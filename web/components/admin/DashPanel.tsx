@@ -3,27 +3,18 @@
 // DJ command center — /admin/dash. Lets the operator step into the autonomous
 // booth: speak custom text on-air, fire any voice segment on demand,
 // flip the autonomous toggles, and watch live on-air status + the booth log.
-import type { ReactNode } from 'react';
 import { useEffect, useState } from 'react';
 import { useAdminAuth } from '../../lib/adminAuth';
 import { notify, errorMessage } from '../../lib/notify';
-import { eventTurnSummary, turnClass, turnKey, turnText } from '../../lib/sessionFeed';
+import { turnClass, turnKey } from '../../lib/sessionFeed';
 import { fmtClock } from '../../lib/format';
-import { clientLabel, fmtConnected, type ListenerConnection } from '../../lib/clientLabel';
+import { clientLabel, fmtConnected } from '../../lib/clientLabel';
 import type { SessionTurn } from '../../lib/types';
-import type {
-  NowPlayingTrack,
-  StationContext,
-  ActiveShow,
-  DjState,
-  ListenerCount,
-  QueueEntry,
-  StationLocale,
-} from '../../lib/types';
+import type { QueueEntry } from '../../lib/types';
 import { V3AlertDialog } from '../ui/alert-dialog';
 import { SkeletonText } from '@/components/ui/skeleton';
 import { ErrorState } from '@/components/ui/error-state';
-import { Card, Btn, Pill, Seg, Toggle } from './ui';
+import { Card, Btn, Pill, Seg } from './ui';
 import {
   Queue,
   QueueItem,
@@ -56,172 +47,31 @@ import {
 import { Message, MessageContent } from '../ai-elements/message';
 import type { ChatStatus } from 'ai';
 import { ScrollArea, ScrollBar } from '../ui/scroll-area';
-import { AudioLines, Clock3, MessagesSquare, RadioTower, RefreshCw, X, type LucideIcon } from 'lucide-react';
+import { RefreshCw, X } from 'lucide-react';
 import StationHeader, { type HealthMetrics } from './StationHeader';
 import { cn } from '../../lib/cn';
-
-const SAY_KINDS = [
-  { id: 'dj-speak', label: 'Solo' },
-  { id: 'link', label: 'Over' },
-];
-const SAY_MODES = [
-  { id: 'raw', label: 'Raw' },
-  { id: 'styled', label: 'Styled' },
-];
-
-// Canned prompts for the manual voice box, in station voice. Written as
-// instructions (they shine with mode=styled — the DJ rewrites them in persona,
-// though raw works too). Clicking one FILLS the textarea; nothing goes to air
-// until the operator hits send. This set is the zero-latency initial render
-// and the fallback when the controller has no generated batch — the ↻ button
-// swaps in fresh LLM-written ones via /generate/say-suggestions. The
-// controller keeps the canonical copy of these six as the generator's style
-// anchors (llm/internal/prompts/generate.ts SAY_SUGGESTION_EXAMPLES); keep
-// the two lists in step.
-const SAY_SUGGESTIONS = [
-  'Tease the weather like it’s a rumour you can’t quite confirm.',
-  'Do a station ID like you suspect nobody’s listening — and you’re fine with it.',
-  'Salute the graveyard shift: night drivers, dish pits, the deliberately awake.',
-  'Tease the next track without giving up the title.',
-  'Remind everyone the request line exists and judges no one.',
-  'Announce the time like it’s classified information.',
-];
-
-type SegmentType = 'station-id' | 'hourly' | 'link' | 'banter';
-const SEGMENTS: { type: SegmentType; label: string; icon: LucideIcon }[] = [
-  { type: 'station-id', label: 'Station ID', icon: RadioTower },
-  { type: 'hourly', label: 'Time check', icon: Clock3 },
-  { type: 'link', label: 'Track link', icon: AudioLines },
-];
-// Only offered while a show with guest co-hosts is on air — a one-person
-// "exchange" is a 400 from the controller anyway.
-const BANTER_SEGMENT: { type: SegmentType; label: string; icon: LucideIcon } =
-  { type: 'banter', label: 'Banter', icon: MessagesSquare };
-
-interface QueueState {
-  upcoming?: QueueEntry[];
-  history?: QueueEntry[];
-  autoPick?: boolean;
-  autoLink?: boolean;
-  pickerBusy?: boolean;
-}
-
-interface DashStatus {
-  nowPlaying?: NowPlayingTrack | null;
-  context?: StationContext | null;
-  dj?: DjState | null;
-  listeners?: ListenerCount | number | null;
-  streamOnline?: boolean;
-  streamBitrate?: number | null;
-  activeShow?: ActiveShow | null;
-  queue?: QueueState;
-  sessionMessages?: SessionTurn[];
-  /** Station IANA zone — render on-air timestamps in it (issue #418). */
-  timezone?: string;
-  locale?: StationLocale;
-}
-
-// Subset of /stats (admin) the health strip reads: DJ p95 latency + the TTS
-// fallback rate, both since-boot rollups. Polled slower than live status since
-// they move slowly and the endpoint is heavier.
-interface HealthStats {
-  llm?: { count?: number; latency?: { p95?: number }; agentTimeoutMs?: number };
-  tts?: { count?: number; fallbackRate?: number | null };
-}
-
-interface ActResponse {
-  ok?: boolean;
-  spoken?: string;
-  error?: string;
-}
-
-interface ConnectionsState {
-  count: number;
-  connections: ListenerConnection[];
-}
-
-// One resolved/failed listener request, as returned by GET /requests. Mirrors
-// the durable record written by the controller's request-log.
-interface RequestEntry {
-  t?: string;
-  requester?: string;
-  text?: string;
-  status?: string;
-  ms?: number | null;
-  path?: string | null;
-  pickSource?: string | null;
-  intent?: string | null;
-  mood?: string | null;
-  scope?: string | null;
-  sort?: string | null;
-  artist?: string | null;
-  genre?: string | null;
-  language?: string | null;
-  searchTerms?: string[] | null;
-  track?: { title?: string; artist?: string; id?: string } | null;
-  ack?: string | null;
-  introScript?: string | null;
-  message?: string | null;
-}
-
-// Listener likes (#991), as returned by GET /likes — the heart button's
-// admin review surface.
-interface LikeTopEntry {
-  track?: { id?: string; title?: string; artist?: string } | null;
-  count?: number;
-  lastLikedAt?: string;
-}
-interface LikeRecentEntry {
-  songId?: string;
-  title?: string;
-  artist?: string;
-  album?: string;
-  likedAt?: string;
-  listener?: string;
-}
-interface LikesPayload {
-  totals?: { total?: number; songs?: number };
-  top?: LikeTopEntry[];
-  recent?: LikeRecentEntry[];
-}
-
-// Hide the host portion of an IP so a glance at the screen doesn't expose a
-// listener's full address. IPv4 drops the last octet, IPv6 keeps the first two
-// groups (the routing prefix) and masks the rest. The raw IP is still in the
-// row's title attribute and one toggle away — this is a display default, not
-// redaction.
-function maskIp(ip: string): string {
-  if (!ip) return '—';
-  if (ip.includes('.')) return ip.replace(/\.\d+$/, '.×');
-  if (ip.includes(':')) {
-    const groups = ip.split(':').filter(Boolean);
-    return groups.length > 2 ? `${groups[0]}:${groups[1]}:×` : ip;
-  }
-  return ip;
-}
-
-type SortKey = 'ip' | 'mount' | 'connectedSeconds' | 'client';
-interface SortState {
-  key: SortKey;
-  dir: 'asc' | 'desc';
-}
-
-// Sort connections by the active column. `client` sorts on the friendly label
-// (what the operator actually sees), everything else on the raw field.
-function sortConnections(
-  rows: ListenerConnection[],
-  { key, dir }: SortState,
-): ListenerConnection[] {
-  const sign = dir === 'asc' ? 1 : -1;
-  return [...rows].sort((a, b) => {
-    let cmp: number;
-    if (key === 'connectedSeconds') cmp = a.connectedSeconds - b.connectedSeconds;
-    else if (key === 'client') cmp = clientLabel(a.userAgent).localeCompare(clientLabel(b.userAgent));
-    else cmp = String(a[key]).localeCompare(String(b[key]));
-    return cmp * sign;
-  });
-}
-
+import { LikesCard } from './dash/LikesCard';
+import { RequestsCard } from './dash/RequestsCard';
+import { BoothTurnText, SegmentButton, SortableTh, ToggleRow, classTone } from './dash/bits';
+import type {
+  ActResponse,
+  ConnectionsState,
+  DashStatus,
+  HealthStats,
+  LikesPayload,
+  QueueState,
+  RequestEntry,
+  SortState,
+} from './dash/types';
+import {
+  BANTER_SEGMENT,
+  SAY_KINDS,
+  SAY_MODES,
+  SAY_SUGGESTIONS,
+  SEGMENTS,
+  maskIp,
+  sortConnections,
+} from './dash/types';
 export default function DashPanel() {
   const { adminFetch, needsAuth, hydrated } = useAdminAuth();
   const [status, setStatus] = useState<DashStatus | null>(null);
@@ -972,321 +822,3 @@ export default function DashPanel() {
 // A clickable column header. Clicking the active column flips direction;
 // clicking a new one selects it (descending for the duration column, ascending
 // for the text columns — the order an operator usually wants first).
-function SortableTh({
-  label,
-  col,
-  sort,
-  onSort,
-  className,
-}: {
-  label: string;
-  col: SortKey;
-  sort: SortState;
-  onSort: (s: SortState) => void;
-  className?: string;
-}) {
-  const active = sort.key === col;
-  const arrow = active ? (sort.dir === 'asc' ? '↑' : '↓') : '';
-  return (
-    <th className={cn('py-1.5 font-bold', className)}>
-      <button
-        type="button"
-        className={cn('uppercase hover:text-ink', active && 'text-ink')}
-        onClick={() =>
-          onSort(
-            active
-              ? { key: col, dir: sort.dir === 'asc' ? 'desc' : 'asc' }
-              : { key: col, dir: col === 'connectedSeconds' ? 'desc' : 'asc' },
-          )
-        }
-      >
-        {label}
-        {arrow ? <span className="ml-1">{arrow}</span> : null}
-      </button>
-    </th>
-  );
-}
-
-interface SegmentButtonProps {
-  label: string;
-  icon: LucideIcon;
-  busyHere: boolean;
-  anyBusy: boolean;
-  onFire: () => void;
-}
-
-// A studio cart-machine pad — all visual states live in .seg-pad (globals.css):
-// hover arms the LED, .is-firing blinks it and sweeps the base while on air.
-function SegmentButton({ label, icon: Icon, busyHere, anyBusy, onFire }: SegmentButtonProps) {
-  return (
-    <button
-      type="button"
-      disabled={anyBusy}
-      onClick={onFire}
-      className={cn('seg-pad', busyHere && 'is-firing')}
-    >
-      <span className="seg-led" aria-hidden />
-      <Icon className="seg-glyph" strokeWidth={1.5} aria-hidden />
-      <span className="seg-label">{label}</span>
-      <span className="seg-cta">{busyHere ? 'on air' : 'fire'}</span>
-    </button>
-  );
-}
-
-interface ToggleRowProps {
-  label: string;
-  desc: string;
-  on: boolean;
-  disabled?: boolean;
-  onToggle: () => void;
-}
-
-function ToggleRow({ label, desc, on, disabled, onToggle }: ToggleRowProps) {
-  return (
-    <div className="flex items-center gap-2.5">
-      <div className="flex-1">
-        <div className="text-[12px] font-bold">{label}</div>
-        <div className="text-[10px] text-muted">{desc}</div>
-      </div>
-      <Toggle on={on} disabled={disabled} onClick={onToggle} ariaLabel={label} />
-    </div>
-  );
-}
-
-function classTone(cls: string): string {
-  switch (cls) {
-    case 'voice':
-    case 'track':
-      return 'accent';
-    default:
-      return 'muted';
-  }
-}
-
-// One booth-log message. Long `event` turns (the pick prompt posted to the DJ
-// agent — link/clock/transition coaching) render as a one-line summary; the
-// raw prompt never shows here (it's in the session JSON if ever needed).
-function BoothTurnText({ turn }: { turn: SessionTurn }) {
-  // Plain text, deliberately not markdown-rendered — booth turns are speech
-  // scripts, not documents.
-  return <span className="break-words text-ink">{eventTurnSummary(turn) ?? turnText(turn)}</span>;
-}
-
-// Collapse whitespace + truncate, for the one-line request preview in a summary.
-function oneLine(s: unknown, n = 80): string {
-  const t = String(s ?? '').replace(/\s+/g, ' ').trim();
-  return t.length > n ? `${t.slice(0, n)}…` : t;
-}
-
-// The Requests card — every listener request and exactly how the AI DJ
-// resolved it. Newest first; each row expands to the full debug trace.
-function RequestsCard({
-  requests,
-  err,
-  tz,
-  locale,
-}: {
-  requests: RequestEntry[] | null;
-  err: string | null;
-  tz?: string;
-  locale?: StationLocale;
-}) {
-  return (
-    <Card
-      title="Requests"
-      sub={
-        err
-          ? 'unavailable'
-          : requests
-            ? `${requests.length} recent · what listeners asked + how the DJ answered`
-            : 'loading…'
-      }
-    >
-      {err ? (
-        <div className="text-muted italic">can’t load requests: {err}</div>
-      ) : !requests ? (
-        <SkeletonText lines={2} />
-      ) : requests.length === 0 ? (
-        <div className="text-muted italic">no requests yet</div>
-      ) : (
-        <ScrollArea className="max-h-[520px]">
-          <div className="grid gap-1.5">
-            {requests.map((r, i) => (
-              <RequestRow key={`${r.t ?? ''}:${i}`} r={r} tz={tz} locale={locale} />
-            ))}
-          </div>
-        </ScrollArea>
-      )}
-    </Card>
-  );
-}
-
-// The Likes card (#991) — what the heart button collected: the most-liked
-// tracks in the configured window, then the recent taps. Listener column is
-// the truncated HMAC handle from the controller — never an IP.
-function LikesCard({
-  likes,
-  err,
-  tz,
-  locale,
-}: {
-  likes: LikesPayload | null;
-  err: string | null;
-  tz?: string;
-  locale?: StationLocale;
-}) {
-  const top = likes?.top ?? [];
-  const recent = likes?.recent ?? [];
-  return (
-    <Card
-      title="Likes"
-      sub={
-        err
-          ? 'unavailable'
-          : likes
-            ? `${likes.totals?.total ?? 0} likes across ${likes.totals?.songs ?? 0} tracks`
-            : 'loading…'
-      }
-    >
-      {err ? (
-        <div className="text-muted italic">can’t load likes: {err}</div>
-      ) : !likes ? (
-        <SkeletonText lines={2} />
-      ) : recent.length === 0 ? (
-        <span className="text-[12px] text-muted">No likes yet — the heart on the player feeds this.</span>
-      ) : (
-        <div className="grid gap-3">
-          {top.length > 0 && (
-            <div className="grid gap-1.5">
-              <div className="caption text-[10px]">most liked</div>
-              {top.slice(0, 8).map((t, i) => (
-                <div
-                  key={`${t.track?.id ?? ''}:${i}`}
-                  className="grid grid-cols-[auto_1fr_auto] items-center gap-2.5 text-[12px]"
-                >
-                  <span className="mono-num text-[10px] text-muted">{i + 1}.</span>
-                  <span className="min-w-0 truncate">
-                    <span className="font-bold">{t.track?.title || '—'}</span>
-                    {t.track?.artist && <span className="text-muted"> — {t.track.artist}</span>}
-                  </span>
-                  <span className="mono-num text-[11px] text-vermilion">
-                    ♥ {t.count ?? 0}
-                  </span>
-                </div>
-              ))}
-            </div>
-          )}
-          <div className="grid gap-1.5">
-            <div className="caption text-[10px]">recent</div>
-            <ScrollArea className="max-h-[280px]">
-              <div className="grid gap-1.5">
-                {recent.map((l, i) => (
-                  <div
-                    key={`${l.likedAt ?? ''}:${i}`}
-                    // Four columns don't leave the title anything to truncate
-                    // into at 390px — the anonymous handle drops on mobile.
-                    className="grid grid-cols-[auto_1fr_auto] items-center gap-2.5 text-[12px] sm:grid-cols-[auto_1fr_auto_auto]"
-                  >
-                    <span className="font-bold text-vermilion">♥</span>
-                    <span className="min-w-0 truncate">
-                      {l.title || '—'}
-                      {l.artist && <span className="text-muted"> — {l.artist}</span>}
-                    </span>
-                    <span
-                      className="caption hidden text-[10px] sm:inline"
-                      title="anonymous listener handle"
-                    >
-                      {l.listener || ''}
-                    </span>
-                    <span className="mono-num text-[10px] text-muted">
-                      {fmtClock(l.likedAt, tz, locale) || '—'}
-                    </span>
-                  </div>
-                ))}
-              </div>
-            </ScrollArea>
-          </div>
-        </div>
-      )}
-    </Card>
-  );
-}
-
-function RequestRow({ r, tz, locale }: { r: RequestEntry; tz?: string; locale?: StationLocale }) {
-  const ok = r.status === 'resolved';
-  // Matcher breakdown — only the fields that carry a value, joined compactly.
-  const trace = [
-    r.intent && `intent ${r.intent}`,
-    r.mood && `mood ${r.mood}`,
-    r.scope && `scope ${r.scope}`,
-    r.sort && `sort ${r.sort}`,
-    r.artist && `artist ${r.artist}`,
-    r.genre && `genre ${r.genre}`,
-    r.language && `lang ${r.language}`,
-  ].filter(Boolean) as string[];
-
-  return (
-    <details className="border border-separator-strong">
-      {/* The resolve time is diagnostic detail — it drops on a phone so the
-          requester + request text keep a usable truncation width. */}
-      <summary className="grid cursor-pointer grid-cols-[auto_1fr_auto] items-center gap-2.5 px-2.5 py-2 sm:grid-cols-[auto_1fr_auto_auto]">
-        <span className={cn('font-bold', ok ? 'text-vermilion' : 'text-[var(--danger)]')}>
-          {ok ? '✓' : '✗'}
-        </span>
-        <span className="min-w-0 truncate text-[12px]">
-          <span className="font-bold">{r.requester || 'anon'}</span>
-          <span className="text-muted"> · {oneLine(r.text)}</span>
-        </span>
-        <span className="caption hidden text-[10px] sm:inline">
-          {r.ms != null ? `${r.ms}ms` : ''}
-        </span>
-        <span className="mono-num text-[10px] text-muted">
-          {fmtClock(r.t, tz, locale) || '—'}
-        </span>
-      </summary>
-      <div className="grid gap-2 px-2.5 pt-1 pb-2.5 text-[12px]">
-        <div className="flex flex-wrap items-center gap-1.5">
-          {r.path && <Pill tone="accent">{r.path}</Pill>}
-          {r.pickSource && <Pill>{r.pickSource}</Pill>}
-        </div>
-
-        {trace.length > 0 && (
-          <div className="caption text-[10px]">{trace.join(' · ')}</div>
-        )}
-
-        {ok ? (
-          <RequestField label="track">
-            {r.track?.title ? (
-              <span>
-                {r.track.title}{' '}
-                <span className="text-muted">— {r.track.artist}</span>
-              </span>
-            ) : (
-              <span className="text-muted italic">—</span>
-            )}
-          </RequestField>
-        ) : (
-          <RequestField label="failed">
-            <span className="text-[var(--danger)]">{r.message || '—'}</span>
-          </RequestField>
-        )}
-
-        {r.ack && <RequestField label="ack">{r.ack}</RequestField>}
-        {r.introScript && (
-          <RequestField label="intro">
-            <span className="break-words whitespace-pre-wrap">{r.introScript}</span>
-          </RequestField>
-        )}
-      </div>
-    </details>
-  );
-}
-
-function RequestField({ label, children }: { label: string; children: ReactNode }) {
-  return (
-    <div className="grid grid-cols-[60px_1fr] items-baseline gap-2">
-      <span className="caption text-[9px]">{label}</span>
-      <span className="break-words">{children}</span>
-    </div>
-  );
-}
