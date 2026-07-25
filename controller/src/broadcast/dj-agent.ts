@@ -438,11 +438,12 @@ export async function runTrackEvent(queue, ctx, { wantLink, showAt = null, prede
       return;
     }
     const cheap = budget.preferCheapPicker();
-    // Station voice off (settings.tts.enabled) → still pick, never link. Both
-    // picker paths read wantLink to decide whether the schema even offers a
-    // link field and whether the prompt asks for one, so this is the whole
-    // suppression: no link is written, so none is rendered or aired, and the
-    // pick costs exactly what a "stay silent" pick has always cost.
+    // Station voice off (settings.tts.enabled) → still pick, never link. The
+    // agent path's event message then orders silence (`say` stays in the
+    // schema but nullable, and a disobedient line is dropped at the
+    // `wantLink && say` guard), and the pool path skips its generateLink call
+    // outright — so no link is written, rendered or aired, and the pick costs
+    // exactly what a "stay silent" pick has always cost.
     wantLink = wantLink && !cheap && autoVoiceAllowed();
 
     const current = predecessor ?? queue.current?.track ?? null;
@@ -642,11 +643,12 @@ async function runRequestViaAgent(queue: any, { requester, text }: { requester: 
       throw new Error(`request agent returned unknown id ${object?.id}`);
     }
 
-    // Station voice off (settings.tts.enabled) → drop the intro. The agent
-    // writes it in the same call that picks the track, so there's nothing to
-    // save by suppressing it upstream; dropping it here means it's never
-    // queued to air, and the session records the ack rather than a line that
-    // never reached the stream. Every read below keys off this one binding.
+    // Station voice off (settings.tts.enabled) → no intro. requestSchema()
+    // already dropped the field from the agent's contract, so normally there
+    // is nothing here to discard — this guard covers the switch flipping
+    // mid-run (the schema resolved before the flip) and a model inventing the
+    // field anyway. Every read below keys off this one binding, and the
+    // session then records the ack rather than a line that never aired.
     const intro = autoVoiceAllowed() && typeof object.intro === 'string' ? object.intro.trim() : '';
     const pos = await queue.push({
       track: trackFields(song),

@@ -13,9 +13,12 @@
 //
 // What stays running with voice off:
 //   - Track picks. The stream needs a next track; only the LINK is dropped
-//     (queue.runPickCycle forces wantLink=false, so the picker never writes one).
+//     (dj-agent.runTrackEvent forces wantLink=false, so the agent path is told
+//     to stay silent and the pool path skips generateLink).
 //   - Listener requests. The track is still found and queued and the listener
-//     still gets their text ack — there's just no spoken intro over it.
+//     still gets their text ack — there's just no spoken intro over it, and
+//     the request agent's schema drops the intro field (requestSchema) so no
+//     tokens are spent writing one.
 //   - Jingles. Pre-rendered WAVs on Liquidsoap's own rotate, nothing to do with
 //     TTS at runtime. Silence those with `jingleRatio: 0` (needs a mixer restart).
 //   - Manual /dj/segment triggers. An explicit operator action always fires —

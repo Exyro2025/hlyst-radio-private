@@ -10,6 +10,7 @@ import * as session from '../session.js';
 import * as dj from '../../llm/dj.js';
 import { modelTolerant } from '../../llm/sdk.js';
 import * as likes from '../likes.js';
+import { autoVoiceAllowed } from '../voice-policy.js';
 
 
 // Plain .nullable() fields, deliberately — GLM's malformed spellings of
@@ -72,9 +73,18 @@ export function pickSchema() {
 // Exported for scripts/llm-bench (same precedent as pickSystem/pickSchema for
 // picker-test.mjs) — live callers stay on requestAgent.
 export function requestSchema() {
-  return z.object({
+  const base = z.object({
     id: z.string().describe('the exact song id returned by one of the discovery tools — never invent or compose ids'),
     ack: z.string().describe('short on-air acknowledgement of the listener, in character — max 20 words; no "thank you for listening" or self-intros'),
+  });
+  // Station voice off (settings.tts.enabled): no spoken intro can air, so the
+  // field leaves the contract entirely rather than being written and dropped —
+  // the request-path counterpart of runTrackEvent forcing wantLink=false, on
+  // the same resolved-per-run pattern as pickSchemaBase's effectsActive()
+  // branch. runRequestViaAgent still guards its own read, covering the switch
+  // flipping mid-run (this schema resolved before the flip).
+  if (!autoVoiceAllowed()) return base;
+  return base.extend({
     intro: z.string().describe(`a natural DJ intro for the track in the DJ voice; weave in what the listener asked for without reading the request back verbatim. It airs over the track's opening seconds, so write it in the present tense — never "next" or "coming up". ${dj.lengthPhrase('intro')}`),
   });
 }
@@ -164,11 +174,17 @@ Finding candidates: prefer tools backed by the local library — searchLibrary, 
 // Exported for scripts/llm-bench, like requestSchema above.
 export function requestSystem() {
   const persona = session.onAirPersona();
+  // Follows requestSchema() above: with the station voice off there IS no
+  // "intro" field, and a prompt that keeps talking about one invites the model
+  // to stuff the intro into "ack" instead.
+  const wantIntro = autoVoiceAllowed();
   return `${settings.agentPersonaPreamble(persona)}
 
-The messages above are the live session. The final user line names the ONE listener request you are resolving now — any earlier request lines are already handled by someone else; ignore them. If the exact ask isn't in the library, pick the closest thing your tools actually returned and own the substitution in the "ack" and "intro" — never pretend it's what they asked for.${settings.agentLanguageReminder(persona, 'the "ack" and "intro" lines')}
+The messages above are the live session. The final user line names the ONE listener request you are resolving now — any earlier request lines are already handled by someone else; ignore them. If the exact ask isn't in the library, pick the closest thing your tools actually returned and own the substitution in ${wantIntro ? 'the "ack" and "intro"' : 'the "ack"'} — never pretend it's what they asked for.${settings.agentLanguageReminder(persona, wantIntro ? 'the "ack" and "intro" lines' : 'the "ack" line')}
 
-The currently-playing track named in that line is there ONLY so you can interpret asks that lean on it ("something like this", "match this energy"). It is not the track your intro introduces and it may well have finished by the time the intro airs — never mention it, back-announce it, or describe the mood it set.${dj.AIR_TIME_CLAUSE}`;
+${wantIntro
+    ? `The currently-playing track named in that line is there ONLY so you can interpret asks that lean on it ("something like this", "match this energy"). It is not the track your intro introduces and it may well have finished by the time the intro airs — never mention it, back-announce it, or describe the mood it set.${dj.AIR_TIME_CLAUSE}`
+    : `The currently-playing track named in that line is there ONLY so you can interpret asks that lean on it ("something like this", "match this energy") — it is not the track you are choosing.`}`;
 }
 
 
