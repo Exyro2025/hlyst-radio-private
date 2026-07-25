@@ -1266,13 +1266,16 @@ export default function PlaylistBuilderPanel() {
                 {/* Deck head — one title row with the toolbar, one meta strip.
                     Caveats and sync fold into the strip; the list gets the rest. */}
                 <div className="flex-none border-b border-ink px-4 pt-1.5 pb-2.5 sm:px-6">
-                  <div className="flex items-center gap-3">
+                  {/* The three deck actions eat ~185px, which leaves a 24px
+                      title field about eight characters at 390px — give the
+                      name its own line and let the actions wrap under it. */}
+                  <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5">
                     <input
                       value={name}
                       onChange={e => setName(e.target.value)}
                       placeholder="Untitled set"
                       aria-label="Playlist name"
-                      className="min-w-0 flex-1 border-b border-transparent bg-transparent py-0.5 font-display text-2xl font-bold tracking-[-0.01em] text-ink outline-none placeholder:text-muted/50 hover:border-separator-soft focus:border-[var(--accent)]"
+                      className="min-w-0 flex-1 basis-full border-b border-transparent bg-transparent py-0.5 font-display text-2xl font-bold tracking-[-0.01em] text-ink outline-none placeholder:text-muted/50 hover:border-separator-soft focus:border-[var(--accent)] sm:basis-0"
                     />
                     <div className="flex flex-none items-center gap-1.5">
                       <Button variant="ghost" size="sm" className="h-8" onClick={openBrowse} title="open a playlist from the music server">
@@ -1433,7 +1436,10 @@ export default function PlaylistBuilderPanel() {
                           </div>
                         )}
                       </div>
-                      <div className="flex items-center gap-2">
+                      {/* The duration/energy block beside three 30px icon
+                          buttons is ~170px wide — stacked, the trailing column
+                          costs 90px and the title keeps the rest. */}
+                      <div className="flex flex-col items-end gap-1 sm:flex-row sm:items-center sm:gap-2">
                         <div className="flex flex-col items-end gap-[3px]">
                           <span className="font-mono text-xs text-ink">{fmtDur(t.durationSec || 0)}</span>
                           <span className="flex items-center gap-[5px] font-mono text-[10px] text-muted">
@@ -1442,9 +1448,12 @@ export default function PlaylistBuilderPanel() {
                           </span>
                         </div>
                         <div className="flex items-center gap-0.5 transition-opacity lg:opacity-0 lg:group-hover:opacity-100">
-                          <IconBtn onClick={() => move(i, i - 1)} disabled={i === 0} title="Move up"><ArrowUp className="size-[15px]" /></IconBtn>
-                          <IconBtn onClick={() => move(i, i + 1)} disabled={i === tracks.length - 1} title="Move down"><ArrowDown className="size-[15px]" /></IconBtn>
-                          <IconBtn onClick={() => removeAt(i)} title="Remove"><X className="size-[15px]" /></IconBtn>
+                          {/* Reorder has no drag handle on mobile (the grip is
+                              `sm:` only), so these are the only way to move a
+                              row — size them for a thumb. */}
+                          <IconBtn className="size-9 sm:size-[30px]" onClick={() => move(i, i - 1)} disabled={i === 0} title="Move up"><ArrowUp className="size-[15px]" /></IconBtn>
+                          <IconBtn className="size-9 sm:size-[30px]" onClick={() => move(i, i + 1)} disabled={i === tracks.length - 1} title="Move down"><ArrowDown className="size-[15px]" /></IconBtn>
+                          <IconBtn className="size-9 sm:size-[30px]" onClick={() => removeAt(i)} title="Remove"><X className="size-[15px]" /></IconBtn>
                         </div>
                       </div>
                     </div>
@@ -1473,8 +1482,8 @@ export default function PlaylistBuilderPanel() {
                         <div className="text-[13px] leading-[1.5] text-muted">Type a mood on the left, optionally add seed tracks and tuning, and let the curator assemble the set.</div>
                       </div>
                     </div>
-                    <div className="flex items-center justify-between gap-3.5 border border-separator-strong p-4">
-                      <div className="flex gap-3.5">
+                    <div className="flex flex-wrap items-center justify-between gap-3.5 border border-separator-strong p-4">
+                      <div className="flex min-w-0 gap-3.5">
                         <div className="grid size-[26px] flex-none place-items-center border border-ink font-mono text-xs font-bold">2</div>
                         <div>
                           <div className="mb-0.5 text-sm font-bold">Open an existing playlist</div>
@@ -1545,7 +1554,7 @@ export default function PlaylistBuilderPanel() {
 
       {/* TOAST */}
       {toast && (
-        <div className="fixed top-[70px] right-6 z-[60] flex max-w-[340px] items-center gap-3 bg-ink px-3.5 py-3 text-bg shadow-drawer">
+        <div className="fixed top-[70px] right-4 left-4 z-[60] flex items-center gap-3 bg-ink px-3.5 py-3 text-bg shadow-drawer sm:right-6 sm:left-auto sm:max-w-[340px]">
           <span className="text-[13px] leading-[1.4]">{toast}</span>
           <button type="button" onClick={() => setToast('')} className="flex-none text-bg/70 hover:text-bg" title="dismiss">
             <X className="size-3.5" />
@@ -1711,11 +1720,11 @@ export default function PlaylistBuilderPanel() {
                 <Switch checked={saveSync} onCheckedChange={setSaveSync} aria-label="Keep in sync" />
               </div>
             </div>
-            <div className="flex items-center justify-between gap-3 border-t border-ink px-5 py-3.5">
+            <div className="flex flex-wrap items-center justify-between gap-3 border-t border-ink px-5 py-3.5">
               <span className="font-mono text-[10px] text-muted">
                 Then pin it to a show in <a href="/admin/shows" className="text-vermilion hover:text-ink">Shows</a> →
               </span>
-              <div className="flex gap-2.5">
+              <div className="flex flex-none gap-2.5">
                 <Button variant="ghost" className="h-10" onClick={() => setModal(null)}>Cancel</Button>
                 <Button variant="accent" className="h-10" disabled={saving || !saveName.trim()} onClick={doSave}>
                   {saving ? 'Saving…' : 'Save playlist'}

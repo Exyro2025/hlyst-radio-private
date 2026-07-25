@@ -439,15 +439,17 @@ export default function SchedulePanel() {
   return (
     <div className="flex min-h-full min-w-0 flex-1 flex-col bg-[var(--card-bg)]">
       {/* ── Header ─────────────────────────────────────────────────────── */}
-      <div className="border-b border-ink px-[30px] pt-4 pb-3.5">
-        <div className="flex items-center justify-between gap-x-6">
+      <div className="border-b border-ink px-5 pt-4 pb-3.5 sm:px-[30px]">
+        {/* The action cluster is `w-full` on a phone so it wraps under the
+            title instead of being pushed off the right edge. */}
+        <div className="flex flex-wrap items-center justify-between gap-x-6 gap-y-2.5">
           <div className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1">
-            <span className="eyebrow text-vermilion">Show plan · The Rundown</span>
-            <span aria-hidden="true" className="h-px w-[18px] bg-[color-mix(in_oklab,var(--ink)_28%,transparent)]" />
+            <span className="eyebrow whitespace-nowrap text-vermilion">Show plan · The Rundown</span>
+            <span aria-hidden="true" className="hidden h-px w-[18px] bg-[color-mix(in_oklab,var(--ink)_28%,transparent)] sm:block" />
             <span className="font-mono text-[11.5px] font-bold tracking-[0.06em] text-ink">{clockLabel}</span>
             <Mu className="text-[9px]">{zoneLabel}</Mu>
           </div>
-          <div className="ml-auto flex flex-none items-center gap-3">
+          <div className="ml-auto flex w-full flex-none flex-wrap items-center gap-3 sm:w-auto sm:flex-nowrap">
             <span className="flex flex-none items-center gap-2">
               {dirty > 0 && <span aria-hidden="true" className="size-1.5 bg-[var(--accent)]" />}
               <Mu className={cn('text-[9px] whitespace-nowrap', dirty > 0 && 'text-ink')}>
@@ -463,10 +465,16 @@ export default function SchedulePanel() {
                 </button>
               )}
             </span>
-            <Button asChild variant="default" size="sm">
+            <Button asChild variant="default" size="sm" className="min-h-9 sm:min-h-0">
               <Link href="/admin/shows">New show →</Link>
             </Button>
-            <Button variant="accent" size="sm" onClick={saveWeek} disabled={busy || dirty === 0}>
+            <Button
+              variant="accent"
+              size="sm"
+              className="min-h-9 sm:min-h-0"
+              onClick={saveWeek}
+              disabled={busy || dirty === 0}
+            >
               {busy ? 'Saving…' : 'Save the week'}
             </Button>
           </div>
@@ -481,7 +489,7 @@ export default function SchedulePanel() {
 
       {/* ── Now band ───────────────────────────────────────────────────── */}
       <div className="border-b border-ink bg-[var(--page-bg)]">
-        <div className="grid grid-cols-3">
+        <div className="grid grid-cols-1 sm:grid-cols-3">
           <NowCell
             label={pinnedShow ? 'On air · takeover' : 'On air'}
             live
@@ -512,12 +520,14 @@ export default function SchedulePanel() {
         </div>
 
         {/* Takeover strip */}
-        <div className="flex flex-wrap items-center gap-x-3.5 gap-y-2 border-t border-separator-strong bg-[color-mix(in_oklab,var(--ink)_5%,var(--page-bg))] px-[22px] py-[11px]">
+        <div className="flex flex-wrap items-center gap-x-3.5 gap-y-2 border-t border-separator-strong bg-[color-mix(in_oklab,var(--ink)_5%,var(--page-bg))] px-5 py-[11px] sm:px-[22px]">
           <span className="eyebrow flex-none text-ink">Takeover</span>
           <Mu className="min-w-0 flex-1 truncate text-[9px]">
             Jump a show to the front of the queue — the schedule picks up again after
           </Mu>
-          <div className="ml-auto flex flex-none items-center gap-2.5">
+          {/* Full-width + wrapping on a phone: the controls run ~430px wide,
+              so on one flex-none line the Pin button falls off the screen. */}
+          <div className="ml-auto flex w-full flex-none flex-wrap items-center gap-2.5 sm:w-auto sm:flex-nowrap">
             {liveOverride && pinnedShow ? (
               <>
                 <ColorChip color={colorOf(pinnedShow.id)} />
@@ -526,7 +536,13 @@ export default function SchedulePanel() {
                   ends {fmtClock(liveOverride.expiresAt, tz, locale)} ·{' '}
                   {Math.max(1, Math.ceil((liveOverride.expiresAt - now.getTime()) / 60_000))} min left
                 </Mu>
-                <Button variant="ghost" size="sm" onClick={cancelPin} disabled={pinBusy}>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="min-h-9 sm:min-h-0"
+                  onClick={cancelPin}
+                  disabled={pinBusy}
+                >
                   {pinBusy ? 'Cancelling…' : 'Cancel takeover'}
                 </Button>
               </>
@@ -534,7 +550,9 @@ export default function SchedulePanel() {
               <>
                 <SlotMenu
                   ariaLabel="Pin a show"
-                  className="text-[12px]"
+                  // Reads as a field here (not a word in a sentence), so it can
+                  // carry the same phone tap height as the rest of the strip.
+                  className="min-h-9 text-[12px] sm:min-h-0"
                   label={showById(pinShowId)?.name ?? 'Pin a show…'}
                   options={shows.map(s => ({ key: s.id, label: s.name, chipColor: colorOf(s.id) }))}
                   onSelect={setPinShowId}
@@ -547,7 +565,7 @@ export default function SchedulePanel() {
                     </SegBtn>
                   ))}
                 </div>
-                <label className="flex items-baseline gap-1.5 border border-separator-strong px-2 py-1">
+                <label className="flex items-baseline gap-1.5 border border-separator-strong px-2 py-[9px] sm:py-1">
                   <input
                     type="number"
                     min={PIN_MIN_MINUTES}
@@ -565,6 +583,7 @@ export default function SchedulePanel() {
                 <Button
                   variant="accent"
                   size="sm"
+                  className="min-h-9 sm:min-h-0"
                   onClick={pinShow}
                   disabled={pinBusy || !pinShowId || pinMinutes < PIN_MIN_MINUTES || pinMinutes > PIN_MAX_MINUTES}
                 >
@@ -577,7 +596,7 @@ export default function SchedulePanel() {
       </div>
 
       {/* ── Main: line editor, edge-to-edge board, order desk beneath ──── */}
-      <div className="min-w-0 px-[30px] pt-[22px]">
+      <div className="min-w-0 px-5 pt-[22px] sm:px-[30px]">
         <div ref={bandRef} className="mb-5 scroll-mt-4">
           <LineEditor
             shows={shows}
@@ -671,7 +690,7 @@ export default function SchedulePanel() {
           {editedRanges.map(r => (
             <div
               key={`${r.day}-${r.start}`}
-              className="flex items-baseline gap-3 border-b border-separator-soft px-1 py-1.5"
+              className="flex flex-wrap items-baseline gap-x-3 gap-y-0.5 border-b border-separator-soft px-1 py-1.5"
             >
               <span className="w-[150px] flex-none font-mono text-[11px] font-bold tracking-[0.06em] text-muted">
                 {dayName(r.day)} {hhmm(r.start)} – {hhmm(r.end)}
@@ -705,7 +724,14 @@ function NowCell({
   const barRef = useRef<HTMLDivElement>(null);
   useDynamicStyle(barRef, { width: `${pct ?? 0}%` });
   return (
-    <div className={cn('min-w-0 px-[22px] py-2', !last && 'border-r border-separator-strong')}>
+    <div
+      className={cn(
+        'min-w-0 px-5 py-2 sm:px-[22px]',
+        // Stacked on a phone (grid-cols-1), so the divider runs along the
+        // bottom; the column rule comes back with the 3-up grid at sm.
+        !last && 'border-b border-separator-strong sm:border-r sm:border-b-0',
+      )}
+    >
       <div className="mb-1 flex items-center gap-2">
         {live && <span aria-hidden="true" className="size-[7px] flex-none rounded-full bg-[var(--accent)]" />}
         <span className={cn('eyebrow min-w-0 truncate', live ? 'text-vermilion' : 'text-muted')}>{label}</span>

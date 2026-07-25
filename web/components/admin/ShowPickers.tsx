@@ -81,7 +81,7 @@ export function PersonaPicker({
 }) {
   if (!personas.length) return null;
   return (
-    <div className="grid grid-cols-2 gap-2">
+    <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
       {personas.map((p) => {
         const selected = p.id === value;
         const src = p.avatar ? `${apiBase}/persona-avatar/${encodeURIComponent(p.id)}` : null;
@@ -145,7 +145,7 @@ export function GuestPersonaPicker({
     else if (value.length < max) onChange([...value, id]);
   };
   return (
-    <div className="grid grid-cols-2 gap-2">
+    <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
       {personas.map((p) => {
         const selected = value.includes(p.id);
         const full = !selected && value.length >= max;

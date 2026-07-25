@@ -90,7 +90,14 @@ export function PersonaEditor({
       open={open}
       onOpenChange={(o) => { if (!o) onClose(); }}
       title={<Eyebrow className="text-vermilion">{isNew ? 'New persona' : 'Edit persona'}</Eyebrow>}
-      sub={<span className="caption truncate">{persona.name.trim() || `Persona ${index + 1}`} · {index + 1} of {personaCount}</span>}
+      sub={(
+        // The dialog header holds `sub` in a flex-none cell, so `truncate` needs
+        // a width to bite — cap it on phones (a 40-char persona name would
+        // otherwise push the close button off the edge), unbounded on desktop.
+        <span className="caption block max-w-[42vw] truncate sm:max-w-none">
+          {persona.name.trim() || `Persona ${index + 1}`} · {index + 1} of {personaCount}
+        </span>
+      )}
       footer={
         <div className="flex w-full flex-col gap-2">
           {/* status line — its own row so the action buttons never wrap */}
@@ -113,8 +120,9 @@ export function PersonaEditor({
           </div>
           {/* action row */}
           <div className="flex flex-wrap items-center gap-3">
-            {/* left — persona-scoped actions */}
-            <span className="flex items-center gap-2">
+            {/* left — persona-scoped actions. Wraps on phones: the three lg
+                buttons are ~530px of transport and can't share one line. */}
+            <span className="flex flex-wrap items-center gap-2">
               {persona.id === onAirPersonaId && <Pill tone="accent" className="text-[8px]">on air</Pill>}
               {persona.id === activePersonaId
                 ? <Pill className="text-[8px]">default</Pill>
@@ -138,7 +146,7 @@ export function PersonaEditor({
               </Btn>
             </span>
             {/* right — discard/save */}
-            <span className="ml-auto flex items-center gap-3">
+            <span className="ml-auto flex flex-wrap items-center justify-end gap-3">
               <Btn lg onClick={onDiscard} disabled={busy}>Discard</Btn>
               <Btn lg tone="accent" onClick={onSave} disabled={busy || !canSave}>
                 {busy ? 'Saving…' : 'Save persona'}

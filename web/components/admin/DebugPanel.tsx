@@ -446,7 +446,7 @@ export default function DebugPanel() {
             className="flex h-[440px] flex-col"
             bodyClass="flex flex-1 flex-col min-h-0"
             right={
-              <Label className="flex cursor-pointer items-center gap-1.5 text-[10px] tracking-[0.18em] text-muted uppercase">
+              <Label className="flex min-h-9 cursor-pointer items-center gap-1.5 text-[10px] tracking-[0.18em] text-muted uppercase sm:min-h-0">
                 <Checkbox
                   checked={autoScroll}
                   onCheckedChange={v => setAutoScroll(v === true)}
@@ -707,13 +707,17 @@ function TtsCallList({ calls }: { calls: TtsCall[] }) {
         )}
         {shown.map((c, i) => (
           <details key={i} className="border border-separator-strong">
-            <summary className="grid cursor-pointer grid-cols-[auto_auto_1fr_auto_auto] items-center gap-2.5 px-2.5 py-2">
+            {/* minmax(0,1fr) (not a bare 1fr): an unbroken kind/preview word
+                would otherwise set the track's min-content floor and push the
+                trailing ms/clock cells out past the card's clipped edge on a
+                phone. */}
+            <summary className="grid cursor-pointer grid-cols-[auto_auto_minmax(0,1fr)_auto_auto] items-center gap-2 px-2.5 py-2 sm:gap-2.5">
               <span className={cn('font-bold', c.ok ? 'text-vermilion' : 'text-[var(--danger)]')}>
                 {c.ok ? '✓' : '✗'}
               </span>
-              <span className="grid leading-tight">
-                <span className="text-[12px] font-bold">{c.kind}</span>
-                <span className={cn('text-[10px]', c.fellBack ? 'text-[var(--danger)]' : 'text-muted')}>
+              <span className="grid min-w-0 leading-tight">
+                <span className="truncate text-[12px] font-bold">{c.kind}</span>
+                <span className={cn('truncate text-[10px]', c.fellBack ? 'text-[var(--danger)]' : 'text-muted')}>
                   {c.engine}
                 </span>
               </span>
@@ -887,11 +891,11 @@ function MountsTable({ mounts }: { mounts?: DebugMounts }) {
       <div className="grid gap-1.5">
         <div className="field-hint tracking-wide uppercase">Listen mounts</div>
         {mounts.list.map(m => (
-          <div key={m.path} className="flex items-center justify-between gap-3 text-[12px]">
-            <span className="flex items-center gap-2">
+          <div key={m.path} className="flex flex-wrap items-center justify-between gap-x-3 gap-y-0.5 text-[12px]">
+            <span className="flex min-w-0 items-center gap-2">
               <MountStatus m={m} />
               <span className="font-medium">{m.codec}</span>
-              <code className="text-[11px] text-muted">{m.path}</code>
+              <code className="truncate text-[11px] text-muted">{m.path}</code>
             </span>
             <span className="text-right text-[11px] text-muted">
               {m.live
@@ -1233,7 +1237,9 @@ function FilterChip({ active, onClick, children }: FilterChipProps) {
       type="button"
       onClick={onClick}
       className={cn(
-        'cursor-pointer border border-separator-strong px-2 py-0.5 text-[10px] tracking-[0.08em] uppercase',
+        // Comfortable 36px target on a phone; from sm: up it collapses back to
+        // the original dense inline-block chip.
+        'inline-flex min-h-9 cursor-pointer items-center border border-separator-strong px-2 py-0.5 text-[10px] tracking-[0.08em] uppercase sm:inline-block sm:min-h-0',
         active ? 'bg-vermilion text-bg' : 'bg-transparent text-muted',
       )}
     >
@@ -1291,7 +1297,7 @@ function LlmCalls({ llm }: { llm: DebugLlm | undefined }) {
       {/* Raw-request capture — writes the last N exact request bodies to a file
           operators can open. Toggle here, or set LLM_DEBUG_RAW in the env. */}
       <div className="mb-2 grid gap-1 border border-separator-strong p-2.5">
-        <Label className="flex cursor-pointer items-center gap-2 text-[11px] tracking-[0.12em] text-muted uppercase">
+        <Label className="flex min-h-9 cursor-pointer flex-wrap items-center gap-2 text-[11px] tracking-[0.12em] text-muted uppercase sm:min-h-0">
           <Checkbox
             checked={enabled}
             disabled={viaEnv}
@@ -1320,12 +1326,16 @@ function LlmCalls({ llm }: { llm: DebugLlm | undefined }) {
                 i === 0 && filter === 'all' ? 'bg-[var(--ink-softer)]' : 'bg-transparent',
               )}
             >
-              <summary className="grid cursor-pointer grid-cols-[auto_1fr_auto_auto_auto] items-center gap-2.5 px-2.5 py-2">
+              {/* minmax(0,1fr) + truncate: `djAgentSegment` is one unbroken
+                  word, and a bare 1fr track would take its min-content width
+                  and shove the ms/clock cells off the card's clipped right
+                  edge at phone widths. */}
+              <summary className="grid cursor-pointer grid-cols-[auto_minmax(0,1fr)_auto_auto_auto] items-center gap-2 px-2.5 py-2 sm:gap-2.5">
                 <span className={cn('font-bold', c.ok ? 'text-vermilion' : 'text-[var(--danger)]')}>
                   {c.ok ? '✓' : '✗'}
                 </span>
-                <span className="text-[12px] font-bold">{c.kind}</span>
-                <span className="caption text-[10px]">
+                <span className="truncate text-[12px] font-bold">{c.kind}</span>
+                <span className="caption text-[10px] whitespace-nowrap">
                   {c.toolCalls?.length ? `🔧 ${c.toolCalls.length}` : ''}
                   {c.steps != null ? `${c.toolCalls?.length ? ' · ' : ''}${c.steps} steps` : ''}
                 </span>
@@ -1455,12 +1465,12 @@ function SubsonicCalls({ subsonic }: { subsonic: DebugSubsonic | undefined }) {
               )}
               {shown.map((c, i) => (
                 <details key={i} className="border border-separator-strong">
-                  <summary className="grid cursor-pointer grid-cols-[auto_1fr_auto_auto_auto] items-center gap-2.5 px-2.5 py-2">
+                  <summary className="grid cursor-pointer grid-cols-[auto_minmax(0,1fr)_auto_auto_auto] items-center gap-2 px-2.5 py-2 sm:gap-2.5">
                     <span className={cn('font-bold', c.ok ? 'text-vermilion' : 'text-[var(--danger)]')}>
                       {c.ok ? '✓' : '✗'}
                     </span>
-                    <span className="text-[12px] font-bold">{c.endpoint}</span>
-                    <span className="caption text-[10px]">{c.count} results</span>
+                    <span className="truncate text-[12px] font-bold">{c.endpoint}</span>
+                    <span className="caption text-[10px] whitespace-nowrap">{c.count} results</span>
                     <span className="mono-num text-[11px] text-muted">{c.ms}ms</span>
                     <span className="mono-num text-[10px] text-muted">
                       {c.t ? new Date(c.t).toLocaleTimeString('en-GB', { hour12: false }) : '—'}

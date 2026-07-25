@@ -643,7 +643,7 @@ export default function DashPanel() {
                   not part of the live queue read. */}
               {history.length > 0 && (
                 <QueueSection defaultOpen={false} className="border-t border-separator-strong">
-                  <QueueSectionTrigger className="rounded-none bg-transparent px-1.5 py-2 text-[9px] font-bold tracking-[0.2em] text-muted uppercase hover:bg-[var(--overlay)] hover:text-ink">
+                  <QueueSectionTrigger className="min-h-9 rounded-none bg-transparent px-1.5 py-2 text-[9px] font-bold tracking-[0.2em] text-muted uppercase hover:bg-[var(--overlay)] hover:text-ink sm:min-h-0">
                     <QueueSectionLabel
                       count={history.length}
                       label="recently played"
@@ -746,7 +746,9 @@ export default function DashPanel() {
                         setSayText(text);
                         setSayMode('styled');
                       }}
-                      className="h-auto rounded-none border-separator-strong px-2 py-[3px] text-[9px] font-medium tracking-[0.04em] text-muted normal-case hover:bg-[var(--overlay)] hover:text-ink"
+                      // min-h-9 gives the chip a thumb-sized target on a
+                      // phone; sm: drops back to the dense desktop pill.
+                      className="h-auto min-h-9 rounded-none border-separator-strong px-3 py-[3px] text-[9px] font-medium tracking-[0.04em] text-muted normal-case hover:bg-[var(--overlay)] hover:text-ink sm:min-h-0 sm:px-2"
                     />
                   ))}
                 </Suggestions>
@@ -757,7 +759,7 @@ export default function DashPanel() {
                 disabled={sayGenBusy}
                 title="New prompts — written by the station LLM for right now"
                 aria-label="Generate new prompts"
-                className="shrink-0 border border-separator-strong p-[5px] text-muted transition-colors hover:bg-[var(--overlay)] hover:text-ink disabled:pointer-events-none disabled:opacity-60"
+                className="shrink-0 border border-separator-strong p-3 text-muted transition-colors hover:bg-[var(--overlay)] hover:text-ink disabled:pointer-events-none disabled:opacity-60 sm:p-[5px]"
               >
                 <RefreshCw className={cn('h-3 w-3', sayGenBusy && 'animate-spin')} />
               </button>
@@ -807,7 +809,9 @@ export default function DashPanel() {
           </Card>
 
           <Card title="DJ segments" sub="fire on demand">
-            <div className="grid grid-cols-3 gap-2">
+            {/* 2-up on a phone so each cart pad keeps a full-width label
+                (and a 4th "banter" pad squares off rather than dangling). */}
+            <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
               {[...SEGMENTS, ...((status?.activeShow?.guests?.length ?? 0) > 0 ? [BANTER_SEGMENT] : [])].map(s => {
                 const k = `seg:${s.type}`;
                 return (
@@ -870,7 +874,7 @@ export default function DashPanel() {
           ) : conns && conns.connections.length > 0 ? (
             <button
               type="button"
-              className="text-[9px] font-bold tracking-[0.2em] text-muted uppercase hover:text-ink"
+              className="inline-flex min-h-9 items-center text-[9px] font-bold tracking-[0.2em] text-muted uppercase hover:text-ink sm:min-h-0"
               onClick={() => setRevealIps(v => !v)}
             >
               {revealIps ? 'hide IPs' : 'show IPs'}
@@ -890,7 +894,15 @@ export default function DashPanel() {
               <thead>
                 <tr className="text-left text-[9px] tracking-[0.2em] text-muted uppercase">
                   <SortableTh label="IP" col="ip" sort={sort} onSort={setSort} className="pr-3" />
-                  <SortableTh label="Mount" col="mount" sort={sort} onSort={setSort} className="pr-3" />
+                  {/* Mount is the least useful of the four on a phone — the
+                      remaining three fit 390px without a sideways scroll. */}
+                  <SortableTh
+                    label="Mount"
+                    col="mount"
+                    sort={sort}
+                    onSort={setSort}
+                    className="hidden pr-3 sm:table-cell"
+                  />
                   <SortableTh
                     label="Connected"
                     col="connectedSeconds"
@@ -910,11 +922,13 @@ export default function DashPanel() {
                     <td className="py-1.5 pr-3 font-mono whitespace-nowrap" title={c.ip}>
                       {revealIps ? c.ip || '—' : maskIp(c.ip)}
                     </td>
-                    <td className="py-1.5 pr-3 whitespace-nowrap text-muted">{c.mount}</td>
+                    <td className="hidden py-1.5 pr-3 whitespace-nowrap text-muted sm:table-cell">
+                      {c.mount}
+                    </td>
                     <td className="py-1.5 pr-3 whitespace-nowrap">
                       {fmtConnected(c.connectedSeconds)}
                     </td>
-                    <td className="max-w-[360px] truncate py-1.5" title={c.userAgent}>
+                    <td className="max-w-[150px] truncate py-1.5 sm:max-w-[360px]" title={c.userAgent}>
                       {clientLabel(c.userAgent)}
                       {c.connections && c.connections > 1 ? (
                         <span
@@ -1169,14 +1183,19 @@ function LikesCard({
                 {recent.map((l, i) => (
                   <div
                     key={`${l.likedAt ?? ''}:${i}`}
-                    className="grid grid-cols-[auto_1fr_auto_auto] items-center gap-2.5 text-[12px]"
+                    // Four columns don't leave the title anything to truncate
+                    // into at 390px — the anonymous handle drops on mobile.
+                    className="grid grid-cols-[auto_1fr_auto] items-center gap-2.5 text-[12px] sm:grid-cols-[auto_1fr_auto_auto]"
                   >
                     <span className="font-bold text-vermilion">♥</span>
                     <span className="min-w-0 truncate">
                       {l.title || '—'}
                       {l.artist && <span className="text-muted"> — {l.artist}</span>}
                     </span>
-                    <span className="caption text-[10px]" title="anonymous listener handle">
+                    <span
+                      className="caption hidden text-[10px] sm:inline"
+                      title="anonymous listener handle"
+                    >
                       {l.listener || ''}
                     </span>
                     <span className="mono-num text-[10px] text-muted">
@@ -1208,7 +1227,9 @@ function RequestRow({ r, tz, locale }: { r: RequestEntry; tz?: string; locale?: 
 
   return (
     <details className="border border-separator-strong">
-      <summary className="grid cursor-pointer grid-cols-[auto_1fr_auto_auto] items-center gap-2.5 px-2.5 py-2">
+      {/* The resolve time is diagnostic detail — it drops on a phone so the
+          requester + request text keep a usable truncation width. */}
+      <summary className="grid cursor-pointer grid-cols-[auto_1fr_auto] items-center gap-2.5 px-2.5 py-2 sm:grid-cols-[auto_1fr_auto_auto]">
         <span className={cn('font-bold', ok ? 'text-vermilion' : 'text-[var(--danger)]')}>
           {ok ? '✓' : '✗'}
         </span>
@@ -1216,7 +1237,9 @@ function RequestRow({ r, tz, locale }: { r: RequestEntry; tz?: string; locale?: 
           <span className="font-bold">{r.requester || 'anon'}</span>
           <span className="text-muted"> · {oneLine(r.text)}</span>
         </span>
-        <span className="caption text-[10px]">{r.ms != null ? `${r.ms}ms` : ''}</span>
+        <span className="caption hidden text-[10px] sm:inline">
+          {r.ms != null ? `${r.ms}ms` : ''}
+        </span>
         <span className="mono-num text-[10px] text-muted">
           {fmtClock(r.t, tz, locale) || '—'}
         </span>

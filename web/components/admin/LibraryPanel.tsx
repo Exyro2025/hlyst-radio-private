@@ -23,11 +23,11 @@
 // All colours come from theme tokens (the operator picks a theme in Settings),
 // so the page renders correctly under every palette — no hardcoded hex.
 
-import type { ChangeEvent, FormEvent, ReactNode } from 'react';
+import type { ChangeEvent, FormEvent, ReactNode, RefObject } from 'react';
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Search, RotateCcw, Sparkles, RefreshCw, ListPlus, ListMusic, X, Pencil, Ban,
-  Music, LayoutGrid, Tags, Telescope, ArrowRight, History,
+  Music, LayoutGrid, Tags, Telescope, ArrowRight, History, MoreVertical,
 } from 'lucide-react';
 import { useAdminAuth, ADMIN_API_URL } from '../../lib/adminAuth';
 import { notify, errorMessage } from '../../lib/notify';
@@ -1244,13 +1244,18 @@ export default function LibraryPanel() {
     recentLoading;
 
   return (
-    <div className="grid gap-5">
+    // grid-cols-1: the implicit `auto` track is sized by its items' min-content,
+    // so a doorway card's un-shrinkable copy blew the whole column (and every
+    // card stretched to it) past a phone viewport. minmax(0,1fr) caps the track.
+    <div className="grid grid-cols-1 gap-5">
       {/* Doorways — Playlists and the Observatory live inside Library now
           (pulled out of the sidebar); these are their front doors. */}
-      <div className="grid gap-3 sm:grid-cols-2">
+      <div className="grid min-w-0 grid-cols-1 gap-3 sm:grid-cols-2">
         <a
           href="/admin/playlists"
-          className="group flex items-center gap-3.5 border border-ink bg-bg p-3.5 transition-colors hover:bg-ink-soft"
+          // min-w-0: a grid item's automatic minimum is its min-content, which
+          // the nowrap/truncated blurb below would otherwise pin ~510px wide.
+          className="group flex min-w-0 items-center gap-3.5 border border-ink bg-bg p-3.5 transition-colors hover:bg-ink-soft"
         >
           <span className="grid size-9 flex-none place-items-center border border-ink bg-[var(--accent)] text-white">
             <ListMusic size={18} />
@@ -1265,7 +1270,7 @@ export default function LibraryPanel() {
         </a>
         <a
           href="/observatory"
-          className="group flex items-center gap-3.5 border border-ink bg-bg p-3.5 transition-colors hover:bg-ink-soft"
+          className="group flex min-w-0 items-center gap-3.5 border border-ink bg-bg p-3.5 transition-colors hover:bg-ink-soft"
         >
           <span className="grid size-9 flex-none place-items-center border border-ink bg-ink text-bg">
             <Telescope size={18} />
@@ -1384,8 +1389,10 @@ export default function LibraryPanel() {
                 )}
               </div>
             )}
-            <form onSubmit={runSearch} className="grid grid-cols-[1fr_auto_auto] gap-2">
-              <InputGroup>
+            {/* Phone: the query takes a full row of its own and the two buttons
+                share the row under it; from sm: the original single-row grid. */}
+            <form onSubmit={runSearch} className="grid grid-cols-[1fr_auto] gap-2 sm:grid-cols-[1fr_auto_auto]">
+              <InputGroup className="col-span-2 sm:col-span-1">
                 <InputGroupAddon><Search /></InputGroupAddon>
                 <InputGroupInput
                   // `required` only; deliberately no minLength — one-character
@@ -1463,7 +1470,7 @@ export default function LibraryPanel() {
         }
         right={
           tab === 'tracks' ? (
-            <span className="flex items-center gap-2.5">
+            <span className="flex flex-wrap items-center gap-2.5">
               <Seg
                 value={trackMode}
                 options={[
@@ -1511,7 +1518,7 @@ export default function LibraryPanel() {
       )}
 
       {tab === 'browse' && browse && browse.total > PAGE_SIZE && (
-        <div className="flex items-center justify-between text-[11px] text-muted">
+        <div className="flex flex-wrap items-center justify-between gap-y-2 text-[11px] text-muted">
           <span className="mono-num">
             {page * PAGE_SIZE + 1}–{Math.min((page + 1) * PAGE_SIZE, browse.total)} of {num(browse.total)}
           </span>
@@ -1559,13 +1566,18 @@ function Tabs({ tab, setTab }: {
     { id: 'blocked', name: 'Blocked', sub: 'never plays', icon: <Ban size={17} /> },
   ];
   return (
-    <div className="lib-tabs">
+    // The strip is a nowrap `overflow-x:auto` scroller (globals.css). At 390px
+    // five tabs are ~700px, so only two are ever in view and the rest read as
+    // clipped. Below sm: the subtitles drop, the padding tightens and the strip
+    // wraps — three tabs a line, nothing hidden. sm: hands it all back to the
+    // CSS. (`!` because `.admin-root .lib-*` outranks a bare utility.)
+    <div className="lib-tabs !flex-wrap sm:!flex-nowrap">
       {items.map(it => (
-        <button key={it.id} type="button" className={cn('lib-tab', tab === it.id && 'on')} onClick={() => setTab(it.id)}>
+        <button key={it.id} type="button" className={cn('lib-tab !px-2.5 sm:!px-[18px]', tab === it.id && 'on')} onClick={() => setTab(it.id)}>
           {it.icon}
           <span className="min-w-0">
             <span className="lib-tab-name">{it.name}</span>
-            <span className="lib-tab-sub">{it.sub}</span>
+            <span className="lib-tab-sub !hidden sm:!block">{it.sub}</span>
           </span>
         </button>
       ))}
@@ -1694,11 +1706,14 @@ function BrowseFilters(p: BrowseFiltersProps) {
       {/* refine — genre, year and sort share a single row. They wrap together as
           a group on very narrow widths, but none ever strands on its own line. */}
       <div className="flex flex-wrap items-end gap-x-4 gap-y-4 p-4">
-        <div className="flex flex-col gap-2">
+        {/* w-full on phones: three fixed-width dropdowns can't share a 390px
+            row, and a full-width control is a better tap target. sm: restores
+            the content-width group. */}
+        <div className="flex w-full flex-col gap-2 sm:w-auto">
           <Field>
             <FieldLabel htmlFor="genre">genre</FieldLabel>
             <Select value={p.genre || '__any'} onValueChange={v => p.setGenre(v === '__any' ? '' : v)}>
-              <SelectTrigger id="genre" className="min-w-[150px]"><SelectValue placeholder="Any genre" /></SelectTrigger>
+              <SelectTrigger id="genre" className="w-full sm:min-w-[150px]"><SelectValue placeholder="Any genre" /></SelectTrigger>
               <SelectContent>
                 <SelectItem value="__any">Any genre</SelectItem>
                 {p.genreList.slice(0, 80).map(g => (
@@ -1720,11 +1735,11 @@ function BrowseFilters(p: BrowseFiltersProps) {
           </div>
         </div>
 
-        <div className="flex flex-col gap-2">
+        <div className="flex w-full flex-col gap-2 sm:w-auto">
           <Field>
             <FieldLabel htmlFor="sort">sort</FieldLabel>
             <Select value={p.sort} onValueChange={v => p.setSort(v as Sort)}>
-              <SelectTrigger id="sort" className="min-w-[170px]"><SelectValue /></SelectTrigger>
+              <SelectTrigger id="sort" className="w-full sm:min-w-[170px]"><SelectValue /></SelectTrigger>
               <SelectContent>
                 <SelectItem value="artist">Artist / album / title</SelectItem>
                 <SelectItem value="title">Title</SelectItem>
@@ -1794,19 +1809,26 @@ function TrackTable(p: TrackTableProps) {
     // Dim (don't blank) stale rows while a refetch is in flight, so filter
     // changes read as "updating" instead of silently showing old results.
     <div className={cn(p.loading && 'opacity-60 transition-opacity')}>
-      <div className="lib-colhead">
+      {/* Below sm: the 5-column grid (which ends in a fixed 150px actions track)
+          leaves the title ~60px, so header and rows lay out as a plain flex line
+          instead — checkbox · art · title · one overflow menu. `!` is needed to
+          beat `.admin-root .lib-colhead/.lib-row`; sm: hands it back to the CSS
+          grid untouched. */}
+      <div className="lib-colhead !flex sm:!grid">
         <span>
-          <input
-            type="checkbox"
-            checked={allSelected}
-            onChange={() => p.onToggleAll(p.rows)}
-            aria-label={allSelected ? 'deselect all tracks' : 'select all tracks'}
-          />
+          <label className={CHECK_HIT}>
+            <input
+              type="checkbox"
+              checked={allSelected}
+              onChange={() => p.onToggleAll(p.rows)}
+              aria-label={allSelected ? 'deselect all tracks' : 'select all tracks'}
+            />
+          </label>
         </span>
-        <span />
-        <span>title</span>
+        <span className="hidden sm:block" />
+        <span className="flex-1">title</span>
         <span className="h-tags">mood · energy</span>
-        <span />
+        <span className="hidden sm:block" />
       </div>
       {p.rows.map(t => {
         const tagged = !!(t.moods && t.moods.length > 0);
@@ -1814,15 +1836,19 @@ function TrackTable(p: TrackTableProps) {
         const dur = fmtDuration(t.duration);
         return (
           <Fragment key={t.id}>
-          <div className={cn('lib-row', p.flashId === t.id && 'flash')}>
-            <input
-              type="checkbox"
-              checked={p.selected.has(t.id)}
-              onChange={() => p.onToggleSelect(t.id)}
-              aria-label={`select ${t.title || 'track'}`}
-            />
+          <div className={cn('lib-row !flex sm:!grid', p.flashId === t.id && 'flash')}>
+            <label className={CHECK_HIT}>
+              <input
+                type="checkbox"
+                checked={p.selected.has(t.id)}
+                onChange={() => p.onToggleSelect(t.id)}
+                aria-label={`select ${t.title || 'track'}`}
+              />
+            </label>
             <Thumb track={t} />
-            <div className="min-w-0">
+            {/* flex-1 drives the phone layout; grid items ignore flex-*, so the
+                sm:+ grid column sizing is untouched. */}
+            <div className="min-w-0 flex-1">
               <div className="lib-title">{t.title || '—'}</div>
               <div className="lib-artist">{t.artist || '—'}{t.year ? ` · ${t.year}` : ''}{dur ? ` · ${dur}` : ''}</div>
               {t.album && <div className="lib-album">{t.album}</div>}
@@ -1850,13 +1876,30 @@ function TrackTable(p: TrackTableProps) {
               {t.similarity != null && <span className="lib-mtag lib-atag" title="sound match vs your description">≈ {Math.round(t.similarity * 100)}%</span>}
             </div>
             {/* icon-only action cluster — tooltips carry the verbs; the fixed
-                150px grid track keeps it aligned under the (empty) header cell */}
+                150px grid track keeps it aligned under the (empty) header cell.
+                Four 36px buttons are worth more than the title is on a phone, so
+                below sm: they collapse into the single overflow menu below and
+                each inline button hides. */}
             <div className="flex items-center justify-end gap-1.5">
-              <Btn sm onClick={() => p.onQueue(t)} disabled={!!p.queuing} title="Queue on air">
+              <RowActionsMenu
+                track={t}
+                tagged={tagged}
+                editing={editing}
+                queuing={p.queuing === t.id}
+                retagging={p.retagging === t.id}
+                blocking={p.blocking === t.id}
+                disabled={!!p.queuing || !!p.retagging || !!p.manualBusy || !!p.blocking}
+                onQueue={p.onQueue}
+                onEdit={p.onEdit}
+                onRetag={p.onRetag}
+                onBlock={p.onBlock}
+              />
+              <Btn sm className="hidden sm:inline-flex" onClick={() => p.onQueue(t)} disabled={!!p.queuing} title="Queue on air">
                 {p.queuing === t.id ? '…' : <ListPlus size={12} />}
               </Btn>
               <Btn
                 sm
+                className="hidden sm:inline-flex"
                 tone={editing ? 'accent' : undefined}
                 onClick={() => p.onEdit(t)}
                 disabled={!!p.manualBusy}
@@ -1868,6 +1911,7 @@ function TrackTable(p: TrackTableProps) {
                   be LLM-tagged on the spot (/library/retag takes the row body). */}
               <Btn
                 sm
+                className="hidden sm:inline-flex"
                 tone={p.tab === 'untagged' || !tagged ? 'accent' : 'solid'}
                 onClick={() => p.onRetag(t)}
                 disabled={!!p.retagging}
@@ -1878,6 +1922,7 @@ function TrackTable(p: TrackTableProps) {
                   : <Sparkles size={11} />}
               </Btn>
               <BlockMenu
+                className="hidden sm:block"
                 track={t}
                 busy={p.blocking === t.id}
                 disabled={!!p.blocking}
@@ -1902,42 +1947,39 @@ function TrackTable(p: TrackTableProps) {
 }
 
 // ---------------------------------------------------------------------------
-// BlockMenu — the per-row "Never play" action. A Ban button opening a small
-// scope menu (track / album / artist); the server resolves album/artist ids
-// from the track id, so the row only needs t.id. No confirm dialog — blocking
-// is one-click reversible from the Blocked tab.
+// Row disclosure plumbing, shared by BlockMenu and RowActionsMenu.
 // ---------------------------------------------------------------------------
-function BlockMenu({ track, busy, disabled, onBlock }: {
-  track: Track;
-  busy: boolean;
-  disabled: boolean;
-  onBlock: (t: Track, type: BlockType) => void;
-}) {
-  const [open, setOpen] = useState(false);
-  const rootRef = useRef<HTMLDivElement>(null);
-  const triggerRef = useRef<HTMLButtonElement>(null);
-  const pick = (type: BlockType) => { setOpen(false); onBlock(track, type); };
+// Padded label wrapper around a row checkbox: the native box stays 13px, but the
+// negative margin cancels the padding so the ~37px touch target costs the layout
+// nothing. Reset at sm:, where the box sits in a 16px grid column.
+const CHECK_HIT = '-m-3 flex cursor-pointer items-center p-3 sm:m-0 sm:p-0';
 
-  // Dismiss on an outside pointer/touch, on focus leaving the group, or on
-  // Escape — via document listeners rather than a full-screen click-catcher
-  // div, which relies on a non-semantic clickable element with no keyboard
-  // path. `pointerdown` covers mouse, touch, and pen in one listener.
-  //
-  // The disclosed panel is deliberately a plain group of <button>s and NOT
-  // role="menu"/"menuitem": that role pair is a contract for the full menu
-  // keyboard pattern (arrow-key roving focus, Home/End, focus into the first
-  // item on open). Announcing a menu we don't implement leaves screen-reader
-  // users pressing arrow keys at something that only answers to Tab, which is
-  // worse than the plain buttons they'd otherwise get.
+// Dismiss an open disclosure on an outside pointer/touch, on focus leaving the
+// group, or on Escape — via document listeners rather than a full-screen
+// click-catcher div, which relies on a non-semantic clickable element with no
+// keyboard path. `pointerdown` covers mouse, touch, and pen in one listener.
+//
+// The disclosed panels are deliberately plain groups of <button>s and NOT
+// role="menu"/"menuitem": that role pair is a contract for the full menu
+// keyboard pattern (arrow-key roving focus, Home/End, focus into the first
+// item on open). Announcing a menu we don't implement leaves screen-reader
+// users pressing arrow keys at something that only answers to Tab, which is
+// worse than the plain buttons they'd otherwise get.
+function useDismissOnOutside(
+  open: boolean,
+  close: () => void,
+  rootRef: RefObject<HTMLDivElement | null>,
+  triggerRef: RefObject<HTMLButtonElement | null>,
+) {
   useEffect(() => {
     if (!open) return;
     const outside = (target: EventTarget | null) =>
       !!rootRef.current && !rootRef.current.contains(target as Node);
-    const onPointer = (e: PointerEvent) => { if (outside(e.target)) setOpen(false); };
-    const onFocusIn = (e: FocusEvent) => { if (outside(e.target)) setOpen(false); };
+    const onPointer = (e: PointerEvent) => { if (outside(e.target)) close(); };
+    const onFocusIn = (e: FocusEvent) => { if (outside(e.target)) close(); };
     const onKey = (e: KeyboardEvent) => {
       if (e.key !== 'Escape') return;
-      setOpen(false);
+      close();
       // Escape returns focus to the control that opened the panel, so keyboard
       // users don't get dropped back to the top of the document.
       triggerRef.current?.focus();
@@ -1950,10 +1992,118 @@ function BlockMenu({ track, busy, disabled, onBlock }: {
       document.removeEventListener('focusin', onFocusIn);
       document.removeEventListener('keydown', onKey);
     };
+    // close/refs are stable for the life of the row.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open]);
+}
+
+// Shared popup shell + item chrome for both row menus. Items are ≥36px tall so
+// they stay thumb-sized on the phone layout that surfaces them.
+const MENU_PANEL =
+  'absolute top-full right-0 z-50 mt-1 max-w-[calc(100vw-2rem)] min-w-[220px] rounded-md border bg-popover p-1 text-popover-foreground shadow-md';
+const MENU_ITEM =
+  'flex w-full items-center gap-2 rounded px-2.5 py-2.5 text-left text-[12px] hover:bg-[var(--ink-soft)] hover:text-ink disabled:opacity-40';
+
+// ---------------------------------------------------------------------------
+// RowActionsMenu — the phone-only overflow menu. The four inline row buttons
+// (queue / edit / retag / never-play) cost ~160px, which is more than the track
+// title gets at 390px, so below sm: every action lives behind this one control
+// and the inline cluster hides. Same actions, same handlers — no mobile-only
+// behaviour, just a different affordance.
+// ---------------------------------------------------------------------------
+function RowActionsMenu({
+  track, tagged, editing, queuing, retagging, blocking, disabled, onQueue, onEdit, onRetag, onBlock,
+}: {
+  track: Track;
+  tagged: boolean;
+  editing: boolean;
+  queuing: boolean;
+  retagging: boolean;
+  blocking: boolean;
+  disabled: boolean;
+  onQueue: (t: Track) => void;
+  onEdit: (t: Track) => void;
+  onRetag: (t: Track) => void;
+  onBlock: (t: Track, type: BlockType) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const rootRef = useRef<HTMLDivElement>(null);
+  const triggerRef = useRef<HTMLButtonElement>(null);
+  const run = (fn: () => void) => { setOpen(false); fn(); };
+  useDismissOnOutside(open, () => setOpen(false), rootRef, triggerRef);
+  const busy = queuing || retagging || blocking;
 
   return (
-    <div ref={rootRef} className="relative">
+    <div ref={rootRef} className="relative sm:hidden">
+      <Btn
+        ref={triggerRef}
+        sm
+        // 36px square: this is the only row action on a phone, so it carries the
+        // whole cluster's tap target.
+        className="size-9"
+        onClick={() => setOpen(o => !o)}
+        aria-label={`actions for ${track.title || 'track'}`}
+        aria-expanded={open}
+        aria-haspopup="true"
+      >
+        {busy ? '…' : <MoreVertical size={15} />}
+      </Btn>
+      {open && (
+        <div className={MENU_PANEL}>
+          <button type="button" className={MENU_ITEM} disabled={disabled} onClick={() => run(() => onQueue(track))}>
+            <ListPlus size={13} /> Queue on air
+          </button>
+          <button type="button" className={MENU_ITEM} disabled={disabled} onClick={() => run(() => onEdit(track))}>
+            {editing ? <X size={13} /> : <Pencil size={13} />} {editing ? 'Close mood editor' : 'Edit moods'}
+          </button>
+          <button type="button" className={MENU_ITEM} disabled={disabled} onClick={() => run(() => onRetag(track))}>
+            {tagged ? <RotateCcw size={13} /> : <Sparkles size={13} />} {tagged ? 'Retag with AI' : 'Tag with AI'}
+          </button>
+          <span className="my-1 block border-t border-dashed border-separator-strong" />
+          <button type="button" className={MENU_ITEM} disabled={disabled} onClick={() => run(() => onBlock(track, 'track'))}>
+            <Ban size={13} /> Never play this track
+          </button>
+          {track.album && (
+            <button type="button" className={MENU_ITEM} disabled={disabled} onClick={() => run(() => onBlock(track, 'album'))}>
+              <Ban size={13} /> Never play this album
+            </button>
+          )}
+          {track.artist && (
+            <button type="button" className={cn(MENU_ITEM, 'items-start')} disabled={disabled} onClick={() => run(() => onBlock(track, 'artist'))}>
+              <Ban size={13} className="mt-px flex-none" />
+              <span>
+                Never play this artist
+                <span className="block text-[10px] text-muted">primary credit only — collabs filed under other artists still play</span>
+              </span>
+            </button>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// BlockMenu — the per-row "Never play" action. A Ban button opening a small
+// scope menu (track / album / artist); the server resolves album/artist ids
+// from the track id, so the row only needs t.id. No confirm dialog — blocking
+// is one-click reversible from the Blocked tab.
+// ---------------------------------------------------------------------------
+function BlockMenu({ track, busy, disabled, onBlock, className }: {
+  track: Track;
+  busy: boolean;
+  disabled: boolean;
+  onBlock: (t: Track, type: BlockType) => void;
+  className?: string;
+}) {
+  const [open, setOpen] = useState(false);
+  const rootRef = useRef<HTMLDivElement>(null);
+  const triggerRef = useRef<HTMLButtonElement>(null);
+  const pick = (type: BlockType) => { setOpen(false); onBlock(track, type); };
+  useDismissOnOutside(open, () => setOpen(false), rootRef, triggerRef);
+
+  return (
+    <div ref={rootRef} className={cn('relative', className)}>
       <Btn
         ref={triggerRef}
         sm
@@ -1966,7 +2116,7 @@ function BlockMenu({ track, busy, disabled, onBlock }: {
         {busy ? '…' : <Ban size={12} />}
       </Btn>
       {open && (
-        <div className="absolute top-full right-0 z-50 mt-1 min-w-[200px] rounded-md border bg-popover p-1 text-popover-foreground shadow-md">
+        <div className="absolute top-full right-0 z-50 mt-1 max-w-[calc(100vw-2rem)] min-w-[200px] rounded-md border bg-popover p-1 text-popover-foreground shadow-md">
           <button type="button" className="block w-full rounded px-2.5 py-1.5 text-left text-[12px] hover:bg-[var(--ink-soft)] hover:text-ink" onClick={() => pick('track')}>
             Never play this track
           </button>
@@ -2149,7 +2299,7 @@ function HistoryTab({ rows, total, page, setPage, loading, queuing, onQueue, onR
       </Card>
 
       {total > PAGE_SIZE && (
-        <div className="flex items-center justify-between text-[11px] text-muted">
+        <div className="flex flex-wrap items-center justify-between gap-y-2 text-[11px] text-muted">
           <span className="mono-num">
             {page * PAGE_SIZE + 1}–{Math.min((page + 1) * PAGE_SIZE, total)} of {num(total)}
           </span>
@@ -2230,7 +2380,7 @@ function ManualTagEditor(props: {
         />
         apply to whole album{track.album ? ` “${track.album}”` : ''}
       </label>
-      <div className="flex items-center gap-2">
+      <div className="flex flex-wrap items-center gap-2">
         <Btn sm tone="accent" onClick={() => props.onSave(sel, energyVal, applyToAlbum)} disabled={busy || sel.length === 0}>
           {busy ? 'Saving…' : 'Save tags'}
         </Btn>
@@ -2268,7 +2418,7 @@ function AddToPlaylistBar({ count, playlists, busy, onAdd, onClear }: {
           {count} track{count === 1 ? '' : 's'} selected
         </span>
         <Select value={target} onValueChange={setTarget}>
-          <SelectTrigger className="min-w-[180px]" aria-label="Target playlist"><SelectValue /></SelectTrigger>
+          <SelectTrigger className="max-w-full min-w-[180px]" aria-label="Target playlist"><SelectValue /></SelectTrigger>
           <SelectContent>
             <SelectItem value="__new">New playlist…</SelectItem>
             {(playlists || []).map(p => (
@@ -2282,7 +2432,7 @@ function AddToPlaylistBar({ count, playlists, busy, onAdd, onClear }: {
           <Input
             placeholder="playlist name"
             aria-label="New playlist name"
-            className="w-48"
+            className="w-48 max-w-full"
             value={name}
             onChange={(e: ChangeEvent<HTMLInputElement>) => setName(e.target.value)}
           />

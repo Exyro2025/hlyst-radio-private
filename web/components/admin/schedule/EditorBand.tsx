@@ -65,7 +65,7 @@ export function LineEditor({
   const lineShow = shows.find(s => s.id === lineShowId) ?? null;
   return (
     <div className="min-w-0">
-      <div className="mb-0.5 flex items-baseline gap-3">
+      <div className="mb-0.5 flex flex-wrap items-baseline gap-x-3 gap-y-0.5">
         <span className="eyebrow flex-none whitespace-nowrap text-ink">Write an order</span>
         <Mu className="min-w-0 flex-1 truncate tracking-[0.08em]">
           Fill in the sentence, then add it to the schedule · {dayName(line.day)} {hhmm(line.start)} → {hhmm(line.end)}{' '}
@@ -115,11 +115,19 @@ export function LineEditor({
           />
           <span className="mx-1 hidden h-5 w-px bg-separator-strong sm:block" />
           <DayPills selected={lineDays} onToggle={onToggleLineDay} />
-          <span className="ml-auto flex gap-2">
-            <Button variant="accent" size="sm" onClick={onAir} disabled={!lineShow}>
+          {/* Its own full-width line on a phone — the sentence above already
+              fills several rows, and the buttons need a real tap target. */}
+          <span className="ml-auto flex w-full gap-2 sm:w-auto">
+            <Button
+              variant="accent"
+              size="sm"
+              className="min-h-9 sm:min-h-0"
+              onClick={onAir}
+              disabled={!lineShow}
+            >
               Add to schedule
             </Button>
-            <Button variant="ghost" size="sm" onClick={onQuiet}>
+            <Button variant="ghost" size="sm" className="min-h-9 sm:min-h-0" onClick={onQuiet}>
               Remove
             </Button>
           </span>
@@ -143,7 +151,7 @@ export default function EditorBand({
 }: EditorBandProps) {
   const hasSuggestions = suggestions.length > 0;
   return (
-    <section className="border-t border-ink bg-[var(--page-bg)] px-[30px] py-[22px]">
+    <section className="border-t border-ink bg-[var(--page-bg)] px-5 py-[22px] sm:px-[30px]">
       <div className={cn('grid items-start gap-x-9 gap-y-7', hasSuggestions && 'xl:grid-cols-[minmax(360px,1fr)_2fr]')}>
         {/* ── Worth a look ──────────────────────────────────────────────── */}
         {hasSuggestions && (
@@ -160,11 +168,16 @@ export default function EditorBand({
                     </span>
                     <span className="text-[12.5px] text-ink">{sug.text}</span>
                   </div>
-                  <div className="flex gap-2">
-                    <Button variant="solid" size="sm" onClick={sug.onAction}>
+                  <div className="flex flex-wrap gap-2">
+                    <Button variant="solid" size="sm" className="min-h-9 sm:min-h-0" onClick={sug.onAction}>
                       {sug.actionLabel}
                     </Button>
-                    <Button variant="ghost" size="sm" onClick={() => onDismissSuggestion(sug.key)}>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="min-h-9 sm:min-h-0"
+                      onClick={() => onDismissSuggestion(sug.key)}
+                    >
                       {sug.dismissLabel}
                     </Button>
                   </div>
@@ -187,7 +200,7 @@ export default function EditorBand({
           </div>
 
           <div className="mt-4 border border-separator-strong bg-[var(--card-bg)] p-4">
-            <div className="mb-[11px] flex items-baseline gap-2">
+            <div className="mb-[11px] flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
               <span className="eyebrow text-ink">Airtime against your target</span>
               <Mu className="text-[9px] tracking-[0.1em]">tick = {target} h</Mu>
             </div>
@@ -228,7 +241,7 @@ function AirtimeBar({ row, tickPct }: { row: AirtimeRow; tickPct: number }) {
   useDynamicStyle(barRef, { width: `${row.pct}%`, background: row.color });
   useDynamicStyle(tickRef, { left: `${tickPct}%` });
   return (
-    <div className="grid grid-cols-[96px_1fr_32px] items-center gap-2.5">
+    <div className="grid grid-cols-[72px_1fr_28px] items-center gap-2 sm:grid-cols-[96px_1fr_32px] sm:gap-2.5">
       <Mu className={cn('truncate text-[9px]', row.under && 'text-vermilion')} >
         {row.name}
       </Mu>
