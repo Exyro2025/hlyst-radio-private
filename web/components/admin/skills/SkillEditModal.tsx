@@ -20,7 +20,7 @@ import type { CSSProperties } from 'react';
 import { notify, errorMessage } from '../../../lib/notify';
 import { useAdminAuth } from '../../../lib/adminAuth';
 import { V3AlertDialog } from '../../ui/alert-dialog';
-import { EditorDialog } from '../../ui/editor-dialog';
+import { EditorDialog, EditorFooter } from '../../ui/editor-dialog';
 import { SkeletonForm } from '@/components/ui/skeleton';
 import { Eyebrow } from '../ui';
 import { CONTEXT_FIELD_LABELS, CONTEXT_FIELDS_FALLBACK, splitContext } from './contextFields';
@@ -492,62 +492,91 @@ export default function SkillEditModal({ mode, skill, personas, tagSuggestions, 
   );
   // On-air toggle (edit only) — lives in the footer with the other actions so
   // the header stays uniform across all three editors.
+  // Sized down on a phone (52x26) — the footer is fixed furniture, and the
+  // toggle is the one control that can't collapse into the overflow menu.
   const airToggle = isEdit ? (
     <div
       onClick={() => { if (!acting) toggleEnabled(); }}
       title={enabled ? 'On air — click to take off air' : 'Off air — click to put on air'}
-      style={{ position: 'relative', width: 62, height: 30, border: '1px solid var(--ink)', flex: 'none', cursor: acting ? 'wait' : 'pointer', transition: 'background .15s cubic-bezier(.2,.7,.2,1)', background: enabled ? 'var(--ink)' : 'transparent', opacity: acting ? 0.6 : 1 }}
+      role="switch"
+      aria-checked={enabled}
+      aria-label="On air"
+      className="relative h-[26px] w-[52px] flex-none border border-ink transition-colors sm:h-[30px] sm:w-[62px]"
+      style={{ cursor: acting ? 'wait' : 'pointer', background: enabled ? 'var(--ink)' : 'transparent', opacity: acting ? 0.6 : 1 }}
     >
-      <div style={{ position: 'absolute', top: 2, left: 2, width: 24, height: 24, transition: 'transform .18s cubic-bezier(.2,.7,.2,1)', background: enabled ? 'var(--bg)' : 'var(--ink)', transform: `translateX(${enabled ? 32 : 0}px)` }} />
+      <div
+        className={`absolute top-[2px] left-[2px] size-[20px] transition-transform duration-200 sm:size-[24px] ${
+          enabled ? 'translate-x-[26px] sm:translate-x-[32px]' : 'translate-x-0'
+        }`}
+        style={{ background: enabled ? 'var(--bg)' : 'var(--ink)' }}
+      />
     </div>
   ) : null;
 
-  // Transport bar — on-air toggle / Run / Delete on the left, unsaved / flash /
-  // Close / Save on the right. Border + padding supplied by EditorDialog's footer.
+  // Transport bar — the shared EditorFooter: on-air toggle always visible, the
+  // editor verbs (run / export / delete / share) inline on desktop and behind a
+  // single `⋯` on a phone, Close/Save pinned right. Status (unsaved / flash)
+  // rides its own line. Border + padding come from EditorDialog's footer slot.
   const footer = (
-    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 16, flexWrap: 'wrap' }}>
-      {/* Both clusters wrap: on a 390px phone the left one alone (toggle, RUN
-          NOW, EXPORT, DELETE, SHARE TO COMMUNITY) is ~600px of transport. */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
-        {airToggle}
-        {isEdit && (
-          <button type="button" onClick={run} disabled={acting} style={{ padding: '13px 26px', fontSize: 11, fontWeight: 700, letterSpacing: '0.2em', textTransform: 'uppercase', transition: 'transform .1s', border: '1px solid var(--accent)', background: 'var(--accent)', color: '#fff', cursor: acting ? 'wait' : 'pointer', opacity: acting ? 0.7 : 1 }}>
-            ▸ RUN NOW
-          </button>
-        )}
-        {isEdit && (
-          <button type="button" onClick={exportZip} className="sw-ghost" title="Download this skill as a .zip (SKILL.md + tool.mjs)" style={{ padding: '13px 22px', background: 'transparent', color: 'var(--muted)', border: '1px solid color-mix(in oklab, var(--ink) 24%, transparent)', fontSize: 11, fontWeight: 700, letterSpacing: '0.2em', textTransform: 'uppercase', cursor: 'pointer' }}>
-            ↓ EXPORT
-          </button>
-        )}
-        {isEdit && custom && (
-          <button type="button" onClick={() => setConfirmDelete(true)} disabled={acting} className="sw-ghost" style={{ padding: '13px 22px', background: 'transparent', color: 'var(--danger)', border: '1px solid var(--danger)', fontSize: 11, fontWeight: 700, letterSpacing: '0.2em', textTransform: 'uppercase', cursor: acting ? 'wait' : 'pointer', opacity: acting ? 0.7 : 1 }}>
-            DELETE
-          </button>
-        )}
-        {isEdit && custom && !hasTool && (
-          <button type="button" onClick={shareToCommunity} className="sw-ghost" title="Open a prefilled GitHub issue to share this skill with the community" style={{ padding: '13px 22px', background: 'transparent', color: 'var(--muted)', border: '1px solid color-mix(in oklab, var(--ink) 24%, transparent)', fontSize: 11, fontWeight: 700, letterSpacing: '0.2em', textTransform: 'uppercase', cursor: 'pointer' }}>
-            ↗ SHARE TO COMMUNITY
-          </button>
-        )}
-      </div>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 16, flexWrap: 'wrap', justifyContent: 'flex-end' }}>
-        {dirty && (
-          <span style={{ display: 'inline-flex', alignItems: 'center', gap: 7, fontSize: 10, letterSpacing: '0.18em', textTransform: 'uppercase', color: 'var(--accent)', fontWeight: 700 }}>
-            <span style={{ width: 7, height: 7, borderRadius: '50%', background: 'var(--accent)' }} />UNSAVED EDITS
-          </span>
-        )}
-        {flash && (
-          <span className="v3-blink" style={{ fontSize: 10, letterSpacing: '0.18em', textTransform: 'uppercase', color: 'var(--accent)', fontWeight: 700 }}>✓ {flash}</span>
-        )}
-        <button type="button" onClick={onClose} className="sw-ghost" style={{ padding: '13px 22px', background: 'transparent', color: 'var(--muted)', border: '1px solid color-mix(in oklab, var(--ink) 24%, transparent)', fontSize: 11, fontWeight: 700, letterSpacing: '0.2em', textTransform: 'uppercase', cursor: 'pointer' }}>
-          CLOSE
-        </button>
-        <button type="button" onClick={save} disabled={!canSave} style={{ padding: '13px 26px', background: canSave ? 'var(--ink)' : 'color-mix(in oklab, var(--ink) 20%, transparent)', color: 'var(--bg)', border: '1px solid var(--ink)', fontSize: 11, fontWeight: 700, letterSpacing: '0.2em', textTransform: 'uppercase', cursor: canSave ? 'pointer' : 'not-allowed' }}>
-          {busy ? (mode === 'create' ? 'CREATING…' : 'SAVING…') : (mode === 'create' ? 'CREATE' : 'SAVE')}
-        </button>
-      </div>
-    </div>
+    <EditorFooter
+      status={(dirty || flash) ? (
+        <>
+          {dirty && (
+            <span style={{ display: 'inline-flex', alignItems: 'center', gap: 7, fontSize: 10, letterSpacing: '0.18em', textTransform: 'uppercase', color: 'var(--accent)', fontWeight: 700 }}>
+              <span style={{ width: 7, height: 7, borderRadius: '50%', background: 'var(--accent)' }} />UNSAVED EDITS
+            </span>
+          )}
+          {flash && (
+            <span className="v3-blink" style={{ fontSize: 10, letterSpacing: '0.18em', textTransform: 'uppercase', color: 'var(--accent)', fontWeight: 700 }}>✓ {flash}</span>
+          )}
+        </>
+      ) : null}
+      extra={airToggle}
+      actions={[
+        {
+          id: 'run',
+          label: '▸ Run now',
+          tone: 'accent',
+          onClick: run,
+          disabled: acting,
+          hidden: !isEdit,
+        },
+        {
+          id: 'export',
+          label: '↓ Export',
+          onClick: exportZip,
+          title: 'Download this skill as a .zip (SKILL.md + tool.mjs)',
+          hidden: !isEdit,
+        },
+        {
+          id: 'delete',
+          label: 'Delete',
+          tone: 'danger',
+          onClick: () => setConfirmDelete(true),
+          disabled: acting,
+          hidden: !(isEdit && custom),
+        },
+        {
+          id: 'share',
+          label: '↗ Share to community',
+          onClick: shareToCommunity,
+          title: 'Open a prefilled GitHub issue to share this skill with the community',
+          hidden: !(isEdit && custom && !hasTool),
+        },
+      ]}
+      primary={[
+        { id: 'close', label: 'Close', onClick: onClose },
+        {
+          id: 'save',
+          label: busy
+            ? (mode === 'create' ? 'Creating…' : 'Saving…')
+            : (mode === 'create' ? 'Create' : 'Save'),
+          tone: 'solid',
+          onClick: save,
+          disabled: !canSave,
+        },
+      ]}
+    />
   );
 
   return (

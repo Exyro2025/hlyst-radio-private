@@ -7,11 +7,11 @@
 import type { RefObject } from 'react';
 import type { Persona, PersonaTts, SettingsResponse, SkillCatalogEntry } from './types';
 import type { AdminAuth } from '../../../lib/adminAuth';
-import { Btn, Eyebrow, Pill } from '../ui';
+import { Eyebrow, Pill } from '../ui';
 import { cn } from '../../../lib/cn';
 import { personaSubmitUrl } from '../../../lib/repo';
 import { DIAL_NEUTRAL } from './constants';
-import { EditorDialog } from '../../ui/editor-dialog';
+import { EditorDialog, EditorFooter } from '../../ui/editor-dialog';
 import { PersonaIdentityCard } from './PersonaIdentityCard';
 import { PersonaBehaviorCard } from './PersonaBehaviorCard';
 import { PersonaVoiceCard } from './PersonaVoiceCard';
@@ -99,61 +99,64 @@ export function PersonaEditor({
         </span>
       )}
       footer={
-        <div className="flex w-full flex-col gap-2">
-          {/* status line — its own row so the action buttons never wrap */}
-          <div className="flex items-center gap-2">
-            <span
-              className={cn(
-                'size-1.5 flex-none rounded-full',
-                canSave ? 'bg-[var(--accent)]' : 'bg-[var(--danger)]',
-              )}
-            />
-            <span className="text-[11px] text-muted">
-              {!canSave && !focusedOk
-                ? <span className="text-[var(--danger)]">this persona has a missing or invalid field</span>
-                : !canSave && !allPersonasOk
-                  ? <span className="text-[var(--danger)]">another persona in the roster is incomplete</span>
-                  : !canSave && !promptOk
-                    ? <span className="text-[var(--danger)]">fix the system-prompt library</span>
-                    : 'changes apply on the next spoken line · no mixer restart'}
-            </span>
-          </div>
-          {/* action row */}
-          <div className="flex flex-wrap items-center gap-3">
-            {/* left — persona-scoped actions. Wraps on phones: the three lg
-                buttons are ~530px of transport and can't share one line. */}
-            <span className="flex flex-wrap items-center gap-2">
+        <EditorFooter
+          status={(
+            <>
+              <span
+                className={cn(
+                  'size-1.5 flex-none rounded-full',
+                  canSave ? 'bg-[var(--accent)]' : 'bg-[var(--danger)]',
+                )}
+              />
+              <span className="min-w-0">
+                {!canSave && !focusedOk
+                  ? <span className="text-[var(--danger)]">this persona has a missing or invalid field</span>
+                  : !canSave && !allPersonasOk
+                    ? <span className="text-[var(--danger)]">another persona in the roster is incomplete</span>
+                    : !canSave && !promptOk
+                      ? <span className="text-[var(--danger)]">fix the system-prompt library</span>
+                      : 'changes apply on the next spoken line · no mixer restart'}
+              </span>
+              {/* Standing state, not an action — rides the status row so the
+                  transport stays a row of verbs. */}
               {persona.id === onAirPersonaId && <Pill tone="accent" className="text-[8px]">on air</Pill>}
-              {persona.id === activePersonaId
-                ? <Pill className="text-[8px]">default</Pill>
-                : <Btn lg onClick={onSetActive}>Set as default</Btn>}
-              <Btn
-                lg
-                tone="danger"
-                onClick={onRemove}
-                disabled={personaCount <= 1}
-                title={personaCount > 1 ? 'Remove this persona' : 'At least one persona is required'}
-              >
-                Remove
-              </Btn>
-              <Btn
-                lg
-                onClick={shareToCommunity}
-                disabled={!persona.name.trim() || !persona.soul.trim()}
-                title="Open a prefilled GitHub form to share this persona with every station (voice and avatar stay yours)"
-              >
-                Share to community
-              </Btn>
-            </span>
-            {/* right — discard/save */}
-            <span className="ml-auto flex flex-wrap items-center justify-end gap-3">
-              <Btn lg onClick={onDiscard} disabled={busy}>Discard</Btn>
-              <Btn lg tone="accent" onClick={onSave} disabled={busy || !canSave}>
-                {busy ? 'Saving…' : 'Save persona'}
-              </Btn>
-            </span>
-          </div>
-        </div>
+              {persona.id === activePersonaId && <Pill className="text-[8px]">default</Pill>}
+            </>
+          )}
+          actions={[
+            {
+              id: 'default',
+              label: 'Set as default',
+              onClick: onSetActive,
+              hidden: persona.id === activePersonaId,
+            },
+            {
+              id: 'remove',
+              label: 'Remove',
+              tone: 'danger',
+              onClick: onRemove,
+              disabled: personaCount <= 1,
+              title: personaCount > 1 ? 'Remove this persona' : 'At least one persona is required',
+            },
+            {
+              id: 'share',
+              label: 'Share to community',
+              onClick: shareToCommunity,
+              disabled: !persona.name.trim() || !persona.soul.trim(),
+              title: 'Open a prefilled GitHub form to share this persona with every station (voice and avatar stay yours)',
+            },
+          ]}
+          primary={[
+            { id: 'discard', label: 'Discard', onClick: onDiscard, disabled: busy },
+            {
+              id: 'save',
+              label: busy ? 'Saving…' : 'Save persona',
+              tone: 'accent',
+              onClick: onSave,
+              disabled: busy || !canSave,
+            },
+          ]}
+        />
       }
     >
       <div ref={editorRef} className="grid">
