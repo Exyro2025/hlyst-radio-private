@@ -155,6 +155,9 @@ export default function SettingsPanel() {
         units: v.weather?.units === 'imperial' ? 'imperial' : 'metric',
       },
       tts: {
+        // Absent (a settings.json predating the key) reads as ON, matching the
+        // controller's own coercion in settings.load().
+        enabled: v.tts?.enabled !== false,
         defaultEngine: v.tts?.defaultEngine ?? 'piper',
         kokoro: { voice: v.tts?.kokoro?.voice ?? 'bf_isabella' },
         chatterbox: { referenceVoice: v.tts?.chatterbox?.referenceVoice ?? '' },

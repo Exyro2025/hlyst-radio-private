@@ -59,6 +59,10 @@ export const ELEVENLABS_VS_DEFAULTS = {
 } as const;
 
 export interface TtsForm {
+  // Station-wide voice switch. false = music only — the DJ never speaks and no
+  // script is generated for it. Jingles are unaffected (jingleRatio owns those)
+  // and manual segment triggers still fire. Mirrors DEFAULTS.tts.enabled.
+  enabled: boolean;
   defaultEngine: string;
   kokoro: { voice: string };
   chatterbox: { referenceVoice: string };
@@ -270,6 +274,7 @@ export interface SettingsData {
       units?: 'metric' | 'imperial';
     };
     tts?: {
+      enabled?: boolean;
       defaultEngine?: string;
       kokoro?: { voice?: string; lang?: string };
       chatterbox?: { referenceVoice?: string };

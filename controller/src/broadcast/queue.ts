@@ -32,6 +32,7 @@ import { getFullContext, energyForDaypart } from '../context.js';
 import * as settings from '../settings.js';
 import { logEvent } from '../observability/events.js';
 import { djCallsAllowed, presentListeners } from './listeners.js';
+import { autoVoiceAllowed } from './voice-policy.js';
 import * as webhooks from './webhooks.js';
 import * as scrobble from './scrobble.js';
 import * as liquidsoapControl from './liquidsoap-control.js';
@@ -1357,6 +1358,11 @@ class Queue {
   // this just writes the path to the duck channel and mirrors the bookkeeping
   // announce() does (djLog feeds the opener anti-repeat; session + webhook).
   async airIntro(item: QueueItem, predecessor: Track | null = null) {
+    // Station voice off (settings.tts.enabled). The generation sites already
+    // skip writing intros, so this only catches an item queued BEFORE the
+    // switch was flipped — it must not air its script now. Backstop, not the
+    // policy: nothing here spends tokens, so a plain drop is the whole job.
+    if (!autoVoiceAllowed()) return;
     if (!item?.introWav || item.introAired) return;
     item.introAired = true;
     // Stale back-announce safety-net. Links are written forward-looking (intro
