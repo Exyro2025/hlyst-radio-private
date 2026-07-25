@@ -23,7 +23,7 @@ import {
   SelectGroup,
 } from '../../ui/select';
 import { Card, Btn, Eyebrow, Toggle } from '../ui';
-import { EditorDialog } from '../../ui/editor-dialog';
+import { EditorDialog, EditorFooter } from '../../ui/editor-dialog';
 import { AiFill } from '../AiFill';
 import GenreSuggest from '../GenreSuggest';
 import { PersonaPicker, GuestPersonaPicker, ThemePicker } from './ShowPickers';
@@ -106,32 +106,36 @@ export function ShowEditor({
       title={<Eyebrow className="text-vermilion">{isNew ? 'New show' : 'Edit show'}</Eyebrow>}
       sub={<span className="caption truncate">{show.name.trim() || 'define a show'}</span>}
       footer={
-        <div className="flex flex-wrap items-center gap-3">
-          {/* left — destructive action */}
-          <Btn lg tone="danger" onClick={onRemove}>Remove</Btn>
-          {/* right — status + close/save */}
-          <span className="ml-auto flex w-full flex-wrap items-center gap-3 sm:w-auto sm:flex-nowrap">
-            {/* Dot + status read as one unit so they take their own line on a
-                phone instead of squeezing the message to a 90px column. */}
-            <span className="flex w-full min-w-0 items-center gap-3 sm:w-auto">
+        <EditorFooter
+          status={(
+            <>
               <span
                 className={cn(
                   'size-1.5 flex-none rounded-full',
                   valid ? 'bg-[var(--accent)]' : 'bg-[var(--danger)]',
                 )}
               />
-              <span className="min-w-0 text-[11px] text-muted">
+              <span className="min-w-0">
                 {!valid
                   ? <span className="text-[var(--danger)]">this show needs a name and a persona</span>
                   : 'saves this show · schedule it on the grid, then Save schedule'}
               </span>
-            </span>
-            <Btn lg onClick={onClose}>Close</Btn>
-            <Btn lg tone="accent" onClick={onSave} disabled={busy || !valid}>
-              {busy ? 'Saving…' : 'Save show'}
-            </Btn>
-          </span>
-        </div>
+            </>
+          )}
+          actions={[
+            { id: 'remove', label: 'Remove', tone: 'danger', onClick: onRemove },
+          ]}
+          primary={[
+            { id: 'close', label: 'Close', onClick: onClose },
+            {
+              id: 'save',
+              label: busy ? 'Saving…' : 'Save show',
+              tone: 'accent',
+              onClick: onSave,
+              disabled: busy || !valid,
+            },
+          ]}
+        />
       }
     >
       <div ref={editorRef} className="grid">
