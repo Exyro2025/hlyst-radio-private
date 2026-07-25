@@ -104,6 +104,10 @@ interface Show {
    *  a planned feature segment mid-hour, a sign-off in the final minutes —
    *  all driven by the topic brief via a per-episode producer plan. */
   programme: boolean;
+  /** Pause-and-talk breaks: a spoken segment longer than the station threshold
+   *  pauses the music (song ends, DJ speaks in the clear, next track starts)
+   *  instead of ducking. Short segments stay ducked. Off by default. */
+  pauseTalk: boolean;
   /** Optional: pin the feature segment to one skill (e.g. news for a morning
    *  roundup). Empty = the producer picks per episode. Only used with
    *  programme on. */
@@ -278,6 +282,7 @@ function hydrateShow(s: Partial<Show>): Show {
     playlistStrict: s.playlistStrict ?? false,
     excludedPlaylistIds: Array.isArray(s.excludedPlaylistIds) ? s.excludedPlaylistIds : [],
     programme: s.programme ?? false,
+    pauseTalk: s.pauseTalk ?? false,
     segmentSkill: s.segmentSkill ?? '',
   };
 }
@@ -333,6 +338,7 @@ function showPayload(s: Show) {
     playlistStrict: (s.playlistIds?.length ?? 0) > 0 && s.playlistStrict,
     excludedPlaylistIds: s.excludedPlaylistIds || [],
     programme: s.programme ?? false,
+    pauseTalk: s.pauseTalk ?? false,
     // A skill pin only means something in programme mode.
     segmentSkill: s.programme ? (s.segmentSkill || '') : '',
   };
@@ -527,7 +533,7 @@ export default function ShowsPanel() {
           themeId: '', genres: [], eras: [], energies: [],
           filtersStrict: false, maxTrackSeconds: null,
           playlistIds: [], playlistStrict: false, excludedPlaylistIds: [],
-          programme: false, segmentSkill: '',
+          programme: false, pauseTalk: false, segmentSkill: '',
         }],
       };
     });
@@ -1113,6 +1119,27 @@ function ShowEditor({
                 </span>
               </div>
             )}
+          </Field>
+
+          <Field>
+            <div className="flex items-start gap-3">
+              <div className="pt-0.5">
+                <Toggle
+                  ariaLabel="Pause-and-talk breaks"
+                  on={show.pauseTalk}
+                  onClick={() => update({ pauseTalk: !show.pauseTalk })}
+                />
+              </div>
+              <div className="grid gap-0.5">
+                <Label>Pause-and-talk breaks</Label>
+                <span className="field-hint">
+                  Longer spoken segments pause the music: the song ends, the DJ
+                  says their piece in the clear, then the next track starts.
+                  Short segments stay ducked over the music. The length cut-off
+                  is set in Settings → DJ. Cloud TTS voices always duck.
+                </span>
+              </div>
+            </div>
           </Field>
 
           <Field>

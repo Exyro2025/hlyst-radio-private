@@ -208,6 +208,7 @@ export interface PrivacyForm {
 export interface FormState {
   crossfadeDuration: string;
   maxTrackSeconds: string;
+  pauseTalkMinSeconds: string;
   transitions: TransitionsForm;
   archive: ArchiveForm;
   stream: StreamForm;
@@ -242,6 +243,7 @@ export interface SettingsData {
     crossfadeDuration?: number;
     maxTrackSeconds?: number;
     minTrackSeconds?: number;
+    pauseTalkMinSeconds?: number;
     archive?: { enabled?: boolean; bitrate?: number; retentionDays?: number };
     transitions?: { pairDrain?: boolean; stemBlends?: boolean };
     audio?: { embeddings?: boolean; vocalActivity?: boolean; stemCache?: boolean; stemCacheGb?: number };
