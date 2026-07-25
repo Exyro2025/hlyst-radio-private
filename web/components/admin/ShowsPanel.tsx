@@ -233,7 +233,9 @@ function ChipRow({ options, selected, onToggle, cap = FILTER_VALUES_MAX }: {
             disabled={atCap}
             onClick={() => onToggle(o.key)}
             className={cn(
-              'border border-ink px-2 py-0.5 text-[12px]',
+              // Comfortable to tap on a phone; the desktop chip keeps its
+              // original padding-driven height.
+              'min-h-9 border border-ink px-2 py-0.5 text-[12px] sm:min-h-0',
               on ? 'bg-ink text-bg' : 'text-ink hover:bg-[var(--ink-soft)]',
               atCap && 'cursor-not-allowed opacity-40',
             )}
@@ -665,12 +667,12 @@ export default function ShowsPanel() {
               listing, and takeovers, hour by hour.
             </div>
           </div>
-          <div className="flex flex-none flex-col items-end gap-2.5">
+          <div className="flex flex-none flex-col items-start gap-2.5 sm:items-end">
             <div className="flex gap-4">
               <Metric n={String(scheduledHours)} l="hours scheduled" />
               <Metric n={String(168 - scheduledHours)} l="silent" accent={scheduledHours < 168} />
             </div>
-            <Button asChild variant="accent" size="sm">
+            <Button asChild variant="accent" size="sm" className="min-h-9 sm:min-h-0">
               <Link href="/admin/shows/schedule">Open the schedule →</Link>
             </Button>
           </div>
@@ -688,9 +690,15 @@ export default function ShowsPanel() {
       {/* ── SHOW DEFINITIONS ─────────────────────────────────────────────── */}
       <div className="mt-1 flex flex-wrap items-center justify-between gap-3">
         <span className="caption">show definitions · {form.shows.length}/{SHOWS_MAX} shows</span>
-        <div className="flex items-center gap-2">
-          <RosterViewToggle view={view} onChange={setView} />
+        {/* Own line on a phone: on one row with the caption the cluster runs
+            out of width and the Cards/List toggle folds into two stacked
+            icons. */}
+        <div className="flex w-full flex-wrap items-center gap-2 sm:w-auto sm:flex-nowrap">
+          <span className="flex-none">
+            <RosterViewToggle view={view} onChange={setView} />
+          </span>
           <Btn
+            className="min-h-9 sm:min-h-0"
             onClick={() => setCommunityOpen(true)}
             disabled={!community}
             title="Browse and install shows shared by other stations"
@@ -702,6 +710,7 @@ export default function ShowsPanel() {
           </Btn>
           <Btn
             tone="accent"
+            className="min-h-9 sm:min-h-0"
             onClick={addShow}
             disabled={form.shows.length >= SHOWS_MAX || personas.length === 0}
           >
@@ -800,12 +809,13 @@ export default function ShowsPanel() {
         sub="shows shared by other stations"
         width={640}
         footer={
-          <div className="flex w-full items-center justify-between gap-3">
-            <span className="text-[11px] leading-[1.5] text-muted">
+          <div className="flex w-full flex-wrap items-center justify-between gap-3">
+            <span className="w-full text-[11px] leading-[1.5] text-muted sm:w-auto sm:flex-1">
               Made a show worth sharing? Submit it to the community catalog — a
               maintainer reviews it, then it ships to every station.
             </span>
             <Btn
+              className="min-h-9 flex-none sm:min-h-0"
               onClick={() => window.open(showSubmitUrl(), '_blank', 'noopener,noreferrer')}
               title="Open a prefilled community submission on GitHub"
             >
@@ -831,7 +841,10 @@ export default function ShowsPanel() {
               );
               const tags = [...c.moods, ...c.genres, ...c.energies].slice(0, 6);
               return (
-                <div key={c.slug} className="grid grid-cols-[1fr_auto] items-center gap-4 border border-ink p-3">
+                <div
+                  key={c.slug}
+                  className="grid grid-cols-1 gap-3 border border-ink p-3 sm:grid-cols-[1fr_auto] sm:items-center sm:gap-4"
+                >
                   <div className="min-w-0">
                     <div className="flex flex-wrap items-center gap-2">
                       <span className="text-[13px] font-extrabold">{c.name}</span>
@@ -872,12 +885,13 @@ export default function ShowsPanel() {
                       </div>
                     )}
                   </div>
-                  <div className="flex flex-col items-end gap-2">
+                  <div className="flex flex-col items-start gap-2 sm:items-end">
                     {inShows ? (
                       <Pill tone="accent" dot>in your shows</Pill>
                     ) : (
                       <Btn
                         tone="accent"
+                        className="min-h-9 sm:min-h-0"
                         onClick={() => install(c.slug)}
                         disabled={installing === c.slug || form.shows.length >= SHOWS_MAX}
                         title={form.shows.length >= SHOWS_MAX ? 'The show list is full' : undefined}
@@ -967,17 +981,21 @@ function ShowEditor({
           {/* left — destructive action */}
           <Btn lg tone="danger" onClick={onRemove}>Remove</Btn>
           {/* right — status + close/save */}
-          <span className="ml-auto flex items-center gap-3">
-            <span
-              className={cn(
-                'size-1.5 flex-none rounded-full',
-                valid ? 'bg-[var(--accent)]' : 'bg-[var(--danger)]',
-              )}
-            />
-            <span className="text-[11px] text-muted">
-              {!valid
-                ? <span className="text-[var(--danger)]">this show needs a name and a persona</span>
-                : 'saves this show · schedule it on the grid, then Save schedule'}
+          <span className="ml-auto flex w-full flex-wrap items-center gap-3 sm:w-auto sm:flex-nowrap">
+            {/* Dot + status read as one unit so they take their own line on a
+                phone instead of squeezing the message to a 90px column. */}
+            <span className="flex w-full min-w-0 items-center gap-3 sm:w-auto">
+              <span
+                className={cn(
+                  'size-1.5 flex-none rounded-full',
+                  valid ? 'bg-[var(--accent)]' : 'bg-[var(--danger)]',
+                )}
+              />
+              <span className="min-w-0 text-[11px] text-muted">
+                {!valid
+                  ? <span className="text-[var(--danger)]">this show needs a name and a persona</span>
+                  : 'saves this show · schedule it on the grid, then Save schedule'}
+              </span>
             </span>
             <Btn lg onClick={onClose}>Close</Btn>
             <Btn lg tone="accent" onClick={onSave} disabled={busy || !valid}>
@@ -1173,7 +1191,7 @@ function ShowEditor({
                     key={`${e.fromYear ?? ''}-${e.toYear ?? ''}-${i}`}
                     type="button"
                     onClick={() => update({ eras: show.eras.filter(x => x !== e) })}
-                    className="border border-ink bg-ink px-2 py-0.5 text-[12px] text-bg"
+                    className="min-h-9 border border-ink bg-ink px-2 py-0.5 text-[12px] text-bg sm:min-h-0"
                     title="Remove this custom era window"
                   >
                     {eraLabelOf(e)} ×
@@ -1210,7 +1228,7 @@ function ShowEditor({
                     key={g}
                     type="button"
                     onClick={() => update({ genres: show.genres.filter(x => x !== g) })}
-                    className="border border-ink bg-ink px-2 py-0.5 text-[12px] text-bg"
+                    className="min-h-9 border border-ink bg-ink px-2 py-0.5 text-[12px] text-bg sm:min-h-0"
                     title="Remove this genre"
                   >
                     {g} ×
@@ -1218,7 +1236,7 @@ function ShowEditor({
                 ))}
               </div>
             )}
-            <div className="flex gap-2">
+            <div className="flex min-w-0 gap-2">
               <Input
                 id="show-genre"
                 type="text" value={genreDraft} maxLength={64}
@@ -1229,6 +1247,7 @@ function ShowEditor({
                 disabled={show.genres.length >= FILTER_VALUES_MAX}
               />
               <Btn
+                className="min-h-9 flex-none sm:min-h-0"
                 onClick={() => addGenre(genreDraft)}
                 disabled={!genreDraft.trim() || show.genres.length >= FILTER_VALUES_MAX}
               >

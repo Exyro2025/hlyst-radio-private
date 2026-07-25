@@ -51,7 +51,7 @@ export default function Board({
 }: BoardProps) {
   return (
     <section>
-      <div className="mb-3 flex flex-wrap items-center gap-3.5 px-[30px]">
+      <div className="mb-3 flex flex-wrap items-center gap-3.5 px-5 sm:px-[30px]">
         <Mu className="tracking-[0.08em]">
           Click a silent hour (or drag a show onto it) to book a show — click a card to edit its order, its × to take it off the air
         </Mu>
@@ -59,7 +59,7 @@ export default function Board({
 
       {/* The shelf — one draggable chip per show, a single scrolling tray so
           any number of shows stays one line tall */}
-      <div className="mx-[30px] mb-3.5 border border-ink bg-[var(--page-bg)]">
+      <div className="mx-5 mb-3.5 border border-ink bg-[var(--page-bg)] sm:mx-[30px]">
         <ScrollArea>
           <div className="flex w-max min-w-full items-center gap-2 px-3 py-2.5">
             <span className="eyebrow mr-1 flex-none text-ink">The shelf</span>
@@ -84,7 +84,7 @@ export default function Board({
             }}
             onClick={() => onArmShow(s.id)}
             title={`Drag onto the board, or click to write an order for “${s.name}”`}
-            className="flex flex-none cursor-grab items-center gap-1.5 border border-separator-strong bg-[var(--card-bg)] px-2.5 py-1.5 hover:border-ink active:cursor-grabbing"
+            className="flex min-h-9 flex-none cursor-grab items-center gap-1.5 border border-separator-strong bg-[var(--card-bg)] px-2.5 py-1.5 hover:border-ink active:cursor-grabbing sm:min-h-0"
           >
             <ColorChip color={colorOf(s.id)} />
             <span className="text-[11.5px] font-semibold whitespace-nowrap text-ink">{s.name}</span>
@@ -96,10 +96,21 @@ export default function Board({
         </ScrollArea>
       </div>
 
+      {/* On a phone the week is a horizontal strip and Radix only reveals its
+          scrollbar on hover, so name the gesture — and the span — outright. */}
+      <Mu className="mb-1.5 flex items-center gap-1.5 px-5 tracking-[0.08em] sm:hidden">
+        <span aria-hidden="true">◂</span>
+        Swipe the board — Mon through Sun
+        <span aria-hidden="true">▸</span>
+      </Mu>
+
       <ScrollArea>
         <div className="flex w-max min-w-full items-start gap-2.5 pb-1.5">
-          {/* Hour gutter — pt clears the 38px column headers (+border+padding) */}
-          <div className="w-[42px] flex-none pt-[43px]">
+          {/* Hour gutter — pt clears the 38px column headers (+border+padding).
+              Pinned while the strip scrolls sideways on a phone, so the hour a
+              card sits on stays readable on any day; static from sm up, where
+              the board usually fits without scrolling. */}
+          <div className="sticky left-0 z-10 w-[42px] flex-none bg-[var(--card-bg)] pt-[43px] sm:static sm:bg-transparent">
             {HOURS.map(h => (
               <div
                 key={h}
@@ -138,7 +149,7 @@ export default function Board({
         </div>
         <ScrollBar orientation="horizontal" />
       </ScrollArea>
-      <Mu className="mt-1 block px-[30px] tracking-[0.08em]">
+      <Mu className="mt-1 block px-5 tracking-[0.08em] sm:px-[30px]">
         Hatched hours are silent — click one to book a show, or leave the station to run itself
       </Mu>
     </section>
@@ -163,7 +174,9 @@ function DayColumn({
   const showById = (id: string | null) => shows.find(s => s.id === id) ?? null;
   const booked = blocks.reduce((a, b) => a + (b.showId ? b.span : 0), 0);
   return (
-    <div className="flex min-w-[188px] flex-1 flex-col border border-ink bg-[var(--page-bg)]">
+    // Narrower on a phone so the next day peeks past the right edge — the
+    // strip reads as scrollable without a permanently-drawn scrollbar.
+    <div className="flex min-w-[164px] flex-1 flex-col border border-ink bg-[var(--page-bg)] sm:min-w-[188px]">
       <button
         type="button"
         onClick={onToggleFold}

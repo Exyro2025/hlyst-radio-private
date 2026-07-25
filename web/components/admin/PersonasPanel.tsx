@@ -536,9 +536,9 @@ export default function PersonasPanel() {
                 p => p.name.trim().toLowerCase() === c.displayName.trim().toLowerCase(),
               );
               return (
-                <div key={c.slug} className="grid grid-cols-[1fr_auto] items-center gap-4 border border-ink p-3">
+                <div key={c.slug} className="grid grid-cols-1 gap-3 border border-ink p-3 sm:grid-cols-[1fr_auto] sm:items-center sm:gap-4">
                   <div>
-                    <div className="flex items-center gap-2">
+                    <div className="flex flex-wrap items-center gap-2">
                       <span className="text-[13px] font-extrabold">{c.displayName}</span>
                       <Pill className="text-[8px]">{c.frequency}</Pill>
                       {c.scriptLength !== 'concise' && <Pill className="text-[8px]">{c.scriptLength}</Pill>}
@@ -577,6 +577,7 @@ export default function PersonasPanel() {
                       <Pill tone="accent" dot>in roster</Pill>
                     ) : (
                       <Btn
+                        className="min-h-9 sm:min-h-0"
                         tone="accent"
                         onClick={() => installCommunity(c.slug)}
                         disabled={installing === c.slug || form.personas.length >= PERSONA_MAX}

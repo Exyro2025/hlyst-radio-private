@@ -776,7 +776,9 @@ function TopBar({ pathname }: { pathname: string | null }) {
 
   return (
     <header className="sticky top-0 z-20 flex flex-wrap items-center gap-x-3 gap-y-2 border-b border-ink bg-[var(--card-bg)] px-4 py-2.5 sm:px-6">
-      <SidebarTrigger className="-ml-1 shrink-0" />
+      {/* Roomier hit box on a phone, where this is the only way back to the
+          nav; the dense desktop button returns at sm. */}
+      <SidebarTrigger className="-ml-1 size-9 shrink-0 sm:size-7" />
       <Separator orientation="vertical" className="hidden h-5 sm:block" />
       {/* Breadcrumb text is hidden on mobile — space is tight next to the
           hamburger, and the current page is already obvious from the drawer. */}
@@ -821,7 +823,7 @@ function TopBar({ pathname }: { pathname: string | null }) {
         <span className="h-4 w-px bg-separator-strong" />
         <Link
           href="/admin/doctor"
-          className="inline-flex items-center gap-1.5 text-[var(--accent)] no-underline"
+          className="inline-flex min-h-9 items-center gap-1.5 text-[var(--accent)] no-underline sm:min-h-0"
           title="DJ Doc — run a station health check and get the producer's review"
         >
           <BoothBuddy mood="onair" size={16} />
@@ -833,7 +835,7 @@ function TopBar({ pathname }: { pathname: string | null }) {
             body scroll lock, so no scrollbar-compensation margin shift. */}
         <DropdownMenu modal={false}>
           <DropdownMenuTrigger
-            className="caption inline-flex cursor-pointer items-center gap-1 text-muted focus:outline-none"
+            className="caption inline-flex min-h-9 cursor-pointer items-center gap-1 text-muted focus:outline-none sm:min-h-0"
             aria-label="Listen and get the app"
             title="Listen"
           >

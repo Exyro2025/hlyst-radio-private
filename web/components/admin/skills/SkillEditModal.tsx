@@ -506,7 +506,9 @@ export default function SkillEditModal({ mode, skill, personas, tagSuggestions, 
   // Close / Save on the right. Border + padding supplied by EditorDialog's footer.
   const footer = (
     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 16, flexWrap: 'wrap' }}>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+      {/* Both clusters wrap: on a 390px phone the left one alone (toggle, RUN
+          NOW, EXPORT, DELETE, SHARE TO COMMUNITY) is ~600px of transport. */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
         {airToggle}
         {isEdit && (
           <button type="button" onClick={run} disabled={acting} style={{ padding: '13px 26px', fontSize: 11, fontWeight: 700, letterSpacing: '0.2em', textTransform: 'uppercase', transition: 'transform .1s', border: '1px solid var(--accent)', background: 'var(--accent)', color: '#fff', cursor: acting ? 'wait' : 'pointer', opacity: acting ? 0.7 : 1 }}>
@@ -529,7 +531,7 @@ export default function SkillEditModal({ mode, skill, personas, tagSuggestions, 
           </button>
         )}
       </div>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 16, flexWrap: 'wrap', justifyContent: 'flex-end' }}>
         {dirty && (
           <span style={{ display: 'inline-flex', alignItems: 'center', gap: 7, fontSize: 10, letterSpacing: '0.18em', textTransform: 'uppercase', color: 'var(--accent)', fontWeight: 700 }}>
             <span style={{ width: 7, height: 7, borderRadius: '50%', background: 'var(--accent)' }} />UNSAVED EDITS
@@ -573,13 +575,13 @@ export default function SkillEditModal({ mode, skill, personas, tagSuggestions, 
                 style={{ ...inputBase, marginTop: 16, padding: '12px 16px', fontSize: 18, fontWeight: 800, letterSpacing: '-0.01em', width: '100%', boxSizing: 'border-box' }}
               />
               {mode === 'create' && (
-                <label style={{ display: 'inline-flex', alignItems: 'center', gap: 10, marginTop: 14 }}>
+                <label style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 10, marginTop: 14 }}>
                   <span style={{ fontSize: 10, letterSpacing: '0.18em', textTransform: 'uppercase', color: 'var(--muted)', fontWeight: 700 }}>SLUG</span>
                   <input
                     value={name}
                     onChange={e => setName(e.target.value.toLowerCase())}
                     placeholder="moon-phase"
-                    style={{ ...inputBase, padding: '8px 12px', fontSize: 13, fontWeight: 700, letterSpacing: '0.04em', width: 200, borderColor: name && !nameValid ? 'var(--accent)' : 'var(--ink)' }}
+                    style={{ ...inputBase, padding: '8px 12px', fontSize: 13, fontWeight: 700, letterSpacing: '0.04em', width: 200, maxWidth: '100%', borderColor: name && !nameValid ? 'var(--accent)' : 'var(--ink)' }}
                   />
                 </label>
               )}
@@ -589,7 +591,7 @@ export default function SkillEditModal({ mode, skill, personas, tagSuggestions, 
             <div className="sw-section">
               <div style={sectionLabel}>COOLDOWN · MINIMUM GAP BETWEEN AIRINGS</div>
               <div style={{ display: 'flex', alignItems: 'center', gap: 18, flexWrap: 'wrap', marginTop: 16 }}>
-                <div style={{ display: 'flex' }}>
+                <div style={{ display: 'flex', flexWrap: 'wrap' }}>
                   {COOLDOWN_PRESETS.map((v, i) => (
                     <button key={v} type="button" onClick={() => patch({ cooldown: v })} style={presetStyle(fields.cooldown === v, i)}>{v}</button>
                   ))}
@@ -599,7 +601,7 @@ export default function SkillEditModal({ mode, skill, personas, tagSuggestions, 
                   value={fields.cooldown}
                   onChange={e => patch({ cooldown: e.target.value })}
                   placeholder="45m"
-                  style={{ ...inputBase, width: 128, padding: '11px 15px', fontSize: 15, fontWeight: 700, letterSpacing: '0.04em', fontVariantNumeric: 'tabular-nums' }}
+                  style={{ ...inputBase, width: 128, maxWidth: '100%', padding: '11px 15px', fontSize: 15, fontWeight: 700, letterSpacing: '0.04em', fontVariantNumeric: 'tabular-nums' }}
                 />
               </div>
               <div style={{ fontSize: 12, color: 'var(--muted)', marginTop: 12, letterSpacing: '0.01em' }}>e.g. 45m, 6h, 2d, or a bare number (minutes).</div>
@@ -609,7 +611,7 @@ export default function SkillEditModal({ mode, skill, personas, tagSuggestions, 
             {custom && (
               <div className="sw-section">
                 <div style={sectionLabel}>WHEN IT CAN AIR</div>
-                <div style={{ display: 'flex', marginTop: 16 }}>
+                <div style={{ display: 'flex', flexWrap: 'wrap', marginTop: 16 }}>
                   {([['any', 'ANY TIME'], ['commute', 'COMMUTE ONLY']] as const).map(([w, lbl], i) => (
                     <button key={w} type="button" onClick={() => patch({ window: w })} style={presetStyle(fields.window === w, i)}>{lbl}</button>
                   ))}
@@ -745,7 +747,7 @@ export default function SkillEditModal({ mode, skill, personas, tagSuggestions, 
 
             {/* Brief */}
             <div className="sw-section">
-              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap' }}>
                 <div style={sectionLabel}>THE BRIEF · WHAT THE DJ SAYS, AND WHEN TO STAY SILENT</div>
                 {/* Built-ins revert to their shipped default — restores both the
                     brief (SKILL.md) and the data tool (tool.mjs) from the image. */}

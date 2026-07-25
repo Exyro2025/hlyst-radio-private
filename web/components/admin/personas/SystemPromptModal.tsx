@@ -89,7 +89,10 @@ export function SystemPromptModal({
     <div
       key={opts.key}
       className={cn(
-        'grid grid-cols-[auto_1fr_auto] items-center gap-3 border p-2.5',
+        // Phones drop the actions onto a second row — radio + name + two
+        // buttons can't share a ~320px line without clipping the name.
+        'grid grid-cols-[auto_1fr] items-center gap-x-3 gap-y-2.5 border p-2.5',
+        'sm:grid-cols-[auto_1fr_auto] sm:gap-3',
         opts.invalid ? 'border-[var(--danger)]' : opts.isActive ? 'border-ink' : 'border-ink/40',
       )}
     >
@@ -100,7 +103,10 @@ export function SystemPromptModal({
         onClick={opts.onUse}
         disabled={opts.isActive}
         className={cn(
-          'v3-focus grid size-4 flex-none place-items-center rounded-full border border-ink bg-transparent p-0',
+          'v3-focus relative grid size-4 flex-none place-items-center rounded-full border border-ink bg-transparent p-0',
+          // Invisible 36px hit box on phones only — the 16px dot is fine with a
+          // mouse but too small for a thumb.
+          "before:absolute before:-inset-2.5 before:content-[''] sm:before:content-none",
           opts.isActive ? 'cursor-default' : 'cursor-pointer hover:border-[var(--accent)]',
         )}
       >
@@ -114,44 +120,49 @@ export function SystemPromptModal({
         </div>
         <div className="caption mt-0.5">{opts.meta}</div>
       </div>
-      <div className="flex flex-none items-center gap-2">{opts.actions}</div>
+      <div className="col-span-2 flex flex-none flex-wrap items-center justify-end gap-2 sm:col-span-1 sm:justify-start">
+        {opts.actions}
+      </div>
     </div>
   );
 
   // ── footer per view ──────────────────────────────────────────────────────
+  // Both footers own a full-width wrapping row rather than sitting as bare
+  // children of the modal's non-wrapping footer flex — on a phone the status
+  // line plus two buttons has to break onto two lines.
   const libraryFooter = (
-    <>
+    <div className="flex w-full flex-wrap items-center justify-end gap-2">
       <span
         className={cn(
           'size-1.5 flex-none rounded-full',
           canSave ? 'bg-[var(--accent)]' : 'bg-[var(--danger)]',
         )}
       />
-      <span className="mr-auto text-[11px] text-muted">
+      <span className="mr-auto min-w-0 text-[11px] text-muted">
         {!canSave && !promptsOk
           ? <span className="text-[var(--danger)]">fix the incomplete prompt template</span>
           : !canSave && !allPersonasOk
             ? <span className="text-[var(--danger)]">a persona in the roster is incomplete — fix it before saving</span>
             : 'changes apply on the next spoken line · no mixer restart'}
       </span>
-      <Btn onClick={onDiscard} disabled={busy}>Discard</Btn>
-      <Btn tone="accent" onClick={onSave} disabled={busy || !canSave}>
+      <Btn className="min-h-9 sm:min-h-0" onClick={onDiscard} disabled={busy}>Discard</Btn>
+      <Btn className="min-h-9 sm:min-h-0" tone="accent" onClick={onSave} disabled={busy || !canSave}>
         {busy ? 'Saving…' : 'Save system prompt'}
       </Btn>
-    </>
+    </div>
   );
   const editorFooter = (
-    <>
+    <div className="flex w-full flex-wrap items-center justify-end gap-2">
       {editingPreset && (
-        <span className={cn('caption mr-auto', editingTextOk && editingNameOk ? 'text-muted' : 'text-[var(--danger)]')}>
+        <span className={cn('caption mr-auto min-w-0', editingTextOk && editingNameOk ? 'text-muted' : 'text-[var(--danger)]')}>
           {editingText.length}/{PROMPT_MAX} chars
           {!editingNameOk && ' · name required'}
           {!editingText.includes('{name}') && ' · missing {name}'}
           {editingText.length > 0 && editingText.length < PROMPT_MIN && ` · min ${PROMPT_MIN}`}
         </span>
       )}
-      <Btn onClick={() => setEditing(null)}>Back to library</Btn>
-    </>
+      <Btn className="min-h-9 sm:min-h-0" onClick={() => setEditing(null)}>Back to library</Btn>
+    </div>
   );
 
   return (
@@ -191,7 +202,7 @@ export function SystemPromptModal({
                 meta: 'ships with SUB/WAVE · read-only',
                 isActive: activeId === '',
                 onUse: () => onSetActive(''),
-                actions: <Btn sm onClick={() => setEditing('default')}>View</Btn>,
+                actions: <Btn sm className="min-h-9 sm:min-h-0" onClick={() => setEditing('default')}>View</Btn>,
               })}
               {presets.map(p =>
                 row({
@@ -203,8 +214,8 @@ export function SystemPromptModal({
                   onUse: () => onSetActive(p.id),
                   actions: (
                     <>
-                      <Btn sm onClick={() => setEditing(p.id)}>Edit</Btn>
-                      <Btn sm onClick={() => setConfirmDeleteId(p.id)} disabled={busy}>Delete</Btn>
+                      <Btn sm className="min-h-9 sm:min-h-0" onClick={() => setEditing(p.id)}>Edit</Btn>
+                      <Btn sm className="min-h-9 sm:min-h-0" onClick={() => setConfirmDeleteId(p.id)} disabled={busy}>Delete</Btn>
                     </>
                   ),
                 }),
@@ -212,6 +223,7 @@ export function SystemPromptModal({
             </div>
             <div className="mt-3">
               <Btn
+                className="min-h-9 sm:min-h-0"
                 onClick={addPreset}
                 disabled={busy || presets.length >= PROMPT_PRESET_MAX}
                 title={presets.length >= PROMPT_PRESET_MAX ? `The library is full (${PROMPT_PRESET_MAX} templates)` : undefined}

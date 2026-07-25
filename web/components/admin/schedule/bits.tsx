@@ -113,7 +113,8 @@ export function SegBtn({
       title={title}
       aria-pressed={on}
       className={cn(
-        'cursor-pointer border px-2.5 py-[5px] font-mono text-[10px] font-bold tracking-[0.2em] uppercase',
+        // min-h on the phone only — the desktop metric is the padding.
+        'min-h-9 cursor-pointer border px-2.5 py-[5px] font-mono text-[10px] font-bold tracking-[0.2em] uppercase sm:min-h-0',
         on
           ? 'border-ink bg-ink text-bg'
           : 'border-separator-strong bg-transparent text-muted hover:border-ink hover:text-ink',
@@ -145,7 +146,9 @@ export function DayPills({
             title={d.name}
             onClick={() => onToggle(d.key)}
             className={cn(
-              'flex size-[17px] cursor-pointer items-center justify-center border font-mono text-[8px] font-bold',
+              // Comfortable squares on a phone (7 × 32px + gaps still fits a
+              // 390px screen); back to the dense 17px chip from sm up.
+              'flex size-8 cursor-pointer items-center justify-center border font-mono text-[10px] font-bold sm:size-[17px] sm:text-[8px]',
               on
                 ? 'border-ink bg-ink text-bg'
                 : 'border-separator-strong bg-transparent text-muted hover:border-ink hover:text-ink',

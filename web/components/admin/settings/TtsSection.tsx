@@ -677,7 +677,7 @@ export function TtsSection({ data, form, setForm, busy, saveSettings, adminFetch
                     setForm(f => ({ ...f, kokoroLang: val === '__auto__' ? '' : val }))
                   }
                 >
-                  <SelectTrigger className="w-[260px]" aria-label="Language override"><SelectValue /></SelectTrigger>
+                  <SelectTrigger className="w-[260px] max-w-full" aria-label="Language override"><SelectValue /></SelectTrigger>
                   <SelectContent>
                     <SelectGroup>
                       <SelectItem value="__auto__">Natural, voice default</SelectItem>
@@ -829,7 +829,7 @@ export function TtsSection({ data, form, setForm, busy, saveSettings, adminFetch
             <div className="mt-3.5 grid grid-cols-[repeat(auto-fit,minmax(200px,1fr))] gap-[18px]">
               <div className="field">
                 <Label>Model</Label>
-                <div className="flex items-stretch gap-2">
+                <div className="flex flex-wrap items-stretch gap-2 sm:flex-nowrap">
                   {ttsDiscovery.models.length > 0 ? (
                     <ModelCombobox
                       models={ttsDiscovery.models}
@@ -947,7 +947,7 @@ export function TtsSection({ data, form, setForm, busy, saveSettings, adminFetch
                 <>
                   <div className="field">
                     <Label>{form.tts.cloud.provider === 'elevenlabs' ? 'ElevenLabs' : 'OpenAI'} API key</Label>
-                    <div className="flex items-stretch gap-2">
+                    <div className="flex flex-wrap items-stretch gap-2 sm:flex-nowrap">
                       <Input
                         type="password"
                         autoComplete="off"

@@ -650,7 +650,9 @@ export default function SettingsPanel() {
               <Card title="Idle pause" sub="silence the programme when nobody is listening">
                 <div className="field">
                   <Label>Pause when the room is empty</Label>
-                  <div className="flex items-center gap-2">
+                  {/* Seg + "after" + minutes + "min" + Save is wider than a
+                      phone card, so the row wraps below 640px. */}
+                  <div className="flex flex-wrap items-center gap-2 sm:flex-nowrap">
                     <Seg
                       options={[
                         { id: 'on', label: 'On' },
@@ -841,7 +843,7 @@ export default function SettingsPanel() {
               <Card title="Max track length" sub="cut over-length tracks on air">
                 <div className="field">
                   <Label>Maximum track length</Label>
-                  <div className="flex items-center gap-2">
+                  <div className="flex flex-wrap items-center gap-2 sm:flex-nowrap">
                     <Input
                       className="mono-num w-28"
                       aria-label="Maximum track length (seconds)"
@@ -942,7 +944,7 @@ export default function SettingsPanel() {
                   </div>
                   <div className="field">
                     <Label>Max boost</Label>
-                    <div className="flex items-center gap-2">
+                    <div className="flex flex-wrap items-center gap-2 sm:flex-nowrap">
                       <Input
                         className="mono-num w-28"
                         aria-label="Max boost (dB)"
