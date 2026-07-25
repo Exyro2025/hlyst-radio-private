@@ -14,11 +14,11 @@
 // rule (#50) bans the inline `style` prop.
 
 import { useRef } from 'react';
-import { cn } from '../../lib/cn';
-import { useDynamicStyle } from '../../hooks/useDynamicStyle';
-import { SWATCH_KEYS } from '../../lib/theme-tokens.generated';
+import { cn } from '../../../lib/cn';
+import { useDynamicStyle } from '../../../hooks/useDynamicStyle';
+import { SWATCH_KEYS } from '../../../lib/theme-tokens.generated';
 
-export interface PersonaOpt {
+interface PersonaOpt {
   id: string;
   name?: string;
   tagline?: string;
@@ -26,7 +26,7 @@ export interface PersonaOpt {
   tts?: { engine?: string; voice?: string };
 }
 
-export interface ThemeOpt {
+interface ThemeOpt {
   id: string;
   name: string;
   mode?: string;

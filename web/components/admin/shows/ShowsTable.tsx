@@ -10,12 +10,12 @@
 // show's facets, airtime and validity are derived.
 
 import { useMemo } from 'react';
-import { Pill, MetaChip } from './ui';
-import { RosterTable } from './RosterTable';
-import type { RosterColumn } from './RosterTable';
-import { RosterAvatar } from './RosterAvatar';
+import { Pill, MetaChip } from '../ui';
+import { RosterTable } from '../RosterTable';
+import type { RosterColumn } from '../RosterTable';
+import { RosterAvatar } from '../RosterAvatar';
 
-export interface ShowFace {
+interface ShowFace {
   key: string;
   initials: string;
   src: string | null;
