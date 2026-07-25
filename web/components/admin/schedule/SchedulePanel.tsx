@@ -15,11 +15,13 @@
 import type { ChangeEvent } from 'react';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
+import { useRouter } from 'next/navigation';
 import { useAdminAuth } from '../../../lib/adminAuth';
 import { notify, errorMessage } from '../../../lib/notify';
 import { fmtClock, normalizeStationLocale, zonedDayHour } from '../../../lib/format';
 import type { StationLocale } from '../../../lib/types';
 import { useDynamicStyle } from '../../../hooks/useDynamicStyle';
+import { useUnsavedGuard } from '../../../hooks/useUnsavedGuard';
 import { cn } from '../../../lib/cn';
 import { Button } from '../../ui/button';
 import { Modal } from '../../ui/modal';
@@ -27,6 +29,7 @@ import { SkeletonRows } from '@/components/ui/skeleton';
 import { ErrorState } from '@/components/ui/error-state';
 import { Card } from '../ui';
 import Board from './Board';
+import SaveBar from './SaveBar';
 import EditorBand, { LineEditor } from './EditorBand';
 import type { EditorLine, Suggestion } from './EditorBand';
 import { ColorChip, Mu, SegBtn, SlotMenu } from './bits';
@@ -93,6 +96,7 @@ function hydrateShow(raw: Record<string, unknown>): ScheduleShow | null {
 
 export default function SchedulePanel() {
   const { adminFetch, needsAuth, hydrated } = useAdminAuth();
+  const router = useRouter();
   const [err, setErr] = useState<string | null>(null);
   const [shows, setShows] = useState<ScheduleShow[]>([]);
   const [personas, setPersonas] = useState<Persona[]>([]);
@@ -117,6 +121,9 @@ export default function SchedulePanel() {
 
   const [dismissed, setDismissed] = useState<string[]>([]);
   const [reviewOpen, setReviewOpen] = useState(false);
+  // The in-app destination an unsaved-edits click was held back from (see the
+  // leave guard below); null when nothing is pending.
+  const [pendingHref, setPendingHref] = useState<string | null>(null);
 
   // Takeover (#930).
   const [override, setOverride] = useState<ScheduleOverride | null>(null);
@@ -282,6 +289,40 @@ export default function SchedulePanel() {
       notify.err(errorMessage(e));
       return false;
     } finally { setBusy(false); }
+  };
+
+  /** Drop every local edit back to the week the controller is running. */
+  const discardEdits = () => {
+    if (serverSchedule) setSchedule(cloneWeek(serverSchedule));
+  };
+
+  // ⌘S / Ctrl+S saves, the way every desktop editor does. Held in a ref so the
+  // listener registers once yet always sees the current week; a modifier chord
+  // is safe to honour with a field focused (it never eats a bare keystroke).
+  const chordSaveRef = useRef<() => boolean>(() => false);
+  chordSaveRef.current = () => {
+    if (dirty === 0 || busy) return false;
+    void saveWeek();
+    return true;
+  };
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.repeat || !(e.metaKey || e.ctrlKey) || e.key.toLowerCase() !== 's') return;
+      // Swallow the browser's own Save-page chord only when a week actually
+      // went out with it.
+      if (chordSaveRef.current()) e.preventDefault();
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, []);
+
+  // Leaving with edits pending used to lose them silently — the whole reason
+  // the save is easy to miss. Hold the click, ask, then navigate.
+  useUnsavedGuard(dirty > 0, setPendingHref);
+
+  const leaveTo = (href: string) => {
+    setPendingHref(null);
+    router.push(href);
   };
 
   // ── takeover ─────────────────────────────────────────────────────────────
@@ -636,7 +677,7 @@ export default function SchedulePanel() {
           onArmShow={setLineShowId}
         />
       </div>
-      <div className="flex-1">
+      <div className="flex-1 pb-1">
         <EditorBand
           stats={{
             booked,
@@ -651,6 +692,15 @@ export default function SchedulePanel() {
         />
       </div>
 
+      {/* The save follows the operator down the page — see SaveBar. */}
+      <SaveBar
+        dirty={dirty}
+        busy={busy}
+        onReview={() => setReviewOpen(true)}
+        onDiscard={discardEdits}
+        onSave={saveWeek}
+      />
+
       {/* Review — the unsaved edits behind the header count */}
       <Modal
         open={reviewOpen}
@@ -664,7 +714,7 @@ export default function SchedulePanel() {
               variant="ghost"
               size="sm"
               onClick={() => {
-                if (serverSchedule) setSchedule(cloneWeek(serverSchedule));
+                discardEdits();
                 setReviewOpen(false);
               }}
             >
@@ -702,6 +752,57 @@ export default function SchedulePanel() {
               </span>
             </div>
           ))}
+        </div>
+      </Modal>
+
+      {/* Leave guard — a link was clicked with the week still unsaved. Three
+          ways out, and the default (accent) one keeps the work. */}
+      <Modal
+        open={pendingHref !== null}
+        onOpenChange={open => { if (!open) setPendingHref(null); }}
+        title="Leave without saving?"
+        sub={`${dirty} hour${dirty === 1 ? '' : 's'} changed`}
+        width={520}
+        footer={
+          <div className="flex w-full flex-wrap items-center gap-2">
+            <Button variant="ghost" size="sm" onClick={() => setPendingHref(null)}>
+              Stay here
+            </Button>
+            <span className="ml-auto flex flex-wrap gap-2">
+              <Button
+                variant="default"
+                size="sm"
+                disabled={busy}
+                onClick={() => { if (pendingHref) leaveTo(pendingHref); }}
+              >
+                Discard and leave
+              </Button>
+              <Button
+                variant="accent"
+                size="sm"
+                disabled={busy}
+                onClick={async () => {
+                  const href = pendingHref;
+                  // Only leave once the week is actually on the controller —
+                  // a failed save keeps the operator here with the edits.
+                  if (href && await saveWeek()) leaveTo(href);
+                }}
+              >
+                {busy ? 'Saving…' : 'Save and leave'}
+              </Button>
+            </span>
+          </div>
+        }
+      >
+        <div className="grid gap-2">
+          <span className="text-[13px] leading-[1.6] text-ink">
+            These edits only exist on this screen. Leave now and the station keeps
+            running the week it already has.
+          </span>
+          <Mu className="text-[9px]">
+            {editedRanges.slice(0, 4).map(r => `${dayName(r.day)} ${hhmm(r.start)}–${hhmm(r.end)}`).join(' · ')}
+            {editedRanges.length > 4 ? ` · +${editedRanges.length - 4} more` : ''}
+          </Mu>
         </div>
       </Modal>
     </div>
