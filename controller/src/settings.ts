@@ -30,6 +30,7 @@ import {
   AAC_BITRATES,
   CHATTERBOX_VOICE_RE,
   DEFAULT_DJ_PROMPT_TEMPLATE,
+  DJ_HOUSE_RULES_MAX,
   DJ_PROMPT_LIMIT,
   DJ_PROMPT_TEXT_MAX,
   DJ_PROMPT_TEXT_MIN,
@@ -428,6 +429,12 @@ export async function load() {
     djPrompt,
     djPrompts,
     activeDjPromptId,
+    // House rules — trimmed + capped on load so a hand-edited settings.json
+    // can't bloat every prompt. '' (or a pre-#1182 file with no key) = off.
+    djHouseRules:
+      typeof stored.djHouseRules === 'string'
+        ? stored.djHouseRules.trim().slice(0, DJ_HOUSE_RULES_MAX)
+        : '',
     station:
       typeof stored.station === 'string' && stored.station.trim()
         ? stored.station.trim().slice(0, 80)
@@ -1240,6 +1247,16 @@ export async function update(patch) {
     // djPrompt stays the resolved active text — the single field readers use.
     next.djPrompt =
       next.djPrompts.find((p: DjPromptEntry) => p.id === next.activeDjPromptId)?.text ?? '';
+  }
+  // Station house rules — appended to BOTH prompt paths (scripted talk AND the
+  // pick/request/segment agents), which the djPrompt template never reaches
+  // (issue #1182). Empty = off, so there's no minimum length.
+  if ('djHouseRules' in patch) {
+    const v = String(patch.djHouseRules ?? '').trim();
+    if (v.length > DJ_HOUSE_RULES_MAX) {
+      throw new Error(`djHouseRules must be at most ${DJ_HOUSE_RULES_MAX} chars`);
+    }
+    next.djHouseRules = v;
   }
   if ('personas' in patch) {
     next.personas = validatePersonasStrict(patch.personas);

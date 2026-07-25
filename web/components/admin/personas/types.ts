@@ -58,6 +58,9 @@ export interface FormState {
   // the built-in default template.
   djPrompts: DjPromptPreset[];
   activeDjPromptId: string;
+  // Station house rules — appended to EVERY spoken-output prompt, including
+  // the agent paths the template never reaches (issue #1182). '' = off.
+  djHouseRules: string;
 }
 
 export interface SkillCatalogEntry {
@@ -91,6 +94,7 @@ export interface SettingsResponse {
     djPrompt?: string;
     djPrompts?: Array<Partial<DjPromptPreset>>;
     activeDjPromptId?: string;
+    djHouseRules?: string;
     tts?: { defaultEngine?: string };
   };
   defaults?: { djPrompt?: string };

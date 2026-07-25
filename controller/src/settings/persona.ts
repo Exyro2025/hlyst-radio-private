@@ -276,11 +276,28 @@ export function renderDjPrompt(persona: unknown, ctx: unknown = {}) {
     .replaceAll('{station}', station)
     .replaceAll('{location}', location);
   const tone = personaToneDirectives(persona);
+  // Everything this prompt produces IS speech, so the rules apply wholesale.
+  const house = houseRulesBlock('follow these in everything you say on air');
   if (tpl.includes('{language}')) {
     const lang = String(p?.language || '').trim();
-    return rendered.replaceAll('{language}', lang || 'English') + tone;
+    return rendered.replaceAll('{language}', lang || 'English') + tone + house;
   }
-  return rendered + languageDirective(persona) + tone;
+  return rendered + languageDirective(persona) + tone + house;
+}
+
+// Station house rules — the operator's per-station rules that must reach EVERY
+// spoken line whichever prompt path writes it: TTS control tags, "spell out
+// numbers and dates", locale orthography (issue #1182). The djPrompt template
+// only renders on the scripted-talk path (renderDjPrompt → djSystem); the
+// tool-loop agents build their own prompts from agentPersonaPreamble — so
+// path-agnostic rules live in settings.djHouseRules and BOTH paths append this
+// block. `scope` frames who the rules bind (free text is all speech; agent
+// output has internal fields the rules must not leak into). Returns '' when
+// unset, keeping default installs byte-identical on both paths.
+function houseRulesBlock(scope: string): string {
+  const rules = String(peek()?.djHouseRules ?? '').trim();
+  if (!rules) return '';
+  return `\n\nStation house rules — ${scope}:\n${rules}`;
 }
 
 // Persona prelude shared by every tool-loop agent system prompt — the picker
@@ -291,19 +308,28 @@ export function renderDjPrompt(persona: unknown, ctx: unknown = {}) {
 // opener everywhere. Paste this at the top of any new agent system prompt;
 // never hand-roll the opener.
 //
-// Deliberately JUST the opener — no style-rule block. A DJ_HUMANNESS_RULES
-// word-blocklist used to be appendable here (and in renderDjPrompt); it was
-// lost in the a0d58b3 editor-mangle, and when a restore was attempted the
-// operator chose to keep it out: the station ran fine without it for weeks,
-// the ~600-char negative list competes with each persona's soul and flattens
-// voices toward one register, and it taxes every call. Voice steering lives
-// in the persona souls, tone dials, and the operator-editable djPrompt
-// template — add style rules there, not as a hard-coded appended constant.
+// Deliberately JUST the opener — no hard-coded style-rule block. A
+// DJ_HUMANNESS_RULES word-blocklist used to be appendable here (and in
+// renderDjPrompt); it was lost in the a0d58b3 editor-mangle, and when a
+// restore was attempted the operator chose to keep it out: the station ran
+// fine without it for weeks, the ~600-char negative list competes with each
+// persona's soul and flattens voices toward one register, and it taxes every
+// call. Voice steering lives in the persona souls, tone dials, and the
+// operator-editable djPrompt template — with one exception: the operator's
+// OWN djHouseRules block (issue #1182), which is appended here too because
+// the djPrompt template never reaches the agent prompts and rules like TTS
+// control tags or number spelling are correctness, not style. Empty by
+// default, so a station with no house rules is byte-identical to before.
 export function agentPersonaPreamble(persona) {
   const name = persona?.name || 'the DJ';
   const soul = persona?.soul || '';
   const station = peek()?.station || DEFAULTS.station;
-  return `You are ${name}, the on-air DJ for ${station}, a personal internet radio station. ${soul}${languageDirective(persona)}${onAirRosterClause(persona)}`;
+  // Agent output is structured (ids, reasons, kinds) — bind the rules to the
+  // spoken fields only, or "write out numbers" starts mangling track ids.
+  const house = houseRulesBlock(
+    'follow these in every spoken line you write (the text the listener hears on air); they do not apply to internal fields like ids, reasons or kinds',
+  );
+  return `You are ${name}, the on-air DJ for ${station}, a personal internet radio station. ${soul}${languageDirective(persona)}${onAirRosterClause(persona)}${house}`;
 }
 
 // When the active show has guest co-hosts, tell the speaking persona who else

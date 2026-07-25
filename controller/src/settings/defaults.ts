@@ -185,6 +185,12 @@ export const DEFAULTS = {
   // default). Switching templates just moves activeDjPromptId.
   djPrompts: [],
   activeDjPromptId: '',
+  // Station house rules — per-station rules (TTS control tags, "spell out
+  // numbers", locale orthography) appended to EVERY spoken-output prompt:
+  // both the scripted-talk path (renderDjPrompt) and the agent paths
+  // (agentPersonaPreamble), which the djPrompt template never reaches
+  // (issue #1182). '' = off; default installs stay byte-identical.
+  djHouseRules: '',
   // The persona roster. One persona is "active" at a time (activePersonaId);
   // a scheduled show can override which persona is on-air for its hour.
   personas: SEED_PERSONAS,

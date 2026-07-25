@@ -779,6 +779,12 @@ export const DJ_PROMPT_LIMIT = 20;
 export const DJ_PROMPT_NAME_MAX = 60;
 export const DJ_PROMPT_TEXT_MIN = 50;
 export const DJ_PROMPT_TEXT_MAX = 4000;
+// Station house rules (djHouseRules) — operator rules appended to BOTH prompt
+// paths (renderDjPrompt and agentPersonaPreamble), unlike the djPrompt
+// template which only the scripted-talk path renders (issue #1182). No
+// minimum: empty means off. Keep in lockstep with HOUSE_RULES_MAX in
+// web/components/admin/personas/constants.ts.
+export const DJ_HOUSE_RULES_MAX = 2000;
 
 // A show can anchor to one or more Navidrome playlists: the playlist union
 // becomes the show's candidate pool. Stored as Subsonic playlist ids; deduped,

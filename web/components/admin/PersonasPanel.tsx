@@ -19,7 +19,7 @@ import { ErrorState } from '@/components/ui/error-state';
 import { V3AlertDialog } from '../ui/alert-dialog';
 import { Modal } from '../ui/modal';
 import type { Persona, PersonaTts, DjPromptPreset, FormState, SettingsResponse, CommunityPersona } from './personas/types';
-import { DIAL_NEUTRAL, PERSONA_MAX } from './personas/constants';
+import { DIAL_NEUTRAL, HOUSE_RULES_MAX, PERSONA_MAX } from './personas/constants';
 import {
   clientMintId, fetchDicebearAvatar, fileToAvatarDataUrl, personaValid, promptPresetValid,
   voiceForSave, cloudIssue, formFromSettings, personaFromSettings, personasEqual,
@@ -286,9 +286,12 @@ export default function PersonasPanel() {
       : f);
 
   // ── validation ───────────────────────────────────────────────────────────
+  // House rules share the prompt modal + save gate. The textarea's maxLength
+  // already enforces the cap; this guards a pasted-over-limit edge.
   const promptsOk = form
     ? form.djPrompts.every(promptPresetValid)
       && (form.activeDjPromptId === '' || form.djPrompts.some(p => p.id === form.activeDjPromptId))
+      && form.djHouseRules.trim().length <= HOUSE_RULES_MAX
     : false;
   const allPersonasOk = form ? form.personas.every(p => personaValid(p)) : false;
   const canSave = !!form && allPersonasOk && promptsOk
@@ -333,6 +336,7 @@ export default function PersonasPanel() {
           activePersonaId: form.activePersonaId,
           djPrompts: form.djPrompts.map(p => ({ id: p.id, name: p.name.trim(), text: p.text.trim() })),
           activeDjPromptId: form.activeDjPromptId,
+          djHouseRules: form.djHouseRules.trim(),
         }),
       });
       const j = (await r.json().catch(() => ({}))) as { error?: string };
@@ -416,8 +420,8 @@ export default function PersonasPanel() {
         notify.err('could not reach the controller — your changes were kept');
         return;
       }
-      const { djPrompts, activeDjPromptId } = promptLibraryFromSettings(j);
-      setForm(f => f ? { ...f, djPrompts, activeDjPromptId } : f);
+      const { djPrompts, activeDjPromptId, djHouseRules } = promptLibraryFromSettings(j);
+      setForm(f => f ? { ...f, djPrompts, activeDjPromptId, djHouseRules } : f);
       notify.ok('changes discarded');
     } finally { setBusy(false); }
   };
@@ -489,6 +493,8 @@ export default function PersonasPanel() {
         onOpenChange={setShowPrompt}
         presets={form.djPrompts}
         activeId={form.activeDjPromptId}
+        houseRules={form.djHouseRules}
+        onHouseRulesChange={(v) => setForm(f => f ? { ...f, djHouseRules: v } : f)}
         defaultPrompt={data?.defaults?.djPrompt || ''}
         busy={busy}
         canSave={canSave}

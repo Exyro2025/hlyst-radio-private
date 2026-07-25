@@ -15,13 +15,17 @@ import { V3AlertDialog } from '../../ui/alert-dialog';
 import { cn } from '../../../lib/cn';
 import type { DjPromptPreset } from './types';
 import { promptPresetValid, clientMintId } from './helpers';
-import { PROMPT_MIN, PROMPT_MAX, PROMPT_NAME_MAX, PROMPT_PRESET_MAX } from './constants';
+import { HOUSE_RULES_MAX, PROMPT_MIN, PROMPT_MAX, PROMPT_NAME_MAX, PROMPT_PRESET_MAX } from './constants';
 
 interface SystemPromptModalProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   presets: DjPromptPreset[];
   activeId: string;        // '' = built-in default
+  // Station house rules — the one block appended to EVERY spoken-output
+  // prompt, including the agent paths the template never reaches (#1182).
+  houseRules: string;
+  onHouseRulesChange: (v: string) => void;
   defaultPrompt: string;   // the built-in template text
   busy: boolean;
   // Save is shared with the persona editor — both POST the whole form (personas
@@ -41,7 +45,8 @@ interface SystemPromptModalProps {
 
 export function SystemPromptModal({
   open, onOpenChange,
-  presets, activeId, defaultPrompt, busy, canSave, allPersonasOk, promptsOk,
+  presets, activeId, houseRules, onHouseRulesChange, defaultPrompt,
+  busy, canSave, allPersonasOk, promptsOk,
   onSetActive, onAddPreset, onPatchPreset, onRemovePreset, onSave, onDiscard,
 }: SystemPromptModalProps) {
   // Which view the modal shows: null = the library list, 'default' = the
@@ -189,7 +194,8 @@ export function SystemPromptModal({
               One template wraps the DJ&rsquo;s scripted talk (intros, links, idents, time
               checks, programme beats), shared by all personas. The tool-using agents (track
               picker, requests, skill segments) use each persona&rsquo;s name and soul directly
-              instead. Keep several saved and switch between them. Placeholders:{' '}
+              instead — only the house rules below reach those too. Keep several saved and
+              switch between them. Placeholders:{' '}
               <code>{'{name}'}</code> · <code>{'{soul}'}</code> · <code>{'{station}'}</code> ·{' '}
               <code>{'{location}'}</code> · <code>{'{language}'}</code>. <code>{'{location}'}</code> is the
               station&rsquo;s on-air location, not the weather coordinates; drop it if you never
@@ -230,6 +236,32 @@ export function SystemPromptModal({
               >
                 New prompt
               </Btn>
+            </div>
+
+            {/* ── station house rules ─────────────────────────────────────
+                The one operator block that reaches EVERY spoken line — the
+                scripted talk the template wraps AND the tool-using agents
+                (track picker, requests, skill segments) it never touches
+                (issue #1182). */}
+            <div className="mt-5 border-t border-ink/40 pt-4">
+              <div className="caption mb-1.5">station house rules</div>
+              <p className="mb-2 max-w-[70ch] text-[12px] leading-[1.6] text-muted">
+                Appended to <b>everything</b> the DJ speaks — scripted talk and the
+                tool-using agents alike, whichever template is active. Use it for rules
+                that must never be skipped: TTS control tags, &ldquo;spell out numbers and
+                dates in words&rdquo;, language-specific spelling. Leave empty for none.
+              </p>
+              <Textarea
+                rows={5}
+                value={houseRules}
+                maxLength={HOUSE_RULES_MAX}
+                placeholder="e.g. Spell out numbers, dates and units in words — never digits."
+                onChange={(e: ChangeEvent<HTMLTextAreaElement>) => onHouseRulesChange(e.target.value)}
+                className="font-mono text-[12px]"
+              />
+              <div className="caption mt-1 text-muted">
+                {houseRules.trim().length}/{HOUSE_RULES_MAX} chars
+              </div>
             </div>
           </>
         ) : editing === 'default' ? (
