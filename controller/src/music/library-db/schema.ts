@@ -423,7 +423,7 @@ export function runDdl(d: Database.Database, sql: string): void {
 // The embedding width baked into the track_vectors vec0 schema — the authority
 // for what inserts accept (embedding_meta is written separately and can lag).
 // Parsed from the stored CREATE statement; null when the table doesn't exist.
-export function vecTableDim(d: Database.Database): number | null {
+function vecTableDim(d: Database.Database): number | null {
   const row = d
     .prepare(`SELECT sql FROM sqlite_master WHERE type='table' AND name='track_vectors'`)
     .get() as { sql: string | null } | undefined;
@@ -435,7 +435,7 @@ export function vecTableDim(d: Database.Database): number | null {
 // Row count of the text-vector index. Used to decide whether a dim mismatch can
 // self-heal (empty table → free to recreate) or must gate behind --reseed
 // (populated index → the operator's vectors are at stake).
-export function vecCount(d: Database.Database): number {
+function vecCount(d: Database.Database): number {
   return (d.prepare('SELECT COUNT(*) AS n FROM track_vectors').get() as { n: number }).n;
 }
 

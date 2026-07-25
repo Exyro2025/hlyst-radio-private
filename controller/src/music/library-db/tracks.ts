@@ -213,7 +213,7 @@ export function clearTrackTags(id: string): void {
     .run(id);
 }
 
-export interface TrackAnalysisWrite {
+interface TrackAnalysisWrite {
   bpm?: number | null;
   musicalKey?: string | null;
   introMs?: number | null;

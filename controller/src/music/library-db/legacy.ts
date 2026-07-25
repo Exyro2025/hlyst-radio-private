@@ -13,7 +13,7 @@ import { normaliseYear } from './rows.js';
 // A single track entry as the legacy state/moods.json carried it. Every field
 // is optional and loosely typed — it's a hand-migrated file — and only the ones
 // the insert below reads are declared.
-export interface LegacyMoodsTrack {
+interface LegacyMoodsTrack {
   title?: string;
   artist?: string;
   album?: string;
@@ -80,7 +80,7 @@ export async function maybeMigrateFromMoodsJson(): Promise<void> {
   await archiveMoodsJson();
 }
 
-export async function archiveMoodsJson(): Promise<void> {
+async function archiveMoodsJson(): Promise<void> {
   const ts = new Date().toISOString().replace(/[:.]/g, '-');
   const archived = `${LEGACY_MOODS_JSON}.archived.${ts}`;
   try {

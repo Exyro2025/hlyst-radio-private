@@ -60,7 +60,7 @@ import { coerceMaxTrackSeconds, rawMaxTrackSec } from './defaults.js';
 export const SKILL_RENAMES: Record<string, string> = {
   'random-facts': 'curiosity',
 };
-export function normalizeSkills(raw: unknown) {
+function normalizeSkills(raw: unknown) {
   if (!Array.isArray(raw)) return null;
   const seen = new Set<string>();
   const out: string[] = [];
@@ -75,7 +75,7 @@ export function normalizeSkills(raw: unknown) {
   return out;
 }
 
-export function normalizeTts(raw: unknown) {
+function normalizeTts(raw: unknown) {
   const r = (raw ?? {}) as Record<string, unknown>;
   const engine = TTS_ENGINES.includes(r.engine as string) ? (r.engine as string) : 'piper';
   const cloudProvider = TTS_CLOUD_PROVIDERS.includes(r.cloudProvider as string)

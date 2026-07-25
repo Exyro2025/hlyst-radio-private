@@ -95,7 +95,7 @@ export function filter(opts: FilterOpts = {}): { total: number; rows: TrackRecor
 // tracks turned the bulk read into a ~15 s synchronous event-loop stall for a
 // payload that only needs a pace MEAN and a vocal PRESENCE flag. Same lesson
 // as getTrackLite (#723), applied to the bulk path.
-export interface ObservatoryTrackRow {
+interface ObservatoryTrackRow {
   id: string;
   title: string | null;
   artist: string | null;
@@ -118,7 +118,7 @@ export interface ObservatoryTrackRow {
   mapY: number | null;
 }
 
-export const OBSERVATORY_COLS = `id, title, artist, album, year, genres, genre, duration_sec,
+const OBSERVATORY_COLS = `id, title, artist, album, year, genres, genre, duration_sec,
   moods, energy, source, confidence, bpm, musical_key, analysis_confidence,
   loudness_lufs, pace_json, vocal_ranges_json, map_x, map_y`;
 

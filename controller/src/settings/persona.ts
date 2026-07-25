@@ -112,7 +112,7 @@ export function getScheduleOverride(now = Date.now()) {
 
 // A stored show, resolved to the consumer-facing shape (persona/guests
 // hydrated, filters coerced). Shared by the grid path and the takeover path.
-export function resolveShowShape(show, s) {
+function resolveShowShape(show, s) {
   const persona = s.personas?.find(p => p.id === show.personaId) || null;
   return {
     id: show.id,
@@ -195,7 +195,7 @@ export function getOnAirRoster(date: Date = new Date()) {
 // How much of the mic the host keeps when guests are in the studio. The rest
 // is split evenly across the guests, so one guest speaks ~2 segments in 5 and
 // the host stays unmistakably the host.
-export const HOST_MIC_SHARE = 0.6;
+const HOST_MIC_SHARE = 0.6;
 
 // The persona who speaks the NEXT standalone segment (station ID, hourly
 // check, weather/news/etc.). Weighted random: host most of the time, a guest

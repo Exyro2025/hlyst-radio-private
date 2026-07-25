@@ -11,7 +11,7 @@ import { requireDb } from './handle.js';
 // `textMode` records whether the vectors were embedded with the model's
 // document prefix ('prefixed') or bare ('plain'); null = legacy row from
 // before mode tracking (equivalent to 'plain' — see resolveIndexTextMode).
-export type EmbeddingTextMode = 'plain' | 'prefixed';
+type EmbeddingTextMode = 'plain' | 'prefixed';
 
 export function getEmbeddingMeta(): {
   model: string;

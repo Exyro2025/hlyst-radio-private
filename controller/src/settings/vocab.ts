@@ -53,7 +53,7 @@ export const SCRIPT_LENGTHS = ['one-liner', 'concise', 'extended', 'storyteller'
 export const TONE_DIALS = ['humour', 'localColour', 'warmth'] as const;
 export const DIAL_NEUTRAL = 5;
 
-export const TONE_DIAL_PHRASES: Record<string, { low: string; high: string }> = {
+const TONE_DIAL_PHRASES: Record<string, { low: string; high: string }> = {
   humour: {
     low: 'Play it straight; keep any wit rare and understated.',
     high: 'Lean into dry, playful wit; an aside or a wink is welcome.',
@@ -179,8 +179,8 @@ export function normalizeTtsSpeedMap(raw: unknown): Record<string, number> {
 // `from` is a literal phrase (regex-escaped at apply time), `to` its spoken
 // form ('' = drop the phrase entirely).
 export const TTS_CORRECTIONS_LIMIT = 100;
-export const TTS_CORRECTION_FROM_MAX = 80;
-export const TTS_CORRECTION_TO_MAX = 160;
+const TTS_CORRECTION_FROM_MAX = 80;
+const TTS_CORRECTION_TO_MAX = 160;
 
 // Lenient on-load pass: never throws, drops malformed entries so a
 // hand-edited settings.json can't wedge boot.
@@ -281,7 +281,7 @@ export function clampNumCtx(raw: unknown, def: number): number {
 // Non-numeric/NaN falls back to `def`. See appliedRepeatPenalty() in
 // capabilities.ts — Ollama ignores this field (ai-sdk-ollama v4 has no
 // per-call repeat_penalty channel at all; restoration is a tracked follow-up).
-export function clampRepeatPenalty(raw: unknown, def: number): number {
+function clampRepeatPenalty(raw: unknown, def: number): number {
   if (typeof raw !== 'number' || !Number.isFinite(raw)) return def;
   return Math.min(2.0, Math.max(1.0, raw));
 }
@@ -872,7 +872,7 @@ export interface NormalizedShow {
   excludedPlaylistIds: string[];
 }
 
-export function coerceEraWindow(raw: unknown): EraWindow | null {
+function coerceEraWindow(raw: unknown): EraWindow | null {
   if (!raw || typeof raw !== 'object') return null;
   const r = raw as { fromYear?: unknown; toYear?: unknown };
   const fromYear = Number.isFinite(r.fromYear) ? Math.trunc(r.fromYear as number) : null;
@@ -884,7 +884,7 @@ export function coerceEraWindow(raw: unknown): EraWindow | null {
 
 // Plural-first: `item[plural]` wins when it's an array; otherwise the legacy
 // singular value (if any) becomes a one-element list. Dedup + cap.
-export function coerceShowList<T>(
+function coerceShowList<T>(
   item: unknown,
   plural: string,
   singular: string,

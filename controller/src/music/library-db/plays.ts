@@ -6,7 +6,7 @@ import { requireDb } from './handle.js';
 // Play history
 // ---------------------------------------------------------------------------
 
-export interface PlayRecord {
+interface PlayRecord {
   id: number;
   trackId: string | null;
   title: string | null;

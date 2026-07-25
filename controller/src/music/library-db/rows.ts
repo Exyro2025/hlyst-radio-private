@@ -94,7 +94,7 @@ export function parseOutroJson(s: string): TrackOutro | null {
 }
 
 // Parse a key_ranges_json column into TrackKeyRange[] or null. Empty/malformed → null.
-export function parseKeyRanges(s: string): TrackKeyRange[] | null {
+function parseKeyRanges(s: string): TrackKeyRange[] | null {
   try {
     const v = JSON.parse(s);
     if (!Array.isArray(v)) return null;
@@ -115,7 +115,7 @@ export function parseKeyRanges(s: string): TrackKeyRange[] | null {
 }
 
 // Parse a JSON array of ms timestamps → finite number[] or null (empty → null).
-export function parseMsArray(s: string): number[] | null {
+function parseMsArray(s: string): number[] | null {
   try {
     const v = JSON.parse(s);
     if (!Array.isArray(v)) return null;
@@ -147,7 +147,7 @@ export function parsePaceSpans(s: string): TrackPaceSpan[] | null {
 
 // Parse a JSON span column into clean TrackSection[] (possibly empty). Drops
 // malformed/zero-length spans; returns [] on any parse error.
-export function parseSpans(s: string): TrackSection[] {
+function parseSpans(s: string): TrackSection[] {
   try {
     const v = JSON.parse(s);
     if (!Array.isArray(v)) return [];
@@ -166,7 +166,7 @@ export function parseSpans(s: string): TrackSection[] {
 }
 
 // structure_json: empty collapses to null ("no structure"), unlike vocal ranges.
-export function safeParseSections(s: string): TrackSection[] | null {
+function safeParseSections(s: string): TrackSection[] | null {
   const out = parseSpans(s);
   return out.length ? out : null;
 }

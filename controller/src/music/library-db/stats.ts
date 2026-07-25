@@ -17,7 +17,7 @@ import type { LibraryStats } from './types.js';
 // the display's freshness needs, and analysis writes don't change these tallies
 // anyway (they touch bpm/*_json, not moods/genre/energy).
 let statsCache: { at: number; value: LibraryStats } | null = null;
-export const STATS_TTL_MS = 5000;
+const STATS_TTL_MS = 5000;
 
 // Drop the memoised stats() result — call when the DB handle is swapped
 // (reset/reload) so a fresh library never briefly serves the old one's tallies.
@@ -50,7 +50,7 @@ export function changeToken(): string {
   return `${getDbNonce()}.${dataVersion}.${ownChanges}`;
 }
 
-export function computeStats(): LibraryStats {
+function computeStats(): LibraryStats {
   const d = requireDb();
   const total =
     (d.prepare(`SELECT COUNT(*) AS n FROM tracks WHERE ${SQL_HAS_MOODS}`).get() as {

@@ -57,7 +57,7 @@ import {
 import { BOUNDS, rawMaxTrackSec } from './defaults.js';
 import { minTrackSeconds } from './store.js';
 
-export function validateTtsBlock(raw, where) {
+function validateTtsBlock(raw, where) {
   const t = raw || {};
   if (!TTS_ENGINES.includes(t.engine)) {
     throw new Error(`${where}.tts.engine must be one of: ${TTS_ENGINES.join(', ')}`);
@@ -657,7 +657,7 @@ export function assertNoOrphanMoods(next: any): void {
   }
 }
 
-export const FESTIVALS_LIMIT = 50;
+const FESTIVALS_LIMIT = 50;
 
 export function validateFestivalsStrict(raw, moodNames: string[] = SHOW_MOODS) {
   if (!Array.isArray(raw)) throw new Error('festivals must be an array');

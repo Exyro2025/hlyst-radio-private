@@ -49,7 +49,7 @@ export function knnByAudioVector(vec: number[] | Float32Array, k: number): KnnHi
 
 // `table` is always a hardcoded vec0 table name from our own code (never user
 // input), so interpolating it is safe — the MATCH buffer is still bound.
-export function knnByBuffer(
+function knnByBuffer(
   buf: Buffer,
   k: number,
   excludeId: string | null,
