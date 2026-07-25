@@ -128,6 +128,74 @@ function relTime(iso: string): string {
   if (d < 30) return `${d}d ago`;
   return new Date(iso).toLocaleDateString();
 }
+// ── generation over a server-side job ────────────────────────────────────────
+// A generation legitimately runs for minutes, and Cloudflare cuts proxied
+// responses off at ~100s with an HTML error page — so the panel starts a job
+// (POST /playlists/generate/jobs) and polls it instead of holding one request
+// open. Bodies are also never parsed before checking they ARE JSON: WebKit
+// reports r.json() on that HTML page as the baffling "The string did not
+// match the expected pattern".
+
+type AdminFetch = (path: string, init?: RequestInit) => Promise<Response>;
+
+async function readJsonSafe(r: Response): Promise<any> {
+  const ct = r.headers.get('content-type') || '';
+  if (!ct.includes('application/json')) {
+    throw new Error(`the curation service returned an unexpected response (HTTP ${r.status}) — is the controller reachable?`);
+  }
+  try {
+    return await r.json();
+  } catch {
+    throw new Error(`the curation service returned malformed JSON (HTTP ${r.status})`);
+  }
+}
+
+const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
+
+const GEN_POLL_MS = 2000;
+const GEN_DEADLINE_MS = 10 * 60_000;
+const GEN_POLL_MISSES = 3; // consecutive transient poll failures tolerated
+
+// Resolves with the GenerateResult payload, throws with an operator-readable
+// message otherwise.
+async function runGenerationJob(adminFetch: AdminFetch, body: unknown): Promise<any> {
+  const init: RequestInit = {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  };
+  const start = await adminFetch('/playlists/generate/jobs', init);
+  // A pre-jobs controller 404s here (mid-upgrade version skew) — fall back to
+  // the synchronous endpoint rather than failing the click.
+  if (start.status === 404) {
+    const r = await adminFetch('/playlists/generate', init);
+    const j = await readJsonSafe(r);
+    if (!r.ok) throw new Error(j.error || 'generation failed');
+    return j;
+  }
+  const started = await readJsonSafe(start);
+  if (!start.ok || !started.jobId) throw new Error(started.error || 'generation failed to start');
+  const deadline = Date.now() + GEN_DEADLINE_MS;
+  let misses = 0;
+  while (Date.now() < deadline) {
+    await sleep(GEN_POLL_MS);
+    let poll: any;
+    try {
+      const r = await adminFetch(`/playlists/generate/jobs/${started.jobId}`);
+      poll = await readJsonSafe(r);
+      if (!r.ok) throw new Error(poll.error || `poll failed (HTTP ${r.status})`);
+    } catch (err) {
+      if (++misses >= GEN_POLL_MISSES) throw err instanceof Error ? err : new Error('lost contact with the curation service');
+      continue;
+    }
+    misses = 0;
+    if (poll.status === 'running') continue;
+    if (poll.status === 'error') throw new Error(poll.error || 'generation failed');
+    return poll.result || {};
+  }
+  throw new Error('generation is taking unusually long — it may still land server-side; try again in a minute');
+}
+
 const energyPct = (e?: string | null): number => (e === 'low' ? 34 : e === 'high' ? 92 : 64);
 const energyColor = (e?: string | null): string => (e === 'low' ? EN_LOW : e === 'high' ? EN_HIGH : EN_MED);
 const energyBgClass = (e?: string | null): string => (e === 'low' ? EN_LOW_BG : e === 'high' ? EN_HIGH_BG : EN_MED_BG);
@@ -247,7 +315,7 @@ function SwitchRow({ label, hint, on, onToggle, mutedLabel }: {
         <div className={cn('text-[13px] font-semibold', mutedLabel && 'text-muted')}>{label}</div>
         <div className="font-mono text-[10px] text-muted">{hint}</div>
       </div>
-      <Switch checked={on} onCheckedChange={onToggle} />
+      <Switch checked={on} onCheckedChange={onToggle} aria-label={label} />
     </div>
   );
 }
@@ -457,12 +525,24 @@ export default function PlaylistBuilderPanel() {
     toastTimer.current = window.setTimeout(() => setToast(''), 4200);
   }, []);
 
-  // Escape closes whichever modal is up.
+  // Escape closes whichever modal is up. Document-level rather than on the
+  // dialog markup, so it fires wherever focus happens to be.
   useEffect(() => {
     if (!modal) return;
     const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setModal(null); };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
+  }, [modal]);
+
+  // Move focus into the dialog when it opens and hand it back to whatever
+  // opened it on close. Without this the modal is only reachable by tabbing
+  // through the page behind it, and closing leaves focus on <body>.
+  const modalPanelRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!modal) return;
+    const restoreTo = document.activeElement as HTMLElement | null;
+    modalPanelRef.current?.focus();
+    return () => restoreTo?.focus?.();
   }, [modal]);
 
   // Energy-bar → track-row jump: center the row inside the LIST's own scroll
@@ -535,18 +615,7 @@ export default function PlaylistBuilderPanel() {
     const exclude = mode === 'fresh' ? [] : tracks.map(t => t.id);
     setView('generating');
     try {
-      const r = await adminFetch('/playlists/generate', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(buildBody(exclude)),
-      });
-      const j = await r.json();
-      if (!r.ok) {
-        setErrorMsg(j.error || 'generation failed');
-        setView(mode === 'more' && tracks.length ? 'result' : 'error');
-        if (mode === 'more' && tracks.length) flash(j.error || 'could not fetch more');
-        return;
-      }
+      const j = await runGenerationJob(adminFetch, buildBody(exclude));
       const got: DraftTrack[] = j.tracks || [];
       if (!got.length) {
         setView(mode === 'more' && tracks.length ? 'result' : 'nomatch');
@@ -570,8 +639,10 @@ export default function PlaylistBuilderPanel() {
       }
       setView('result');
     } catch (err) {
-      setErrorMsg(err instanceof Error ? err.message : 'generation failed');
+      const msg = err instanceof Error ? err.message : 'generation failed';
+      setErrorMsg(msg);
       setView(mode === 'more' && tracks.length ? 'result' : 'error');
+      if (mode === 'more' && tracks.length) flash(msg);
     } finally {
       generatingRef.current = false;
     }
@@ -840,6 +911,7 @@ export default function PlaylistBuilderPanel() {
                 onChange={e => setPrompt(e.target.value)}
                 rows={3}
                 placeholder={'“rainy sunday jazz that warms up halfway through”'}
+                aria-label="Vibe"
                 className={cn(searchInputClass, 'resize-none leading-[1.45]')}
               />
             </div>
@@ -855,6 +927,7 @@ export default function PlaylistBuilderPanel() {
                   value={seedQuery}
                   onChange={e => setSeedQuery(e.target.value)}
                   placeholder="Search a track or artist to anchor on…"
+                  aria-label="Search seeds"
                   className={searchInputClass}
                 />
                 {seedResults && (seedResults.length > 0 || seedArtists.length > 0) && (
@@ -915,7 +988,7 @@ export default function PlaylistBuilderPanel() {
                 <Eyeb>Target length</Eyeb>
                 <span className="font-mono text-[11px] font-bold text-vermilion">{count} tracks</span>
               </div>
-              <input type="range" min={5} max={60} value={count} onChange={e => setCount(+e.target.value)} className="w-full accent-[var(--accent)]" />
+              <input type="range" min={5} max={60} value={count} onChange={e => setCount(+e.target.value)} aria-label="Target length in tracks" className="w-full accent-[var(--accent)]" />
               <div className="mt-[5px] flex justify-between font-mono text-[9px] text-muted"><span>5</span><span>60</span></div>
             </div>
 
@@ -925,7 +998,7 @@ export default function PlaylistBuilderPanel() {
                 <Eyeb>Artist spacing</Eyeb>
                 <span className="font-mono text-[11px] text-muted">{artistSpacing ? `min ${artistSpacing} apart` : 'off'}</span>
               </div>
-              <input type="range" min={0} max={5} value={artistSpacing} onChange={e => setArtistSpacing(+e.target.value)} className="w-full accent-[var(--accent)]" />
+              <input type="range" min={0} max={5} value={artistSpacing} onChange={e => setArtistSpacing(+e.target.value)} aria-label="Artist spacing" className="w-full accent-[var(--accent)]" />
             </div>
 
             {/* track-length band — min/max anchors on one track */}
@@ -941,7 +1014,7 @@ export default function PlaylistBuilderPanel() {
                             : 'any'}
                     </span>
                   )}
-                  <Switch checked={capOn} onCheckedChange={setCapOn} />
+                  <Switch checked={capOn} onCheckedChange={setCapOn} aria-label="Limit track length" />
                 </div>
               </div>
               <DualRange
@@ -970,7 +1043,7 @@ export default function PlaylistBuilderPanel() {
                             : 'any bpm'}
                     </span>
                   )}
-                  <Switch checked={bpmOn} onCheckedChange={setBpmOn} />
+                  <Switch checked={bpmOn} onCheckedChange={setBpmOn} aria-label="Limit tempo" />
                 </div>
               </div>
               <DualRange
@@ -1058,6 +1131,7 @@ export default function PlaylistBuilderPanel() {
                   onKeyDown={e => { if (e.key === 'Enter' || e.key === ',') { e.preventDefault(); addGenre(); } }}
                   onBlur={() => { if (genreInput.trim()) addGenre(); }}
                   placeholder="Add a genre…"
+                  aria-label="Add a genre"
                   className={searchInputClass}
                 />
                 {genreSuggestions && genreSuggestions.length > 0 && (
@@ -1104,6 +1178,7 @@ export default function PlaylistBuilderPanel() {
                   value={artistQuery}
                   onChange={e => setArtistQuery(e.target.value)}
                   placeholder="Add an artist…"
+                  aria-label="Add an artist"
                   className={searchInputClass}
                 />
                 {artistResults && artistResults.length > 0 && (
@@ -1196,17 +1271,18 @@ export default function PlaylistBuilderPanel() {
                       value={name}
                       onChange={e => setName(e.target.value)}
                       placeholder="Untitled set"
+                      aria-label="Playlist name"
                       className="min-w-0 flex-1 border-b border-transparent bg-transparent py-0.5 font-display text-2xl font-bold tracking-[-0.01em] text-ink outline-none placeholder:text-muted/50 hover:border-separator-soft focus:border-[var(--accent)]"
                     />
                     <div className="flex flex-none items-center gap-1.5">
                       <Button variant="ghost" size="sm" className="h-8" onClick={openBrowse} title="open a playlist from the music server">
-                        <FolderOpen />Open
+                        <FolderOpen data-icon="inline-start" />Open
                       </Button>
                       <Button variant="ghost" size="sm" className="h-8" onClick={doNew} title="start a blank draft">
-                        <FilePlus2 />New
+                        <FilePlus2 data-icon="inline-start" />New
                       </Button>
                       <Button variant="accent" size="sm" className="h-8" disabled={saveDisabled} onClick={openSave} title="save to Navidrome">
-                        <Save />{existingId ? 'Update' : 'Save'}
+                        <Save data-icon="inline-start" />{existingId ? 'Update' : 'Save'}
                       </Button>
                     </div>
                   </div>
@@ -1287,7 +1363,8 @@ export default function PlaylistBuilderPanel() {
                     value={addQuery}
                     onChange={e => setAddQuery(e.target.value)}
                     placeholder="Add any track from your library…"
-                    className="w-full bg-transparent text-sm text-ink outline-none placeholder:text-muted/60"
+                    aria-label="Add a track"
+                    className="w-full bg-transparent text-sm text-ink outline-none placeholder:text-muted/60 focus-visible:ring-1 focus-visible:ring-[var(--accent)]"
                   />
                   {addResults && addResults.length > 0 && (
                     <div className="absolute top-full right-4 left-4 z-20 max-h-64 overflow-auto border border-ink bg-bg shadow-drawer sm:right-6 sm:left-6">
@@ -1479,17 +1556,28 @@ export default function PlaylistBuilderPanel() {
       {/* OPEN-EXISTING MODAL */}
       {modal === 'open' && (
         <div
+          // Backdrop only — no role, no tabIndex. Making it a `role="button"`
+          // would put a full-viewport control in the tab order *and* wrap the
+          // dialog in a role whose children are presentational, hiding the real
+          // controls from assistive tech. Escape is handled once at the document
+          // level (see the effect above) so it works wherever focus sits.
           className="fixed inset-0 z-[80] flex items-start justify-center bg-[rgba(20,18,14,0.42)] p-5 pt-16"
-          onClick={() => setModal(null)}
+          // Close on a click landing on the backdrop itself (not bubbled from
+          // the panel), so the panel needs no onClick stopPropagation of its own.
+          onClick={e => { if (e.target === e.currentTarget) setModal(null); }}
         >
           <div
-            className="flex max-h-[78vh] w-full max-w-[560px] flex-col border border-ink bg-bg shadow-drawer"
-            onClick={e => e.stopPropagation()}
+            ref={modalPanelRef}
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="pb-open-title"
+            tabIndex={-1}
+            className="flex max-h-[78vh] w-full max-w-[560px] flex-col border border-ink bg-bg shadow-drawer outline-none"
           >
             <div className="flex items-center justify-between border-b border-ink px-5 py-4">
               <div>
                 <div className="font-mono text-[10px] font-bold tracking-[0.18em] text-muted uppercase">Music server</div>
-                <h3 className="mt-0.5 font-display text-xl font-bold">Open a playlist</h3>
+                <h3 id="pb-open-title" className="mt-0.5 font-display text-xl font-bold">Open a playlist</h3>
               </div>
               <IconBtn onClick={() => setModal(null)} title="close"><X className="size-4" /></IconBtn>
             </div>
@@ -1498,6 +1586,7 @@ export default function PlaylistBuilderPanel() {
                 value={playlistQuery}
                 onChange={e => setPlaylistQuery(e.target.value)}
                 placeholder="Search playlists…"
+                aria-label="Search playlists"
                 className={searchInputClass}
               />
             </div>
@@ -1559,23 +1648,32 @@ export default function PlaylistBuilderPanel() {
       {/* SAVE MODAL */}
       {modal === 'save' && (
         <div
+          // See the OPEN modal above: backdrop stays a plain div; Escape is
+          // owned by the document-level handler.
           className="fixed inset-0 z-[80] flex items-start justify-center bg-[rgba(20,18,14,0.42)] p-5 pt-16"
-          onClick={() => setModal(null)}
+          onClick={e => { if (e.target === e.currentTarget) setModal(null); }}
         >
-          <div className="w-full max-w-[480px] border border-ink bg-bg shadow-drawer" onClick={e => e.stopPropagation()}>
+          <div
+            ref={modalPanelRef}
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="pb-save-title"
+            tabIndex={-1}
+            className="w-full max-w-[480px] border border-ink bg-bg shadow-drawer outline-none"
+          >
             <div className="flex items-center justify-between border-b border-ink px-5 py-4">
               <div>
                 <div className="font-mono text-[10px] font-bold tracking-[0.18em] text-muted uppercase">
                   {tracks.length} tracks · {fmtRun(totalSec)}
                 </div>
-                <h3 className="mt-0.5 font-display text-xl font-bold">Save playlist</h3>
+                <h3 id="pb-save-title" className="mt-0.5 font-display text-xl font-bold">Save playlist</h3>
               </div>
               <IconBtn onClick={() => setModal(null)} title="close"><X className="size-4" /></IconBtn>
             </div>
             <div className="grid gap-4 px-5 py-[18px]">
               <div>
                 <div className="mb-[7px]"><Eyeb>Name</Eyeb></div>
-                <input value={saveName} onChange={e => setSaveName(e.target.value)} placeholder="Untitled set" className={searchInputClass} />
+                <input value={saveName} onChange={e => setSaveName(e.target.value)} placeholder="Untitled set" aria-label="Playlist name" className={searchInputClass} />
               </div>
               {existingId && (
                 <div className="grid gap-2">
@@ -1610,7 +1708,7 @@ export default function PlaylistBuilderPanel() {
                     Remembers this recipe and appends new matching songs after library tagging.
                   </div>
                 </div>
-                <Switch checked={saveSync} onCheckedChange={setSaveSync} />
+                <Switch checked={saveSync} onCheckedChange={setSaveSync} aria-label="Keep in sync" />
               </div>
             </div>
             <div className="flex items-center justify-between gap-3 border-t border-ink px-5 py-3.5">

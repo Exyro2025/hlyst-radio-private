@@ -191,6 +191,12 @@ export interface LoudnessForm {
   source: LoudnessSource;
 }
 
+export interface TransitionsForm {
+  pairDrain: boolean;   // hold picks until the successor is known (#749 fix)
+  stemBlends: boolean;  // pre-rendered stem-blend seams (needs pairDrain + stem cache)
+  stemCache: boolean;   // settings.audio.stemCache — persist Demucs stems during analysis
+}
+
 export interface PrivacyForm {
   privatePlayer: boolean;
   listenerAuth: boolean;
@@ -203,6 +209,7 @@ export interface FormState {
   crossfadeDuration: string;
   maxTrackSeconds: string;
   pauseTalkMinSeconds: string;
+  transitions: TransitionsForm;
   archive: ArchiveForm;
   stream: StreamForm;
   loudness: LoudnessForm;
@@ -238,6 +245,8 @@ export interface SettingsData {
     minTrackSeconds?: number;
     pauseTalkMinSeconds?: number;
     archive?: { enabled?: boolean; bitrate?: number; retentionDays?: number };
+    transitions?: { pairDrain?: boolean; stemBlends?: boolean };
+    audio?: { embeddings?: boolean; vocalActivity?: boolean; stemCache?: boolean; stemCacheGb?: number };
     stream?: {
       opusEnabled?: boolean;
       opusBitrate?: number;
@@ -346,6 +355,15 @@ export interface SettingsData {
   };
   tagger?: { running?: boolean };
   env?: Record<string, unknown>;
+  // Navidrome connection read state (Settings → Music source). passSet only —
+  // the password value never reaches the browser. Env flags are per-field:
+  // url can be env-managed while user/pass come from the wizard/admin.
+  navidrome?: {
+    url?: string;
+    user?: string;
+    passSet?: boolean;
+    env?: { url?: boolean; user?: boolean; pass?: boolean };
+  };
   streamOnAir?: boolean;
   // What timezone '' (Auto) resolves to — the controller's own zone.
   serverTimezone?: string;
