@@ -198,6 +198,16 @@ export const DEFAULTS = {
   // null = no takeover. Persisted in schedule.json alongside shows/schedule.
   scheduleOverride: null,
   tts: {
+    // Station-wide voice switch. false = music only: the DJ never speaks — no
+    // links, idents, hourly checks, segments, banter, mic-passes, programme
+    // beats or listener-request intros — and, crucially, the scripts for those
+    // are never GENERATED, so an off station spends no LLM tokens on talk.
+    // Picks keep running (the stream needs a next track) and jingles keep
+    // playing (pre-rendered WAVs on Liquidsoap's own rotate — silence those
+    // with jingleRatio: 0). Manual /dj/segment triggers stay exempt: an
+    // explicit operator action always fires. Policy lives in exactly one
+    // place — broadcast/voice-policy.ts. Applies live; no restart.
+    enabled: true,
     defaultEngine: 'piper',
     // Advisory flag — does the operator intend to run the optional tts-heavy
     // sidecar (Chatterbox + PocketTTS)? Both setup wizards (CLI + /onboarding)

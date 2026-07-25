@@ -500,6 +500,13 @@ export async function load() {
     schedule,
     scheduleOverride,
     tts: {
+      // Station-wide voice switch. Coerce missing/non-boolean (every settings.json
+      // written before this key existed) to the default `true`, so an upgrade is
+      // byte-identical. See DEFAULTS.tts.enabled.
+      enabled:
+        typeof stored.tts?.enabled === 'boolean'
+          ? stored.tts.enabled
+          : DEFAULTS.tts.enabled,
       defaultEngine: TTS_ENGINES.includes(stored.tts?.defaultEngine)
         ? stored.tts.defaultEngine
         : DEFAULTS.tts.defaultEngine,
@@ -1269,6 +1276,12 @@ export async function update(patch) {
         throw new Error(`tts.defaultEngine must be one of: ${TTS_ENGINES.join(', ')}`);
       }
       next.tts.defaultEngine = t.defaultEngine;
+    }
+    if (t.enabled !== undefined) {
+      if (typeof t.enabled !== 'boolean') {
+        throw new Error('tts.enabled must be a boolean');
+      }
+      next.tts.enabled = t.enabled;
     }
     if (t.heavyEnabled !== undefined) {
       if (typeof t.heavyEnabled !== 'boolean') {

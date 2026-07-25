@@ -36,6 +36,7 @@ import { withTrace, logEvent } from '../observability/events.js';
 import { recencyWindowsForLibrary, effectiveNoRepeatWindow, artistKey } from '../music/recency.js';
 import { hasEraBound, genreResolutionWarningOnce } from '../music/show-filter.js';
 import { djCallsAllowed } from './listeners.js';
+import { autoVoiceAllowed } from './voice-policy.js';
 import { pickerAgent, requestAgent } from './dj-agent/agents.js';
 import {
   HANDOFF_MAX_AGE_MS,
@@ -437,7 +438,13 @@ export async function runTrackEvent(queue, ctx, { wantLink, showAt = null, prede
       return;
     }
     const cheap = budget.preferCheapPicker();
-    wantLink = wantLink && !cheap;
+    // Station voice off (settings.tts.enabled) → still pick, never link. The
+    // agent path's event message then orders silence (`say` stays in the
+    // schema but nullable, and a disobedient line is dropped at the
+    // `wantLink && say` guard), and the pool path skips its generateLink call
+    // outright — so no link is written, rendered or aired, and the pick costs
+    // exactly what a "stay silent" pick has always cost.
+    wantLink = wantLink && !cheap && autoVoiceAllowed();
 
     const current = predecessor ?? queue.current?.track ?? null;
     const previous = predecessor ? (prior ?? null) : (queue.history[0]?.track ?? null);
@@ -636,7 +643,13 @@ async function runRequestViaAgent(queue: any, { requester, text }: { requester: 
       throw new Error(`request agent returned unknown id ${object?.id}`);
     }
 
-    const intro = typeof object.intro === 'string' ? object.intro.trim() : '';
+    // Station voice off (settings.tts.enabled) → no intro. requestSchema()
+    // already dropped the field from the agent's contract, so normally there
+    // is nothing here to discard — this guard covers the switch flipping
+    // mid-run (the schema resolved before the flip) and a model inventing the
+    // field anyway. Every read below keys off this one binding, and the
+    // session then records the ack rather than a line that never aired.
+    const intro = autoVoiceAllowed() && typeof object.intro === 'string' ? object.intro.trim() : '';
     const pos = await queue.push({
       track: trackFields(song),
       requestedBy: requester,
@@ -700,7 +713,9 @@ export async function runPersonaHandoff(queue: any, ctx: any): Promise<void> {
   // handoff for later. Budget: treated as an optional segment (muted in soft
   // and hard tiers, policy in dj-budget.ts). Either way, mark aired so it
   // doesn't retry — a handoff fires at most ~once an hour and is cheap to loosen.
-  if (!djCallsAllowed() || !budget.optionalSegmentsAllowed()) {
+  // Station voice off (settings.tts.enabled) is treated the same way: mark it
+  // aired so a stale mic-pass isn't queued up waiting for the switch to flip.
+  if (!autoVoiceAllowed() || !djCallsAllowed() || !budget.optionalSegmentsAllowed()) {
     session.markHandoffAired();
     return;
   }

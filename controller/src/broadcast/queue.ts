@@ -32,6 +32,7 @@ import { getFullContext, energyForDaypart } from '../context.js';
 import * as settings from '../settings.js';
 import { logEvent } from '../observability/events.js';
 import { djCallsAllowed, presentListeners } from './listeners.js';
+import { autoVoiceAllowed } from './voice-policy.js';
 import * as webhooks from './webhooks.js';
 import * as scrobble from './scrobble.js';
 import * as liquidsoapControl from './liquidsoap-control.js';
@@ -1060,7 +1061,11 @@ class Queue {
         // — airing now would play it over whatever's currently on-air, one (or
         // more) tracks before this one reaches the front of dj_queue (issue
         // #189). airIntro() writes it to the voice file when the track starts.
-        if (item.introScript && !item.introWav) {
+        // Skipped while the station voice is off: airIntro would only drop the
+        // WAV (the script predates the flip), so the render is pure waste — and
+        // if the switch comes back on before the track airs, airIntro renders
+        // from the script itself.
+        if (item.introScript && !item.introWav && autoVoiceAllowed()) {
           try {
             item.introWav = await speak(item.introScript, {
               kind: item.introKind || 'dj-speak',
@@ -1357,7 +1362,13 @@ class Queue {
   // this just writes the path to the duck channel and mirrors the bookkeeping
   // announce() does (djLog feeds the opener anti-repeat; session + webhook).
   async airIntro(item: QueueItem, predecessor: Track | null = null) {
-    if (!item?.introWav || item.introAired) return;
+    // Station voice off (settings.tts.enabled). The generation sites already
+    // skip writing intros, so this only catches an item queued BEFORE the
+    // switch was flipped — it must not air its script now. Backstop, not the
+    // policy: nothing here spends tokens, so a plain drop is the whole job.
+    if (!autoVoiceAllowed()) return;
+    if (!item || item.introAired) return;
+    if (!item.introWav && !item.introScript) return;
     item.introAired = true;
     // Stale back-announce safety-net. Links are written forward-looking (intro
     // the pick, never name the just-played track), so this normally never fires.
@@ -1377,14 +1388,24 @@ class Queue {
     // older than ~1h — a predecessor longer than that (long-form mixes are
     // supported) outlives the file. A silent return here used to be a lost
     // link; for a bedded item the bed is already committed and airing, so it
-    // would air naked. The script is still on the item: render it again.
-    // introAired is already set above, so the re-render can't double-air.
-    if (!existsSync(item.introWav)) {
+    // would air naked. The WAV may also never have been rendered at all: the
+    // drain skips the render while the station voice is off, and this item
+    // lived to air because the switch came back on. Either way the script is
+    // still on the item: render it now. introAired is already set above, so
+    // the render can't double-air.
+    if (!item.introWav || !existsSync(item.introWav)) {
       if (!item.introScript) return;
       try {
-        item.introWav = await speak(item.introScript, { kind: item.introKind || 'dj-speak' });
+        item.introWav = await speak(item.introScript, {
+          kind: item.introKind || 'dj-speak',
+          // Same persona the script was written under — speak() would
+          // otherwise resolve getEffectivePersona() at AIR time, the wrong
+          // voice when this render lands the other side of a show boundary
+          // (the drain-time render pins it for exactly that reason).
+          persona: item.introPersona || null,
+        });
       } catch (err) {
-        this.log('error', `Intro WAV was reaped and re-render failed: ${(err as Error).message}`);
+        this.log('error', `Intro WAV render at air time failed: ${(err as Error).message}`);
         return;
       }
     }
