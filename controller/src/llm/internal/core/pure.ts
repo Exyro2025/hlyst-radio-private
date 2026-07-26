@@ -616,10 +616,13 @@ export function renderTerminalPrompt(
     .filter((t) => t.text);
   // The last user turn IS the task ("Pick the track to play next…"), so it is
   // restated on its own at the end — nearest the answer, and out of a history
-  // block the model might read as already-handled.
+  // block the model might read as already-handled. Every other turn is history,
+  // including any assistant turns AFTER the task turn (djAgent's windows end on
+  // the user event turn today, but a trailing turn is context, not droppable).
   const lastUserIdx = turns.map((t) => t.role).lastIndexOf('user');
   const task = lastUserIdx >= 0 ? turns[lastUserIdx].text : '';
-  const history = (lastUserIdx >= 0 ? turns.slice(0, lastUserIdx) : turns).slice(-TERMINAL_HISTORY_TURNS);
+  const history = (lastUserIdx >= 0 ? [...turns.slice(0, lastUserIdx), ...turns.slice(lastUserIdx + 1)] : turns)
+    .slice(-TERMINAL_HISTORY_TURNS);
 
   const out: string[] = [];
   if (history.length) {

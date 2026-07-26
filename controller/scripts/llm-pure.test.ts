@@ -587,6 +587,17 @@ async function main() {
     assert.ok(prompt.includes('thinking out loud'), 'assistant-only history is kept as context');
     assert.ok(prompt.includes('Answer now'), 'and it still asks for the answer');
   });
+  await test('assistant turns after the task turn are kept as context, not dropped', () => {
+    const prompt = renderTerminalPrompt(
+      [
+        { role: 'user', content: 'Pick the track to play next.' },
+        { role: 'assistant', content: 'Leaning towards something mellow.' },
+      ],
+      [],
+    );
+    assert.ok(prompt.includes('Leaning towards something mellow.'), 'a trailing assistant turn survives into the history block');
+    assert.ok(/Your task:\nPick the track to play next\./.test(prompt), 'the task is still the last user turn');
+  });
 
   // ---- JSON / thinking salvage ----
   console.log('stripThinking / extractJson / usageOf:');

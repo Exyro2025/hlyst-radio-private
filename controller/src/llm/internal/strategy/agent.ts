@@ -465,6 +465,9 @@ export async function djAgent({
               terminalObject = t.object;
               addUsage(t.usage);
               terminalPrompt = prompt;
+              // The collapse is a real model call the record should count —
+              // steps otherwise reads as if the recovery's step total answered.
+              steps += 1;
             } catch (e) {
               // A miss here is not the end of the road — the text salvage below
               // still gets a shot, and the caller's pool fallback after that. Log
@@ -505,7 +508,9 @@ export async function djAgent({
               // failover.ts's logFailurePreview into the container log line.
               err.text = declinedAttempts.length ? declinedAttempts.join('\n\n') : (result.text || '');
               err.finishReason = result.finishReason;
-              err.usage = result.usage;
+              // The full spend across every leg, not just the last result's —
+              // in the raw TokenUsage shape failureDiagnostics feeds usageOf.
+              err.usage = { inputTokens: spentUsage.input, outputTokens: spentUsage.output, totalTokens: spentUsage.total };
               err.steps = result.steps;
               throw err;
             }
