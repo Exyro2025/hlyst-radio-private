@@ -8,6 +8,7 @@ import { searchReady, searchWeb } from '../skills/web-search.js';
 import * as system from '../system.js';
 import { budgetStatus } from '../broadcast/dj-budget.js';
 import * as analyzer from '../music/analyzer.js';
+import * as db from '../music/library-db.js';
 import type { Finding, StationSettings } from './types.js';
 import { fmtTokens, isSchemaFailure } from './util.js';
 
@@ -268,6 +269,27 @@ export async function checkTuning(s: StationSettings | null): Promise<Finding[]>
         detail: 'enabled, but the analyzer can’t separate stems',
         hint: `The stem cache and stem-blend transitions need the heavy analyzer (Demucs). The lean build can’t separate, so these settings silently no-op. ${upgradeHint} Or turn them off.`,
       });
+    }
+    // Coverage, not just capability: stem blends only fire when BOTH tracks of
+    // a pair have cached stems, so a station with the feature on and a nearly
+    // empty cache hears plain crossfades forever and has nothing to tell it
+    // why. Report the real numbers and name the two things that cause it — a
+    // backfill that hasn't run yet, or a budget too small to hold the library.
+    if (wantStems && analyzer.vocalActivityAvailable() !== false) {
+      const cached = db.stemsCachedCount();
+      const total = db.trackCount();
+      const budgetGb = Number(s?.audio?.stemCacheGb) || 15;
+      const holds = Math.floor((budgetGb * 1024) / 25); // ~25 MB per track
+      if (total > 0 && cached < total / 2) {
+        out.push({
+          label: 'stem transitions',
+          status: 'warn',
+          detail: `only ${cached.toLocaleString('en-GB')} of ${total.toLocaleString('en-GB')} tracks have cached stems`,
+          hint: holds < total
+            ? `Blends need cached stems on BOTH tracks of a pair, so most seams will fall back to a plain crossfade. The ${budgetGb} GB budget only holds ~${holds.toLocaleString('en-GB')} tracks — raise audio.stemCacheGb in Settings → Transitions to cover more of the library, then let the analysis pass backfill the rest.`
+            : 'Blends need cached stems on BOTH tracks of a pair, so most seams will fall back to a plain crossfade until the backfill catches up. Run the analysis pass (it now targets tracks with no cached stems) and this fills in over a few runs.',
+        });
+      }
     }
     // Stem blends ride the pair-drain scheduling — without it no seam is ever
     // pair-annotated and a blend can never be inserted.
