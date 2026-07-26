@@ -823,6 +823,7 @@ export default function SettingsPanel() {
                       />
                       <span className="text-sm opacity-70">
                         GB &middot; holds ~
+                        {/* /25 mirrors the controller's stem-cache APPROX_TRACK_BYTES (~25 MB/track) */}
                         {Math.floor(
                           ((Number(form.transitions.stemCacheGb) || 15) * 1024) / 25,
                         ).toLocaleString('en-GB')}{' '}

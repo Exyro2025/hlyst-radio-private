@@ -126,6 +126,16 @@ async function main() {
     assert.equal(await stemCache.headroomTracks(), expected);
   });
 
+  await test('doctor coverage counts dirs on disk, not attempt stamps', async () => {
+    // The two numbers are allowed to disagree — that is the point. Stamps
+    // record attempts and survive eviction (the scope must converge); the
+    // doctor's coverage must NOT, or the warning goes quiet on exactly the
+    // stations where the sweep is evicting everything the backfill writes.
+    // Here: t1's dir is on disk but the clearAnalysis above wiped all stamps.
+    assert.equal(await stemCache.cachedTrackCount(), 1);
+    assert.equal(db.stemsCachedCount(), 0);
+  });
+
   await test('a full cache reports zero headroom rather than a negative slot count', async () => {
     // The backfill stands down at 0. Without the floor, an over-budget cache
     // would produce a negative "room" and slice() would silently return the
@@ -135,6 +145,7 @@ async function main() {
     const swept = await stemCache.sweep(tiny);
     assert.equal(swept.removed, 1, 'the over-budget dir is evicted');
     assert.equal(await stemCache.usageBytes(), 0);
+    assert.equal(await stemCache.cachedTrackCount(), 0, 'eviction drops disk coverage');
   });
 
   await test('hasWindow needs the tail alignment sidecar, not just four stems', async () => {

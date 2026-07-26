@@ -97,6 +97,15 @@ export async function usageBytes(): Promise<number> {
   return (await scanDirs()).reduce((n, d) => n + d.bytes, 0);
 }
 
+// How many track dirs are on disk RIGHT NOW — the doctor's coverage number.
+// Deliberately distinct from library-db's stemsCachedCount(): stems_at stamps
+// ATTEMPTS (and must, for the backfill scope to converge), so once the sweep
+// has evicted anything — or a separation failed — the stamp count overstates
+// what a blend can actually hit. This counts hittable dirs instead.
+export async function cachedTrackCount(): Promise<number> {
+  return (await scanDirs()).length;
+}
+
 // How many more tracks the budget can hold, approximately. The stem backfill
 // caps its scope at this: separating thousands of tracks the sweep will evict
 // minutes later is hours of Demucs time for nothing, which is what made the

@@ -317,7 +317,8 @@ export async function runAnalysisPass(opts: AnalyzeOptions = {}): Promise<Analyz
     console.log('[analyze] vocal backfill skipped — backend has no Demucs (build tts-heavy WITH_DEMUCS=1 to enable vocal ranges)');
   }
 
-  // Stem backfill: the third widening, for tracks that have never had a stem
+  // Stem backfill: the fourth widening (after CLAP vectors, vocal ranges and
+  // the tail-vocal re-target), for tracks that have never had a stem
   // pass. Without it, turning the stem cache on did NOTHING to an
   // already-analysed library — the scope above only re-targets missing CLAP
   // vectors and missing vocal ranges, so a fully-scanned library reported
@@ -344,10 +345,14 @@ export async function runAnalysisPass(opts: AnalyzeOptions = {}): Promise<Analyz
     } else {
       const seen = new Set(ids);
       const needing = db.needsStemsIds().filter(id => !seen.has(id));
-      const room = cap ? Math.min(cap, headroom) : headroom;
+      // Under --limit, only the slots the bpm/CLAP/vocal scopes haven't already
+      // spent are available — sizing off the raw cap would log stem tracks a
+      // final slice then silently drops, the exact "reads as finished"
+      // truncation the announcement exists to avoid.
+      const room = cap ? Math.min(Math.max(0, cap - ids.length), headroom) : headroom;
       const stemIds = needing.slice(0, room);
       if (stemIds.length > 0) {
-        ids = cap ? [...ids, ...stemIds].slice(0, cap) : [...ids, ...stemIds];
+        ids = [...ids, ...stemIds];
         const left = needing.length - stemIds.length;
         console.log(
           `[analyze] stem backfill: +${stemIds.length} tracks with no cached stems` +
