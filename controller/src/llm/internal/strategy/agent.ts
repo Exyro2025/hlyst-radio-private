@@ -259,6 +259,22 @@ export async function djAgent({
           };
         }
 
+        // Tokens spent across every leg below (a native leg that fell through,
+        // the main run, the recovery, the terminal collapse). Each leg is a
+        // separate billable call and `result` is reassigned between them, so a
+        // single usageOf(result) at the end only ever counted the LAST leg —
+        // the same reassignment loss captureTrail guards the discovery trail
+        // against. This sum is what telemetry/log.ts records and what the
+        // daily token cap (llm/internal/telemetry/budget.ts) counts against.
+        let spentUsage = { input: 0, output: 0, total: 0 };
+        const addUsage = (u: { input: number; output: number; total: number }) => {
+          spentUsage = {
+            input: spentUsage.input + u.input,
+            output: spentUsage.output + u.output,
+            total: spentUsage.total + u.total,
+          };
+        };
+
         // ----- Native-first structured output (non-Ollama tool-using agents) -----
         // Prefer native Output.object where it now emits reliably (see header).
         // No forced tool_choice → no thinking conflict, and simpler than the
@@ -312,6 +328,7 @@ export async function djAgent({
               };
             }
             console.log(`[${kind}] native output produced no usable pick (explored=${explored}, accepted=${accepted}) — falling back to done-tool`);
+            addUsage(usageOf(nr));
           } catch (e) {
             console.log(`[${kind}] native output failed (${e?.message}) — falling back to done-tool`);
           }
@@ -358,6 +375,7 @@ export async function djAgent({
         // stateless path rather than blocking on a pathological model call.
         let result = await runDeadlined(deadlineAt, kind, 'agent run', agent, messages);
         let steps = result.steps?.length ?? 0;
+        addUsage(usageOf(result));
 
         // The discovery trail belongs to the MAIN run: `result` is reassigned by
         // the recovery below, and the recovery agent is pinned done-only, so
@@ -374,7 +392,6 @@ export async function djAgent({
 
         // Set only by the single-turn terminal collapse below.
         let terminalObject: unknown;
-        let terminalUsage: { input: number; output: number; total: number } | undefined;
         let terminalPrompt: string | undefined;
 
         // What the model said INSTEAD of calling `done`, one entry per attempt
@@ -412,6 +429,7 @@ export async function djAgent({
           result = await runDeadlined(deadlineAt, kind, 'agent recovery',
             buildRecoveryAgent(leg, system, allTools, temperature, maxOutputTokens, forcedChoice), recoveryMessages);
           steps = result.steps?.length ?? 0;
+          addUsage(usageOf(result));
           captureTrail(result);
           noteIfDeclined('recovery', result);
 
@@ -445,7 +463,7 @@ export async function djAgent({
                   system, prompt, schema, temperature, maxOutputTokens, signal,
                 }));
               terminalObject = t.object;
-              terminalUsage = t.usage;
+              addUsage(t.usage);
               terminalPrompt = prompt;
             } catch (e) {
               // A miss here is not the end of the road — the text salvage below
@@ -501,22 +519,12 @@ export async function djAgent({
         // The discovery-tool trail for /debug (excludes the `done` tool), carried
         // from the main run rather than re-read off `result` — see captureTrail.
         const toolCalls = discoveryTrail;
-        // The collapse is a second billable call on top of the loop, so its tokens
-        // are added in: this figure is what telemetry/log.ts records, and what the
-        // daily token cap (llm/internal/telemetry/budget.ts) counts against.
-        const loopUsage = usageOf(result);
-        const usage = terminalUsage
-          ? {
-            input: loopUsage.input + terminalUsage.input,
-            output: loopUsage.output + terminalUsage.output,
-            total: loopUsage.total + terminalUsage.total,
-          }
-          : loopUsage;
         return {
           value: { object, steps, toolCalls },
           via: lastVia,
           sampling: samplingWithLocalKnobs(leg.cfg, { temperature }),
-          usage,
+          // Every billable leg summed — see addUsage above.
+          usage: spentUsage,
           perf: perfOf(result),
           warnings: warningsOf(result),
           // Full, untruncated — the agent's entire input and trail. When the
