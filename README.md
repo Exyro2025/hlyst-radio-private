@@ -191,6 +191,10 @@ Container Toolkit, nothing else):
 docker compose -f docker-compose.yml -f docker-compose.analyzer-gpu.yml up -d
 ```
 
+All-in-one installs have no `analyzer` service to swap, so they take the GPU on
+the image instead: pull `subwave-aio-cuda` and hand the container the card
+(`--gpus all`, or the Unraid steps in [`docs/unraid.md`](docs/unraid.md)).
+
 ### Local dev (contributors)
 
 ```bash
@@ -252,7 +256,7 @@ Icecast stream on `:7702` (all configurable). Point your proxy at those three.
 `docker/Caddyfile` is a working reference for the route table you need to
 replicate. Details in [`DEPLOY.md`](DEPLOY.md#bring-your-own-reverse-proxy).
 
-**Images on GHCR.** Tagged releases publish to `ghcr.io/perminder-klair/subwave-{caddy,broadcast,controller,web}`, the default-on `subwave-analyzer` (lean, multi-arch acoustic analysis) sidecar, and the opt-in `subwave-tts-heavy` (expressive voices) sidecar. Heavy-analysis variants — `subwave-analyzer-heavy` and `subwave-aio-heavy` (CLAP + Demucs, amd64) — are published for operators who enable "sounds-like"/vocals, plus `subwave-analyzer-cuda` (the heavy stack on NVIDIA CUDA, amd64) for GPU hosts via the `docker-compose.analyzer-gpu.yml` overlay.
+**Images on GHCR.** Tagged releases publish to `ghcr.io/perminder-klair/subwave-{caddy,broadcast,controller,web}`, the default-on `subwave-analyzer` (lean, multi-arch acoustic analysis) sidecar, and the opt-in `subwave-tts-heavy` (expressive voices) sidecar. Heavy-analysis variants — `subwave-analyzer-heavy` and `subwave-aio-heavy` (CLAP + Demucs, amd64) — are published for operators who enable "sounds-like"/vocals, plus the NVIDIA CUDA builds of that heavy stack (amd64) — `subwave-analyzer-cuda` for split-stack hosts via the `docker-compose.analyzer-gpu.yml` overlay, and `subwave-aio-cuda` for one-click all-in-one hosts.
 All compose files pull `:latest` by default; pin a version with
 `SUBWAVE_VERSION=v1.2.3` in the root `.env`.
 
