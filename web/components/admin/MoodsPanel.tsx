@@ -120,9 +120,11 @@ export default function MoodsPanel() {
   }, [adminFetch]);
 
   useEffect(() => {
-    if (!hydrated || needsAuth) return;
+    // Mid-redirect (RELOCATED_TABS) this render never shows the data — skip
+    // the fetch rather than racing it against the navigation.
+    if (!hydrated || needsAuth || relocated) return;
     void load();
-  }, [hydrated, needsAuth, load]);
+  }, [hydrated, needsAuth, relocated, load]);
 
   // Deep-link: /admin/moods?tab=moments opens that tab directly (mirrors
   // /admin/imaging?tab=… and /admin/connect?tab=…). Routed through the Next

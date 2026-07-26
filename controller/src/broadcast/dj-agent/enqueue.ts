@@ -41,8 +41,9 @@ export function trackFields(song) {
 // mode: trim to the pick's measured intro runway so the DJ lands before the
 // vocals — sentence/clause-complete or dropped (null), never a fragment.
 // speechPaceScale('link') maps the word ceiling to the rate the line will be
-// spoken at (engine × persona × daypart). Returns the text unchanged when not
-// in DJ mode; enforceIntroBudget itself no-ops on an un-analysed pick.
+// spoken at (engine × persona × daypart). Outside DJ mode there's no budget —
+// the line still gets the reader's cleanup, just un-trimmed; enforceIntroBudget
+// itself no-ops on an un-analysed pick.
 //
 // What this RETURNS is the display form (issue #1186). The returned line is
 // what gets queued as introScript — and from there it is booth-logged, appended
@@ -54,9 +55,13 @@ export function trackFields(song) {
 export function trimLinkToIntro(text: string | null | undefined, song: any): string | null {
   const raw = (text || '').trim();
   if (!raw) return null;
-  if (!settings.getEffectivePersona()?.djMode) return raw;
   const clean = stripThinking(raw);
   const display = normalizeForDisplay(clean);
+  // Non-DJ personas skip the budget but not the cleanup: introScript is a
+  // written line wherever it lands, so leaked markdown (or a whole line that
+  // was nothing but a think-block — then '' → null, no intro) shouldn't reach
+  // the booth log just because the persona doesn't do radio-style intros.
+  if (!settings.getEffectivePersona()?.djMode) return display || null;
   // The budget is a DURATION budget, so it has to be counted on the words the
   // engine will actually read — the same normalize speak() will run at render
   // time, corrections and all. spokenWordScale folds any difference between the
@@ -90,9 +95,14 @@ export async function enqueuePick(
 ): Promise<number> {
   // Single chokepoint for the intro budget: every pick path (agent, pool, any
   // future producer) funnels its link through here, so enforcement can't be
-  // skipped by a new caller. Idempotent — callers that already trimmed (the
-  // agent path does, to record the aired text in its session turn) pass
-  // through unchanged.
+  // skipped by a new caller. For callers that already trimmed (the agent path
+  // does, to record the text in its session turn) this is a pass-through in
+  // the common case, but not strictly idempotent: spokenWordScale is
+  // recomputed here on the kept text, where it's EXACT for the line that
+  // airs — when corrections cluster unevenly in a long line, the first pass's
+  // whole-line ratio was an over-estimate and this pass trims a little
+  // further. Air always honours the duration budget; the session turn can
+  // occasionally carry the slightly longer reading.
   const introLink = trimLinkToIntro(link, song);
   const track: any = trackFields(song);
   // Flag the transition effects on this pick (DJ mode only). getAnnotatedUri

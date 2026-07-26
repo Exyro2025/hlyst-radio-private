@@ -505,8 +505,8 @@ export function TtsSection({ data, form, setForm, busy, saveSettings, adminFetch
 
   // Compare what save() would actually send (trimmed, draft rows dropped)
   // against the saved list, so an untouched empty draft row isn't "unsaved".
-  const effectiveCorrections = (form.tts.corrections || [])
-    .map(c => ({ from: (c.from || '').trim(), to: (c.to || '').trim() }))
+  const effectiveCorrections = form.tts.corrections
+    .map(c => ({ from: c.from.trim(), to: c.to.trim() }))
     .filter(c => c.from);
   const savedCorrections = (savedTts.corrections || [])
     .map(c => ({ from: c.from ?? '', to: c.to ?? '' }));
@@ -1145,7 +1145,14 @@ export function TtsSection({ data, form, setForm, busy, saveSettings, adminFetch
         </div>
       </Card>
 
-      <Card title="Speech corrections" sub="how names and tricky words should sound">
+      <Card
+        title="Speech corrections"
+        // The rule count rode the Moods tab badge before the move; keep it
+        // visible here. Draft rows don't count — they're not rules yet.
+        sub={effectiveCorrections.length
+          ? `how names and tricky words should sound · ${effectiveCorrections.length} rule${effectiveCorrections.length === 1 ? '' : 's'}`
+          : 'how names and tricky words should sound'}
+      >
         <div className="field">
           <div className="field-hint">
             Find-and-replace rules we apply to every line before it’s spoken, for names and

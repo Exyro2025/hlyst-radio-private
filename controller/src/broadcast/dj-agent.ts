@@ -290,9 +290,9 @@ async function pickViaAgent(queue, { wantLink, audioWaypoint = null, current = n
 
   const rawSay = typeof object.say === 'string' ? object.say.trim() : '';
   // Talk-within-the-intro (feature 3a): enqueuePick re-applies this trim at
-  // the chokepoint (idempotent); it runs here too so the session turn below
-  // records the line as it will actually air — trimmed, and dropped links as
-  // null, never a line the listeners didn't hear.
+  // the chokepoint (near-idempotent — see the note there); it runs here too so
+  // the session turn below records the line as it will actually air — trimmed,
+  // and dropped links as null, never a line the listeners didn't hear.
   const say = trimLinkToIntro(rawSay, song) || '';
   // Transition effects on this pick (persona djMode via settings.effectsActive),
   // independent of whether a link airs.
