@@ -15,7 +15,7 @@
        NOT in here. It's a hard failure on a box without the Nvidia Driver
        plugin, and most Unraid boxes don't have a card, so it stays an opt-in the
        operator adds by hand alongside repointing Repository at the CUDA image.
-       The full three-step swap is in docs/unraid.md; see also the NVIDIA_*
+       The full swap is stepped through in docs/unraid.md; see also the NVIDIA_*
        variables below, which are inert until that runtime is enabled. -->
   <ExtraParams>--add-host host.docker.internal:host-gateway</ExtraParams>
 
@@ -51,7 +51,7 @@
   <ExtraSearchTerms>subwave sub-wave sub/wave subwave-aio radio internet radio icecast liquidsoap ai dj navidrome subsonic stream ollama station broadcast</ExtraSearchTerms>
   <Requires>A reachable Navidrome / Subsonic music server and an LLM provider (Ollama local/cloud or a cloud API key), both configured in the browser at /onboarding after first boot.</Requires>
 
-  <Date>2026-06-22</Date>
+  <Date>2026-07-26</Date>
   <Changes>
 ### 2026-07-26
 - Optional GPU acoustic analysis: point Repository at subwave-aio-cuda and add

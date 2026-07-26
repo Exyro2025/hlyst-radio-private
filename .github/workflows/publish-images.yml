@@ -198,7 +198,10 @@ jobs:
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha,scope=${{ matrix.image }}
           # mode=max caches every intermediate layer, which is right for the
-          # small images. The cuda build's torch layer alone would be several GB
-          # of a 10GB repo-wide GHA cache budget and evict every other scope, so
-          # that one entry exports only the final layers (mode=min).
-          cache-to: type=gha,scope=${{ matrix.image }},mode=${{ matrix.big_build && 'min' || 'max' }}
+          # small images. The cuda build exports NO cache at all: even mode=min
+          # exports the final image's layers, and its multi-GB torch venv layer
+          # sits in the final stage — one entry would evict most other scopes
+          # from the 10GB repo-wide GHA cache budget. Tag builds are rare, so a
+          # cold rebuild is the cheaper trade. (cache-from above stays — it's a
+          # harmless miss while nothing is ever exported to that scope.)
+          cache-to: ${{ !matrix.big_build && format('type=gha,scope={0},mode=max', matrix.image) || '' }}
