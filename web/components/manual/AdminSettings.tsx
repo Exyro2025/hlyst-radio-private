@@ -89,13 +89,13 @@ export default function AdminSettings() {
           </li>
           <li>
             <strong>Moods</strong> — the station's mood vocabulary and how the autonomous
-            DJ reaches for it. Three tabs: <strong>Vocabulary</strong> (the moods every
+            DJ reaches for it. Four tabs: <strong>Vocabulary</strong> (the moods every
             track is tagged with, each with an optional sound description for audio
             tagging), <strong>Moments</strong> (which mood each part of the day and each
-            weather condition leans into), and <strong>Festivals</strong> (the calendar
-            that nudges the mood on the day). Edit the vocabulary and every show,
-            festival, and auto-DJ pick draws from it. Pronunciation fixes live with the
-            voice, under Settings → TTS voice.
+            weather condition leans into), <strong>Festivals</strong> (the calendar that
+            nudges the mood on the day), and <strong>Speech</strong> (pronunciation fixes
+            applied to every spoken line). Edit the vocabulary and every show, festival,
+            and auto-DJ pick draws from it.
           </li>
         </ul>
       </section>

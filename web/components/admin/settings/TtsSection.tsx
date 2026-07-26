@@ -9,10 +9,8 @@ import { CLOUD_VOICES, CLOUD_MODELS } from '../../../lib/cloudVoices';
 import {
   buildCloudVoiceGroups, isKnownCloudVoice, providerSupportsDiscovery, CUSTOM_VOICE_ID,
 } from '../../../lib/cloudVoiceGroups';
-import { Trash2 } from 'lucide-react';
 import { Input } from '../../ui/input';
 import { Label } from '../../ui/label';
-import { ScrollArea } from '../../ui/scroll-area';
 import {
   Select, SelectTrigger, SelectValue, SelectContent, SelectItem, SelectGroup, SelectLabel,
 } from '../../ui/select';
@@ -418,11 +416,6 @@ export function TtsSection({ data, form, setForm, busy, saveSettings, adminFetch
         // Per-engine speech speed (×). Same contract as gainDb; inert for the
         // engines whose workers ignore speed (chatterbox/pocket-tts).
         speed: form.tts.speed,
-        // Whole-list replace. Rows with an empty "text on air" are drafts the
-        // operator never filled in — dropped, not an error.
-        corrections: form.tts.corrections
-          .map(c => ({ from: c.from.trim(), to: c.to.trim() }))
-          .filter(c => c.from),
       },
     });
     // Save cloud API key if typed -- goes to secrets.env, not settings.json
@@ -479,7 +472,6 @@ export function TtsSection({ data, form, setForm, busy, saveSettings, adminFetch
     remote?: { url?: string };
     gainDb?: Record<string, number>;
     speed?: Record<string, number>;
-    corrections?: { from?: string; to?: string }[];
   } = data.values?.tts || {};
   const savedEngine: string = savedTts.defaultEngine || 'piper';
   const savedKokoroVoice: string = savedTts.kokoro?.voice || '';
@@ -503,16 +495,6 @@ export function TtsSection({ data, form, setForm, busy, saveSettings, adminFetch
     e => (form.tts.speed?.[e] ?? 1) !== (savedSpeed[e] ?? 1),
   );
 
-  // Compare what save() would actually send (trimmed, draft rows dropped)
-  // against the saved list, so an untouched empty draft row isn't "unsaved".
-  const effectiveCorrections = form.tts.corrections
-    .map(c => ({ from: c.from.trim(), to: c.to.trim() }))
-    .filter(c => c.from);
-  const savedCorrections = (savedTts.corrections || [])
-    .map(c => ({ from: c.from ?? '', to: c.to ?? '' }));
-  const correctionsDirty =
-    JSON.stringify(effectiveCorrections) !== JSON.stringify(savedCorrections);
-
   const ttsDirty =
     // Absent reads as ON, matching the controller's coercion — so an untouched
     // pre-upgrade settings.json never shows up as dirty.
@@ -532,8 +514,7 @@ export function TtsSection({ data, form, setForm, busy, saveSettings, adminFetch
     || form.tts.cloud.voiceUseSpeakerBoost !== (savedCloud.voiceUseSpeakerBoost ?? ELEVENLABS_VS_DEFAULTS.voiceUseSpeakerBoost)
     || (form.tts.remote.url || '').trim() !== savedRemoteUrl
     || gainDirty
-    || speedDirty
-    || correctionsDirty;
+    || speedDirty;
 
   let activeDetail: ReactNode = null;
   if (savedEngine === 'piper') {
@@ -1145,107 +1126,7 @@ export function TtsSection({ data, form, setForm, busy, saveSettings, adminFetch
         </div>
       </Card>
 
-      <Card
-        title="Speech corrections"
-        // The rule count rode the Moods tab badge before the move; keep it
-        // visible here. Draft rows don't count — they're not rules yet.
-        sub={effectiveCorrections.length
-          ? `how names and tricky words should sound · ${effectiveCorrections.length} rule${effectiveCorrections.length === 1 ? '' : 's'}`
-          : 'how names and tricky words should sound'}
-      >
-        <div className="field">
-          <div className="field-hint">
-            Find-and-replace rules we apply to every line before it’s spoken, for names and
-            words the voice tends to get wrong (<em>GHz</em> → <em>gigahertz</em>,{' '}
-            <em>Hozier</em> → <em>Ho-zeer</em>). Case doesn’t matter, and it matches whole
-            words and phrases; leave the spoken form empty to drop a word entirely. These
-            change the <em>sound</em> only — the written line stays as the DJ wrote it
-            everywhere it’s shown. New rules kick in from the next line, no restart.
-          </div>
-          {/* Capped so a long rule list scrolls instead of stretching the card;
-              the pr-2 keeps rows clear of the scrollbar. */}
-          <ScrollArea className="max-h-[280px]">
-            <div className="flex flex-col gap-2 pr-2">
-              {form.tts.corrections.map((c, idx) => (
-                /* Mobile: "on air" + bin on row one, "reads as" + the spoken
-                   form on row two — two 220/260px inputs plus a label never fit
-                   the 320px a card body leaves at 390px. `sm:` puts the four
-                   back on one left-aligned line. */
-                <div
-                  key={idx}
-                  className="grid grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-2 sm:grid-cols-[220px_auto_260px_auto] sm:justify-start"
-                >
-                  <Input
-                    aria-label="Text on air"
-                    value={c.from}
-                    onChange={(e: ChangeEvent<HTMLInputElement>) =>
-                      setForm(f => ({
-                        ...f,
-                        tts: {
-                          ...f.tts,
-                          corrections: f.tts.corrections.map((row, i) =>
-                            i === idx ? { ...row, from: e.target.value } : row),
-                        },
-                      }))
-                    }
-                    placeholder="text on air (e.g. GHz)"
-                    maxLength={80}
-                    className="col-span-2 col-start-1 row-start-1 min-w-0 sm:col-span-1"
-                  />
-                  <span className="col-start-1 row-start-2 shrink-0 text-[11px] text-muted sm:col-start-2 sm:row-start-1">
-                    reads as
-                  </span>
-                  <Input
-                    aria-label="Spoken form"
-                    value={c.to}
-                    onChange={(e: ChangeEvent<HTMLInputElement>) =>
-                      setForm(f => ({
-                        ...f,
-                        tts: {
-                          ...f.tts,
-                          corrections: f.tts.corrections.map((row, i) =>
-                            i === idx ? { ...row, to: e.target.value } : row),
-                        },
-                      }))
-                    }
-                    placeholder="spoken form (e.g. gigahertz)"
-                    maxLength={160}
-                    className="col-start-2 row-start-2 min-w-0 sm:col-start-3 sm:row-start-1"
-                  />
-                  <Btn
-                    sm
-                    title="Remove correction"
-                    className="col-start-3 row-start-1 size-9 shrink-0 sm:col-start-4 sm:size-auto"
-                    onClick={() =>
-                      setForm(f => ({
-                        ...f,
-                        tts: { ...f.tts, corrections: f.tts.corrections.filter((_, i) => i !== idx) },
-                      }))
-                    }
-                  >
-                    <Trash2 size={12} />
-                  </Btn>
-                </div>
-              ))}
-            </div>
-          </ScrollArea>
-          <div className="mt-3">
-            <Btn
-              className="min-h-9 sm:min-h-0"
-              // 100 mirrors the server-side TTS_CORRECTIONS_LIMIT.
-              disabled={form.tts.corrections.length >= 100}
-              onClick={() =>
-                setForm(f => ({
-                  ...f,
-                  tts: { ...f.tts, corrections: [...f.tts.corrections, { from: '', to: '' }] },
-                }))
-              }
-            >
-              Add correction
-            </Btn>
-          </div>
-        </div>
-      </Card>
+      {/* Speech corrections moved to /admin/moods (MoodsPanel). */}
 
       <SaveBar
         note={ttsDirty

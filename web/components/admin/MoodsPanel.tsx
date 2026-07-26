@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useState } from 'react';
 import { usePathname, useRouter, useSearchParams } from 'next/navigation';
-import { Trash2, Palette, Clock, CalendarDays } from 'lucide-react';
+import { Trash2, Palette, Clock, CalendarDays, Volume2 } from 'lucide-react';
 import { useAdminAuth } from '../../lib/adminAuth';
 import { notify, errorMessage } from '../../lib/notify';
 import { Card, Btn, Eyebrow } from './ui';
@@ -19,6 +19,10 @@ import FestivalsSection from './FestivalsSection';
 interface MoodEntry {
   name: string;
   clapPrompt: string;
+}
+interface Correction {
+  from: string;
+  to: string;
 }
 
 // The 8 fixed day-periods (controller context.ts getTimeContext) — only each
@@ -50,17 +54,8 @@ const NONE = '__none__';
 
 const MOODS_LIMIT = 40; // mirrors the server MOODS_LIMIT
 
-type TabId = 'vocab' | 'moments' | 'festivals';
-const TAB_IDS: TabId[] = ['vocab', 'moments', 'festivals'];
-
-// Speech corrections used to live here as a fourth tab; they went back to
-// Settings → TTS voice, where the rest of settings.tts is edited (#1186 —
-// operators looked for them under the voice, not under the moods). Old
-// bookmarks and sidebar links land on ?tab=speech, so send them on rather
-// than silently dropping them into Vocabulary.
-const RELOCATED_TABS: Record<string, string> = {
-  speech: '/admin/settings?section=tts',
-};
+type TabId = 'vocab' | 'moments' | 'festivals' | 'speech';
+const TAB_IDS: TabId[] = ['vocab', 'moments', 'festivals', 'speech'];
 
 export default function MoodsPanel() {
   const { adminFetch, needsAuth, hydrated } = useAdminAuth();
@@ -76,12 +71,6 @@ export default function MoodsPanel() {
   const rawTab = searchParams.get('tab');
   const tab: TabId = (TAB_IDS as string[]).includes(rawTab ?? '') ? (rawTab as TabId) : 'vocab';
 
-  // Forward a tab that moved out of this page (see RELOCATED_TABS).
-  const relocated = rawTab ? RELOCATED_TABS[rawTab] : undefined;
-  useEffect(() => {
-    if (relocated) router.replace(relocated);
-  }, [relocated, router]);
-
   // Working copies + saved baselines (for dirty detection).
   const [moods, setMoods] = useState<MoodEntry[] | null>(null);
   const [savedMoods, setSavedMoods] = useState<MoodEntry[]>([]);
@@ -89,6 +78,8 @@ export default function MoodsPanel() {
   const [savedSchedule, setSavedSchedule] = useState<Record<string, string>>({});
   const [weather, setWeather] = useState<Record<string, string>>({});
   const [savedWeather, setSavedWeather] = useState<Record<string, string>>({});
+  const [corrections, setCorrections] = useState<Correction[]>([]);
+  const [savedCorrections, setSavedCorrections] = useState<Correction[]>([]);
 
   const load = useCallback(async () => {
     try {
@@ -99,6 +90,7 @@ export default function MoodsPanel() {
           moods?: unknown;
           moodSchedule?: unknown;
           weatherMoods?: unknown;
+          tts?: { corrections?: unknown };
         };
       } | null;
       const v = j?.values || {};
@@ -107,12 +99,16 @@ export default function MoodsPanel() {
         ? v.moodSchedule : {}) as Record<string, string>;
       const loadedWeather = (v.weatherMoods && typeof v.weatherMoods === 'object'
         ? v.weatherMoods : {}) as Record<string, string>;
+      const loadedCorr = Array.isArray(v.tts?.corrections)
+        ? (v.tts!.corrections as Correction[]) : [];
       setMoods(loadedMoods);
       setSavedMoods(loadedMoods);
       setSchedule(loadedSchedule);
       setSavedSchedule(loadedSchedule);
       setWeather(loadedWeather);
       setSavedWeather(loadedWeather);
+      setCorrections(loadedCorr);
+      setSavedCorrections(loadedCorr);
       setErr(null);
     } catch (e) {
       setErr(e instanceof Error ? e.message : String(e));
@@ -120,11 +116,9 @@ export default function MoodsPanel() {
   }, [adminFetch]);
 
   useEffect(() => {
-    // Mid-redirect (RELOCATED_TABS) this render never shows the data — skip
-    // the fetch rather than racing it against the navigation.
-    if (!hydrated || needsAuth || relocated) return;
+    if (!hydrated || needsAuth) return;
     void load();
-  }, [hydrated, needsAuth, relocated, load]);
+  }, [hydrated, needsAuth, load]);
 
   // Deep-link: /admin/moods?tab=moments opens that tab directly (mirrors
   // /admin/imaging?tab=… and /admin/connect?tab=…). Routed through the Next
@@ -166,14 +160,17 @@ export default function MoodsPanel() {
   };
 
   if (!hydrated || needsAuth) return null;
-  // Mid-redirect (see RELOCATED_TABS) — render nothing rather than flashing the
-  // Vocabulary tab the unknown ?tab= falls back to.
-  if (relocated) return null;
 
   const savedMoodNames = savedMoods.map(m => m.name);
   const moodsDirty = JSON.stringify(moods ?? []) !== JSON.stringify(savedMoods);
   const scheduleDirty = JSON.stringify(schedule) !== JSON.stringify(savedSchedule);
   const weatherDirty = JSON.stringify(weather) !== JSON.stringify(savedWeather);
+  const effectiveCorr = corrections
+    .map(c => ({ from: c.from.trim(), to: c.to.trim() }))
+    .filter(c => c.from);
+  const correctionsDirty =
+    JSON.stringify(effectiveCorr) !== JSON.stringify(savedCorrections.map(c => ({ from: c.from ?? '', to: c.to ?? '' })));
+
   const saveMoods = () => {
     const payload = (moods ?? []).map(m => ({ name: m.name, clapPrompt: m.clapPrompt }));
     void saveSlice('moods', { moods: payload }, () => setSavedMoods(payload),
@@ -187,11 +184,17 @@ export default function MoodsPanel() {
     void saveSlice('weather', { weatherMoods: weather }, () => setSavedWeather(weather),
       'Weather moods saved');
   };
+  const saveCorrections = () => {
+    void saveSlice('corrections', { tts: { corrections: effectiveCorr } },
+      () => setSavedCorrections(effectiveCorr), 'Speech corrections saved');
+  };
+
   const loading = moods === null && !err;
   const tabs = [
     { id: 'vocab' as TabId, label: 'Vocabulary', count: moods?.length, icon: Palette },
     { id: 'moments' as TabId, label: 'Moments', count: undefined as number | undefined, icon: Clock },
     { id: 'festivals' as TabId, label: 'Festivals', count: undefined as number | undefined, icon: CalendarDays },
+    { id: 'speech' as TabId, label: 'Speech', count: moods !== null ? corrections.length : undefined, icon: Volume2 },
   ];
 
   return (
@@ -359,6 +362,82 @@ export default function MoodsPanel() {
 
       {/* --- Festivals (self-contained, composed as-is) --- */}
       {tab === 'festivals' && <FestivalsSection />}
+
+      {/* --- Speech corrections (relocated from the TTS tab) --- */}
+      {tab === 'speech' && moods !== null && (
+        <Card title="Speech corrections" sub="how names and tricky words should sound">
+          <div className="field">
+            <div className="field-hint">
+              Find-and-replace rules we apply to every line before it’s spoken, for names and
+              words the voice tends to get wrong (<em>GHz</em> →<em> gigahertz</em>, <em>Hozier</em>{' '}
+              → <em>Ho-zeer</em>). Case doesn’t matter, and it matches whole words and phrases;
+              leave the spoken form empty to drop a word entirely. New rules kick in from the next
+              line — no restart needed.
+            </div>
+            <ScrollArea className="max-h-[360px]">
+              <div className="flex flex-col gap-2 pr-2">
+                {corrections.map((c, idx) => (
+                  /* Mobile: "on air" + bin on row one, "reads as" + the spoken
+                     form on row two — two 220/260px inputs plus a label never
+                     fit the 320px a card body leaves at 390px. `sm:` puts the
+                     four back on one left-aligned line (`justify-start` is what
+                     keeps the auto tracks at content width, as the flex row
+                     was). */
+                  <div
+                    key={idx}
+                    className="grid grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-2 sm:grid-cols-[220px_auto_260px_auto] sm:justify-start"
+                  >
+                    <Input
+                      aria-label="Text on air"
+                      value={c.from}
+                      onChange={e => setCorrections(list =>
+                        list.map((row, i) => i === idx ? { ...row, from: e.target.value } : row))}
+                      placeholder="text on air (e.g. GHz)"
+                      maxLength={80}
+                      className="col-span-2 col-start-1 row-start-1 min-w-0 sm:col-span-1"
+                    />
+                    <span className="col-start-1 row-start-2 shrink-0 text-[11px] text-muted sm:col-start-2 sm:row-start-1">reads as</span>
+                    <Input
+                      aria-label="Spoken form"
+                      value={c.to}
+                      onChange={e => setCorrections(list =>
+                        list.map((row, i) => i === idx ? { ...row, to: e.target.value } : row))}
+                      placeholder="spoken form (e.g. gigahertz)"
+                      maxLength={160}
+                      className="col-start-2 row-start-2 min-w-0 sm:col-start-3 sm:row-start-1"
+                    />
+                    <Btn
+                      sm
+                      title="Remove correction"
+                      className="col-start-3 row-start-1 size-9 shrink-0 sm:col-start-4 sm:size-auto"
+                      onClick={() => setCorrections(list => list.filter((_, i) => i !== idx))}
+                    >
+                      <Trash2 size={12} />
+                    </Btn>
+                  </div>
+                ))}
+              </div>
+            </ScrollArea>
+            <div className="mt-3 flex flex-wrap items-center gap-2">
+              <Btn
+                className="min-h-9 sm:min-h-0"
+                disabled={corrections.length >= 100}
+                onClick={() => setCorrections(list => [...list, { from: '', to: '' }])}
+              >
+                Add correction
+              </Btn>
+              <Btn
+                tone="accent"
+                className="min-h-9 sm:min-h-0"
+                disabled={!correctionsDirty || busy === 'corrections'}
+                onClick={saveCorrections}
+              >
+                {busy === 'corrections' ? 'Saving…' : 'Save corrections'}
+              </Btn>
+            </div>
+          </div>
+        </Card>
+      )}
     </div>
   );
 }
