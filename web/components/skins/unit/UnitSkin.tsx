@@ -583,10 +583,7 @@ export default function UnitSkin(_props: SkinProps) {
                 )}
               />
             </div>
-            <div className="mt-auto flex min-h-[96px] flex-1 items-end gap-[18px]">
-              <span className="text-[26px] leading-none text-[#cfc9bb]" aria-hidden="true">
-                {playing ? '▶' : '■'}
-              </span>
+            <div className="mt-auto flex min-h-[96px] flex-1 items-end">
               <Bars count={7} playing={playing} className="h-full max-h-[300px] flex-1 gap-[9px]" />
             </div>
             <div
@@ -655,10 +652,7 @@ export default function UnitSkin(_props: SkinProps) {
             </span>
             <span className="truncate text-[var(--accent)] uppercase">{trackLine}</span>
           </div>
-          <div className="flex items-end gap-2.5">
-            <span className="text-[15px] leading-none text-[#cfc9bb]" aria-hidden="true">
-              {playing ? '▶' : '■'}
-            </span>
+          <div className="flex items-end">
             <Bars count={6} playing={playing} mobile className="h-[74px] flex-1 gap-[5px]" />
           </div>
           <div className="flex items-center justify-between gap-3">
