@@ -500,6 +500,12 @@ export async function load() {
         typeof stored.privacy?.password === 'string'
           ? stored.privacy.password
           : DEFAULTS.privacy.password,
+      // Absent/non-boolean coerces to the default (false), so every settings.json
+      // written before this key existed keeps its public reads byte-identical.
+      publishPersonaSouls:
+        typeof stored.privacy?.publishPersonaSouls === 'boolean'
+          ? stored.privacy.publishPersonaSouls
+          : DEFAULTS.privacy.publishPersonaSouls,
     },
     personas,
     activePersonaId,
@@ -1820,6 +1826,12 @@ export async function update(patch) {
     const pv = patch.privacy || {};
     if (pv.privatePlayer !== undefined) {
       next.privacy.privatePlayer = !!pv.privatePlayer;
+    }
+    // Disclosure toggle, not a lock: it is deliberately outside the
+    // "a lock needs a password" invariant below, needs no mixer restart, and
+    // applies live on the next public read.
+    if (pv.publishPersonaSouls !== undefined) {
+      next.privacy.publishPersonaSouls = !!pv.publishPersonaSouls;
     }
     // 'set' is the redaction sentinel from getRedacted() — ignore it so a
     // round-tripped form doesn't overwrite the stored secret.

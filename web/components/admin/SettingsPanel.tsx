@@ -146,6 +146,7 @@ export default function SettingsPanel() {
         listenerAuth: v.privacy?.listenerAuth ?? false,
         // Arrives as the 'set' sentinel ('' when unset) — never the secret.
         password: v.privacy?.password ?? '',
+        publishPersonaSouls: v.privacy?.publishPersonaSouls ?? false,
       },
       kokoroLang: v.tts?.kokoro?.lang ?? '',
       weather: {

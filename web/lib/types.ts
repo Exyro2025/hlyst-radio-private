@@ -69,7 +69,12 @@ export interface DjPublic {
 export interface SchedulePersona {
   id: string;
   name: string;
+  /** Public one-liner. Always present; '' when the operator hasn't set one. */
+  tagline?: string;
   avatar: string;
+  /** The persona's soul blurb — only when the station opted into publishing
+   *  souls (settings.privacy.publishPersonaSouls). Absent otherwise. */
+  soul?: string;
 }
 export interface ScheduleShow {
   id: string;
@@ -80,6 +85,9 @@ export interface ScheduleShow {
   /** Full multi-value mood list (#929). */
   moods?: string[];
   personaId: string;
+  /** Guest co-hosts, as ids into the payload's `personas` index (already
+   *  filtered to personas that still exist). Empty/absent = solo show. */
+  guestPersonaIds?: string[];
 }
 /** 7 entries (Sun=0..Sat=6), each a 24-slot array of showId|null. */
 export type ScheduleGrid = Record<number, Array<string | null>>;
