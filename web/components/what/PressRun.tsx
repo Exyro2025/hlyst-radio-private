@@ -35,8 +35,9 @@ function Plate({
 }: {
   plate: PressRunPlate;
   onOpen: (p: PressRunPlate) => void;
-  /** Second copy of the sequence in the seamless loop — hidden from the
-   *  accessibility tree and tab order so nothing is announced twice. */
+  /** Copy of the sequence beyond the first, rendered to cover wide viewports
+   *  in the seamless loop — hidden from the accessibility tree and tab order
+   *  so nothing is announced twice. */
   ghost?: boolean;
 }) {
   const [failed, setFailed] = useState(false);
@@ -103,28 +104,60 @@ const MarqueeRow = memo(function MarqueeRow({
   onOpen: (p: PressRunPlate) => void;
 }) {
   const reduced = useReducedMotion();
+  // useReducedMotion() resolves to its real value as soon as the client can
+  // read matchMedia, which can be at hydration itself (not after, via an
+  // effect) — branching DOM structure on `reduced` directly would then mean
+  // the very first client render disagrees with the SSR markup. Gate the
+  // structural switch on mount instead: render the marquee (matching SSR)
+  // until an effect confirms we're past hydration, then swap to the static
+  // strip for reduced-motion users.
+  const [mounted, setMounted] = useState(false);
+  useEffect(() => {
+    setMounted(true);
+  }, []);
   const x = useMotionValue(0);
   // 1 = drifting, 0 = paused; the spring is the "press winding down" ease.
   const throttle = useMotionValue(1);
   const factor = useSpring(throttle, { stiffness: 40, damping: 15 });
   const trackRef = useRef<HTMLDivElement | null>(null);
-  const halfRef = useRef(0);
+  // Width in px of ONE copy of the sequence (not the whole doubled/tripled
+  // track) — the wrap-around unit for `x`.
+  const seqRef = useRef(0);
+  // How many copies of the sequence are rendered back to back. Starts at the
+  // minimum needed for a seamless loop (2); grows to cover wide viewports so
+  // the track's trailing edge never pulls inside the viewport mid-drift.
+  const [copies, setCopies] = useState(2);
+  const copiesRef = useRef(copies);
 
   useEffect(() => {
     if (reduced) return;
     const el = trackRef.current;
     if (!el) return;
+    const wrapper = el.parentElement;
     const measure = () => {
-      const half = el.scrollWidth / 2;
-      if (halfRef.current === 0 && half > 0) {
+      // Recompute from the copies count that actually produced this
+      // scrollWidth — copiesRef may already hold a newer value written by
+      // this same callback below, so measure order can't corrupt seq.
+      const currentCopies = copiesRef.current;
+      const seq = el.scrollWidth / currentCopies;
+      if (seqRef.current === 0 && seq > 0) {
         // First measure: phase-shift the band so row seams stay unaligned.
-        x.set(-half * offsetFraction);
+        x.set(-seq * offsetFraction);
       }
-      halfRef.current = half;
+      seqRef.current = seq;
+      const wrapperWidth = wrapper?.clientWidth ?? 0;
+      if (seq > 0 && wrapperWidth > 0) {
+        const needed = Math.max(2, Math.ceil(wrapperWidth / seq) + 1);
+        if (needed !== currentCopies) {
+          copiesRef.current = needed;
+          setCopies(needed);
+        }
+      }
     };
     measure();
     const ro = new ResizeObserver(measure);
     ro.observe(el);
+    if (wrapper) ro.observe(wrapper);
     return () => ro.disconnect();
   }, [reduced, offsetFraction, x]);
 
@@ -133,18 +166,18 @@ const MarqueeRow = memo(function MarqueeRow({
   // re-renders (e.g. the parent's lightbox state) rather than being a fresh
   // inline arrow every render.
   const tick = useCallback((_: number, delta: number) => {
-    const half = halfRef.current;
-    if (reduced || half === 0) return;
+    const seq = seqRef.current;
+    if (reduced || seq === 0) return;
     const dir = direction === 'left' ? -1 : 1;
-    const pxPerMs = half / (durationSec * 1000);
+    const pxPerMs = seq / (durationSec * 1000);
     const next = x.get() + dir * pxPerMs * delta * factor.get();
-    // Wrap into (-half, 0] so the doubled track loops seamlessly either way.
-    x.set(((next % half) + half) % half - half);
+    // Wrap into [-seq, 0) so the multi-copy track loops seamlessly either way.
+    x.set(((next % seq) + seq) % seq - seq);
   }, [reduced, direction, durationSec, x, factor]);
 
   useAnimationFrame(tick);
 
-  if (reduced) {
+  if (mounted && reduced) {
     return (
       <div className="overflow-x-auto">
         <div className="flex w-max gap-6 px-6 pb-2">
@@ -165,12 +198,14 @@ const MarqueeRow = memo(function MarqueeRow({
       onBlur={() => throttle.set(1)}
     >
       <m.div ref={trackRef} className="flex w-max gap-6" style={{ x }}>
-        {plates.map(p => (
-          <Plate key={p.id} plate={p} onOpen={onOpen} />
-        ))}
-        {plates.map(p => (
-          <Plate key={`${p.id}-ghost`} plate={p} onOpen={onOpen} ghost />
-        ))}
+        {Array.from({ length: copies }, (_, i) => i).flatMap(i => plates.map(p => (
+          <Plate
+            key={i === 0 ? p.id : `${p.id}-ghost-${i}`}
+            plate={p}
+            onOpen={onOpen}
+            ghost={i > 0}
+          />
+        )))}
       </m.div>
     </div>
   );
