@@ -15,3 +15,10 @@ Next.js 15 App Router + Tailwind. Routes:
 PWA-installable (`app/manifest.js`, `app/icon.js`, dynamic icon/screenshot routes via `next/og` ImageResponse — mind Satori's constraints). `useMediaSession` wires OS lock-screen / headphone / car controls; **skip is intentionally omitted** on the listener side so a stray AirPods double-tap doesn't skip for everyone.
 
 Stream URL + API base default to same-origin (`/api`, `/stream.mp3`) for the prod image; dev overrides via `web/.env.local` (`NEXT_PUBLIC_API_URL=http://localhost:7701`, `NEXT_PUBLIC_STREAM_URL=http://localhost:7702/stream.mp3`).
+
+**Landing "Press Run" gallery.** The landing page's skin/theme interlude
+(`components/what/PressRun.tsx`) renders the 8 curated skin×theme screenshots
+in `public/screenshots/gallery/`, defined in `lib/press-run-plates.ts` (every
+skin at least once, every built-in theme exactly once). When a skin's look
+changes, re-capture against a running station:
+`cd web && npm i --no-save playwright sharp && npx tsx scripts/capture-gallery.mjs`.
