@@ -543,7 +543,7 @@ export default function UnitSkin(_props: SkinProps) {
                   <span className="font-mono text-[9px] font-bold tracking-[0.16em] text-[var(--accent)] uppercase">
                     now{like.count > 0 ? ` · ${like.count} ♥` : ''}
                   </span>
-                  <span className="line-clamp-2 font-display text-[clamp(15px,1.4vw,20px)] leading-[1.05] font-extrabold text-[var(--u-keytext)]">
+                  <span className="line-clamp-2 h-[2.2em] font-display text-[clamp(15px,1.4vw,20px)] leading-[1.05] font-extrabold text-[var(--u-keytext)]">
                     {title}
                   </span>
                   <span className="truncate font-mono text-[9px] tracking-[0.12em] text-[var(--u-keytext-dim)] uppercase">
@@ -566,7 +566,7 @@ export default function UnitSkin(_props: SkinProps) {
                   <span className="font-mono text-[9px] font-bold tracking-[0.16em] text-[var(--u-keytext-dim)]">
                     {turnClock(entryTime(h), timezone, stationLocale)}
                   </span>
-                  <span className="line-clamp-2 font-display text-[clamp(15px,1.4vw,20px)] leading-[1.05] font-extrabold text-[var(--u-keytext)]">
+                  <span className="line-clamp-2 h-[2.2em] font-display text-[clamp(15px,1.4vw,20px)] leading-[1.05] font-extrabold text-[var(--u-keytext)]">
                     {h.title ?? '—'}
                   </span>
                   <span className="truncate font-mono text-[9px] tracking-[0.12em] text-[var(--u-keytext-dim)] uppercase">
