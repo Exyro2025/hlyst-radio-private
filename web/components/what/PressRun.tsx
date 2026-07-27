@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useRef, useState } from 'react';
+import { memo, useCallback, useEffect, useRef, useState } from 'react';
 import {
   m,
   useAnimationFrame,
@@ -11,6 +11,7 @@ import {
 import EditorialReveal from '../landing/EditorialReveal';
 import { PRESS_RUN_ROWS, type PressRunPlate } from '@/lib/press-run-plates';
 import { cn } from '@/lib/cn';
+import { Dialog, DialogContent, DialogDescription, DialogTitle } from '@/components/ui/dialog';
 
 // "The Press Run" — an unnumbered full-bleed interlude between PART ONE and
 // PART TWO: every skin and every built-in theme as real screenshots, drifting
@@ -81,7 +82,12 @@ function Plate({
   );
 }
 
-function MarqueeRow({
+// Memoized so opening/closing the lightbox (a setActive call in the parent)
+// doesn't re-render every row — `plates`/`direction`/`durationSec` are stable
+// per row and `onOpen` is a useState setter, so props are shallow-equal across
+// that re-render and this component (and its useAnimationFrame subscription
+// below) skips re-rendering entirely.
+const MarqueeRow = memo(function MarqueeRow({
   plates,
   direction,
   durationSec,
@@ -122,7 +128,11 @@ function MarqueeRow({
     return () => ro.disconnect();
   }, [reduced, offsetFraction, x]);
 
-  useAnimationFrame((_, delta) => {
+  // useAnimationFrame re-subscribes (cancelFrame + frame.update) whenever this
+  // callback's identity changes, so it must stay stable across unrelated
+  // re-renders (e.g. the parent's lightbox state) rather than being a fresh
+  // inline arrow every render.
+  const tick = useCallback((_: number, delta: number) => {
     const half = halfRef.current;
     if (reduced || half === 0) return;
     const dir = direction === 'left' ? -1 : 1;
@@ -130,7 +140,9 @@ function MarqueeRow({
     const next = x.get() + dir * pxPerMs * delta * factor.get();
     // Wrap into (-half, 0] so the doubled track loops seamlessly either way.
     x.set(((next % half) + half) % half - half);
-  });
+  }, [reduced, direction, durationSec, x, factor]);
+
+  useAnimationFrame(tick);
 
   if (reduced) {
     return (
@@ -162,10 +174,10 @@ function MarqueeRow({
       </m.div>
     </div>
   );
-}
+});
 
 export default function PressRun() {
-  const [, setActive] = useState<PressRunPlate | null>(null); // lightbox lands in the next task
+  const [active, setActive] = useState<PressRunPlate | null>(null);
 
   return (
     <EditorialReveal className="bs-section">
@@ -195,6 +207,36 @@ export default function PressRun() {
         </div>
         <div className="bs-rule-double" />
       </div>
+
+      <Dialog open={active !== null} onOpenChange={open => { if (!open) setActive(null); }}>
+        <DialogContent className="max-w-[min(1100px,94vw)] gap-0 border-ink bg-bg p-0 sm:rounded-none">
+          {active && (
+            <m.figure
+              initial={{ opacity: 0, scale: 0.98 }}
+              animate={{ opacity: 1, scale: 1 }}
+              transition={{ duration: 0.22, ease: [0.2, 0.7, 0.2, 1] }}
+              className="m-0"
+            >
+              <img
+                src={active.src}
+                alt={active.alt}
+                width={1600}
+                height={1000}
+                className="block h-auto w-full border-b border-ink"
+              />
+              <figcaption className="flex flex-col gap-1 p-4">
+                <DialogTitle className="text-[11px] font-medium tracking-[0.18em] text-muted uppercase">
+                  <span className="font-bold text-vermilion">PLATE No. {active.no}&nbsp;</span>
+                  · {active.skinName} × {active.themeName}
+                </DialogTitle>
+                <DialogDescription className="text-[14px] leading-[1.5] text-ink">
+                  {active.skinDescription}
+                </DialogDescription>
+              </figcaption>
+            </m.figure>
+          )}
+        </DialogContent>
+      </Dialog>
     </EditorialReveal>
   );
 }
