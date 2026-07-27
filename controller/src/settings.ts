@@ -54,6 +54,7 @@ import {
   WEATHER_MOOD_DEFAULTS,
   applyInlineKey,
   applyLlmLegPatch,
+  canonicalKokoroLang,
   clamp01,
   clampAgentTimeout,
   clampBudgetSoftPct,
@@ -535,10 +536,13 @@ export async function load() {
           KOKORO_VOICE_RE.test(stored.tts.kokoro.voice)
             ? stored.tts.kokoro.voice
             : DEFAULTS.tts.kokoro.voice,
+        // Legacy codes are canonicalised first (`fr` → `fr-fr`, #1213), so an
+        // operator who chose French before the fix keeps French rather than
+        // dropping back to the auto-detect default.
         lang:
           typeof stored.tts?.kokoro?.lang === 'string' &&
-          KOKORO_LANG_RE.test(stored.tts.kokoro.lang)
-            ? stored.tts.kokoro.lang
+          KOKORO_LANG_RE.test(canonicalKokoroLang(stored.tts.kokoro.lang))
+            ? canonicalKokoroLang(stored.tts.kokoro.lang)
             : DEFAULTS.tts.kokoro.lang,
       },
       chatterbox: {
@@ -1322,7 +1326,9 @@ export async function update(patch) {
         next.tts.kokoro.voice = v;
       }
       if (k.lang !== undefined) {
-        const v = String(k.lang).trim();
+        // Canonicalise before validating so a pre-#1213 client still posting
+        // `fr` lands on `fr-fr` rather than being rejected outright.
+        const v = canonicalKokoroLang(String(k.lang).trim());
         if (v && !KOKORO_LANG_RE.test(v)) {
           throw new Error(`tts.kokoro.lang must be one of: ${KOKORO_LANGS.join(', ')}`);
         }
