@@ -36,6 +36,7 @@ import { cn } from '@/lib/cn';
 import { useStationClient } from '@/lib/stationClient';
 import { fmtClockMinute, fmtTime, normalizeStationLocale } from '@/lib/format';
 import {
+  contextLine,
   entryTime,
   listenerCountOf,
   progressRatio,
@@ -234,6 +235,13 @@ export default function UnitSkin(_props: SkinProps) {
       : `track ${trackNo} · ${fmtTime(elapsed)} · live`;
   const nextLine = upNext?.title ? `next: ${upNext.title}` : "next: the dj's call";
   const footerRight = `${showName || 'freeform'} · ${djName}`;
+  // The masthead caption — live show facts where the handoff engraved the
+  // model name, matching the other skins' mastheads.
+  const showLine = [
+    showName || 'freeform',
+    `with ${djName}`,
+    contextLine(context) || (offline ? 'off air' : 'on air'),
+  ].join(' · ');
 
   // Station-time clock (mobile status strip). Seeded in an effect, not at
   // render, so SSR markup can't mismatch the client's clock on hydration.
@@ -410,7 +418,7 @@ export default function UnitSkin(_props: SkinProps) {
                 'truncate font-mono text-[10px] font-bold tracking-[0.22em] uppercase',
               )}
             >
-              sw-9 · net / fm receiver · musical broadcast
+              {showLine}
             </span>
           </div>
           <div
@@ -652,10 +660,10 @@ export default function UnitSkin(_props: SkinProps) {
           <span
             className={cn(
               styles.engravedSoft,
-              'font-mono text-[8px] font-bold tracking-[0.2em] uppercase',
+              'min-w-0 truncate pl-3 font-mono text-[8px] font-bold tracking-[0.2em] uppercase',
             )}
           >
-            sw-9 · net receiver
+            {showName || 'freeform'} · {djName}
           </span>
         </div>
 
