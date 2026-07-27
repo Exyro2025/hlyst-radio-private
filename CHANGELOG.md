@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.1.1](https://github.com/perminder-klair/subwave/compare/v1.1.0...v1.1.1) (2026-07-27)
+
+
+### Bug Fixes
+
+* **aio:** copy Node 22 from the official image instead of NodeSource ([#1225](https://github.com/perminder-klair/subwave/issues/1225)) ([4c6a7ea](https://github.com/perminder-klair/subwave/commit/4c6a7eaf772c6e11c1f390232b912c899318dc3a))
+
 ## [1.1.0](https://github.com/perminder-klair/subwave/compare/v1.0.0...v1.1.0) (2026-07-27)
 
 
