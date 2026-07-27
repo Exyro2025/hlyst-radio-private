@@ -69,11 +69,16 @@ export function LineEditor({
     <div className="min-w-0">
       <div className="mb-0.5 flex flex-wrap items-baseline gap-x-3 gap-y-0.5">
         <span className="eyebrow flex-none whitespace-nowrap text-ink">Write an order</span>
+        {/* The instruction half is the part that truncates on a phone, and the
+            sentence below it is self-evidently a sentence to fill in. What the
+            operator cannot get anywhere else is what those hours run right
+            now, so that half stays at every width. */}
         <Mu className="min-w-0 flex-1 truncate tracking-[0.08em]">
-          Fill in the sentence, then add it to the schedule · {dayName(line.day)} {hhmm(line.start)} → {hhmm(line.end)}{' '}
+          <span className="hidden sm:inline">Fill in the sentence, then add it to the schedule · </span>
+          {dayName(line.day)} {hhmm(line.start)} → {hhmm(line.end)}{' '}
           {currentName ? `is currently ${currentName}` : 'is currently silent'}
         </Mu>
-        <Mu className="ml-auto flex-none text-[8.5px] whitespace-nowrap">Becomes order №{orderNo}</Mu>
+        <Mu className="ml-auto hidden flex-none text-[8.5px] whitespace-nowrap sm:block">Becomes order №{orderNo}</Mu>
       </div>
       <div className="mt-2 border border-ink bg-[var(--page-bg)] p-[15px]">
         <div className="flex flex-wrap items-center gap-2 text-[14.5px] text-ink">

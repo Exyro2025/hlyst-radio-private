@@ -91,7 +91,17 @@ export default function Board({
   return (
     <section>
       <div className="mb-3 flex flex-wrap items-center gap-x-3.5 gap-y-2 px-5 sm:px-[30px]">
-        <Mu className="min-w-0 flex-1 tracking-[0.08em]">
+        {/* Two lengths, not one truncated line. The long copy runs to three
+            wrapped rows of mono on a phone, and half of what it describes is
+            mouse-only: HTML5 drag-and-drop does not fire from a touch, and the
+            7px card edges are a poor target for a fingertip. The short copy
+            names the gestures a phone can actually perform. */}
+        <Mu className="min-w-0 flex-1 tracking-[0.08em] sm:hidden">
+          {armedName
+            ? `${armedName} is armed — tap an hour to book it, or a day header for the whole day`
+            : 'Tap a silent hour to book a show — tap a card to edit its order, its × to take it off the air'}
+        </Mu>
+        <Mu className="hidden min-w-0 flex-1 tracking-[0.08em] sm:block">
           {armedName
             ? `${armedName} is armed — click any hour to book it, a day header for the whole day, or an hour in the gutter for that hour all week`
             : 'Click a silent hour (or drag a show onto it) to book a show — click a card to edit its order, drag its top or bottom edge to change the hours, its × to take it off the air'}

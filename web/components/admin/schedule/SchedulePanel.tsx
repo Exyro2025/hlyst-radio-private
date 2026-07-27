@@ -573,8 +573,17 @@ export default function SchedulePanel() {
             <span className="font-mono text-[11.5px] font-bold tracking-[0.06em] text-ink">{clockLabel}</span>
             <Mu className="text-[9px]">{zoneLabel}</Mu>
           </div>
-          <div className="ml-auto flex w-full flex-none flex-wrap items-center gap-3 sm:w-auto sm:flex-nowrap">
-            <span className="flex flex-none items-center gap-2">
+          {/* Phones get the status and Save from `SaveBar` alone. It is sticky
+              for exactly as long as the week is dirty, carries Review and
+              Discard beside the same button, and follows the operator down
+              into the board where the edits actually happen — so repeating all
+              of it here just spent a row of a 24-hour screen saying it twice.
+              With nothing to save there is nothing to show either. */}
+          {/* No `w-full` on a phone any more: with the status and Save gone,
+              the lone New-show link sizes to its content and sits beside the
+              clock wherever there is room instead of claiming a row. */}
+          <div className="ml-auto flex flex-none flex-wrap items-center gap-3 sm:flex-nowrap">
+            <span className="hidden flex-none items-center gap-2 sm:flex">
               {dirty > 0 && <span aria-hidden="true" className="size-1.5 bg-[var(--accent)]" />}
               <Mu className={cn('text-[9px] whitespace-nowrap', dirty > 0 && 'text-ink')}>
                 {dirty > 0 ? `${dirty} unsaved edit${dirty === 1 ? '' : 's'}` : 'all changes saved'}
@@ -595,7 +604,7 @@ export default function SchedulePanel() {
             <Button
               variant="accent"
               size="sm"
-              className="min-h-9 sm:min-h-0"
+              className="hidden sm:inline-flex"
               onClick={saveWeek}
               disabled={busy || dirty === 0}
             >
@@ -634,6 +643,9 @@ export default function SchedulePanel() {
             name={showById(nextBlock.showId)?.name ?? 'Nobody in the chair'}
             color={nextBlock.showId ? colorOf(nextBlock.showId) : null}
             meta={metaOf(nextBlock.showId)}
+            // Hiding "After that" makes this the last cell a phone shows, and
+            // its own rule would double up against the takeover strip's.
+            className="max-sm:border-b-0"
           />
           <NowCell
             label="After that"
@@ -642,18 +654,32 @@ export default function SchedulePanel() {
             color={laterBlock.showId ? colorOf(laterBlock.showId) : null}
             meta={metaOf(laterBlock.showId)}
             last
+            // Three stacked cells is ~190px of a phone screen spent on what is
+            // playing before any of the week is visible. On air and Up next
+            // are the two an operator acts on; the hour after that is already
+            // in the board they are scrolling to.
+            className="hidden sm:block"
           />
         </div>
 
         {/* Takeover strip */}
         <div className="flex flex-wrap items-center gap-x-3.5 gap-y-2 border-t border-separator-strong bg-[color-mix(in_oklab,var(--ink)_5%,var(--page-bg))] px-5 py-[11px] sm:px-[22px]">
           <span className="eyebrow flex-none text-ink">Takeover</span>
-          <Mu className="min-w-0 flex-1 truncate text-[9px]">
+          {/* Truncated to "…THE SCHEDULE PICKS…" on a phone, which is noise
+              rather than explanation — the Pin button and its own controls say
+              the rest. */}
+          <Mu className="hidden min-w-0 flex-1 truncate text-[9px] sm:block">
             Jump a show to the front of the queue — the schedule picks up again after
           </Mu>
-          {/* Full-width + wrapping on a phone: the controls run ~430px wide,
-              so on one flex-none line the Pin button falls off the screen. */}
-          <div className="ml-auto flex w-full flex-none flex-wrap items-center gap-2.5 sm:w-auto sm:flex-nowrap">
+          {/* Full-width + wrapping on a phone only once there is something to
+              wrap: expanded, the controls run ~430px and the Pin button would
+              fall off the screen. Collapsed it is one button, and giving that
+              a row of its own is how a monthly action came to cost the same
+              vertical space as an hour of the week. */}
+          <div className={cn(
+            'ml-auto flex flex-none flex-wrap items-center gap-2.5 sm:w-auto sm:flex-nowrap',
+            takeoverOpen || liveOverride ? 'w-full' : 'w-auto',
+          )}>
             {!liveOverride && !takeoverOpen ? (
               <Button
                 variant="ghost"
@@ -927,7 +953,7 @@ export default function SchedulePanel() {
 }
 
 function NowCell({
-  label, live, time, left, name, color, meta, pct, last,
+  label, live, time, left, name, color, meta, pct, last, className,
 }: {
   label: string;
   live?: boolean;
@@ -938,6 +964,8 @@ function NowCell({
   meta: string;
   pct?: number;
   last?: boolean;
+  /** Responsive overrides from the caller (which cells a phone shows). */
+  className?: string;
 }) {
   const barRef = useRef<HTMLDivElement>(null);
   useDynamicStyle(barRef, { width: `${pct ?? 0}%` });
@@ -948,6 +976,7 @@ function NowCell({
         // Stacked on a phone (grid-cols-1), so the divider runs along the
         // bottom; the column rule comes back with the 3-up grid at sm.
         !last && 'border-b border-separator-strong sm:border-r sm:border-b-0',
+        className,
       )}
     >
       <div className="mb-1 flex items-center gap-2">
