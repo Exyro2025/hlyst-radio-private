@@ -173,11 +173,14 @@ export default function Board({
               readable, which is exactly what releasing this at `sm` broke. */}
           <div className="sticky left-0 z-10 w-[42px] flex-none bg-[var(--card-bg)] pt-[43px]">
             {HOURS.map(h => (
+              // aria-disabled, not disabled: Firefox drops the tooltip (and
+              // focus) on a disabled control, and the title is the only
+              // in-place explanation of what arming a show unlocks here.
               <button
                 key={h}
                 type="button"
-                disabled={!armedShowId}
-                onClick={() => onFillHour(h)}
+                aria-disabled={!armedShowId}
+                onClick={armedShowId ? () => onFillHour(h) : undefined}
                 title={armedName
                   ? `Put “${armedName}” on ${hh(h)}:00 every day (again to clear it)`
                   : `${hh(h)}:00 — arm a show on the shelf to fill this hour all week`}
@@ -260,11 +263,12 @@ function DayColumn({
     <div className="flex min-w-[164px] flex-1 flex-col border border-ink bg-[var(--page-bg)] sm:min-w-0">
       {/* The header fills the day with the armed brush — the bulk gesture the
           paint-brush grid had. Fold moved to the footer, where the column was
-          already printing the word. */}
+          already printing the word. aria-disabled rather than disabled so the
+          explanatory title still shows in Firefox (see the hour gutter). */}
       <button
         type="button"
-        disabled={!armedShowId}
-        onClick={onFillDay}
+        aria-disabled={!armedShowId}
+        onClick={armedShowId ? onFillDay : undefined}
         title={armedName
           ? `Put “${armedName}” on all of ${name} (again to clear it)`
           : `${name} — arm a show on the shelf to fill the whole day in one click`}
@@ -310,11 +314,13 @@ function DayColumn({
       </div>
       <div className="flex items-center gap-2 border-t border-separator-strong px-2.5 py-2">
         <Mu className="text-[8px]">{booked} h booked</Mu>
+        {/* min-h-9 on a phone: fold used to be the 38px header, and an 8px
+            text label alone is no tap target. */}
         <button
           type="button"
           onClick={onToggleFold}
           title={`Fold ${name} out of the way`}
-          className="ml-auto cursor-pointer border-0 bg-transparent p-0 font-mono text-[8px] tracking-[0.16em] text-muted uppercase hover:text-ink"
+          className="ml-auto min-h-9 cursor-pointer border-0 bg-transparent p-0 font-mono text-[8px] tracking-[0.16em] text-muted uppercase hover:text-ink sm:min-h-0"
         >
           Fold
         </button>

@@ -255,7 +255,10 @@ export default function SchedulePanel() {
   useEffect(() => {
     if (!armedId) return;
     const onKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') setArmedShowId(null);
+      // A Radix layer that consumed this Escape (the review modal, a slot
+      // menu) preventDefaults it from a document-capture listener before this
+      // bubble listener runs — closing an overlay must not also drop the brush.
+      if (e.key === 'Escape' && !e.defaultPrevented) setArmedShowId(null);
     };
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
