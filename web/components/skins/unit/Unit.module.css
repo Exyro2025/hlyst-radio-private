@@ -75,7 +75,11 @@
   text-shadow: 0 1px 0 rgba(255, 255, 255, 0.35);
 }
 
-/* Speaker grille — perforated field, pure CSS. */
+/* Speaker grille — perforated field, pure CSS. The base paints the metal and
+   its dark holes; .grilleArt lays the on-air cover over it, masked to the
+   SAME dot grid (blurred + desaturated), so each perforation carries a shade
+   of the artwork while the panel still reads as a grille. .grilleShade holds
+   the recess shadows above the art so the edges stay sunken. */
 .grille {
   border: 1px solid var(--u-line);
   background-color: color-mix(in oklab, var(--bg) 90%, var(--ink));
@@ -85,6 +89,24 @@
     transparent 2.4px
   );
   background-size: 15px 15px;
+}
+.grilleArt {
+  /* A dark wash multiplied into the cover keeps every hole visibly darker
+     than the metal field, so bright artwork can't dissolve the perforation. */
+  background-image:
+    linear-gradient(rgba(23, 21, 15, 0.45), rgba(23, 21, 15, 0.45)),
+    var(--u-cover);
+  background-blend-mode: multiply;
+  background-size: cover;
+  background-position: center;
+  filter: blur(1px) saturate(1.1);
+  opacity: 0.95;
+  -webkit-mask-image: radial-gradient(circle at center, #000 2.1px, transparent 2.4px);
+  -webkit-mask-size: 15px 15px;
+  mask-image: radial-gradient(circle at center, #000 2.1px, transparent 2.4px);
+  mask-size: 15px 15px;
+}
+.grilleShade {
   box-shadow:
     inset 0 2px 6px rgba(0, 0, 0, 0.28),
     inset 0 -1px 0 rgba(255, 255, 255, 0.4);

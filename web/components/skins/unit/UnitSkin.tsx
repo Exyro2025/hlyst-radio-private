@@ -32,6 +32,7 @@ import { useElapsed } from '@/hooks/useElapsed';
 import { useDynamicStyle } from '@/hooks/useDynamicStyle';
 import ThemeSwitcher from '@/components/ThemeSwitcher';
 import { cn } from '@/lib/cn';
+import { useStationClient } from '@/lib/stationClient';
 import { fmtClockMinute, fmtTime, normalizeStationLocale } from '@/lib/format';
 import {
   entryTime,
@@ -159,6 +160,19 @@ function Knob({
   );
 }
 
+/** The speaker grille. When a library track is on air its cover rides the
+ *  root's --u-cover var and paints through the perforation as a halftone —
+ *  the artwork visible only inside the holes, so the panel keeps reading as
+ *  hardware. Falls back to the plain metal grid when no artwork exists. */
+function Grille({ hasArt, className }: { hasArt: boolean; className?: string }) {
+  return (
+    <div className={cn(styles.grille, 'relative overflow-hidden', className)} aria-hidden="true">
+      {hasArt && <div className={cn(styles.grilleArt, 'absolute inset-0')} />}
+      <div className={cn(styles.grilleShade, 'pointer-events-none absolute inset-0')} />
+    </div>
+  );
+}
+
 /** The mount fader — hardware trim for the stream mounts. The core owns mount
  *  selection (the probe in usePlayer), so this stays a physical prop like
  *  Platter's strobe rim: cap parked on the MP3 floor every listener gets. */
@@ -192,6 +206,7 @@ export default function UnitSkin(_props: SkinProps) {
   const { tunedIn, status, volume, muted, offline, signal } = usePlayerAudio();
   const { toggleMute, setVolume } = usePlayerActions();
   const { showOverlay, showTuneIn, tuneInFromOverlay, handleTune } = useTuneInGate();
+  const client = useStationClient();
 
   const elapsed = useElapsed(trackStartedAt);
   const stationLocale = normalizeStationLocale(locale);
@@ -261,12 +276,18 @@ export default function UnitSkin(_props: SkinProps) {
     escape: () => setModal(null),
   });
 
-  // Progress fill + both knob pointers ride root CSS vars (no inline styles).
+  // On-air cover art, shown as a halftone through the speaker grille.
+  const coverUrl =
+    !offline && nowPlaying?.subsonic_id ? client.coverUrl(nowPlaying.subsonic_id) : null;
+
+  // Progress fill, both knob pointers and the grille artwork ride root CSS
+  // vars (no inline styles).
   const rootRef = useRef<HTMLDivElement | null>(null);
   useDynamicStyle(rootRef, {
     '--pf': ratio ?? 0,
     '--vol-rot': `${(-135 + clamp01(volume) * 270).toFixed(1)}deg`,
     '--log-rot': `${24 + logAt * 18}deg`,
+    '--u-cover': coverUrl ? `url("${coverUrl}")` : null,
   });
 
   // ── shared atoms ────────────────────────────────────────────────────────
@@ -454,7 +475,7 @@ export default function UnitSkin(_props: SkinProps) {
             </div>
 
             {/* speaker grille */}
-            <div className={cn(styles.grille, 'min-h-10 flex-1')} aria-hidden="true" />
+            <Grille hasArt={!!coverUrl} className="min-h-10 flex-1" />
 
             {/* knob rail */}
             <div
@@ -702,7 +723,7 @@ export default function UnitSkin(_props: SkinProps) {
         </div>
 
         {/* speaker grille absorbs the slack */}
-        <div className={cn(styles.grille, 'mx-4 mt-3.5 min-h-6 flex-1')} aria-hidden="true" />
+        <Grille hasArt={!!coverUrl} className="mx-4 mt-3.5 min-h-6 flex-1" />
 
         {/* key rows */}
         <div className="mx-4 mt-3.5 grid flex-none grid-cols-3 gap-2.5">
