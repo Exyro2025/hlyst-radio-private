@@ -2,8 +2,7 @@
 
 // Small shared atoms for the schedule page — the design-system patterns the
 // Rundown repeats everywhere: colour chips, the underlined "slot" dropdown
-// (an inline editable value in a sentence), segmented text buttons, and the
-// M T W T F S S day pills.
+// (an inline editable value in a sentence), and the M T W T F S S day pills.
 
 import type { ReactNode } from 'react';
 import { useRef } from 'react';
@@ -91,37 +90,6 @@ export function SlotMenu({
         </DropdownMenuGroup>
       </DropdownMenuContent>
     </DropdownMenu>
-  );
-}
-
-/** Segmented text button (the spSeg pattern) — mono caps, ink fill when on. */
-export function SegBtn({
-  on,
-  onClick,
-  children,
-  title,
-}: {
-  on?: boolean;
-  onClick: () => void;
-  children: ReactNode;
-  title?: string;
-}) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      title={title}
-      aria-pressed={on}
-      className={cn(
-        // min-h on the phone only — the desktop metric is the padding.
-        'min-h-9 cursor-pointer border px-2.5 py-[5px] font-mono text-[10px] font-bold tracking-[0.2em] uppercase sm:min-h-0',
-        on
-          ? 'border-ink bg-ink text-bg'
-          : 'border-separator-strong bg-transparent text-muted hover:border-ink hover:text-ink',
-      )}
-    >
-      {children}
-    </button>
   );
 }
 
