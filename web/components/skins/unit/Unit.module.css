@@ -96,11 +96,12 @@
 .grilleArt {
   display: flex;
   justify-content: center;
-  filter: blur(1px) saturate(1.1);
-  opacity: 0.95;
-  -webkit-mask-image: radial-gradient(circle at center, #000 2.1px, transparent 2.4px);
+  filter: blur(1px) saturate(1.15);
+  /* Art dots run larger than the base perforation (3.4px vs 2.1px on the
+     same 15px pitch) so the sleeve reads clearly while staying a dot grid. */
+  -webkit-mask-image: radial-gradient(circle at center, #000 3.4px, transparent 3.8px);
   -webkit-mask-size: 15px 15px;
-  mask-image: radial-gradient(circle at center, #000 2.1px, transparent 2.4px);
+  mask-image: radial-gradient(circle at center, #000 3.4px, transparent 3.8px);
   mask-size: 15px 15px;
 }
 .grilleArtBox {
@@ -110,7 +111,7 @@
   /* A dark wash multiplied into the cover keeps every hole visibly darker
      than the metal field, so bright artwork can't dissolve the perforation. */
   background-image:
-    linear-gradient(rgba(23, 21, 15, 0.45), rgba(23, 21, 15, 0.45)),
+    linear-gradient(rgba(23, 21, 15, 0.25), rgba(23, 21, 15, 0.25)),
     var(--u-cover);
   background-blend-mode: multiply;
   background-size: contain;
