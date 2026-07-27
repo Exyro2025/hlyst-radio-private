@@ -32,6 +32,9 @@
      default light theme), and its faded sibling. */
   --u-keytext: color-mix(in oklab, var(--bg) 87%, var(--ink));
   --u-keytext-dim: color-mix(in srgb, var(--u-keytext) 60%, transparent);
+  /* Cover-art tint (useCoverColors) — overridden from JS while art is on
+     air; the default resolves every tinted formula back to plain metal. */
+  --u-tint: color-mix(in oklab, var(--bg) 90%, var(--ink));
   border: 1px solid var(--ink);
   background: linear-gradient(
     180deg,
@@ -82,13 +85,33 @@
    the recess shadows above the art so the edges stay sunken. */
 .grille {
   border: 1px solid var(--u-line);
-  background-color: color-mix(in oklab, var(--bg) 90%, var(--ink));
+  /* The metal field takes a shade of the artwork's dominant colour so the
+     halftone square sits in a matching panel instead of on bare metal. */
+  background-color: color-mix(
+    in oklab,
+    var(--u-tint) 22%,
+    color-mix(in oklab, var(--bg) 88%, var(--ink))
+  );
   background-image: radial-gradient(
     circle at center,
     color-mix(in oklab, var(--ink) 92%, #000) 2.1px,
     transparent 2.4px
   );
-  background-size: 15px 15px;
+  background-size: 11px 11px;
+}
+/* Full-bleed, heavily blurred copy of the cover glowing through every hole —
+   the bridge that lets the sharp centre square melt into the panel. Same dot
+   mask as the art layer so all holes read one size. */
+.grilleWash {
+  background-image: var(--u-cover);
+  background-size: cover;
+  background-position: center;
+  filter: blur(22px) saturate(1.2);
+  opacity: 0.5;
+  -webkit-mask-image: radial-gradient(circle at center, #000 3.4px, transparent 3.8px);
+  -webkit-mask-size: 11px 11px;
+  mask-image: radial-gradient(circle at center, #000 3.4px, transparent 3.8px);
+  mask-size: 11px 11px;
 }
 /* The dot mask + filter live on this full-bleed layer so the halftone grid
    stays aligned with the base perforation; the artwork itself paints in the
@@ -98,11 +121,11 @@
   justify-content: center;
   filter: blur(1px) saturate(1.15);
   /* Art dots run larger than the base perforation (3.4px vs 2.1px on the
-     same 15px pitch) so the sleeve reads clearly while staying a dot grid. */
+     same 11px pitch) so the sleeve reads clearly while staying a dot grid. */
   -webkit-mask-image: radial-gradient(circle at center, #000 3.4px, transparent 3.8px);
-  -webkit-mask-size: 15px 15px;
+  -webkit-mask-size: 11px 11px;
   mask-image: radial-gradient(circle at center, #000 3.4px, transparent 3.8px);
-  mask-size: 15px 15px;
+  mask-size: 11px 11px;
 }
 .grilleArtBox {
   height: 100%;

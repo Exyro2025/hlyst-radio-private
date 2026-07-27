@@ -30,6 +30,7 @@ import { useTuneInGate } from '@/components/player/useTuneInGate';
 import { useKeyboardShortcuts } from '@/hooks/useKeyboardShortcuts';
 import { useElapsed } from '@/hooks/useElapsed';
 import { useDynamicStyle } from '@/hooks/useDynamicStyle';
+import { useCoverColors } from '@/hooks/useCoverColors';
 import ThemeSwitcher from '@/components/ThemeSwitcher';
 import { cn } from '@/lib/cn';
 import { useStationClient } from '@/lib/stationClient';
@@ -167,6 +168,7 @@ function Knob({
 function Grille({ hasArt, className }: { hasArt: boolean; className?: string }) {
   return (
     <div className={cn(styles.grille, 'relative overflow-hidden', className)} aria-hidden="true">
+      {hasArt && <div className={cn(styles.grilleWash, 'absolute inset-0')} />}
       {hasArt && (
         <div className={cn(styles.grilleArt, 'absolute inset-0')}>
           <div className={styles.grilleArtBox} />
@@ -280,9 +282,11 @@ export default function UnitSkin(_props: SkinProps) {
     escape: () => setModal(null),
   });
 
-  // On-air cover art, shown as a halftone through the speaker grille.
+  // On-air cover art, shown as a halftone through the speaker grille; its
+  // dominant colour tints the grille metal so the panel reads seamless.
   const coverUrl =
     !offline && nowPlaying?.subsonic_id ? client.coverUrl(nowPlaying.subsonic_id) : null;
+  const coverColors = useCoverColors(coverUrl);
 
   // Progress fill, both knob pointers and the grille artwork ride root CSS
   // vars (no inline styles).
@@ -292,6 +296,7 @@ export default function UnitSkin(_props: SkinProps) {
     '--vol-rot': `${(-135 + clamp01(volume) * 270).toFixed(1)}deg`,
     '--log-rot': `${24 + logAt * 18}deg`,
     '--u-cover': coverUrl ? `url("${coverUrl}")` : null,
+    '--u-tint': coverUrl ? coverColors.vibrant : null,
   });
 
   // ── shared atoms ────────────────────────────────────────────────────────
