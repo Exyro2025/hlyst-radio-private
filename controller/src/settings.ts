@@ -54,6 +54,7 @@ import {
   WEATHER_MOOD_DEFAULTS,
   applyInlineKey,
   applyLlmLegPatch,
+  canonicalKokoroLang,
   clamp01,
   clampAgentTimeout,
   clampBudgetSoftPct,
@@ -500,6 +501,12 @@ export async function load() {
         typeof stored.privacy?.password === 'string'
           ? stored.privacy.password
           : DEFAULTS.privacy.password,
+      // Absent/non-boolean coerces to the default (false), so every settings.json
+      // written before this key existed keeps its public reads byte-identical.
+      publishPersonaSouls:
+        typeof stored.privacy?.publishPersonaSouls === 'boolean'
+          ? stored.privacy.publishPersonaSouls
+          : DEFAULTS.privacy.publishPersonaSouls,
     },
     personas,
     activePersonaId,
@@ -529,10 +536,13 @@ export async function load() {
           KOKORO_VOICE_RE.test(stored.tts.kokoro.voice)
             ? stored.tts.kokoro.voice
             : DEFAULTS.tts.kokoro.voice,
+        // Legacy codes are canonicalised first (`fr` → `fr-fr`, #1213), so an
+        // operator who chose French before the fix keeps French rather than
+        // dropping back to the auto-detect default.
         lang:
           typeof stored.tts?.kokoro?.lang === 'string' &&
-          KOKORO_LANG_RE.test(stored.tts.kokoro.lang)
-            ? stored.tts.kokoro.lang
+          KOKORO_LANG_RE.test(canonicalKokoroLang(stored.tts.kokoro.lang))
+            ? canonicalKokoroLang(stored.tts.kokoro.lang)
             : DEFAULTS.tts.kokoro.lang,
       },
       chatterbox: {
@@ -1316,7 +1326,9 @@ export async function update(patch) {
         next.tts.kokoro.voice = v;
       }
       if (k.lang !== undefined) {
-        const v = String(k.lang).trim();
+        // Canonicalise before validating so a pre-#1213 client still posting
+        // `fr` lands on `fr-fr` rather than being rejected outright.
+        const v = canonicalKokoroLang(String(k.lang).trim());
         if (v && !KOKORO_LANG_RE.test(v)) {
           throw new Error(`tts.kokoro.lang must be one of: ${KOKORO_LANGS.join(', ')}`);
         }
@@ -1820,6 +1832,12 @@ export async function update(patch) {
     const pv = patch.privacy || {};
     if (pv.privatePlayer !== undefined) {
       next.privacy.privatePlayer = !!pv.privatePlayer;
+    }
+    // Disclosure toggle, not a lock: it is deliberately outside the
+    // "a lock needs a password" invariant below, needs no mixer restart, and
+    // applies live on the next public read.
+    if (pv.publishPersonaSouls !== undefined) {
+      next.privacy.publishPersonaSouls = !!pv.publishPersonaSouls;
     }
     // 'set' is the redaction sentinel from getRedacted() — ignore it so a
     // round-tripped form doesn't overwrite the stored secret.
