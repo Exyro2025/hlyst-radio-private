@@ -1715,7 +1715,7 @@ class Queue {
         // REMAINS of it (never its full duration — this cycle also runs from
         // the deadline backstop and from boot recovery, part-way through a
         // track, and the elapsed part would push `showAt` over the next
-        // boundary early, #1204); with one (deadline path) it follows the
+        // boundary early, #1205); with one (deadline path) it follows the
         // HELD track, so the lead is on-air remaining + the held track's
         // length. Unknown clock → no look-ahead, today's behaviour.
         //

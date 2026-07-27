@@ -166,7 +166,7 @@ function main() {
     assert.equal(pickLeadSec(120), 120);
   });
 
-  test('#1204 — a part-played track cannot push showAt past the boundary', () => {
+  test('#1205 — a part-played track cannot push showAt past the boundary', () => {
     // Reported case: 20:00-22:00 After Hours → 22:00 Discovery. At 21:55 the
     // deadline backstop fires the cycle with an empty queue; the on-air track
     // started 21:50 and runs 7 min, so it ends at 21:57 and the next pick is

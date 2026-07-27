@@ -59,7 +59,7 @@ export const PICK_SHOW_LOOKAHEAD_SEC = 120;
 // track — which walks `showAt` across the next schedule boundary while the
 // real next track still starts inside the current show. That is what aired a
 // handoff five-plus minutes early, over the middle of a song, with the session
-// flipped to a show `/now-playing` still reported as the old one (#1204).
+// flipped to a show `/now-playing` still reported as the old one (#1205).
 //
 //  - `heldSec` null → the pick follows the ON-AIR track: lead = its remaining.
 //  - `heldSec` set  → the deadline path, where the pick follows a HELD track
