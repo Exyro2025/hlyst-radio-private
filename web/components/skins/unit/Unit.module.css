@@ -2,13 +2,16 @@
    soft-touch keys, weighted knobs, and every live fact inside one glowing
    dot-matrix window. Design ref: design_handoff_unit_sw9 (Skins Canvas 5a).
 
-   The hardware palette is intentionally off-token (brushed metal is metal in
-   any theme, like the tape on Spool's successor-in-spirit and the record on
-   Platter); the vermilion accent rides the theme's --accent so operator
-   palettes still re-tint the lamps, LEDs and progress fill. Everything that
-   moves is a co-located keyframe idling at `paused` until `.playing` lands,
-   so a tuned-out unit sits still and html.lite's global keyframe kill stops
-   the whole panel for free. */
+   The hardware palette derives from the theme tokens (--bg / --ink / --muted
+   / --accent) with color-mix, shaded by light physics — white highlights,
+   black shadows — so the default light theme reproduces the handoff's
+   aluminium while dark and exotic themes recast the same unit as their own
+   hardware. The display glass and its dot-matrix readout stay fixed
+   near-black/warm-white: it is self-lit hardware, like Subamp's LCD; only
+   its accent lines follow the theme. Everything that moves is a co-located
+   keyframe idling at `paused` until `.playing` lands, so a tuned-out unit
+   sits still and html.lite's global keyframe kill stops the whole panel for
+   free. */
 
 @keyframes unit-bar {
   0%, 100% { transform: scaleY(0.28); }
@@ -23,18 +26,35 @@
 /* ── chassis ──────────────────────────────────────────────────────────── */
 
 .chassis {
-  border: 1px solid #161412;
-  background: linear-gradient(180deg, #e6e1d5 0%, #d9d3c6 46%, #cfc9bb 100%);
-  color: #161412;
+  /* Shared derived colours for the hardware descendants. */
+  --u-line: color-mix(in srgb, var(--ink) 34%, transparent);
+  /* Key-face lettering: paper dimmed a step toward ink (≈ #ded8cc on the
+     default light theme), and its faded sibling. */
+  --u-keytext: color-mix(in oklab, var(--bg) 87%, var(--ink));
+  --u-keytext-dim: color-mix(in srgb, var(--u-keytext) 60%, transparent);
+  border: 1px solid var(--ink);
+  background: linear-gradient(
+    180deg,
+    color-mix(in oklab, var(--bg) 90%, #fff) 0%,
+    color-mix(in oklab, var(--bg) 96%, #000) 46%,
+    color-mix(in oklab, var(--bg) 88%, #000) 100%
+  );
+  color: var(--ink);
 }
 @media (max-width: 1023px) {
   /* Mobile frame carries its mid-stop a touch lower (design spec). */
   .chassis {
-    background: linear-gradient(180deg, #e6e1d5 0%, #d9d3c6 52%, #cfc9bb 100%);
+    background: linear-gradient(
+      180deg,
+      color-mix(in oklab, var(--bg) 90%, #fff) 0%,
+      color-mix(in oklab, var(--bg) 96%, #000) 52%,
+      color-mix(in oklab, var(--bg) 88%, #000) 100%
+    );
   }
 }
 
-/* Milled-metal striation, full-bleed over the frame. */
+/* Milled-metal striation, full-bleed over the frame — a physical highlight,
+   so it stays white in every theme. */
 .striation {
   opacity: 0.5;
   background-image: repeating-linear-gradient(
@@ -44,21 +64,25 @@
   );
 }
 
-/* Engraved lettering — ink pressed into the metal. */
+/* Engraved lettering — ink pressed into the metal, white catch below. */
 .engraved {
-  color: #3a3630;
-  text-shadow: 0 1px 0 rgba(255, 255, 255, 0.75);
+  color: var(--ink);
+  text-shadow: 0 1px 0 rgba(255, 255, 255, 0.45);
 }
 .engravedSoft {
-  color: #6f685e;
-  text-shadow: 0 1px 0 rgba(255, 255, 255, 0.6);
+  color: var(--muted);
+  text-shadow: 0 1px 0 rgba(255, 255, 255, 0.35);
 }
 
 /* Speaker grille — perforated field, pure CSS. */
 .grille {
-  border: 1px solid rgba(0, 0, 0, 0.34);
-  background-color: #d2ccbe;
-  background-image: radial-gradient(circle at center, #17150f 2.1px, transparent 2.4px);
+  border: 1px solid var(--u-line);
+  background-color: color-mix(in oklab, var(--bg) 90%, var(--ink));
+  background-image: radial-gradient(
+    circle at center,
+    color-mix(in oklab, var(--ink) 92%, #000) 2.1px,
+    transparent 2.4px
+  );
   background-size: 15px 15px;
   box-shadow:
     inset 0 2px 6px rgba(0, 0, 0, 0.28),
@@ -67,35 +91,55 @@
 
 /* Recessed knob rail. */
 .rail {
-  border: 1px solid rgba(0, 0, 0, 0.34);
-  background: linear-gradient(180deg, #dcd6c9, #cdc7b9);
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.55);
+  border: 1px solid var(--u-line);
+  background: linear-gradient(
+    180deg,
+    color-mix(in oklab, var(--bg) 95%, var(--ink)),
+    color-mix(in oklab, var(--bg) 86%, var(--ink))
+  );
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.45);
 }
 
 /* ── keys & pads ──────────────────────────────────────────────────────── */
 
 .key {
   border-radius: 3px;
-  background: linear-gradient(180deg, #302c27, #151310);
+  background: linear-gradient(
+    180deg,
+    color-mix(in oklab, var(--ink) 88%, var(--bg)),
+    color-mix(in oklab, var(--ink) 97%, #000)
+  );
   box-shadow:
     inset 0 1px 0 rgba(255, 255, 255, 0.14),
     0 3px 4px rgba(0, 0, 0, 0.3);
-  color: #ded8cc;
+  color: var(--u-keytext);
 }
 .keyDown {
-  background: linear-gradient(180deg, #4a453e, #26221d);
+  background: linear-gradient(
+    180deg,
+    color-mix(in oklab, var(--ink) 74%, var(--bg)),
+    color-mix(in oklab, var(--ink) 88%, var(--bg))
+  );
   box-shadow: inset 0 2px 5px rgba(0, 0, 0, 0.6);
-  color: #fff4ec;
+  color: color-mix(in oklab, var(--bg) 96%, #fff);
 }
 .keyAccent {
-  background: linear-gradient(180deg, #e2603d, #c53f1f);
+  background: linear-gradient(
+    180deg,
+    color-mix(in oklab, var(--accent) 82%, #fff),
+    color-mix(in oklab, var(--accent) 88%, #000)
+  );
   box-shadow:
     inset 0 1px 0 rgba(255, 255, 255, 0.3),
     0 3px 4px rgba(0, 0, 0, 0.3);
   color: #fff4ec;
 }
 .keyAccentDown {
-  background: linear-gradient(180deg, #c53f1f, #a63317);
+  background: linear-gradient(
+    180deg,
+    color-mix(in oklab, var(--accent) 88%, #000),
+    color-mix(in oklab, var(--accent) 72%, #000)
+  );
   box-shadow: inset 0 2px 5px rgba(0, 0, 0, 0.5);
   color: #fff4ec;
 }
@@ -104,14 +148,22 @@
 
 .knobOuter {
   border-radius: 50%;
-  background: radial-gradient(circle at 50% 22%, #3a3630, #100e0c 72%);
+  background: radial-gradient(
+    circle at 50% 22%,
+    color-mix(in oklab, var(--ink) 80%, var(--bg)),
+    color-mix(in oklab, var(--ink) 94%, #000) 72%
+  );
   box-shadow:
     0 6px 14px rgba(0, 0, 0, 0.4),
     inset 0 0 0 7px rgba(255, 255, 255, 0.04);
 }
 .knobInner {
   border-radius: 50%;
-  background: radial-gradient(circle at 50% 20%, #2b2822, #080706 78%);
+  background: radial-gradient(
+    circle at 50% 20%,
+    color-mix(in oklab, var(--ink) 86%, var(--bg)),
+    color-mix(in oklab, var(--ink) 90%, #000) 78%
+  );
   box-shadow: inset 0 2px 4px rgba(255, 255, 255, 0.1);
 }
 /* Pointer position rides root CSS vars so both breakpoints' knobs agree. */
@@ -121,16 +173,20 @@
   background: var(--accent, #d94b2a);
   box-shadow: 0 0 10px color-mix(in srgb, var(--accent, #d94b2a) 60%, transparent);
 }
-.knobMark { background: #ded8cc; }
+.knobMark { background: var(--u-keytext); }
 
 .faderSlot {
-  background: #16140f;
+  background: color-mix(in oklab, var(--ink) 95%, #000);
   box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.8);
 }
 .faderCap {
   left: 52%;
   border-radius: 50%;
-  background: radial-gradient(circle at 50% 24%, #33302a, #0b0a08 76%);
+  background: radial-gradient(
+    circle at 50% 24%,
+    color-mix(in oklab, var(--ink) 84%, var(--bg)),
+    color-mix(in oklab, var(--ink) 92%, #000) 76%
+  );
   box-shadow: 0 3px 6px rgba(0, 0, 0, 0.45);
 }
 
@@ -147,25 +203,27 @@
     inset 0 1px 1px rgba(255, 255, 255, 0.5);
   animation: unit-pulse 2.4s ease-in-out infinite;
 }
+/* Net lamp keeps its phosphor green — a status colour, not a theme one. */
 .lampNet {
   background: #8fa88c;
   box-shadow:
     0 0 6px rgba(143, 168, 140, 0.7),
     inset 0 1px 1px rgba(255, 255, 255, 0.5);
 }
-.lampIdle { background: #b9b3a6; }
+.lampIdle { background: color-mix(in oklab, var(--muted) 55%, var(--bg)); }
 
 .ledOn {
   background: var(--accent, #d94b2a);
   box-shadow: 0 0 9px color-mix(in srgb, var(--accent, #d94b2a) 95%, transparent);
 }
+/* Lit warm-white — a saved lamp glows the same in any theme. */
 .ledSaved {
   background: #efeadd;
   box-shadow: 0 0 7px rgba(239, 234, 221, 0.7);
 }
-.ledOff { background: #3d3a34; }
+.ledOff { background: color-mix(in oklab, var(--ink) 78%, var(--bg)); }
 
-/* ── the display glass ────────────────────────────────────────────────── */
+/* ── the display glass (fixed: self-lit hardware) ─────────────────────── */
 
 .glass {
   border: 1px solid #0a0908;
@@ -221,7 +279,7 @@
 /* ── window chrome ────────────────────────────────────────────────────── */
 
 .rowSelected {
-  background: rgba(217, 75, 42, 0.14);
+  background: color-mix(in srgb, var(--accent, #d94b2a) 14%, transparent);
   border-left: 3px solid var(--accent, #d94b2a);
 }
 .rowIdle { border-left: 3px solid transparent; }

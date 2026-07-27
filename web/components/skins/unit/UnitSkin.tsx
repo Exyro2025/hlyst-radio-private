@@ -179,7 +179,7 @@ const FADER_LABELS = (
     )}
   >
     <span>mp3 128</span>
-    <span className="tracking-[0.14em] text-[#161412]">mount · mp3 320</span>
+    <span className="tracking-[0.14em] text-[var(--ink)]">mount · mp3 320</span>
     <span>opus</span>
   </div>
 );
@@ -505,10 +505,10 @@ export default function UnitSkin(_props: SkinProps) {
                   <span className="font-mono text-[9px] font-bold tracking-[0.16em] text-[var(--accent)] uppercase">
                     now{like.count > 0 ? ` · ${like.count} ♥` : ''}
                   </span>
-                  <span className="line-clamp-2 font-display text-[clamp(15px,1.4vw,20px)] leading-[1.05] font-extrabold text-[#ded8cc]">
+                  <span className="line-clamp-2 font-display text-[clamp(15px,1.4vw,20px)] leading-[1.05] font-extrabold text-[var(--u-keytext)]">
                     {title}
                   </span>
-                  <span className="truncate font-mono text-[9px] tracking-[0.12em] text-[#8a8478] uppercase">
+                  <span className="truncate font-mono text-[9px] tracking-[0.12em] text-[var(--u-keytext-dim)] uppercase">
                     {artist || 'live stream'}
                   </span>
                   <span
@@ -525,13 +525,13 @@ export default function UnitSkin(_props: SkinProps) {
                   key={`${entryTime(h) ?? i}-${h.title ?? i}`}
                   className={cn(styles.key, 'relative flex flex-col gap-2 p-3.5 px-4')}
                 >
-                  <span className="font-mono text-[9px] font-bold tracking-[0.16em] text-[#7c7669]">
+                  <span className="font-mono text-[9px] font-bold tracking-[0.16em] text-[var(--u-keytext-dim)]">
                     {turnClock(entryTime(h), timezone, stationLocale)}
                   </span>
-                  <span className="line-clamp-2 font-display text-[clamp(15px,1.4vw,20px)] leading-[1.05] font-extrabold text-[#ded8cc]">
+                  <span className="line-clamp-2 font-display text-[clamp(15px,1.4vw,20px)] leading-[1.05] font-extrabold text-[var(--u-keytext)]">
                     {h.title ?? '—'}
                   </span>
-                  <span className="truncate font-mono text-[9px] tracking-[0.12em] text-[#8a8478] uppercase">
+                  <span className="truncate font-mono text-[9px] tracking-[0.12em] text-[var(--u-keytext-dim)] uppercase">
                     {h.artist ?? ''}
                   </span>
                   <span className={cn(styles.ledOff, 'absolute right-3 bottom-3 size-2 rounded-full')} aria-hidden="true" />
@@ -541,7 +541,7 @@ export default function UnitSkin(_props: SkinProps) {
                 <div
                   className={cn(
                     styles.key,
-                    'col-span-3 flex items-center px-4 font-mono text-[10px] tracking-[0.14em] text-[#8a8478] uppercase',
+                    'col-span-3 flex items-center px-4 font-mono text-[10px] tracking-[0.14em] text-[var(--u-keytext-dim)] uppercase',
                   )}
                 >
                   the log fills as the night plays on
@@ -766,7 +766,7 @@ export default function UnitSkin(_props: SkinProps) {
         <button
           type="button"
           onClick={tuneInFromOverlay}
-          className="absolute inset-0 z-40 grid w-full cursor-pointer place-items-center border-0 bg-[#e2ddd0]/95 p-6"
+          className="absolute inset-0 z-40 grid w-full cursor-pointer place-items-center border-0 bg-[var(--bg)]/95 p-6"
         >
           <span className="grid w-full max-w-[420px] justify-items-stretch gap-4">
             <span className={cn(styles.glass, 'relative flex flex-col gap-3 overflow-hidden p-6 text-left')}>
