@@ -433,6 +433,10 @@ router.get('/schedule', async (req, res) => {
       personas,
       shows,
       schedule: s.schedule,
+      // Same discriminator /personas carries: lets a schedule-only client tell
+      // "no souls published" from "souls on but blank" without inferring it
+      // from key presence (ambiguous on an empty roster).
+      soulsPublished: withSouls,
       // Timed takeover (#930): the pin currently in force, or null. Expired /
       // dangling overrides report as null even before the janitor sweeps them.
       override: settings.getScheduleOverride(),

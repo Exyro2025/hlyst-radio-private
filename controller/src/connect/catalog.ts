@@ -181,12 +181,14 @@ export const ENDPOINT_GROUPS: EndpointGroup[] = [
           'timezone. Each show carries `guestPersonaIds` — guest co-hosts, ' +
           'resolved against the live roster — which you join against the persona ' +
           'index by id. Persona `soul` blurbs are included only when the operator ' +
-          'turns on Settings → Station → publish persona souls. No admin-only fields.',
+          'turns on Settings → Station → publish persona souls (`soulsPublished` ' +
+          'reports which). No admin-only fields.',
         auth: 'none',
         responseExample: {
           personas: [{ id: 'frequency', name: 'Frequency', tagline: 'after-dark selector', avatar: '/persona-avatar/frequency' }],
           shows: [{ id: 'late-shift', name: 'The Late Shift', topic: 'after-hours', mood: 'nocturnal', personaId: 'frequency', guestPersonaIds: ['nyx'] }],
           schedule: { mon: [], tue: [] },
+          soulsPublished: false,
           timezone: 'Europe/London',
         },
       },

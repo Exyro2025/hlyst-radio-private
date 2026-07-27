@@ -69,7 +69,8 @@ export interface DjPublic {
 export interface SchedulePersona {
   id: string;
   name: string;
-  /** Public one-liner. Always present; '' when the operator hasn't set one. */
+  /** Public one-liner; '' when the operator hasn't set one. Optional only
+   *  because an older controller may omit the field entirely. */
   tagline?: string;
   avatar: string;
   /** The persona's soul blurb — only when the station opted into publishing
@@ -95,6 +96,8 @@ export interface SchedulePayload {
   personas: SchedulePersona[];
   shows: ScheduleShow[];
   schedule: ScheduleGrid;
+  /** Whether persona `soul` fields are included (same flag /personas reports). */
+  soulsPublished?: boolean;
   timezone?: string | null;
   locale?: StationLocale;
 }

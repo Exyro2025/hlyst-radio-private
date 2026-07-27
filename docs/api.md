@@ -47,9 +47,9 @@ an admin credential:
 **Persona souls are opt-in.** A persona's `soul` is its system prompt rather
 than a written bio, so the roster-wide reads above publish it only when the
 operator turns on **Settings → Station → Public API → publish persona souls**.
-Off (the default), the field is *absent* rather than empty — `/personas`
-reports which mode you're in via `soulsPublished`, so a client can hide the bio
-column instead of rendering blank cards. `tagline` is the field intended for
+Off (the default), the field is *absent* rather than empty — both `/schedule`
+and `/personas` report which mode you're in via `soulsPublished`, so a client
+can hide the bio column instead of rendering blank cards. `tagline` is the field intended for
 public display and is always present. `GET /dj` publishes the on-air persona's
 soul regardless, as it always has.
 
