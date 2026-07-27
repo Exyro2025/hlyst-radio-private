@@ -140,6 +140,25 @@ link_liquidsoap_log() {
 		log "WARNING $target is a broken symlink (-> $(readlink "$target" 2>/dev/null || echo '?')) — replacing it with a real directory"
 		rm -f "$target" 2>/dev/null || true
 	fi
+
+	# 1b. A state-side link that RESOLVES INTO the container log path is the
+	#     #1196 cycle half wearing a disguise: it only looks healthy while
+	#     the fresh image's plain /var/log/liquidsoap still exists (the
+	#     exact shape the reported operator's install boots into after
+	#     pulling this fix). Linking $LIQ_LOG_DIR at a path that resolves to
+	#     $LIQ_LOG_DIR itself can only re-create the cycle, which the probe
+	#     below would then break — but at the price of dropping persistence.
+	#     Replacing the link with a real directory now keeps it.
+	if [ -L "$target" ] && [ -d "$target" ] && command -v realpath >/dev/null 2>&1; then
+		local target_real liq_real
+		target_real=$(realpath -m -- "$target" 2>/dev/null || true)
+		liq_real=$(realpath -m -- "$LIQ_LOG_DIR" 2>/dev/null || true)
+		if [ -n "$target_real" ] && [ "$target_real" = "$liq_real" ]; then
+			log "WARNING $target resolves into $LIQ_LOG_DIR — the #1196 cycle half; replacing it with a real directory"
+			rm -f "$target" 2>/dev/null || true
+		fi
+	fi
+
 	mkdir -p "$target" 2>/dev/null || true
 	chmod 777 "$target" 2>/dev/null || true
 

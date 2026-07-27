@@ -298,4 +298,39 @@ function scratch(): Scratch {
   assert.match(out, /is a mountpoint — leaving it/, 'bind mount: the decision should be logged');
 }
 
+// --- 10. THE REPORTED OPERATOR'S POST-UPGRADE BOOT ------------------------
+// The reporter's state dir carries logs -> /var/log/liquidsoap (their
+// workaround for the pre-#1196 missing-radio.log bug), and a FRESH fixed
+// image has a plain real dir at the container path — so the state-side link
+// RESOLVES and can't be caught by the broken-link check. Left in place it
+// re-creates the cycle the moment the container dir is replaced by the link;
+// the probe would then break the cycle but at the price of persistence.
+// Step 1b must instead spot that the link resolves into $LIQ_LOG_DIR and
+// replace it, ending in the fully-healed shape: real state dir, container
+// path linked at it, writes persisting.
+{
+  const { stateRoot, liqLogDir } = scratch();
+  mkdirSync(liqLogDir, { recursive: true });
+  symlinkSync(liqLogDir, join(stateRoot, 'logs')); // resolves — not "broken"
+
+  const out = runLinker(stateRoot, liqLogDir);
+
+  assert.ok(radioLogOpenable(liqLogDir), 'cycle half: radio.log must be openable');
+  assert.ok(
+    !lstatSync(join(stateRoot, 'logs')).isSymbolicLink(),
+    'cycle half: the state-side link into $LIQ_LOG_DIR must become a real directory',
+  );
+  assert.ok(
+    lstatSync(liqLogDir).isSymbolicLink(),
+    'cycle half: the container path should end up linked at the state dir (full heal, not fallback)',
+  );
+  writeFileSync(join(liqLogDir, 'radio.log'), 'healed\n');
+  assert.equal(
+    readFileSync(join(stateRoot, 'logs', 'radio.log'), 'utf8'),
+    'healed\n',
+    'cycle half: persistence must survive the heal — fallback mode would lose it',
+  );
+  assert.match(out, /cycle half/, 'cycle half: the repair should be logged');
+}
+
 console.log('aio-log-link: all assertions passed');
