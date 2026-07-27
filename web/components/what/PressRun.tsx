@@ -47,12 +47,12 @@ function Plate({
       onClick={() => onOpen(plate)}
       tabIndex={ghost ? -1 : 0}
       aria-hidden={ghost || undefined}
-      className="group block w-[min(440px,78vw)] shrink-0 text-left"
+      className="group block w-[min(360px,70vw)] shrink-0 text-left"
     >
       <span
         className={cn(
           'block aspect-[16/10] overflow-hidden border border-ink bg-overlay',
-          'shadow-[5px_5px_0_0_var(--ink)] transition-transform duration-200',
+          'shadow-[2px_2px_0_0_var(--ink)] transition-transform duration-200',
           'group-hover:-translate-y-0.5 group-focus-visible:-translate-y-0.5',
         )}
       >
