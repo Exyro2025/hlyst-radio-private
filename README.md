@@ -37,9 +37,8 @@ https://github.com/user-attachments/assets/0a2ba78a-eda3-44c1-adce-bfa78ae992cd
 **The listener player.** One shared broadcast, with in-app song requests.
 
 <p>
-  <a href="web/public/screenshots/listen.webp"><img src="web/public/screenshots/listen.webp" alt="Player — the listener player on /listen" width="380"></a>
-  <a href="web/public/screenshots/listen-unit.webp"><img src="web/public/screenshots/listen-unit.webp" alt="Player — the UNIT SW-9 skin" width="380"></a>
-  <a href="web/public/screenshots/player-request-song.webp"><img src="web/public/screenshots/player-request-song.webp" alt="Player — request a song" width="128"></a>
+  <a href="web/public/screenshots/listen.webp"><img src="web/public/screenshots/listen.webp" alt="Player — the listener player on /listen" width="400"></a>
+  <a href="web/public/screenshots/listen-unit.webp"><img src="web/public/screenshots/listen-unit.webp" alt="Player — the UNIT SW-9 skin" width="400"></a>
 </p>
 
 **The admin console.** Where the operator runs the station.
