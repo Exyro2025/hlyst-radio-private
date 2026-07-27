@@ -97,7 +97,7 @@
     color-mix(in oklab, var(--ink) 92%, #000) 2.1px,
     transparent 2.4px
   );
-  background-size: 11px 11px;
+  background-size: 9px 9px;
 }
 /* Full-bleed, heavily blurred copy of the cover glowing through every hole —
    the bridge that lets the sharp centre square melt into the panel. Same dot
@@ -109,9 +109,9 @@
   filter: blur(22px) saturate(1.2);
   opacity: 0.5;
   -webkit-mask-image: radial-gradient(circle at center, #000 3.4px, transparent 3.8px);
-  -webkit-mask-size: 11px 11px;
+  -webkit-mask-size: 9px 9px;
   mask-image: radial-gradient(circle at center, #000 3.4px, transparent 3.8px);
-  mask-size: 11px 11px;
+  mask-size: 9px 9px;
 }
 /* The dot mask + filter live on this full-bleed layer so the halftone grid
    stays aligned with the base perforation; the artwork itself paints in the
@@ -121,11 +121,11 @@
   justify-content: center;
   filter: blur(1px) saturate(1.15);
   /* Art dots run larger than the base perforation (3.4px vs 2.1px on the
-     same 11px pitch) so the sleeve reads clearly while staying a dot grid. */
+     same 9px pitch) so the sleeve reads clearly while staying a dot grid. */
   -webkit-mask-image: radial-gradient(circle at center, #000 3.4px, transparent 3.8px);
-  -webkit-mask-size: 11px 11px;
+  -webkit-mask-size: 9px 9px;
   mask-image: radial-gradient(circle at center, #000 3.4px, transparent 3.8px);
-  mask-size: 11px 11px;
+  mask-size: 9px 9px;
 }
 .grilleArtBox {
   height: 100%;
