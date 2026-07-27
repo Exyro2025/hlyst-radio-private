@@ -42,7 +42,8 @@ assert.ok(existsSync(SUPERVISOR), `supervisor.sh not found at ${SUPERVISOR}`);
 
 // Drive link_liquidsoap_log() against a scratch STATE_ROOT / log dir by
 // sourcing the supervisor in library mode. Returns its stderr (the log lines).
-function runLinker(stateRoot: string, liqLogDir: string): string {
+// extraEnv lets a scenario override PATH etc. (scenario 9 stubs mountpoint(1)).
+function runLinker(stateRoot: string, liqLogDir: string, extraEnv: Record<string, string> = {}): string {
   return execFileSync(
     'bash',
     [
@@ -58,6 +59,7 @@ function runLinker(stateRoot: string, liqLogDir: string): string {
         ...process.env,
         SUBWAVE_STATE_ROOT: stateRoot,
         SUBWAVE_LIQ_LOG_DIR: liqLogDir,
+        ...extraEnv,
       },
       encoding: 'utf8',
       stdio: ['ignore', 'pipe', 'pipe'],
@@ -79,6 +81,11 @@ function radioLogOpenable(liqLogDir: string): boolean {
 type Scratch = { root: string; stateRoot: string; liqLogDir: string };
 
 const scratches: string[] = [];
+// Clean up on 'exit' rather than at the bottom of the file — the handler also
+// fires when an assertion throws, so failed runs don't leak dirs into $TMPDIR.
+process.on('exit', () => {
+  for (const dir of scratches) rmSync(dir, { recursive: true, force: true });
+});
 function scratch(): Scratch {
   const root = mkdtempSync(join(tmpdir(), 'subwave-aio-log-'));
   scratches.push(root);
@@ -249,6 +256,46 @@ function scratch(): Scratch {
   assert.match(out, /WARNING/, 'fallback: the degraded mode must be logged loudly');
 }
 
-for (const dir of scratches) rmSync(dir, { recursive: true, force: true });
+// --- 9. BIND MOUNT AT THE CONTAINER PATH ----------------------------------
+// The split stack's `${STATE_DIR}/logs:/var/log/liquidsoap` mapping copied
+// into an AIO `docker run`. The mounted dir must be used as-is, and — the
+// part the first cut of this fix got wrong — its CONTENTS must survive:
+// `rm -rf` on a mountpoint cannot remove the mountpoint itself but deletes
+// everything inside it, so an unguarded rm wiped the operator's log history
+// on every boot. A real mount needs root, so mountpoint(1) is stubbed via
+// PATH; the on-disk shape (a real, non-symlink dir) is exactly what the
+// supervisor sees over a bind mount.
+{
+  const { root, stateRoot, liqLogDir } = scratch();
+  mkdirSync(liqLogDir, { recursive: true });
+  writeFileSync(join(liqLogDir, 'radio.log'), 'operator history\n');
+
+  const stubBin = join(root, 'stub-bin');
+  mkdirSync(stubBin);
+  writeFileSync(
+    join(stubBin, 'mountpoint'),
+    '#!/usr/bin/env bash\n' +
+      '# test stub: only $SUBWAVE_TEST_MOUNTPOINT is a mount ($1 is -q, $2 the path)\n' +
+      '[ "$2" = "$SUBWAVE_TEST_MOUNTPOINT" ]\n',
+    { mode: 0o755 },
+  );
+
+  const out = runLinker(stateRoot, liqLogDir, {
+    PATH: `${stubBin}:${process.env.PATH ?? ''}`,
+    SUBWAVE_TEST_MOUNTPOINT: liqLogDir,
+  });
+
+  assert.ok(radioLogOpenable(liqLogDir), 'bind mount: radio.log must be openable');
+  assert.ok(
+    !lstatSync(liqLogDir).isSymbolicLink(),
+    'bind mount: the mounted dir must not be replaced by a link',
+  );
+  assert.equal(
+    readFileSync(join(liqLogDir, 'radio.log'), 'utf8'),
+    'operator history\n',
+    'bind mount: existing log history must NOT be wiped by the bootstrap',
+  );
+  assert.match(out, /is a mountpoint — leaving it/, 'bind mount: the decision should be logged');
+}
 
 console.log('aio-log-link: all assertions passed');

@@ -83,12 +83,16 @@ init_state() {
 
 	link_liquidsoap_log
 
-	# Rotate radio.log on boot once it passes 50MB — same policy as
-	# docker/broadcast-entrypoint.sh. Now that the log persists in state,
-	# it would otherwise append forever; boot is the one safe moment to
-	# move it since liquidsoap isn't holding the fd yet. One .old
-	# generation caps disk at ~2x the threshold.
-	RADIO_LOG="$STATE_ROOT/logs/radio.log"
+	# Rotate radio.log on boot once it passes 50MB — same policy (and same
+	# container-side path) as docker/broadcast-entrypoint.sh. Now that the
+	# log persists in state, it would otherwise append forever; boot is the
+	# one safe moment to move it since liquidsoap isn't holding the fd yet.
+	# One .old generation caps disk at ~2x the threshold. Rotating via
+	# $LIQ_LOG_DIR (not $STATE_ROOT/logs) matters: after
+	# link_liquidsoap_log it resolves to wherever radio.log actually lands —
+	# state logs, an operator's own disk, a bind mount, or the local
+	# fallback — while the state path misses the last two branches.
+	RADIO_LOG="$LIQ_LOG_DIR/radio.log"
 	if [ -f "$RADIO_LOG" ] && [ "$(stat -c %s "$RADIO_LOG" 2>/dev/null || echo 0)" -gt 52428800 ]; then
 		mv -f "$RADIO_LOG" "$RADIO_LOG.old"
 		echo "supervisor: rotated oversized radio.log to radio.log.old" >&2
@@ -140,21 +144,33 @@ link_liquidsoap_log() {
 	chmod 777 "$target" 2>/dev/null || true
 
 	# 2. Point the in-container path at it — unless something is mounted
-	#    there. `rm -rf` cannot remove a mountpoint, and `ln -s` onto a
-	#    surviving directory silently creates the link INSIDE it
-	#    (/var/log/liquidsoap/logs) instead of replacing it. An operator who
-	#    bind-mounted a host dir onto /var/log/liquidsoap (the split stack's
-	#    compose mapping, copied into an AIO `docker run`) already has a
-	#    persistent log dir, so leaving it alone is the correct outcome.
+	#    there. An operator who bind-mounted a host dir onto
+	#    /var/log/liquidsoap (the split stack's compose mapping, copied into
+	#    an AIO `docker run`) already has a persistent log dir, so it is
+	#    used as-is. The mountpoint test must come BEFORE any `rm -rf`:
+	#    `rm -rf` on a mountpoint can't remove the mountpoint itself but
+	#    DOES delete everything inside it — which would wipe the very log
+	#    history the operator mounted the dir to keep, on every boot.
 	if [ -d "$target" ]; then
-		[ -L "$LIQ_LOG_DIR" ] || rm -rf "$LIQ_LOG_DIR" 2>/dev/null || true
-		if [ -e "$LIQ_LOG_DIR" ] && [ ! -L "$LIQ_LOG_DIR" ]; then
-			log "$LIQ_LOG_DIR is a real directory (bind mount?) — leaving it; radio.log stays there"
+		if [ -e "$LIQ_LOG_DIR" ] && [ ! -L "$LIQ_LOG_DIR" ] && is_mountpoint "$LIQ_LOG_DIR"; then
+			log "$LIQ_LOG_DIR is a mountpoint — leaving it as-is; radio.log stays there"
 		else
-			# -f replaces an existing link (including a looping one, which
-			# is removed rather than followed); -n keeps it from being
-			# planted inside a link-to-directory.
-			ln -sfn "$target" "$LIQ_LOG_DIR" 2>/dev/null || true
+			# Anything unmounted at the container path — a plain dir
+			# from a pre-#1196 image, a stray file — is replaced by
+			# the link. `ln -s` onto a surviving directory would
+			# silently create the link INSIDE it
+			# (/var/log/liquidsoap/logs), hence the rm first.
+			[ -L "$LIQ_LOG_DIR" ] || rm -rf "$LIQ_LOG_DIR" 2>/dev/null || true
+			if [ -e "$LIQ_LOG_DIR" ] && [ ! -L "$LIQ_LOG_DIR" ]; then
+				# Unremovable yet not detected as a mountpoint
+				# (exotic mount setups) — same outcome, use as-is.
+				log "$LIQ_LOG_DIR survived removal (bind mount?) — leaving it; radio.log stays there"
+			else
+				# -f replaces an existing link (including a looping one, which
+				# is removed rather than followed); -n keeps it from being
+				# planted inside a link-to-directory.
+				ln -sfn "$target" "$LIQ_LOG_DIR" 2>/dev/null || true
+			fi
 		fi
 	else
 		log "WARNING $target is not a usable directory — not linking $LIQ_LOG_DIR at it"
@@ -167,8 +183,14 @@ link_liquidsoap_log() {
 	#    across recreates but keeps the station on the air.
 	if ! probe_log_dir; then
 		log "WARNING $LIQ_LOG_DIR is unopenable — falling back to a container-local log dir; radio.log will NOT persist in the state dir"
-		rm -rf "$LIQ_LOG_DIR" 2>/dev/null || true
-		mkdir -p "$LIQ_LOG_DIR" 2>/dev/null || true
+		# A mountpoint can be neither removed nor replaced, so rebuilding
+		# is pointless there — and `rm -rf` on a mount that somehow fails
+		# the probe would only strip the operator's files while leaving
+		# the path just as unopenable. Rebuild unmounted paths only.
+		if ! is_mountpoint "$LIQ_LOG_DIR"; then
+			rm -rf "$LIQ_LOG_DIR" 2>/dev/null || true
+			mkdir -p "$LIQ_LOG_DIR" 2>/dev/null || true
+		fi
 		probe_log_dir || log "ERROR $LIQ_LOG_DIR is still unopenable — liquidsoap will fail to start"
 	fi
 
@@ -176,6 +198,9 @@ link_liquidsoap_log() {
 	# NOT recursive: liquidsoap only needs to create/append radio.log in the
 	# directory itself, and an operator who pointed <state>/logs at their own
 	# disk shouldn't have its existing contents re-owned underneath them.
+	# The directory inode itself IS re-moded/re-owned even when it is the
+	# operator's own — that's the price of liquidsoap being able to create
+	# radio.log inside it; only the contents are left untouched.
 	chmod 777 "$LIQ_LOG_DIR" 2>/dev/null || true
 	chown liquidsoap:liquidsoap "$LIQ_LOG_DIR" 2>/dev/null || true
 }
@@ -189,6 +214,20 @@ probe_log_dir() {
 	: > "$probe" 2>/dev/null || return 1
 	rm -f "$probe" 2>/dev/null || true
 	return 0
+}
+
+# Is $1 a mountpoint? `mountpoint` ships with util-linux on the Debian base;
+# fall back to /proc/self/mountinfo (field 5 is the mount point) so the answer
+# never silently degrades to "not a mount" just because the binary is missing.
+# A symlink is never its own mountpoint, but `mountpoint` resolves it and
+# reports on the target — fine for both call sites, which only ask about
+# non-symlink shapes or paths about to be rebuilt anyway.
+is_mountpoint() {
+	if command -v mountpoint >/dev/null 2>&1; then
+		mountpoint -q "$1" 2>/dev/null
+	else
+		awk -v p="$1" '$5 == p { found = 1; exit } END { exit found ? 0 : 1 }' /proc/self/mountinfo 2>/dev/null
+	fi
 }
 
 # ---------------------------------------------------------------------------
