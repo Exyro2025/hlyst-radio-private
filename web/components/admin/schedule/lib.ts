@@ -155,6 +155,35 @@ export function fillHourToggle(schedule: Schedule, hour: number, showId: string)
   return setRange(schedule, days, hour, hour + 1, allSet ? null : showId);
 }
 
+/** Where a dragged edge of `block` lands once `hour` is clamped to something
+ *  legal: inside the day, and never shorter than one hour. Pure so the board
+ *  can run it on every pointer move without touching the grid. */
+export function resizedRun(
+  block: Block,
+  edge: 'top' | 'bottom',
+  hour: number,
+): { start: number; end: number } {
+  const end = block.start + block.span;
+  if (edge === 'top') return { start: Math.min(Math.max(hour, 0), end - 1), end };
+  return { start: block.start, end: Math.max(Math.min(hour, 24), block.start + 1) };
+}
+
+/** Move one run's boundaries to [start, end) — the write behind a resize drag.
+ *  The hours it gives up fall silent; the hours it takes over are written to
+ *  its show over whatever was there, the same overwrite every other write on
+ *  this screen performs. Clearing first is what makes a shrink work at all,
+ *  and it must happen before the write or a grow would erase its own gain. */
+export function resizeBlock(
+  schedule: Schedule,
+  block: Block,
+  start: number,
+  end: number,
+): Schedule {
+  if (!block.showId) return schedule;
+  const cleared = setRange(schedule, [block.day], block.start, block.start + block.span, null);
+  return setRange(cleared, [block.day], start, end, block.showId);
+}
+
 /** Number of cells where the two grids disagree (the unsaved-edit count). */
 export function diffCells(a: Schedule, b: Schedule): number {
   let n = 0;

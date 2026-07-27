@@ -38,7 +38,7 @@ import type { Block, Schedule, ScheduleShow } from './lib';
 import {
   DAYS, SHOW_COLORS, blockAhead, blockAt, bookedHours, cloneWeek, dayBlocks,
   dayName, diffCells, diffRanges, emptyWeek, fillDayToggle, fillHourToggle,
-  hhmm, setRange, showHours, weekOrders,
+  hhmm, resizeBlock, setRange, showHours, weekOrders,
 } from './lib';
 
 /** The airtime-bar tick — hours a show "should" get in a week. */
@@ -310,6 +310,21 @@ export default function SchedulePanel() {
     setLine({ day: b.day, start: b.start, end: b.start + b.span });
     setLineDays([b.day]);
     setLineShowId(showId);
+  };
+
+  // A board card's edge dragged to new hours. The vacated hours fall silent
+  // and the gained ones are written over whatever was there — the same
+  // overwrite a drop or the order desk performs, so a run grown into its
+  // neighbour takes those hours rather than stopping short of them.
+  const resizeRun = (b: Block, start: number, end: number) => {
+    if (!schedule || !b.showId) return;
+    setSchedule(resizeBlock(schedule, b, start, end));
+    setLine({ day: b.day, start, end });
+    setLineDays([b.day]);
+    setLineShowId(b.showId);
+    notify.ok(
+      `“${showById(b.showId)?.name ?? 'show'}” now ${dayName(b.day)} ${hhmm(start)} – ${hhmm(end)} — unsaved until you save the week.`,
+    );
   };
 
   // The × on a board card: take the run off the air (a local edit). The
@@ -768,6 +783,7 @@ export default function SchedulePanel() {
           hoursOf={hoursOf}
           onPick={pick}
           onRemove={removeRun}
+          onResize={resizeRun}
           onDropShow={dropShow}
           armedShowId={armedId}
           onArmShow={armShow}

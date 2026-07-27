@@ -4,7 +4,8 @@
 // days always open. Shows are cards whose height equals their duration; silent
 // runs are hatched slots. Direct manipulation everywhere: click a silent slot
 // (or drop a shelf chip on it) to book a show over those hours, click a card to
-// load its order into the Write-an-order line, click a card's × to take the run
+// load its order into the Write-an-order line, drag a card's top or bottom edge
+// to move that boundary an hour at a time, click a card's × to take the run
 // off the air. Every write is a local edit — Save the week persists.
 //
 // Two geometry rules earn their keep (#1204):
@@ -22,9 +23,12 @@
 //    preference, so the gutter's static `h-[var(--hour-px)]` and each card's
 //    computed `calc()` height can never drift apart.
 
-import type { DragEvent } from 'react';
+import type {
+  ComponentPropsWithoutRef, DragEvent, KeyboardEvent, PointerEvent,
+} from 'react';
 import { useRef, useState } from 'react';
 import Link from 'next/link';
+import { FoldHorizontal, Rows2, Rows4 } from 'lucide-react';
 import { useDynamicStyle } from '../../../hooks/useDynamicStyle';
 import { cn } from '../../../lib/cn';
 import type { BoardDensity } from '../../../lib/adminView';
@@ -39,7 +43,7 @@ import { ScrollArea, ScrollBar } from '../../ui/scroll-area';
 import { Seg } from '../ui';
 import { ColorChip, Mu } from './bits';
 import type { Block, Schedule, ScheduleShow } from './lib';
-import { DAYS, HOURS, dayBlocks, hh } from './lib';
+import { DAYS, HOURS, dayBlocks, hh, resizedRun } from './lib';
 
 const DND_TYPE = 'text/x-subwave-show';
 
@@ -57,6 +61,9 @@ export interface BoardProps {
   hoursOf: (id: string) => number;
   onPick: (b: Block) => void;
   onRemove: (b: Block) => void;
+  /** A card's edge dragged (or arrow-keyed) to new boundaries — the run moves
+   *  to [start, end) and the hours it vacates fall silent. */
+  onResize: (b: Block, start: number, end: number) => void;
   onDropShow: (b: Block, showId: string) => void;
   /** The armed show — the shelf chip acting as a brush, or null. */
   armedShowId: string | null;
@@ -73,7 +80,7 @@ export interface BoardProps {
 
 export default function Board({
   schedule, shows, folded, onToggleFold, todayKey,
-  colorOf, hoursOf, onPick, onRemove, onDropShow,
+  colorOf, hoursOf, onPick, onRemove, onResize, onDropShow,
   armedShowId, onArmShow, onFillDay, onFillHour,
   density, hourPx, onDensity,
 }: BoardProps) {
@@ -87,16 +94,41 @@ export default function Board({
         <Mu className="min-w-0 flex-1 tracking-[0.08em]">
           {armedName
             ? `${armedName} is armed — click any hour to book it, a day header for the whole day, or an hour in the gutter for that hour all week`
-            : 'Click a silent hour (or drag a show onto it) to book a show — click a card to edit its order, its × to take it off the air'}
+            : 'Click a silent hour (or drag a show onto it) to book a show — click a card to edit its order, drag its top or bottom edge to change the hours, its × to take it off the air'}
         </Mu>
         <span className="ml-auto flex flex-none items-center gap-2">
+          {/* The label stays: two row icons on their own in the corner of a
+              toolbar could as easily be a view switch as a density one, and
+              this control is the only thing here that isn't self-evident. */}
           <Mu className="hidden text-[8.5px] sm:inline">Rows</Mu>
           <Seg
             value={density}
             onChange={v => onDensity(v === 'compact' ? 'compact' : 'comfortable')}
             options={[
-              { id: 'comfortable', title: 'Comfortable rows — the full hour range on every card', label: 'Roomy' },
-              { id: 'compact', title: 'Compact rows — a shorter board that clears the fold', label: 'Compact' },
+              // Icon-only, the RosterViewToggle recipe: the glyph carries the
+              // meaning (fewer, taller rows vs more, shorter ones), an sr-only
+              // span carries the name, and `title` carries the explanation.
+              // min-h gives the tab a real tap target on a phone.
+              {
+                id: 'comfortable',
+                title: 'Roomy rows — the full hour range on every card',
+                label: (
+                  <span className="flex min-h-[22px] items-center sm:min-h-0">
+                    <Rows2 size={15} strokeWidth={1.75} aria-hidden />
+                    <span className="sr-only">Roomy</span>
+                  </span>
+                ),
+              },
+              {
+                id: 'compact',
+                title: 'Compact rows — a shorter board that clears the fold',
+                label: (
+                  <span className="flex min-h-[22px] items-center sm:min-h-0">
+                    <Rows4 size={15} strokeWidth={1.75} aria-hidden />
+                    <span className="sr-only">Compact</span>
+                  </span>
+                ),
+              },
             ]}
           />
         </span>
@@ -215,12 +247,14 @@ export default function Board({
                 colorOf={colorOf}
                 shows={shows}
                 density={density}
+                hourPx={hourPx}
                 armedShowId={armedShowId}
                 armedName={armedName}
                 onToggleFold={() => onToggleFold(d.key)}
                 onFillDay={() => onFillDay(d.key)}
                 onPick={onPick}
                 onRemove={onRemove}
+                onResize={onResize}
                 onDropShow={onDropShow}
               />
             ),
@@ -236,8 +270,8 @@ export default function Board({
 }
 
 function DayColumn({
-  label, name, today, blocks, colorOf, shows, density, armedShowId, armedName,
-  onToggleFold, onFillDay, onPick, onRemove, onDropShow,
+  label, name, today, blocks, colorOf, shows, density, hourPx, armedShowId, armedName,
+  onToggleFold, onFillDay, onPick, onRemove, onResize, onDropShow,
 }: {
   label: string;
   name: string;
@@ -246,12 +280,14 @@ function DayColumn({
   colorOf: (id: string | null | undefined) => string;
   shows: ScheduleShow[];
   density: BoardDensity;
+  hourPx: number;
   armedShowId: string | null;
   armedName: string | null;
   onToggleFold: () => void;
   onFillDay: () => void;
   onPick: (b: Block) => void;
   onRemove: (b: Block) => void;
+  onResize: (b: Block, start: number, end: number) => void;
   onDropShow: (b: Block, showId: string) => void;
 }) {
   const showById = (id: string | null) => shows.find(s => s.id === id) ?? null;
@@ -261,31 +297,43 @@ function DayColumn({
     // next day peeks past the right edge; from sm up `min-w-0` lets the seven
     // columns divide the board's width instead of forcing it past the screen.
     <div className="flex min-w-[164px] flex-1 flex-col border border-ink bg-[var(--page-bg)] sm:min-w-0">
-      {/* The header fills the day with the armed brush — the bulk gesture the
-          paint-brush grid had. Fold moved to the footer, where the column was
-          already printing the word. aria-disabled rather than disabled so the
-          explanatory title still shows in Firefox (see the hour gutter). */}
-      <button
-        type="button"
-        aria-disabled={!armedShowId}
-        onClick={armedShowId ? onFillDay : undefined}
-        title={armedName
-          ? `Put “${armedName}” on all of ${name} (again to clear it)`
-          : `${name} — arm a show on the shelf to fill the whole day in one click`}
-        className={cn(
-          'flex h-[38px] items-center gap-2 border-0 border-b border-solid border-b-ink bg-transparent px-2.5',
-          armedShowId ? 'cursor-pointer hover:bg-[var(--ink-soft)]' : 'cursor-default',
-        )}
-      >
-        <span
-          aria-hidden="true"
-          className={cn('size-[7px] rounded-full', today ? 'bg-[var(--accent)]' : 'bg-ink')}
-        />
-        <span className="font-mono text-[11px] font-bold tracking-[0.16em] text-ink">{label}</span>
-        <span className="ml-auto flex h-5 min-w-5 items-center justify-center border border-ink bg-[var(--card-bg)] px-1 font-mono text-[9px] font-bold text-ink">
-          {blocks.filter(b => b.showId).length}
-        </span>
-      </button>
+      {/* The header carries two gestures. Its body folds the column — what it
+          has always done, and the reason the day names read as handles — until
+          a brush is armed, when it fills the whole day instead (the bulk write
+          the paint-brush grid had). Same armed/unarmed split the silent slots
+          make, and the hint line above the shelf names the armed one.
+          The chevron is the constant: it folds in either mode, so an armed
+          brush never leaves the column without a collapse control at the top.
+          Fold also stays in the footer — this column is 24 hours tall, and
+          scrolling ~800px back up to close it is its own annoyance. */}
+      <div className="flex h-[38px] items-stretch border-b border-solid border-b-ink">
+        <button
+          type="button"
+          onClick={armedShowId ? onFillDay : onToggleFold}
+          title={armedName
+            ? `Put “${armedName}” on all of ${name} (again to clear it)`
+            : `Fold ${name} out of the way`}
+          className="flex min-w-0 flex-1 cursor-pointer items-center gap-2 border-0 bg-transparent px-2.5 hover:bg-[var(--ink-soft)]"
+        >
+          <span
+            aria-hidden="true"
+            className={cn('size-[7px] flex-none rounded-full', today ? 'bg-[var(--accent)]' : 'bg-ink')}
+          />
+          <span className="font-mono text-[11px] font-bold tracking-[0.16em] text-ink">{label}</span>
+          <span className="ml-auto flex h-5 min-w-5 flex-none items-center justify-center border border-ink bg-[var(--card-bg)] px-1 font-mono text-[9px] font-bold text-ink">
+            {blocks.filter(b => b.showId).length}
+          </span>
+        </button>
+        <button
+          type="button"
+          onClick={onToggleFold}
+          aria-label={`Fold ${name} out of the way`}
+          title={`Fold ${name} out of the way`}
+          className="flex w-7 flex-none cursor-pointer items-center justify-center border-0 border-l border-solid border-l-separator-strong bg-transparent p-0 text-muted hover:bg-[var(--ink-soft)] hover:text-ink"
+        >
+          <FoldHorizontal size={13} strokeWidth={1.75} aria-hidden />
+        </button>
+      </div>
       <div className="flex flex-col gap-1 p-[5px]">
         {blocks.map(b =>
           b.showId ? (
@@ -295,8 +343,10 @@ function DayColumn({
               name={showById(b.showId)?.name ?? 'unknown show'}
               color={colorOf(b.showId)}
               density={density}
+              hourPx={hourPx}
               onPick={onPick}
               onRemove={onRemove}
+              onResize={onResize}
               onDropShow={onDropShow}
             />
           ) : (
@@ -363,25 +413,88 @@ function FoldedRail({
 // compact, which is not two lines of type — it was slicing the show's name
 // through the middle. Anything that short prints the name alone and leaves the
 // hour range to the tooltip, which carried it all along.
+//
+// The two edges are resize handles: drag one to move that boundary an hour at
+// a time. The drag is a PURE PREVIEW — the grid is written once, on release.
+// Writing on every step would be the obvious thing and it does not work: the
+// cards are re-derived from the grid by `dayBlocks` and keyed on `start`, so a
+// top-edge drag would remount the very handle holding the pointer capture and
+// the gesture would die on its first hour. Instead the card draws itself at
+// the drafted size and pulls the difference back out of its own margins, so
+// the run appears to grow over its neighbours without the column reflowing
+// under the cursor.
 function BoardCard({
-  block, name, color, density, onPick, onRemove, onDropShow,
+  block, name, color, density, hourPx, onPick, onRemove, onResize, onDropShow,
 }: {
   block: Block;
   name: string;
   color: string;
   density: BoardDensity;
+  hourPx: number;
   onPick: (b: Block) => void;
   onRemove: (b: Block) => void;
+  onResize: (b: Block, start: number, end: number) => void;
   onDropShow: (b: Block, showId: string) => void;
 }) {
   const ref = useRef<HTMLDivElement>(null);
   const [over, setOver] = useState(false);
+  const [draft, setDraft] = useState<{ start: number; end: number } | null>(null);
+  const drag = useRef<{ edge: ResizeEdge; y0: number } | null>(null);
+
+  const blockEnd = block.start + block.span;
+  const start = draft?.start ?? block.start;
+  const end = draft?.end ?? blockEnd;
+  const span = end - start;
+
   useDynamicStyle(ref, {
-    height: `calc(var(--hour-px) * ${block.span} - 4px)`,
+    height: `calc(var(--hour-px) * ${span} - 4px)`,
+    // Negative when the draft has grown past the real run — the card overlaps
+    // its neighbours instead of displacing them.
+    marginTop: draft ? `calc(var(--hour-px) * ${start - block.start})` : undefined,
+    marginBottom: draft ? `calc(var(--hour-px) * ${blockEnd - end})` : undefined,
     background: color,
   });
+
+  const commit = (r: { start: number; end: number }) => {
+    if (r.start !== block.start || r.end !== blockEnd) onResize(block, r.start, r.end);
+  };
+
+  const edgeHour = (edge: ResizeEdge) => (edge === 'top' ? block.start : blockEnd);
+
+  const handleProps = (edge: ResizeEdge) => ({
+    onPointerDown: (e: PointerEvent<HTMLButtonElement>) => {
+      if (e.button !== 0) return;
+      e.preventDefault();
+      e.stopPropagation();
+      e.currentTarget.setPointerCapture(e.pointerId);
+      drag.current = { edge, y0: e.clientY };
+      setDraft({ start: block.start, end: blockEnd });
+    },
+    onPointerMove: (e: PointerEvent<HTMLButtonElement>) => {
+      const d = drag.current;
+      if (!d) return;
+      const steps = Math.round((e.clientY - d.y0) / hourPx);
+      setDraft(resizedRun(block, d.edge, edgeHour(d.edge) + steps));
+    },
+    onPointerUp: () => {
+      if (drag.current && draft) commit(draft);
+      drag.current = null;
+      setDraft(null);
+    },
+    // A cancelled pointer (a system gesture, the page scrolling away) abandons
+    // the draft rather than committing a size the operator never released on.
+    onPointerCancel: () => { drag.current = null; setDraft(null); },
+    onKeyDown: (e: KeyboardEvent) => {
+      const step = e.key === 'ArrowUp' ? -1 : e.key === 'ArrowDown' ? 1 : 0;
+      if (!step) return;
+      e.preventDefault();
+      commit(resizedRun(block, edge, edgeHour(edge) + step));
+    },
+  });
+
   // Two lines need both hour units; compact only has the room from three up.
-  const showRange = density === 'comfortable' ? block.span > 1 : block.span > 2;
+  const showRange = density === 'comfortable' ? span > 1 : span > 2;
+  const range = `${hh(start)} – ${hh(end)}`;
   return (
     <div
       ref={ref}
@@ -397,12 +510,15 @@ function BoardCard({
         'group relative overflow-hidden text-[#f6f2ea]',
         'hover:outline-2 hover:-outline-offset-1 hover:outline-ink',
         over && 'outline-2 -outline-offset-1 outline-ink',
+        // Lifted while drafting so the overlap reads as the card on top of its
+        // neighbours rather than sunk behind them.
+        draft && 'z-20 outline-2 -outline-offset-1 outline-[var(--accent)]',
       )}
     >
       <button
         type="button"
         onClick={() => onPick(block)}
-        title={`${name} · ${hh(block.start)} – ${hh(block.start + block.span)} — click to edit this order`}
+        title={`${name} · ${hh(block.start)} – ${hh(blockEnd)} — click to edit this order, or drag an edge to change the hours`}
         className={cn(
           'flex size-full cursor-pointer flex-col overflow-hidden border-0 bg-transparent px-2 text-left text-inherit',
           showRange ? 'justify-between py-1.5' : 'justify-center py-0.5',
@@ -413,20 +529,72 @@ function BoardCard({
         </span>
         {showRange && (
           <span className="font-mono text-[9px] tracking-[0.06em] whitespace-nowrap opacity-70">
-            {hh(block.start)} – {hh(block.start + block.span)}
+            {range}
           </span>
         )}
       </button>
+      {/* While drafting, the range is the only feedback that matters — print it
+          even on the short cards that normally leave it to the tooltip. */}
+      {draft && !showRange && (
+        <span className="pointer-events-none absolute inset-x-0 bottom-0 bg-[rgba(0,0,0,0.45)] px-1 text-center font-mono text-[8.5px] tracking-[0.06em] whitespace-nowrap">
+          {range}
+        </span>
+      )}
+      <ResizeHandle
+        edge="top"
+        label={`Move the start of “${name}” — currently ${hh(block.start)}:00`}
+        dragging={drag.current?.edge === 'top'}
+        {...handleProps('top')}
+      />
+      <ResizeHandle
+        edge="bottom"
+        label={`Move the end of “${name}” — currently ${hh(blockEnd)}:00`}
+        dragging={drag.current?.edge === 'bottom'}
+        {...handleProps('bottom')}
+      />
       <button
         type="button"
         onClick={() => onRemove(block)}
         aria-label={`Take “${name}” off the air`}
         title={`Take “${name}” off the air`}
-        className="absolute top-[3px] right-[3px] flex size-[17px] cursor-pointer items-center justify-center border-0 bg-transparent p-0 font-mono text-[13px] leading-none font-bold text-inherit opacity-0 group-hover:opacity-100 hover:bg-[rgba(0,0,0,0.35)] focus-visible:opacity-100"
+        className="absolute top-[3px] right-[3px] z-10 flex size-[17px] cursor-pointer items-center justify-center border-0 bg-transparent p-0 font-mono text-[13px] leading-none font-bold text-inherit opacity-0 group-hover:opacity-100 hover:bg-[rgba(0,0,0,0.35)] focus-visible:opacity-100"
       >
         ×
       </button>
     </div>
+  );
+}
+
+type ResizeEdge = 'top' | 'bottom';
+
+// The grab strip on a card's top or bottom edge. Kept to 7px so it still fits
+// either side of a one-hour card (22px of box at the compact unit) — the depth
+// comes from `touch-action: none`, which hands the whole gesture to the
+// pointer handlers instead of the page's scroll. Arrow keys drive the same
+// edge for anyone not dragging.
+function ResizeHandle({
+  edge, label, dragging, ...rest
+}: {
+  edge: ResizeEdge;
+  label: string;
+  dragging: boolean;
+} & ComponentPropsWithoutRef<'button'>) {
+  return (
+    <button
+      type="button"
+      aria-label={label}
+      title={`${label}. Drag, or use the up and down arrow keys.`}
+      className={cn(
+        'absolute inset-x-0 z-10 flex h-[7px] cursor-ns-resize touch-none items-center justify-center border-0 bg-transparent p-0 opacity-0 group-hover:opacity-100 focus-visible:opacity-100',
+        edge === 'top' ? 'top-0' : 'bottom-0',
+        // A capture can carry the pointer off the card, which drops
+        // `group-hover` — the handle being dragged must not vanish under it.
+        dragging && 'opacity-100',
+      )}
+      {...rest}
+    >
+      <span aria-hidden="true" className="h-[2px] w-6 max-w-[55%] bg-[rgba(246,242,234,0.8)]" />
+    </button>
   );
 }
 
