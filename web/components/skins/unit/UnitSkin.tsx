@@ -371,9 +371,9 @@ export default function UnitSkin(_props: SkinProps) {
       {/* ============ desktop: the full front panel ============ */}
       <div className="relative hidden min-h-0 flex-1 flex-col gap-[18px] p-5 lg:flex">
         {/* brand strip */}
-        <div className="flex h-14 flex-none items-center justify-between px-1.5">
+        <div className="flex h-[30px] flex-none items-center justify-between px-1.5">
           <div className="flex min-w-0 items-baseline gap-4">
-            {wordmark('text-[22px]')}
+            {wordmark('text-[18px]')}
             <span
               className={cn(
                 styles.engravedSoft,
