@@ -90,21 +90,32 @@
   );
   background-size: 15px 15px;
 }
+/* The dot mask + filter live on this full-bleed layer so the halftone grid
+   stays aligned with the base perforation; the artwork itself paints in the
+   centred square box below — whole sleeve, never cropped. */
 .grilleArt {
-  /* A dark wash multiplied into the cover keeps every hole visibly darker
-     than the metal field, so bright artwork can't dissolve the perforation. */
-  background-image:
-    linear-gradient(rgba(23, 21, 15, 0.45), rgba(23, 21, 15, 0.45)),
-    var(--u-cover);
-  background-blend-mode: multiply;
-  background-size: cover;
-  background-position: center;
+  display: flex;
+  justify-content: center;
   filter: blur(1px) saturate(1.1);
   opacity: 0.95;
   -webkit-mask-image: radial-gradient(circle at center, #000 2.1px, transparent 2.4px);
   -webkit-mask-size: 15px 15px;
   mask-image: radial-gradient(circle at center, #000 2.1px, transparent 2.4px);
   mask-size: 15px 15px;
+}
+.grilleArtBox {
+  height: 100%;
+  max-width: 100%;
+  aspect-ratio: 1;
+  /* A dark wash multiplied into the cover keeps every hole visibly darker
+     than the metal field, so bright artwork can't dissolve the perforation. */
+  background-image:
+    linear-gradient(rgba(23, 21, 15, 0.45), rgba(23, 21, 15, 0.45)),
+    var(--u-cover);
+  background-blend-mode: multiply;
+  background-size: contain;
+  background-position: center;
+  background-repeat: no-repeat;
 }
 .grilleShade {
   box-shadow:

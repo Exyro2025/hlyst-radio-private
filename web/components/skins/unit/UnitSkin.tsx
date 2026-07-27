@@ -167,7 +167,11 @@ function Knob({
 function Grille({ hasArt, className }: { hasArt: boolean; className?: string }) {
   return (
     <div className={cn(styles.grille, 'relative overflow-hidden', className)} aria-hidden="true">
-      {hasArt && <div className={cn(styles.grilleArt, 'absolute inset-0')} />}
+      {hasArt && (
+        <div className={cn(styles.grilleArt, 'absolute inset-0')}>
+          <div className={styles.grilleArtBox} />
+        </div>
+      )}
       <div className={cn(styles.grilleShade, 'pointer-events-none absolute inset-0')} />
     </div>
   );
