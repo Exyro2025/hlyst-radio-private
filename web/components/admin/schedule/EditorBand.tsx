@@ -10,7 +10,7 @@ import { useRef } from 'react';
 import { useDynamicStyle } from '../../../hooks/useDynamicStyle';
 import { cn } from '../../../lib/cn';
 import { Button } from '../../ui/button';
-import { DayPills, Mu, SlotMenu } from './bits';
+import { DayPills, DayPresets, Mu, SlotMenu } from './bits';
 import type { ScheduleShow } from './lib';
 import { HOURS, dayName, hhmm } from './lib';
 
@@ -50,6 +50,8 @@ export interface LineEditorProps {
   onLineChange: (patch: Partial<EditorLine>) => void;
   onLineShow: (id: string) => void;
   onToggleLineDay: (day: number) => void;
+  /** Replace the day set outright — the weekday/weekend/every-day presets. */
+  onSetLineDays: (days: number[]) => void;
   onAir: () => void;
   onQuiet: () => void;
   orderNo: number;
@@ -60,7 +62,7 @@ export interface LineEditorProps {
  *  the tool for finer ranges, other shows, and multi-day writes. */
 export function LineEditor({
   shows, line, lineShowId, lineDays, currentName, colorOf,
-  onLineChange, onLineShow, onToggleLineDay, onAir, onQuiet, orderNo,
+  onLineChange, onLineShow, onToggleLineDay, onSetLineDays, onAir, onQuiet, orderNo,
 }: LineEditorProps) {
   const lineShow = shows.find(s => s.id === lineShowId) ?? null;
   return (
@@ -114,6 +116,7 @@ export function LineEditor({
             onSelect={k => onLineChange({ end: Number(k) })}
           />
           <span className="mx-1 hidden h-5 w-px bg-separator-strong sm:block" />
+          <DayPresets selected={lineDays} onSelect={onSetLineDays} />
           <DayPills selected={lineDays} onToggle={onToggleLineDay} />
           {/* Its own full-width line on a phone — the sentence above already
               fills several rows, and the buttons need a real tap target. */}

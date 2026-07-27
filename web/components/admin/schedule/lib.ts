@@ -138,6 +138,23 @@ export function setRange(
   return week;
 }
 
+/** Fill a whole day with `showId` — or clear it when the day already runs
+ *  nothing but that show, so a second click undoes the first. The bulk gesture
+ *  behind a click on a day header. */
+export function fillDayToggle(schedule: Schedule, day: number, showId: string): Schedule {
+  const cells = schedule[day] ?? [];
+  const allSet = cells.length === 24 && cells.every(c => c === showId);
+  return setRange(schedule, [day], 0, 24, allSet ? null : showId);
+}
+
+/** Fill one hour across all seven days — same toggle-off rule as `fillDayToggle`.
+ *  The bulk gesture behind a click on an hour in the gutter. */
+export function fillHourToggle(schedule: Schedule, hour: number, showId: string): Schedule {
+  const days = DAYS.map(d => d.key);
+  const allSet = days.every(d => schedule[d]?.[hour] === showId);
+  return setRange(schedule, days, hour, hour + 1, allSet ? null : showId);
+}
+
 /** Number of cells where the two grids disagree (the unsaved-edit count). */
 export function diffCells(a: Schedule, b: Schedule): number {
   let n = 0;
