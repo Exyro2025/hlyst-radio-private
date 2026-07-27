@@ -259,6 +259,28 @@ render_icecast() {
 	emit_mount /stream.flac "$FLAC_BITRATE_EST"
 	emit_mount /stream.aac  "$AAC_BITRATE"
 
+	# Trusted reverse proxies — same contract as docker/broadcast-entrypoint.sh
+	# (real listener IPs in admin → Listeners instead of the edge's address).
+	# The AIO has it easy: Caddy is in THIS container, so the peer is always
+	# loopback and the address is known without any DNS or ordering dance that
+	# the split stack has to negotiate. icecast-KH wants an exact IP, and both
+	# loopback forms are emitted because which one icecast sees depends on how
+	# Caddy resolved its upstream. ICECAST_TRUSTED_PROXY_IPS still overrides,
+	# for an AIO sitting behind a further reverse proxy that rewrites the chain.
+	local TRUSTED_XML=/etc/icecast2/trusted-proxies.xml
+	local TRUSTED_LIST _ip
+	: > "$TRUSTED_XML"
+	TRUSTED_LIST=$(echo "${ICECAST_TRUSTED_PROXY_IPS:-127.0.0.1 ::1}" | tr ',' ' ')
+	for _ip in $TRUSTED_LIST; do
+		case "$_ip" in
+			''|*[!0-9a-fA-F.:]*)
+				log "WARNING ignoring malformed trusted proxy '$_ip'"
+				continue
+				;;
+		esac
+		echo "        <x-forwarded-for>$_ip</x-forwarded-for>" >> "$TRUSTED_XML"
+	done
+
 	sed \
 		-e "s|\${ICECAST_SOURCE_PASSWORD}|$ICECAST_SOURCE_PASSWORD|g" \
 		-e "s|\${ICECAST_ADMIN_PASSWORD}|$ICECAST_ADMIN_PASSWORD|g" \
@@ -268,6 +290,8 @@ render_icecast() {
 		-e "s|\${ICECAST_QUEUE_SIZE}|$ICECAST_QUEUE_SIZE|g" \
 		-e "/<!--@STREAM_MOUNTS@-->/r $MOUNTS_XML" \
 		-e "/<!--@STREAM_MOUNTS@-->/d" \
+		-e "/<!--@TRUSTED_PROXIES@-->/r $TRUSTED_XML" \
+		-e "/<!--@TRUSTED_PROXIES@-->/d" \
 		"$TEMPLATE" > "$RENDERED"
 	chown icecast2 "$RENDERED" 2>/dev/null || true
 }
