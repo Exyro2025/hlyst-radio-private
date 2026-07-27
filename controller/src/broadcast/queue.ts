@@ -1717,7 +1717,11 @@ class Queue {
         // track, and the elapsed part would push `showAt` over the next
         // boundary early, #1205); with one (deadline path) it follows the
         // HELD track, so the lead is on-air remaining + the held track's
-        // length. Unknown clock → no look-ahead, today's behaviour.
+        // length (knownDurationSec — the same library fallback every other
+        // duration read uses). Unknown clock → no look-ahead — rarer than it
+        // was pre-#1205: untracked auto plays carry a start stamp and
+        // usually a library duration, so remainingSecOnAir now gives them a
+        // real lead where the old duration-only read never could.
         //
         // This ONE date then drives the whole boundary sequence below — roll,
         // episode plan, mic-pass, episode hook — not just the pick. It used
@@ -1731,7 +1735,7 @@ class Queue {
         // on-air persona to disagree: there is no second date to disagree with.
         const leadSec = pickLeadSec(
           this.remainingSecOnAir(),
-          predecessorItem ? (Number(predecessorItem.track?.duration) || 0) : null,
+          predecessorItem ? knownDurationSec(predecessorItem.track) : null,
         );
         let showAt: Date | null = null;
         if (leadSec != null) {
