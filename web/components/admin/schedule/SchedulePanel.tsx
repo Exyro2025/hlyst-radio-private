@@ -17,6 +17,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useAdminAuth } from '../../../lib/adminAuth';
+import { BOARD_HOUR_PX, useBoardDensity } from '../../../lib/adminView';
 import { notify, errorMessage } from '../../../lib/notify';
 import { fmtClock, normalizeStationLocale, zonedDayHour } from '../../../lib/format';
 import type { StationLocale } from '../../../lib/types';
@@ -36,8 +37,8 @@ import { ColorChip, Mu, SegBtn, SlotMenu } from './bits';
 import type { Block, Schedule, ScheduleShow } from './lib';
 import {
   DAYS, SHOW_COLORS, blockAhead, blockAt, bookedHours, cloneWeek, dayBlocks,
-  dayName, diffCells, diffRanges, emptyWeek, hhmm, setRange, showHours,
-  weekOrders,
+  dayName, diffCells, diffRanges, emptyWeek, fillDayToggle, fillHourToggle,
+  hhmm, resizeBlock, setRange, showHours, weekOrders,
 } from './lib';
 
 /** The airtime-bar tick — hours a show "should" get in a week. */
@@ -119,6 +120,14 @@ export default function SchedulePanel() {
   const [lineShowId, setLineShowId] = useState<string | null>(null);
   const [lineDays, setLineDays] = useState<number[]>([6]);
 
+  // The armed show — the shelf chip acting as a brush (#1204). Deliberately
+  // its own state rather than reusing `lineShowId`: that one is set by every
+  // card click and load, so hanging the day/hour bulk fills off it would let a
+  // stray click on a day header rewrite 24 hours. Arming is an explicit mode
+  // the operator enters and can leave with Escape.
+  const [armedShowId, setArmedShowId] = useState<string | null>(null);
+  const [density, setDensity] = useBoardDensity();
+
   const [dismissed, setDismissed] = useState<string[]>([]);
   const [reviewOpen, setReviewOpen] = useState(false);
   // The in-app destination an unsaved-edits click was held back from (see the
@@ -130,6 +139,11 @@ export default function SchedulePanel() {
   const [pinShowId, setPinShowId] = useState('');
   const [pinMinutes, setPinMinutes] = useState(60);
   const [pinBusy, setPinBusy] = useState(false);
+  // The takeover controls run ~430px of dropdown, presets, minutes and button
+  // for something reached a few times a month, and they sit between the header
+  // and the board on every load. Collapsed to one line until asked for; a live
+  // takeover always renders in full.
+  const [takeoverOpen, setTakeoverOpen] = useState(false);
 
   useEffect(() => {
     const id = setInterval(() => setNow(new Date()), 1000);
@@ -221,6 +235,59 @@ export default function SchedulePanel() {
   const liveOverride = override && override.expiresAt > now.getTime() ? override : null;
   const pinnedShow = liveOverride ? showById(liveOverride.showId) : null;
 
+  // ── the brush ────────────────────────────────────────────────────────────
+  // Resolve through the roster rather than trusting the id: a show deleted on
+  // the Shows page in another tab would otherwise leave a dangling brush that
+  // writes an id no order can render.
+  const armedShow = armedShowId ? showById(armedShowId) : null;
+  const armedId = armedShow?.id ?? null;
+
+  /** Shelf-chip click: arm the show, or put the brush down if it is already
+   *  armed. Either way the sentence editor follows, so the two editing paths
+   *  never disagree about which show is in hand. */
+  const armShow = (id: string) => {
+    setArmedShowId(cur => (cur === id ? null : id));
+    setLineShowId(id);
+  };
+
+  // Escape puts the brush down — the standard way out of a modal tool, and the
+  // only way out that doesn't require finding the armed chip again.
+  useEffect(() => {
+    if (!armedId) return;
+    const onKeyDown = (e: KeyboardEvent) => {
+      // A Radix layer that consumed this Escape (the review modal, a slot
+      // menu) preventDefaults it from a document-capture listener before this
+      // bubble listener runs — closing an overlay must not also drop the brush.
+      if (e.key === 'Escape' && !e.defaultPrevented) setArmedShowId(null);
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [armedId]);
+
+  /** A day header with a show armed: put it on all 24 hours — or clear the day
+   *  when it already runs nothing else, so a second click undoes the first. */
+  const fillDay = (day: number) => {
+    if (!schedule || !armedShow) return;
+    const next = fillDayToggle(schedule, day, armedShow.id);
+    setSchedule(next);
+    const cleared = (next[day] ?? []).every(c => c == null);
+    notify.ok(cleared
+      ? `${dayName(day)} cleared — unsaved until you save the week.`
+      : `“${armedShow.name}” across ${dayName(day)} — unsaved until you save the week.`);
+  };
+
+  /** An hour in the gutter with a show armed: put it on that hour every day,
+   *  with the same toggle-off rule. */
+  const fillHour = (hour: number) => {
+    if (!schedule || !armedShow) return;
+    const next = fillHourToggle(schedule, hour, armedShow.id);
+    setSchedule(next);
+    const cleared = DAYS.every(d => next[d.key]?.[hour] == null);
+    notify.ok(cleared
+      ? `${hhmm(hour)} cleared all week — unsaved until you save the week.`
+      : `“${armedShow.name}” at ${hhmm(hour)} every day — unsaved until you save the week.`);
+  };
+
   // ── editor actions ───────────────────────────────────────────────────────
   const pick = (b: Block) => {
     setLine({ day: b.day, start: b.start, end: b.start + b.span });
@@ -243,6 +310,21 @@ export default function SchedulePanel() {
     setLine({ day: b.day, start: b.start, end: b.start + b.span });
     setLineDays([b.day]);
     setLineShowId(showId);
+  };
+
+  // A board card's edge dragged to new hours. The vacated hours fall silent
+  // and the gained ones are written over whatever was there — the same
+  // overwrite a drop or the order desk performs, so a run grown into its
+  // neighbour takes those hours rather than stopping short of them.
+  const resizeRun = (b: Block, start: number, end: number) => {
+    if (!schedule || !b.showId) return;
+    setSchedule(resizeBlock(schedule, b, start, end));
+    setLine({ day: b.day, start, end });
+    setLineDays([b.day]);
+    setLineShowId(b.showId);
+    notify.ok(
+      `“${showById(b.showId)?.name ?? 'show'}” now ${dayName(b.day)} ${hhmm(start)} – ${hhmm(end)} — unsaved until you save the week.`,
+    );
   };
 
   // The × on a board card: take the run off the air (a local edit). The
@@ -338,6 +420,7 @@ export default function SchedulePanel() {
       const j = (await r.json().catch(() => ({}))) as { error?: string; override?: ScheduleOverride };
       if (!r.ok) throw new Error(j.error || `failed (${r.status})`);
       setOverride(j.override ?? null);
+      setTakeoverOpen(false);
       const name = showById(pinShowId)?.name || 'show';
       notify.ok(`“${name}” takes over — the switch airs on the next track.`);
     } catch (e) {
@@ -490,8 +573,17 @@ export default function SchedulePanel() {
             <span className="font-mono text-[11.5px] font-bold tracking-[0.06em] text-ink">{clockLabel}</span>
             <Mu className="text-[9px]">{zoneLabel}</Mu>
           </div>
-          <div className="ml-auto flex w-full flex-none flex-wrap items-center gap-3 sm:w-auto sm:flex-nowrap">
-            <span className="flex flex-none items-center gap-2">
+          {/* Phones get the status and Save from `SaveBar` alone. It is sticky
+              for exactly as long as the week is dirty, carries Review and
+              Discard beside the same button, and follows the operator down
+              into the board where the edits actually happen — so repeating all
+              of it here just spent a row of a 24-hour screen saying it twice.
+              With nothing to save there is nothing to show either. */}
+          {/* No `w-full` on a phone any more: with the status and Save gone,
+              the lone New-show link sizes to its content and sits beside the
+              clock wherever there is room instead of claiming a row. */}
+          <div className="ml-auto flex flex-none flex-wrap items-center gap-3 sm:flex-nowrap">
+            <span className="hidden flex-none items-center gap-2 sm:flex">
               {dirty > 0 && <span aria-hidden="true" className="size-1.5 bg-[var(--accent)]" />}
               <Mu className={cn('text-[9px] whitespace-nowrap', dirty > 0 && 'text-ink')}>
                 {dirty > 0 ? `${dirty} unsaved edit${dirty === 1 ? '' : 's'}` : 'all changes saved'}
@@ -512,7 +604,7 @@ export default function SchedulePanel() {
             <Button
               variant="accent"
               size="sm"
-              className="min-h-9 sm:min-h-0"
+              className="hidden sm:inline-flex"
               onClick={saveWeek}
               disabled={busy || dirty === 0}
             >
@@ -520,9 +612,11 @@ export default function SchedulePanel() {
             </Button>
           </div>
         </div>
-        <h1 className="mt-2 mb-0 font-display text-[28px] leading-[1.05] font-semibold tracking-[-0.015em]">
-          Programme the week, one hour at a time.
-        </h1>
+        {/* The board is 24 hours tall, so every row of chrome above it costs a
+            row of the week. The display headline went (the eyebrow and the
+            breadcrumb both already name this page); its standing note stays as
+            the accessible h1. */}
+        <h1 className="sr-only">The Rundown — programme the week, one hour at a time</h1>
         <Mu className="mt-1.5 block text-[9px] tracking-[0.1em]">
           Empty hours run autonomously · every change goes live on save
         </Mu>
@@ -549,6 +643,9 @@ export default function SchedulePanel() {
             name={showById(nextBlock.showId)?.name ?? 'Nobody in the chair'}
             color={nextBlock.showId ? colorOf(nextBlock.showId) : null}
             meta={metaOf(nextBlock.showId)}
+            // Hiding "After that" makes this the last cell a phone shows, and
+            // its own rule would double up against the takeover strip's.
+            className="max-sm:border-b-0"
           />
           <NowCell
             label="After that"
@@ -557,19 +654,42 @@ export default function SchedulePanel() {
             color={laterBlock.showId ? colorOf(laterBlock.showId) : null}
             meta={metaOf(laterBlock.showId)}
             last
+            // Three stacked cells is ~190px of a phone screen spent on what is
+            // playing before any of the week is visible. On air and Up next
+            // are the two an operator acts on; the hour after that is already
+            // in the board they are scrolling to.
+            className="hidden sm:block"
           />
         </div>
 
         {/* Takeover strip */}
         <div className="flex flex-wrap items-center gap-x-3.5 gap-y-2 border-t border-separator-strong bg-[color-mix(in_oklab,var(--ink)_5%,var(--page-bg))] px-5 py-[11px] sm:px-[22px]">
           <span className="eyebrow flex-none text-ink">Takeover</span>
-          <Mu className="min-w-0 flex-1 truncate text-[9px]">
+          {/* Truncated to "…THE SCHEDULE PICKS…" on a phone, which is noise
+              rather than explanation — the Pin button and its own controls say
+              the rest. */}
+          <Mu className="hidden min-w-0 flex-1 truncate text-[9px] sm:block">
             Jump a show to the front of the queue — the schedule picks up again after
           </Mu>
-          {/* Full-width + wrapping on a phone: the controls run ~430px wide,
-              so on one flex-none line the Pin button falls off the screen. */}
-          <div className="ml-auto flex w-full flex-none flex-wrap items-center gap-2.5 sm:w-auto sm:flex-nowrap">
-            {liveOverride && pinnedShow ? (
+          {/* Full-width + wrapping on a phone only once there is something to
+              wrap: expanded, the controls run ~430px and the Pin button would
+              fall off the screen. Collapsed it is one button, and giving that
+              a row of its own is how a monthly action came to cost the same
+              vertical space as an hour of the week. */}
+          <div className={cn(
+            'ml-auto flex flex-none flex-wrap items-center gap-2.5 sm:w-auto sm:flex-nowrap',
+            takeoverOpen || liveOverride ? 'w-full' : 'w-auto',
+          )}>
+            {!liveOverride && !takeoverOpen ? (
+              <Button
+                variant="ghost"
+                size="sm"
+                className="min-h-9 sm:min-h-0"
+                onClick={() => setTakeoverOpen(true)}
+              >
+                Pin a show…
+              </Button>
+            ) : liveOverride && pinnedShow ? (
               <>
                 <ColorChip color={colorOf(pinnedShow.id)} />
                 <span className="text-[13px] font-bold text-ink">{pinnedShow.name}</span>
@@ -630,6 +750,15 @@ export default function SchedulePanel() {
                 >
                   {pinBusy ? 'Pinning…' : 'Pin show'}
                 </Button>
+                <button
+                  type="button"
+                  onClick={() => setTakeoverOpen(false)}
+                  aria-label="Close the takeover controls"
+                  title="Close the takeover controls"
+                  className="cursor-pointer border-0 bg-transparent p-1 font-mono text-[13px] leading-none font-bold text-muted hover:text-ink"
+                >
+                  ×
+                </button>
               </>
             )}
           </div>
@@ -656,6 +785,13 @@ export default function SchedulePanel() {
                 ? (d === line.day ? cur : cur.filter(x => x !== d))
                 : [...cur, d],
             )}
+            // A preset replaces the set outright, so the sentence's own day has
+            // to move into it — otherwise `applyLine` re-adds the old one and
+            // "Weekdays" quietly writes Saturday too.
+            onSetLineDays={days => {
+              setLineDays(days);
+              if (!days.includes(line.day)) setLine(cur => ({ ...cur, day: days[0] ?? cur.day }));
+            }}
             onAir={() => applyLine(lineShowId)}
             onQuiet={() => applyLine(null)}
             orderNo={orderNo}
@@ -673,8 +809,15 @@ export default function SchedulePanel() {
           hoursOf={hoursOf}
           onPick={pick}
           onRemove={removeRun}
+          onResize={resizeRun}
           onDropShow={dropShow}
-          onArmShow={setLineShowId}
+          armedShowId={armedId}
+          onArmShow={armShow}
+          onFillDay={fillDay}
+          onFillHour={fillHour}
+          density={density}
+          hourPx={BOARD_HOUR_PX[density]}
+          onDensity={setDensity}
         />
       </div>
       <div className="flex-1 pb-1">
@@ -810,7 +953,7 @@ export default function SchedulePanel() {
 }
 
 function NowCell({
-  label, live, time, left, name, color, meta, pct, last,
+  label, live, time, left, name, color, meta, pct, last, className,
 }: {
   label: string;
   live?: boolean;
@@ -821,6 +964,8 @@ function NowCell({
   meta: string;
   pct?: number;
   last?: boolean;
+  /** Responsive overrides from the caller (which cells a phone shows). */
+  className?: string;
 }) {
   const barRef = useRef<HTMLDivElement>(null);
   useDynamicStyle(barRef, { width: `${pct ?? 0}%` });
@@ -831,6 +976,7 @@ function NowCell({
         // Stacked on a phone (grid-cols-1), so the divider runs along the
         // bottom; the column rule comes back with the 3-up grid at sm.
         !last && 'border-b border-separator-strong sm:border-r sm:border-b-0',
+        className,
       )}
     >
       <div className="mb-1 flex items-center gap-2">
