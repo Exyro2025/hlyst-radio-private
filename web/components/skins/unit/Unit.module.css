@@ -54,9 +54,10 @@
 }
 
 /* Milled-metal striation, full-bleed over the frame — a physical highlight,
-   so it stays white in every theme. */
+   so it stays white in every theme. Kept faint: at full design strength the
+   pinstripes read as glare, especially on dark chassis. */
 .striation {
-  opacity: 0.5;
+  opacity: 0.25;
   background-image: repeating-linear-gradient(
     90deg,
     rgba(255, 255, 255, 0.5) 0 1px,
