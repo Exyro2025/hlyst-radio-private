@@ -292,7 +292,10 @@ if [ -n "${ICECAST_TRUSTED_PROXY_IPS:-}" ]; then
     TRUSTED_LIST=$(echo "$ICECAST_TRUSTED_PROXY_IPS" | tr ',' ' ')
 else
     for _host in $(echo "${ICECAST_TRUSTED_PROXY_HOSTS:-caddy}" | tr ',' ' '); do
-        _found=$(getent hosts "$_host" 2>/dev/null | awk '{print $1}' || true)
+        # ahosts, not hosts: `getent hosts` returns ONE address family, so on
+        # a dual-stack network it can hand back only the IPv6 while Caddy
+        # dials icecast over IPv4 — and an exact-IP match then never fires.
+        _found=$(getent ahosts "$_host" 2>/dev/null | awk '{print $1}' | sort -u || true)
         [ -n "$_found" ] && TRUSTED_LIST="$TRUSTED_LIST $_found"
     done
 fi

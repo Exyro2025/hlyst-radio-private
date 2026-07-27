@@ -265,6 +265,14 @@ shape how you configure it:
 - **It reads the left-most entry** of the forwarded chain, which is the original
   client — correct even though Caddy appends its own peer on the way through.
 
+One consequence of the left-most read: when Cloudflare fronts the stack (proxied
+DNS or a tunnel), a client can seed its own `X-Forwarded-For` and Cloudflare
+*appends* the real IP rather than replacing it — so the left-most entry, and the
+row in the Listeners table, is whatever the client claimed. Treat the IPs as
+advisory in that setup. Listener *counts* are unaffected either way (they never
+key on IP), and direct-to-Caddy connections can't spoof (an untrusted peer's
+header is discarded and rewritten).
+
 ### Bundled Caddy (default compose)
 
 Nothing to do for the steady state: the broadcast container resolves `caddy` by
