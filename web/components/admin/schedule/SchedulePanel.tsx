@@ -1,18 +1,24 @@
 'use client';
 
 // The Rundown — /admin/shows/schedule. The dedicated full-screen show-plan
-// view: a live header, the On air / Up next / After that band with the
-// takeover control, the full-width board (7 × 24 kanban), and the order desk
-// beneath it with the sentence-based order editor.
+// view: a live header, the On air / Up next / After that band, the full-width
+// board (7 × 24 kanban), and the order desk beneath it with the sentence-based
+// order editor.
 //
 // The data model is unchanged: the controller's 7×24 `schedule` grid from
 // GET /settings, persisted with PUT /schedule ("Save the week"). Every edit
 // on this screen — sentence editor, board clicks (silent slot books a show,
 // a card's × takes one off the air), drag-and-drop, suggestions — is a local
-// range write until the week is saved. The takeover strip drives the same
-// /schedule/override endpoints the shows page used (#930).
+// range write until the week is saved.
+//
+// Takeovers (#930) are NOT part of this screen — pinning, cancelling and the
+// countdown all live on the dash (components/admin/dash/TakeoverCard): putting
+// a show on the air right now is a live on-air action, not a way of
+// programming the week, and its old strip here cost a row of chrome above a
+// 24-hour board on every load. The one thing that stays is the READ of the
+// pin in force: it outranks the grid in the controller's resolveActiveShow, so
+// the On air cell would otherwise name a show that is not on the air.
 
-import type { ChangeEvent } from 'react';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
@@ -33,7 +39,7 @@ import Board from './Board';
 import SaveBar from './SaveBar';
 import EditorBand, { LineEditor } from './EditorBand';
 import type { EditorLine, Suggestion } from './EditorBand';
-import { ColorChip, Mu, SegBtn, SlotMenu } from './bits';
+import { ColorChip, Mu } from './bits';
 import type { Block, Schedule, ScheduleShow } from './lib';
 import {
   DAYS, SHOW_COLORS, blockAhead, blockAt, bookedHours, cloneWeek, dayBlocks,
@@ -43,15 +49,6 @@ import {
 
 /** The airtime-bar tick — hours a show "should" get in a week. */
 const WEEKLY_TARGET = 12;
-
-// Mirror the controller's OVERRIDE_MIN/MAX_MINUTES (settings.ts).
-const PIN_MIN_MINUTES = 15;
-const PIN_MAX_MINUTES = 720;
-const PIN_PRESETS = [
-  { minutes: 60, label: '1h' },
-  { minutes: 120, label: '2h' },
-  { minutes: 180, label: '3h' },
-];
 
 interface Persona {
   id: string;
@@ -134,16 +131,9 @@ export default function SchedulePanel() {
   // leave guard below); null when nothing is pending.
   const [pendingHref, setPendingHref] = useState<string | null>(null);
 
-  // Takeover (#930).
+  // The live takeover (#930), for the Now band's read of what is actually on
+  // air. Pinning and cancelling happen on the dash.
   const [override, setOverride] = useState<ScheduleOverride | null>(null);
-  const [pinShowId, setPinShowId] = useState('');
-  const [pinMinutes, setPinMinutes] = useState(60);
-  const [pinBusy, setPinBusy] = useState(false);
-  // The takeover controls run ~430px of dropdown, presets, minutes and button
-  // for something reached a few times a month, and they sit between the header
-  // and the board on every load. Collapsed to one line until asked for; a live
-  // takeover always renders in full.
-  const [takeoverOpen, setTakeoverOpen] = useState(false);
 
   useEffect(() => {
     const id = setInterval(() => setNow(new Date()), 1000);
@@ -407,40 +397,6 @@ export default function SchedulePanel() {
     router.push(href);
   };
 
-  // ── takeover ─────────────────────────────────────────────────────────────
-  const pinShow = async () => {
-    if (!pinShowId) return;
-    setPinBusy(true);
-    try {
-      const r = await adminFetch('/schedule/override', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ showId: pinShowId, minutes: pinMinutes }),
-      });
-      const j = (await r.json().catch(() => ({}))) as { error?: string; override?: ScheduleOverride };
-      if (!r.ok) throw new Error(j.error || `failed (${r.status})`);
-      setOverride(j.override ?? null);
-      setTakeoverOpen(false);
-      const name = showById(pinShowId)?.name || 'show';
-      notify.ok(`“${name}” takes over — the switch airs on the next track.`);
-    } catch (e) {
-      notify.err(errorMessage(e));
-    } finally { setPinBusy(false); }
-  };
-
-  const cancelPin = async () => {
-    setPinBusy(true);
-    try {
-      const r = await adminFetch('/schedule/override', { method: 'DELETE' });
-      const j = (await r.json().catch(() => ({}))) as { error?: string };
-      if (!r.ok) throw new Error(j.error || `failed (${r.status})`);
-      setOverride(null);
-      notify.ok('Takeover cancelled — back to the weekly schedule.');
-    } catch (e) {
-      notify.err(errorMessage(e));
-    } finally { setPinBusy(false); }
-  };
-
   // ── suggestions ──────────────────────────────────────────────────────────
   const suggestions: Suggestion[] = useMemo(() => {
     if (!schedule) return [];
@@ -643,8 +599,8 @@ export default function SchedulePanel() {
             name={showById(nextBlock.showId)?.name ?? 'Nobody in the chair'}
             color={nextBlock.showId ? colorOf(nextBlock.showId) : null}
             meta={metaOf(nextBlock.showId)}
-            // Hiding "After that" makes this the last cell a phone shows, and
-            // its own rule would double up against the takeover strip's.
+            // Hiding "After that" makes this the last cell a phone shows, so
+            // its own rule would double up against the band's own bottom edge.
             className="max-sm:border-b-0"
           />
           <NowCell
@@ -662,107 +618,6 @@ export default function SchedulePanel() {
           />
         </div>
 
-        {/* Takeover strip */}
-        <div className="flex flex-wrap items-center gap-x-3.5 gap-y-2 border-t border-separator-strong bg-[color-mix(in_oklab,var(--ink)_5%,var(--page-bg))] px-5 py-[11px] sm:px-[22px]">
-          <span className="eyebrow flex-none text-ink">Takeover</span>
-          {/* Truncated to "…THE SCHEDULE PICKS…" on a phone, which is noise
-              rather than explanation — the Pin button and its own controls say
-              the rest. */}
-          <Mu className="hidden min-w-0 flex-1 truncate text-[9px] sm:block">
-            Jump a show to the front of the queue — the schedule picks up again after
-          </Mu>
-          {/* Full-width + wrapping on a phone only once there is something to
-              wrap: expanded, the controls run ~430px and the Pin button would
-              fall off the screen. Collapsed it is one button, and giving that
-              a row of its own is how a monthly action came to cost the same
-              vertical space as an hour of the week. */}
-          <div className={cn(
-            'ml-auto flex flex-none flex-wrap items-center gap-2.5 sm:w-auto sm:flex-nowrap',
-            takeoverOpen || liveOverride ? 'w-full' : 'w-auto',
-          )}>
-            {!liveOverride && !takeoverOpen ? (
-              <Button
-                variant="ghost"
-                size="sm"
-                className="min-h-9 sm:min-h-0"
-                onClick={() => setTakeoverOpen(true)}
-              >
-                Pin a show…
-              </Button>
-            ) : liveOverride && pinnedShow ? (
-              <>
-                <ColorChip color={colorOf(pinnedShow.id)} />
-                <span className="text-[13px] font-bold text-ink">{pinnedShow.name}</span>
-                <Mu className="text-[9px]">
-                  ends {fmtClock(liveOverride.expiresAt, tz, locale)} ·{' '}
-                  {Math.max(1, Math.ceil((liveOverride.expiresAt - now.getTime()) / 60_000))} min left
-                </Mu>
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  className="min-h-9 sm:min-h-0"
-                  onClick={cancelPin}
-                  disabled={pinBusy}
-                >
-                  {pinBusy ? 'Cancelling…' : 'Cancel takeover'}
-                </Button>
-              </>
-            ) : (
-              <>
-                <SlotMenu
-                  ariaLabel="Pin a show"
-                  // Reads as a field here (not a word in a sentence), so it can
-                  // carry the same phone tap height as the rest of the strip.
-                  className="min-h-9 text-[12px] sm:min-h-0"
-                  label={showById(pinShowId)?.name ?? 'Pin a show…'}
-                  options={shows.map(s => ({ key: s.id, label: s.name, chipColor: colorOf(s.id) }))}
-                  onSelect={setPinShowId}
-                  disabled={shows.length === 0}
-                />
-                <div className="flex gap-1.5">
-                  {PIN_PRESETS.map(p => (
-                    <SegBtn key={p.minutes} on={pinMinutes === p.minutes} onClick={() => setPinMinutes(p.minutes)}>
-                      {p.label}
-                    </SegBtn>
-                  ))}
-                </div>
-                <label className="flex items-baseline gap-1.5 border border-separator-strong px-2 py-[9px] sm:py-1">
-                  <input
-                    type="number"
-                    min={PIN_MIN_MINUTES}
-                    max={PIN_MAX_MINUTES}
-                    value={pinMinutes}
-                    onChange={(e: ChangeEvent<HTMLInputElement>) => {
-                      const v = Number(e.target.value);
-                      if (Number.isFinite(v)) setPinMinutes(Math.round(v));
-                    }}
-                    aria-label="Takeover minutes"
-                    className="w-11 [appearance:textfield] border-0 bg-transparent p-0 text-right font-mono text-[11px] font-bold text-ink outline-none"
-                  />
-                  <Mu className="text-[8px]">min</Mu>
-                </label>
-                <Button
-                  variant="accent"
-                  size="sm"
-                  className="min-h-9 sm:min-h-0"
-                  onClick={pinShow}
-                  disabled={pinBusy || !pinShowId || pinMinutes < PIN_MIN_MINUTES || pinMinutes > PIN_MAX_MINUTES}
-                >
-                  {pinBusy ? 'Pinning…' : 'Pin show'}
-                </Button>
-                <button
-                  type="button"
-                  onClick={() => setTakeoverOpen(false)}
-                  aria-label="Close the takeover controls"
-                  title="Close the takeover controls"
-                  className="cursor-pointer border-0 bg-transparent p-1 font-mono text-[13px] leading-none font-bold text-muted hover:text-ink"
-                >
-                  ×
-                </button>
-              </>
-            )}
-          </div>
-        </div>
       </div>
 
       {/* ── Main: line editor, edge-to-edge board, order desk beneath ──── */}
