@@ -19,13 +19,17 @@
 //     feed. Stripping `**bold**` makes a line more readable, never differently
 //     spelled.
 //   normalizeForSpeech()  — the above PLUS the pronunciation layer: operator
-//     corrections, unit/symbol expansion, the SUB/WAVE → "Subwave" rule.
+//     corrections, kana romanization, unit/symbol expansion, the SUB/WAVE →
+//     "Subwave" rule.
 //     These are spelled for an ENGINE's benefit, not a reader's — "Ye" reads
 //     as "Yay" only so the voice says it right, and a listener seeing "Yay"
 //     in the written line is a bug, not a feature. Speech-only spellings must
 //     never be persisted anywhere a human sees them.
 //
-// No imports — pure module, unit-pinned by scripts/speech-text.test.ts.
+// One import — the equally pure, equally settings-free audio/romanize.ts.
+// Still side-effect-free and unit-pinned by scripts/speech-text.test.ts.
+
+import { romanizeCjk } from './romanize.js';
 
 // Operator-defined speech correction: replace `from` with `to` wherever it
 // appears in booth-bound text (settings.tts.corrections, admin → Settings →
@@ -132,6 +136,15 @@ export function normalizeForSpeech(
   // operator sees ("**Hozier**" still matches a "Hozier" rule), and BEFORE
   // the symbol rules so a correction can pre-empt a built-in expansion.
   if (corrections?.length) t = applyCorrections(t, corrections);
+
+  // --- kana → Latin (issue #1179) ---
+  // AFTER corrections, and that order is load-bearing: an operator rule is
+  // written in the ORIGINAL script (`ウルフルズ` → `Ulfuls`, the band's own
+  // Latin name), so romanizing first would leave every such rule unable to
+  // match. A correction therefore always beats the transliteration, which is
+  // the escape hatch for names this approximates badly.
+  // No-op on text without kana, so a Latin-only station is unaffected.
+  t = romanizeCjk(t);
 
   // --- units and symbols (all keyed on an adjacent digit — conservative) ---
   t = t.replace(/(\d)\s*°\s*F\b/g, '$1 degrees Fahrenheit');
