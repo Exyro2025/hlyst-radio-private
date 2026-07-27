@@ -144,56 +144,55 @@ export default function Board({
         </span>
       </div>
 
-      {/* The shelf — one draggable chip per show, a single scrolling tray so
-          any number of shows stays one line tall. A chip is also a brush:
-          click to arm it, then fill hours, days or a whole hour-of-the-week
-          from the board without returning here. */}
+      {/* The shelf — one draggable chip per show, wrapping to as many rows as
+          the roster needs. It used to be a single scrolling tray, but a
+          sideways slider hides most of the roster past the clipped edge —
+          every chip has to be on screen to be dragged or armed. A chip is
+          also a brush: click to arm it, then fill hours, days or a whole
+          hour-of-the-week from the board without returning here. */}
       <div className="mx-5 mb-3.5 border border-ink bg-[var(--page-bg)] sm:mx-[30px]">
-        <ScrollArea>
-          <div className="flex w-max min-w-full items-center gap-2 px-3 py-2.5">
-            <span className="eyebrow mr-1 flex-none text-ink">The shelf</span>
-        {shows.length === 0 && (
-          <Mu className="text-[9px] normal-case">
-            No shows yet —{' '}
-            <Link href="/admin/shows" className="text-vermilion underline">
-              define one on the Shows page
-            </Link>{' '}
-            to start scheduling.
-          </Mu>
-        )}
-        {shows.map(s => {
-          const armed = s.id === armedShowId;
-          return (
-            <button
-              key={s.id}
-              type="button"
-              draggable
-              aria-pressed={armed}
-              onDragStart={e => {
-                e.dataTransfer.setData(DND_TYPE, s.id);
-                e.dataTransfer.setData('text/plain', s.id);
-                e.dataTransfer.effectAllowed = 'copy';
-              }}
-              onClick={() => onArmShow(s.id)}
-              title={armed
-                ? `“${s.name}” is armed — click hours on the board to book it, or click here to put the brush down`
-                : `Click to arm “${s.name}” as a brush, or drag it onto the board`}
-              className={cn(
-                'flex min-h-9 flex-none cursor-grab items-center gap-1.5 border px-2.5 py-1.5 active:cursor-grabbing sm:min-h-0',
-                armed
-                  ? 'border-ink bg-[var(--ink-soft)] outline-2 -outline-offset-2 outline-[var(--accent)]'
-                  : 'border-separator-strong bg-[var(--card-bg)] hover:border-ink',
-              )}
-            >
-              <ColorChip color={colorOf(s.id)} />
-              <span className="text-[11.5px] font-semibold whitespace-nowrap text-ink">{s.name}</span>
-              <Mu className="text-[8px]">{hoursOf(s.id)}h</Mu>
-            </button>
-          );
-        })}
-          </div>
-          <ScrollBar orientation="horizontal" />
-        </ScrollArea>
+        <div className="flex flex-wrap items-center gap-2 px-3 py-2.5">
+          <span className="eyebrow mr-1 flex-none text-ink">The shelf</span>
+          {shows.length === 0 && (
+            <Mu className="text-[9px] normal-case">
+              No shows yet —{' '}
+              <Link href="/admin/shows" className="text-vermilion underline">
+                define one on the Shows page
+              </Link>{' '}
+              to start scheduling.
+            </Mu>
+          )}
+          {shows.map(s => {
+            const armed = s.id === armedShowId;
+            return (
+              <button
+                key={s.id}
+                type="button"
+                draggable
+                aria-pressed={armed}
+                onDragStart={e => {
+                  e.dataTransfer.setData(DND_TYPE, s.id);
+                  e.dataTransfer.setData('text/plain', s.id);
+                  e.dataTransfer.effectAllowed = 'copy';
+                }}
+                onClick={() => onArmShow(s.id)}
+                title={armed
+                  ? `“${s.name}” is armed — click hours on the board to book it, or click here to put the brush down`
+                  : `Click to arm “${s.name}” as a brush, or drag it onto the board`}
+                className={cn(
+                  'flex min-h-9 flex-none cursor-grab items-center gap-1.5 border px-2.5 py-1.5 active:cursor-grabbing sm:min-h-0',
+                  armed
+                    ? 'border-ink bg-[var(--ink-soft)] outline-2 -outline-offset-2 outline-[var(--accent)]'
+                    : 'border-separator-strong bg-[var(--card-bg)] hover:border-ink',
+                )}
+              >
+                <ColorChip color={colorOf(s.id)} />
+                <span className="text-[11.5px] font-semibold whitespace-nowrap text-ink">{s.name}</span>
+                <Mu className="text-[8px]">{hoursOf(s.id)}h</Mu>
+              </button>
+            );
+          })}
+        </div>
       </div>
 
       {/* On a phone the week is a horizontal strip and Radix only reveals its
