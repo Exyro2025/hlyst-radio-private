@@ -16,7 +16,7 @@ import * as listeners from '../broadcast/listeners.js';
 import { autoVoiceAllowed } from '../broadcast/voice-policy.js';
 import * as webhooks from '../broadcast/webhooks.js';
 import * as settings from '../settings.js';
-import { stripScriptedOpener, cleanRequesterName } from '../util/request-guard.js';
+import { stripScriptedOpener, cleanRequesterName, stillInFlight } from '../util/request-guard.js';
 import {
   checkRateLimit, checkGlobalRateLimit, clientIp,
   REQUESTS_DISABLED, REQUEST_TEXT_MAX,
@@ -676,15 +676,8 @@ router.post('/request', async (req, res) => {
       retryAfter: globalGate.retryAfter,
     });
   }
-  if (cfg.onePendingPerIp !== false) {
-    const prev = lastByIp.get(ip);
-    const stillInFlight = prev && (
-      prev.status === 'pending' ||
-      (prev.status === 'resolved' && prev.pick?.id && queue.queuedIds().has(prev.pick.id))
-    );
-    if (stillInFlight) {
-      return res.status(429).json({ success: false, message: 'Your last request is still queued — it airs first.' });
-    }
+  if (cfg.onePendingPerIp !== false && stillInFlight(lastByIp.get(ip), queue.queuedIds())) {
+    return res.status(429).json({ success: false, message: 'Your last request is still queued — it airs first.' });
   }
   const pendingCount = queue.upcoming.filter((i: any) => i.requestedBy).length;
   if (pendingCount >= (Number(cfg.maxPending) || 6)) {

@@ -127,3 +127,21 @@ export function guardAck(ack: string | null | undefined, requestText: string, fa
   if (!a) return fallback;
   return echoesRequest(a, requestText, { minRun: 6 }) ? fallback : a;
 }
+
+// One-pending-per-IP hold (routes/request.ts POST /request): an IP's previous
+// request must resolve AND its pick must have fully left `queuedIds` (current
+// + upcoming — i.e. aired to completion) before a new one from that IP is
+// accepted. Pulled out as a pure predicate rather than inlined at the call
+// site so the invariant — spread across every `resolved()` closure that sets
+// `entry.pick` — has one place that's actually pinned by a test, instead of a
+// future resolution path silently forgetting to set `pick` and defeating the
+// hold with nothing catching it.
+export function stillInFlight(
+  prev: { status?: string; pick?: { id?: string } } | null | undefined,
+  queuedIds: Set<string>,
+): boolean {
+  if (!prev) return false;
+  if (prev.status === 'pending') return true;
+  if (prev.status === 'resolved' && prev.pick?.id) return queuedIds.has(prev.pick.id);
+  return false;
+}

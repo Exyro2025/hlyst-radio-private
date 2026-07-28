@@ -5,7 +5,7 @@
 // without re-running the full fixture set.
 import assert from 'node:assert/strict';
 import {
-  stripScriptedOpener, echoesRequest, cleanRequesterName, guardIntro, guardAck,
+  stripScriptedOpener, echoesRequest, cleanRequesterName, guardIntro, guardAck, stillInFlight,
 } from '../src/util/request-guard.js';
 
 // --- stripScriptedOpener -----------------------------------------------------
@@ -92,4 +92,33 @@ assert.equal(guardAck(AIRED_CRANK, REQ_CRANK, 'fallback'), 'fallback');
   assert.equal(out.guard, null);
   assert.equal(out.script, 'A clean intro.');
 }
+// --- stillInFlight (one-pending-per-IP hold) ---------------------------------
+assert.equal(stillInFlight(null, new Set()), false);                 // no prior request
+assert.equal(stillInFlight(undefined, new Set(['x'])), false);        // no prior request
+assert.equal(stillInFlight({ status: 'pending' }, new Set()), true);  // still resolving
+assert.equal(
+  stillInFlight({ status: 'pending', pick: { id: 'x' } }, new Set()),
+  true,
+); // pending always holds, pick or not
+assert.equal(
+  stillInFlight({ status: 'resolved', pick: { id: 'x' } }, new Set(['x', 'y'])),
+  true,
+); // resolved, pick still in the upcoming/current queue
+assert.equal(
+  stillInFlight({ status: 'resolved', pick: { id: 'x' } }, new Set(['y'])),
+  false,
+); // resolved, pick already aired off the queue — hold releases
+assert.equal(
+  stillInFlight({ status: 'resolved' }, new Set(['x'])),
+  false,
+); // resolved with no pick at all
+assert.equal(
+  stillInFlight({ status: 'resolved', pick: {} }, new Set(['x'])),
+  false,
+); // resolved, pick present but no id
+assert.equal(
+  stillInFlight({ status: 'failed', pick: { id: 'x' } }, new Set(['x'])),
+  false,
+); // failed entry never holds, even with a stray pick
+
 console.log('request-guard.test.ts: all assertions passed');
