@@ -15,9 +15,11 @@ import * as requestLog from '../broadcast/request-log.js';
 import * as listeners from '../broadcast/listeners.js';
 import { autoVoiceAllowed } from '../broadcast/voice-policy.js';
 import * as webhooks from '../broadcast/webhooks.js';
+import * as settings from '../settings.js';
+import { stripScriptedOpener, cleanRequesterName } from '../util/request-guard.js';
 import {
-  checkRateLimit, clientIp,
-  REQUESTS_DISABLED, REQUEST_TEXT_MAX, REQUEST_NAME_MAX,
+  checkRateLimit, checkGlobalRateLimit, clientIp,
+  REQUESTS_DISABLED, REQUEST_TEXT_MAX,
 } from '../middleware/ratelimit.js';
 import { shuffle } from '../util/shuffle.js';
 
@@ -56,10 +58,19 @@ function sanitizeRequestText(raw: string): string {
 const requests = new Map();
 const REQUEST_TTL_MS = 10 * 60 * 1000;
 
+// One request in flight per IP (settings.requests.onePendingPerIp): an IP's
+// previous request must resolve AND leave the upcoming queue (i.e. air) before
+// the next one is accepted. Entries are ledger entries; pruneRequests() below
+// is the shared janitor.
+const lastByIp = new Map<string, any>();
+
 function pruneRequests() {
   const cutoff = Date.now() - REQUEST_TTL_MS;
   for (const [id, entry] of requests) {
     if (entry.createdAt < cutoff) requests.delete(id);
+  }
+  for (const [ip, entry] of lastByIp) {
+    if (entry.createdAt < cutoff) lastByIp.delete(ip);
   }
 }
 
@@ -165,6 +176,8 @@ function recordOutcome(entry) {
       id: String(entry.id).slice(0, 8),
       requester: entry.requester,
       text: entry.text,
+      rawText: entry.rawText ?? null,
+      injection: entry.injection ?? null,
       status: entry.status,
       ms: entry.startedAt ? Date.now() - entry.startedAt : null,
       path: entry.path || null,
@@ -612,13 +625,12 @@ async function resolveRequest(entry) {
 // background. The listener never waits on the LLM.
 // ---------------------------------------------------------------------------
 router.post('/request', async (req, res) => {
-  if (REQUESTS_DISABLED) {
+  const cfg = (settings.get() as any)?.requests || {};
+  if (REQUESTS_DISABLED || cfg.enabled === false) {
     return res.status(503).json({ success: false, message: 'Requests are temporarily closed.' });
   }
 
-  // Zero-listener pause: a request would mean LLM work, so it's gated too.
-  // Force a fresh Icecast read so a listener who just connected isn't turned
-  // away on a stale cached count.
+  // Zero-listener pause (unchanged — see original comment).
   await listeners.refresh();
   if (!listeners.djCallsAllowed()) {
     return res.status(503).json({
@@ -629,13 +641,24 @@ router.post('/request', async (req, res) => {
 
   const rawText = typeof req.body?.text === 'string' ? req.body.text : '';
   const rawName = typeof req.body?.name === 'string' ? req.body.name : '';
-  const text = sanitizeRequestText(rawText).slice(0, REQUEST_TEXT_MAX);
+  // Sanitize (markup-shaped injection), then neutralize the "read this on air"
+  // directive family — the cleaned text is all the session/prompts/air see; the
+  // raw text is preserved on the entry for the operator request log.
+  const stripped = stripScriptedOpener(sanitizeRequestText(rawText));
+  const text = stripped.text.slice(0, REQUEST_TEXT_MAX);
   if (!text) {
     return res.status(400).json({ error: 'Empty request' });
   }
-  const requester = (rawName.trim().slice(0, REQUEST_NAME_MAX)) || 'anon';
+  const s = settings.get() as any;
+  const reservedNames = [
+    'dj', 'admin', 'host', 'mod', 'moderator',
+    s?.station || '',
+    ...(Array.isArray(s?.personas) ? s.personas.map((p: any) => p?.name || '') : []),
+  ];
+  const requester = cleanRequesterName(rawName, reservedNames);
 
-  const gate = checkRateLimit(clientIp(req));
+  const ip = clientIp(req);
+  const gate = checkRateLimit(ip);
   if (!gate.ok) {
     res.setHeader('Retry-After', String(gate.retryAfter));
     return res.status(429).json({
@@ -644,22 +667,42 @@ router.post('/request', async (req, res) => {
       retryAfter: gate.retryAfter,
     });
   }
+  const globalGate = checkGlobalRateLimit();
+  if (!globalGate.ok) {
+    res.setHeader('Retry-After', String(globalGate.retryAfter));
+    return res.status(429).json({
+      success: false,
+      message: 'The request line is busy — try again in a few minutes.',
+      retryAfter: globalGate.retryAfter,
+    });
+  }
+  if (cfg.onePendingPerIp !== false) {
+    const prev = lastByIp.get(ip);
+    const stillInFlight = prev && (
+      prev.status === 'pending' ||
+      (prev.status === 'resolved' && prev.pick?.id && queue.queuedIds().has(prev.pick.id))
+    );
+    if (stillInFlight) {
+      return res.status(429).json({ success: false, message: 'Your last request is still queued — it airs first.' });
+    }
+  }
+  const pendingCount = queue.upcoming.filter((i: any) => i.requestedBy).length;
+  if (pendingCount >= (Number(cfg.maxPending) || 6)) {
+    return res.status(429).json({ success: false, message: "The request queue's full — try again in a few minutes." });
+  }
 
   pruneRequests();
   const id = randomUUID();
   const entry: any = {
-    id,
-    status: 'pending',
-    requester,
-    text,
-    ack: null,
-    track: null,
-    queuePosition: null,
-    message: null,
+    id, status: 'pending', requester, text,
+    rawText: sanitizeRequestText(rawText).slice(0, REQUEST_TEXT_MAX),
+    injection: stripped.injection,
+    ack: null, track: null, queuePosition: null, message: null,
     createdAt: Date.now(),
   };
   requests.set(id, entry);
-  queue.log('request', `${requester}: "${text}" (id ${id.slice(0, 8)})`);
+  lastByIp.set(ip, entry);
+  queue.log('request', `${requester}: "${text}" (id ${id.slice(0, 8)})${stripped.injection ? ` [${stripped.injection} stripped]` : ''}`);
   webhooks.notify('request.received', { requestedBy: requester, text });
 
   // Hand the listener a receipt and let go of the connection. The booth does
