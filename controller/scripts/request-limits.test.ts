@@ -52,4 +52,30 @@ assert.ok(shape, 'requestSchema resolves');
 const { matchRequest } = await import('../src/llm/dj.js'); // import only — no call (LLM)
 assert.equal(typeof matchRequest, 'function');
 
+// --- cascade `kind` never fails a request on a weak/local model miss --------
+// A required z.enum() field a model omits or botches would otherwise throw
+// out of djObject (both legs fail: coerceModelPayload deliberately leaves a
+// missing non-nullable key alone, and no field-level fallback exists), which
+// crashes a genuine music request straight to `failed` — no LLM call needed
+// to pin this, it's a pure schema.parse() check.
+const { REQUEST_SCHEMA_TOLERANT } = await import('../src/llm/internal/prompts/request.js');
+const validRest = {
+  search_terms: ['test'], artist: null, genre: null, language: null,
+  sort: null, scope: 'song', mood: null,
+  intent: 'test intent', ack: 'test ack',
+};
+
+// Missing `kind` entirely (the common local-model omission) degrades to the
+// pre-existing safe default, 'track', instead of throwing.
+const missingKind: any = REQUEST_SCHEMA_TOLERANT.parse({ ...validRest });
+assert.equal(missingKind.kind, 'track', 'a request with no "kind" key parses as "track", not a thrown error');
+
+// A malformed (non-enum) `kind` value degrades the same way.
+const badKind: any = REQUEST_SCHEMA_TOLERANT.parse({ ...validRest, kind: 'not-a-real-kind' });
+assert.equal(badKind.kind, 'track', 'an unrecognised "kind" value parses as "track", not a thrown error');
+
+// A well-formed classification still passes through untouched either way.
+assert.equal(REQUEST_SCHEMA_TOLERANT.parse({ ...validRest, kind: 'track' }).kind, 'track');
+assert.equal(REQUEST_SCHEMA_TOLERANT.parse({ ...validRest, kind: 'chat' }).kind, 'chat');
+
 console.log('request-limits.test.ts: all assertions passed');

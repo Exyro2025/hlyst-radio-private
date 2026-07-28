@@ -376,6 +376,7 @@ async function resolveRequest(entry) {
 
   // Conversational message → conversational answer; nothing queued (C1).
   if ((matched as any).kind === 'chat') {
+    queue.log('request', `cascade chat-answered (no track)`);
     entry.path = 'chat';
     entry.pickSource = 'chat';
     const ack = guardAck(matched.ack, text, 'Heard you loud and clear.');

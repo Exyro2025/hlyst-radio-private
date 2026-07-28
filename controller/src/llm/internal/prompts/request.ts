@@ -4,6 +4,7 @@
 import { z } from 'zod';
 import * as settings from '../../../settings.js';
 import { djObject } from '../strategy/object.js';
+import { modelTolerant } from '../core/pure.js';
 
 const REQUEST_SYSTEM = `You are the music librarian for a personal Navidrome library that runs an AI radio station. A listener sends a request; you turn it into structured search parameters.
 
@@ -82,6 +83,27 @@ const REQUEST_SCHEMA = z.object({
   ack: z.string().describe(`short on-air acknowledgment the DJ reads aloud, max 20 words, sounds like a real radio DJ — no "thank you for listening" or self-intros`),
 });
 
+// `kind` is a REQUIRED (non-nullable) field a weaker/local model can simply
+// omit — a plain required enum then throws (coerceModelPayload deliberately
+// leaves a missing non-nullable key alone, "modelTolerant's fallbacks handle
+// it" — see core/pure.ts), and this schema has no forced-tool/native fallback
+// leg the way the agent path's requestSchema() does. That would kill a
+// genuine music request outright on an omitted classification, exactly the
+// "never fail a real request" rule this schema exists to serve. Same
+// objectFallbacks precedent as skills/_agent.ts's `segment` field: on a
+// missing/malformed `kind`, fall back to 'track' — the pre-existing, already-
+// safe cascade behaviour from before this field existed — rather than
+// throwing the whole request into `failed`.
+// Exported (only) so scripts/request-limits.test.ts can pin the fallback
+// directly with schema.parse(...) — no LLM call needed. Tests reaching into
+// llm/internal/** for this kind of shape assertion already has precedent
+// (scripts/request-intro-airtime.test.ts imports internal/prompts/scripts.js
+// directly); the "call sites use the barrel" rule is about production code,
+// not the test suite.
+export const REQUEST_SCHEMA_TOLERANT = modelTolerant(REQUEST_SCHEMA, {
+  objectFallbacks: { kind: 'track' },
+});
+
 export async function matchRequest(
   userQuery: string,
   { listenerName = null, nowPlaying = null }: { listenerName?: string | null; nowPlaying?: any } = {},
@@ -115,7 +137,7 @@ export async function matchRequest(
   return djObject({
     system: REQUEST_SYSTEM + personaSuffix + langSuffix,
     prompt: userPrompt,
-    schema: REQUEST_SCHEMA,
+    schema: REQUEST_SCHEMA_TOLERANT,
     temperature: 0.4,
     kind: 'matchRequest',
   });
