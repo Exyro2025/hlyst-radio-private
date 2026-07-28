@@ -46,7 +46,7 @@ import {
 } from './dj-agent/breaker.js';
 import { enqueuePick, trackFields, trimLinkToIntro } from './dj-agent/enqueue.js';
 import { advanceRun, runActive } from './dj-agent/runs.js';
-import { pickSchemaBase, pickSystem } from './dj-agent/schemas.js';
+import { pickSchemaBase, pickSystem, requestSystem } from './dj-agent/schemas.js';
 import { guardIntro, guardAck } from '../util/request-guard.js';
 
 // Re-exported so every existing `from './dj-agent.js'` import keeps working —
@@ -97,6 +97,50 @@ async function repickFromSeen({ seen, badId, wantLink, showAt = null, playlistRe
       schema,
       temperature: 0.5,
       kind: 'djAgentRepick',
+    });
+  } catch {
+    return null;
+  }
+}
+
+// Request-flavoured corrective re-pick (D1): mirrors repickFromSeen above —
+// the request agent returned an id outside its own discovery trail. Observed
+// live: the SAME hallucinated id recurring across independent requests hours
+// apart (e.g. `1q8OwSA2qIzk4n1ikV06wa`, `OAlSQiljTZx5b8OvwfEAIg`, both seen
+// twice) — which looks like the model copying an id out of a session event
+// turn (every pick event tags the current track `[id: …]`) rather than
+// fabricating one fresh; the idInSessionWindow diagnostic on the eventual
+// pick.rejected event (runRequestViaAgent below) is what turns that hunch
+// into a number instead of a guess. One djObject call constrained to the
+// run's own candidates (z.enum — a decode-time grammar on local models, a
+// Zod reject elsewhere, same story as repickFromSeen) salvages the run
+// instead of discarding it wholesale to the caller's stateless matcher
+// cascade — which still runs when this misses too (no candidates, or the
+// call itself fails). Reuses requestSystem() and requestSchema()'s own field
+// wording, gated on the same autoVoiceAllowed() check for `intro`, so a
+// re-picked request stays byte-consistent with a first-try one. Never
+// throws — a salvage failure falls through to the caller's rejection path
+// unchanged.
+async function repickRequestFromSeen({ seen, badId, requester, text }:
+  { seen: Map<string, any>; badId: string | null; requester: string; text: string }) {
+  const ids = [...seen.keys()];
+  if (ids.length === 0) return null;
+  const wantIntro = autoVoiceAllowed();
+  const schema = modelTolerant(z.object({
+    id: z.enum(ids as [string, ...string[]]).describe('the exact id of one candidate'),
+    ack: z.string().describe('short on-air acknowledgement of the listener, in character — max 20 words; no "thank you for listening" or self-intros'),
+    ...(wantIntro ? {
+      intro: z.string().describe(`a natural DJ intro for the track in the DJ voice; weave in what the listener asked for without reading the request back verbatim. It airs over the track's opening seconds, so write it in the present tense — never "next" or "coming up". ${dj.lengthPhrase('intro')}`),
+    } : {}),
+  }));
+  try {
+    return await djObject({
+      system: requestSystem(),
+      prompt: JSON.stringify({ candidates: [...seen.values()] }, null, 2)
+        + `\n\nListener "${requester}" asked: "${text}". The id you returned (${badId ?? 'none'}) matches none of the candidates above. Choose the best candidate id from the list for this request, and write "ack"${wantIntro ? ' and "intro"' : ''} to match.`,
+      schema,
+      temperature: 0.3,
+      kind: 'djAgentRequestRepick',
     });
   } catch {
     return null;
@@ -664,10 +708,15 @@ async function runRequestViaAgent(queue: any, { requester, text }: { requester: 
     if (last && last.role === 'user') last.content += '\n' + tail;
     else messages.push({ role: 'user', content: tail });
 
-    const { object, toolCalls, extras } = await requestAgent.run({
+    const run = await requestAgent.run({
       messages,
       recentIds,
     });
+    const { toolCalls, extras } = run;
+    // Reassigned when the unknown-id salvage below (repickRequestFromSeen)
+    // lands a corrective re-pick — same let-after-destructure shape
+    // pickViaAgent uses for the identical reason.
+    let object = run.object;
 
     // Chat escape (C1): a null id with a real ack means "this wasn't a music
     // request" — answer in persona, queue nothing, skip the cascade entirely.
@@ -686,10 +735,7 @@ async function runRequestViaAgent(queue: any, { requester, text }: { requester: 
     let song = object?.id ? extras.seen.get(object.id) : null;
     // Near-miss repair, same as the pick path: an unambiguous prefix /
     // clear-winner edit-distance match against the run's own candidates
-    // rescues an id the model transcribed imperfectly (#939). No re-pick
-    // stage here — a request that
-    // can't resolve should fall to the caller's stateless matcher cascade,
-    // which understands the listener's actual text.
+    // rescues an id the model transcribed imperfectly (#939).
     if (!song && object?.id && extras.seen.size) {
       const fixed = nearestId(object.id, extras.seen.keys());
       if (fixed) {
@@ -697,8 +743,36 @@ async function runRequestViaAgent(queue: any, { requester, text }: { requester: 
         song = extras.seen.get(fixed);
       }
     }
+    // Corrective re-pick (D1), same as the pick path's stage 2: the model
+    // fabricated an id outright while its `seen` map held real candidates.
+    // One djObject call constrained to that set (repickRequestFromSeen,
+    // above) salvages the run instead of discarding it wholesale — the
+    // caller's stateless matcher cascade is still the fallback when this
+    // misses too (empty seen, or the re-pick call itself fails).
+    if (!song && extras.seen.size) {
+      const repicked = await repickRequestFromSeen({ seen: extras.seen, badId: object?.id ?? null, requester, text });
+      if (repicked) {
+        logEvent('pick.repicked', { agent: 'request', from: object?.id ?? null, to: repicked.id, candidates: extras.seen.size });
+        queue.log('request', `agent returned unknown id "${object?.id}" — re-picked "${repicked.id}" from its own candidates`);
+        object = repicked;
+        song = extras.seen.get(repicked.id);
+      }
+    }
     if (!song) {
-      logEvent('pick.rejected', { agent: 'request', id: object?.id ?? null, candidates: extras.seen.size, toolCalls });
+      // idInSessionWindow (D2 telemetry): does the bad id appear verbatim
+      // anywhere in the EXACT window this run saw (the local `messages` array
+      // built above, not a fresh session.windowMessages() call — a concurrent
+      // request's session turn can shift the window between this run and now,
+      // which would corrupt the diagnostic in either direction)? A hit
+      // corroborates the copy-not-fabricate hypothesis behind
+      // repickRequestFromSeen (the same hallucinated id recurring hours apart,
+      // live — see its comment); a miss doesn't rule that out, it just narrows
+      // what's worth chasing next.
+      const windowText = messages.map((m: any) => String(m.content ?? '')).join('\n');
+      logEvent('pick.rejected', {
+        agent: 'request', id: object?.id ?? null, candidates: extras.seen.size, toolCalls,
+        idInSessionWindow: !!(object?.id && windowText.includes(object.id)),
+      });
       throw new Error(`request agent returned unknown id ${object?.id}`);
     }
 
