@@ -31,4 +31,18 @@ await settings.update({ requests: { maxPending: 'lots', enabled: 'yes' } });
 const j = settings.get().requests;
 assert.equal(j.maxPending, 50);
 assert.equal(j.enabled, false);
+
+// --- rate limiting is settings-driven ---------------------------------------
+const { checkRateLimit, checkGlobalRateLimit } = await import('../src/middleware/ratelimit.js');
+
+await settings.update({ requests: { enabled: true, cooldownSec: 5, perIpHourlyCap: 2, globalHourlyCap: 5 } });
+assert.equal(checkRateLimit('10.0.0.1').ok, true);
+assert.equal(checkRateLimit('10.0.0.1').ok, false); // inside 5s cooldown
+
+// Global bucket: 5 allowed across ANY ips, 6th refused with a retryAfter.
+for (let i = 0; i < 5; i++) assert.equal(checkGlobalRateLimit().ok, true);
+const g = checkGlobalRateLimit();
+assert.equal(g.ok, false);
+assert.ok(g.retryAfter > 0);
+
 console.log('request-limits.test.ts: all assertions passed');

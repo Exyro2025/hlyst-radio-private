@@ -6,15 +6,27 @@
 //   - operator kill switch (REQUESTS_DISABLED env)
 //   - per-IP cooldown (no more than 1 request per COOLDOWN_MS)
 //   - per-IP hourly ceiling
+//   - station-wide hourly ceiling (2026-07-28: raid hardening)
 // State is in-memory; a controller restart resets counters. Good enough for a
 // homelab station; if you need durable enforcement, put a real ratelimit at
 // the Caddy edge.
 // ---------------------------------------------------------------------------
+import * as settings from '../settings.js';
+
 export const REQUEST_TEXT_MAX = 280;
 export const REQUEST_NAME_MAX = 40;
-const REQUEST_COOLDOWN_MS = 20_000;
-const REQUEST_HOURLY_CAP = 8;
 export const REQUESTS_DISABLED = process.env.REQUESTS_DISABLED === '1' || process.env.REQUESTS_DISABLED === 'true';
+
+// Live limits from settings.requests (raid hardening 2026-07-28) — read per
+// call so admin edits apply without a restart. Defaults mirror settings.ts.
+function limits() {
+  const rq = (settings.get() as any)?.requests || {};
+  return {
+    cooldownMs: (Number(rq.cooldownSec) > 0 ? Number(rq.cooldownSec) : 60) * 1000,
+    perIpHourlyCap: Number(rq.perIpHourlyCap) > 0 ? Number(rq.perIpHourlyCap) : 8,
+    globalHourlyCap: Number(rq.globalHourlyCap) > 0 ? Number(rq.globalHourlyCap) : 30,
+  };
+}
 
 const requestHistory = new Map(); // ip → { last: ts, hits: [ts,...] }
 
@@ -30,10 +42,11 @@ export function checkRateLimit(ip) {
   const oneHourAgo = now - 3_600_000;
   const rec = requestHistory.get(ip) || { last: 0, hits: [] };
   rec.hits = rec.hits.filter(t => t > oneHourAgo);
-  if (rec.last && now - rec.last < REQUEST_COOLDOWN_MS) {
-    return { ok: false, retryAfter: Math.ceil((REQUEST_COOLDOWN_MS - (now - rec.last)) / 1000) };
+  const { cooldownMs, perIpHourlyCap } = limits();
+  if (rec.last && now - rec.last < cooldownMs) {
+    return { ok: false, retryAfter: Math.ceil((cooldownMs - (now - rec.last)) / 1000) };
   }
-  if (rec.hits.length >= REQUEST_HOURLY_CAP) {
+  if (rec.hits.length >= perIpHourlyCap) {
     const oldest = rec.hits[0];
     return { ok: false, retryAfter: Math.ceil((oldest + 3_600_000 - now) / 1000) };
   }
@@ -46,6 +59,22 @@ export function checkRateLimit(ip) {
       if (!v.hits.length && now - v.last > 3_600_000) requestHistory.delete(k);
     }
   }
+  return { ok: true };
+}
+
+// All-IP combined ceiling — per-IP buckets are useless against a distributed
+// raid (2026-07-28: ~106 requests from many addresses inside 5 hours).
+const globalHits: number[] = [];
+
+export function checkGlobalRateLimit() {
+  const now = Date.now();
+  const cutoff = now - 3_600_000;
+  while (globalHits.length && globalHits[0] <= cutoff) globalHits.shift();
+  const { globalHourlyCap } = limits();
+  if (globalHits.length >= globalHourlyCap) {
+    return { ok: false, retryAfter: Math.ceil((globalHits[0] + 3_600_000 - now) / 1000) };
+  }
+  globalHits.push(now);
   return { ok: true };
 }
 
