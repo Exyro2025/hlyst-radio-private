@@ -668,6 +668,14 @@ async function runRequestViaAgent(queue: any, { requester, text }: { requester: 
       recentIds,
     });
 
+    // Chat escape (C1): a null id with a real ack means "this wasn't a music
+    // request" — answer in persona, queue nothing, skip the cascade entirely.
+    if (!object?.id && typeof object?.ack === 'string' && object.ack.trim()) {
+      const ack = object.ack.trim();
+      session.appendTurn({ role: 'dj', kind: 'request', text: ack, meta: { requester, toolCalls } });
+      return { ack, track: null, introScript: null };
+    }
+
     let song = object?.id ? extras.seen.get(object.id) : null;
     // Near-miss repair, same as the pick path: an unambiguous prefix /
     // clear-winner edit-distance match against the run's own candidates

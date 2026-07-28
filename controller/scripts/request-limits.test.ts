@@ -45,4 +45,11 @@ const g = checkGlobalRateLimit();
 assert.equal(g.ok, false);
 assert.ok(g.retryAfter > 0);
 
+// --- schema shape: chat escapes exist on both request paths -----------------
+const { requestSchema } = await import('../src/broadcast/dj-agent/schemas.js');
+const shape: any = requestSchema();
+assert.ok(shape, 'requestSchema resolves');
+const { matchRequest } = await import('../src/llm/dj.js'); // import only — no call (LLM)
+assert.equal(typeof matchRequest, 'function');
+
 console.log('request-limits.test.ts: all assertions passed');

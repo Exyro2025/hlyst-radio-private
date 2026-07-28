@@ -16,7 +16,7 @@ import * as listeners from '../broadcast/listeners.js';
 import { autoVoiceAllowed } from '../broadcast/voice-policy.js';
 import * as webhooks from '../broadcast/webhooks.js';
 import * as settings from '../settings.js';
-import { stripScriptedOpener, cleanRequesterName, stillInFlight } from '../util/request-guard.js';
+import { stripScriptedOpener, cleanRequesterName, stillInFlight, guardAck } from '../util/request-guard.js';
 import {
   checkRateLimit, checkGlobalRateLimit, clientIp,
   REQUESTS_DISABLED, REQUEST_TEXT_MAX,
@@ -335,6 +335,13 @@ async function resolveRequest(entry) {
   try {
     const agentRes = await djAgent.runRequest(queue, ctx, { requester, text });
     if (agentRes) {
+      if (!agentRes.track) {
+        // Chat escape (C1): the agent answered in persona — nothing to queue.
+        queue.log('request', `agent chat-answered (no track)`);
+        entry.path = 'chat';
+        entry.pickSource = 'agent-chat';
+        return resolved({ ack: agentRes.ack, track: null, queuePosition: null });
+      }
       queue.log('request', `agent resolved: ${agentRes.track.title} — ${agentRes.track.artist}`);
       entry.path = 'agent';
       entry.pickSource = 'agent';
@@ -366,6 +373,15 @@ async function resolveRequest(entry) {
     language: matched.language,
     searchTerms: matched.search_terms,
   });
+
+  // Conversational message → conversational answer; nothing queued (C1).
+  if ((matched as any).kind === 'chat') {
+    entry.path = 'chat';
+    entry.pickSource = 'chat';
+    const ack = guardAck(matched.ack, text, 'Heard you loud and clear.');
+    session.appendTurn({ role: 'dj', kind: 'request', text: ack, meta: { requester } });
+    return resolved({ ack, track: null, queuePosition: null });
+  }
 
   // Stash the matcher breakdown for the debug record — this path is the
   // stateless cascade (agent + more-like-this never reach here).
