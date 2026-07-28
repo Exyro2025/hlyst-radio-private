@@ -671,8 +671,14 @@ async function runRequestViaAgent(queue: any, { requester, text }: { requester: 
 
     // Chat escape (C1): a null id with a real ack means "this wasn't a music
     // request" — answer in persona, queue nothing, skip the cascade entirely.
+    // Echo guard (A2): this ack is the model's own free-text answer, generated
+    // straight from a message that may carry an injected script — guard it the
+    // same way the cascade's chat branch does (request.ts). Not just a display
+    // concern: this text becomes a `dj`-role session turn that later
+    // `windowMessages()` calls condition on, so an unguarded echo here can
+    // poison future generations even though it never reaches tts.speak.
     if (!object?.id && typeof object?.ack === 'string' && object.ack.trim()) {
-      const ack = object.ack.trim();
+      const ack = guardAck(object.ack, text, 'Heard you loud and clear.');
       session.appendTurn({ role: 'dj', kind: 'request', text: ack, meta: { requester, toolCalls } });
       return { ack, track: null, introScript: null };
     }
@@ -701,7 +707,7 @@ async function runRequestViaAgent(queue: any, { requester, text }: { requester: 
     if (cdMin > 0 && queue.recentlyPlayedIds(cdMin / 60).has(song.id)) {
       const cdAck = `"${song.title}" just spun — give it a rest for a bit.`;
       session.appendTurn({ role: 'dj', kind: 'request', text: cdAck, meta: { trackId: song.id, requester, toolCalls } });
-      return { ack: cdAck, track: { title: song.title, artist: song.artist, id: song.id }, introScript: null };
+      return { ack: cdAck, track: { title: song.title, artist: song.artist, id: song.id }, introScript: null, guard: null };
     }
 
     // Station voice off (settings.tts.enabled) → no intro. requestSchema()
@@ -737,13 +743,15 @@ async function runRequestViaAgent(queue: any, { requester, text }: { requester: 
     // "coming up", no intro to air) and still append the line as the session
     // reply so the request event isn't left without one.
     if (pos === -1) {
-      const ack = queue.dedupAck(song.id);
+      const dupAck = queue.dedupAck(song.id);
       session.appendTurn({
         role: 'dj', kind: 'request',
-        text: ack,
+        text: dupAck,
         meta: { trackId: song.id, requester, toolCalls },
       });
-      return { ack, track: { title: song.title, artist: song.artist, id: song.id }, introScript: null };
+      // The echo guard already ran above (guarded.guard) even though this
+      // pick turned out to be a duplicate — surface it rather than losing it.
+      return { ack: dupAck, track: { title: song.title, artist: song.artist, id: song.id }, introScript: null, guard: guarded.guard ?? null };
     }
     session.appendTurn({
       role: 'dj', kind: 'request',
@@ -755,6 +763,7 @@ async function runRequestViaAgent(queue: any, { requester, text }: { requester: 
       ack: ack || `Coming up for you, ${requester}.`,
       track: { title: song.title, artist: song.artist, id: song.id },
       introScript: intro || null,
+      guard: guarded.guard ?? null,
     };
   });
 }

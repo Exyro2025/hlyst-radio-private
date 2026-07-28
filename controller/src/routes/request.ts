@@ -351,6 +351,11 @@ async function resolveRequest(entry) {
   try {
     const agentRes = await djAgent.runRequest(queue, ctx, { requester, text });
     if (agentRes) {
+      // Agent path's echo guard (dj-agent.ts) already logged the ephemeral
+      // djLog entry when it fired; thread the same verdict into the durable
+      // request log so `guard` isn't silently unset for every agent-path
+      // request (the cascade/more-like-this paths set it inline above).
+      if (agentRes.guard) entry.guard = agentRes.guard;
       if (!agentRes.track) {
         // Chat escape (C1): the agent answered in persona — nothing to queue.
         queue.log('request', `agent chat-answered (no track)`);
