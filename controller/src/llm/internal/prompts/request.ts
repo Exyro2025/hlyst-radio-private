@@ -125,14 +125,16 @@ export async function matchRequest(
   const personaSuffix = persona?.name
     ? `\n\nThe "ack" line is read on air by ${persona.name}, the station's DJ${persona.soul ? ` — ${persona.soul}` : ''}. Write the ack in their voice; every other field stays plain and functional.`
     : '';
-  // When the on-air persona speaks another language, only the spoken `ack`
-  // follows it — every search-facing field must stay in English / canonical
-  // names so it still matches an English-tagged library. Language comes LAST
-  // (after the persona clause) — repeating it last is what makes it stick.
-  const lang = String(persona?.language || '').trim();
-  const langSuffix = lang
-    ? `\n\nThe on-air DJ speaks ${lang}: write the "ack" field in ${lang}. Every OTHER field (search_terms, artist, genre, mood, sort, intent, language) stays in English / canonical names exactly as the library is tagged — translate nothing there, even when the listener wrote in ${lang}.`
-    : '';
+  // The on-air persona's language always anchors the spoken `ack` — unset
+  // defaults to English rather than omitting the clause, so a default station
+  // is never left with no language anchor at all (raid 2026-07-28: with no
+  // anchor, session-history mimicry flipped the station's language; see
+  // settings/persona.ts languageDirective for the full incident). Every
+  // search-facing field must stay in English / canonical names regardless, so
+  // it still matches an English-tagged library. Language comes LAST (after the
+  // persona clause) — repeating it last is what makes it stick.
+  const lang = String(persona?.language || '').trim() || 'English';
+  const langSuffix = `\n\nThe on-air DJ speaks ${lang}: write the "ack" field in ${lang}. Every OTHER field (search_terms, artist, genre, mood, sort, intent, language) stays in English / canonical names exactly as the library is tagged — translate nothing there, even when the listener wrote in ${lang}.`;
 
   return djObject({
     system: REQUEST_SYSTEM + personaSuffix + langSuffix,

@@ -488,7 +488,11 @@ async function resolveRequest(entry) {
     if (!pick) {
       try {
         const r = await subsonic.search(matched.language, { songCount: 25 });
-        pick = randomFresh(r);
+        // Strict-fresh (C2): with a tiny text-match pool (often 1 track), falling
+        // back to recently-played candidates just dedup-dies downstream — treat
+        // an all-stale pool as a miss and let the cascade continue instead.
+        const fresh = (r || []).filter((s: any) => s?.id && !recentIds.has(s.id));
+        pick = fresh.length ? fresh[Math.floor(Math.random() * fresh.length)] : null;
         if (pick) pickSource = `language-search:${matched.language}`;
       } catch (err) {
         queue.log('error', `language search pick failed: ${err.message}`);
