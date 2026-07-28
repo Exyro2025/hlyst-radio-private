@@ -85,9 +85,8 @@ export function requestSchema() {
   // flipping mid-run (this schema resolved before the flip).
   // modelTolerant repairs weak-model nullable spellings ("null"-the-string, an
   // omitted key) at the OBJECT level, same precedent as pickSchema() above —
-  // both `id` here and `intro` below stay plain .nullable()/.optional()-free
-  // fields; never wrap an individual field in a preprocess (see the note atop
-  // pickSchema).
+  // `id`'s .nullable() stays a plain field; never wrap an individual field in
+  // its own preprocess pipe (see the note atop pickSchema).
   if (!autoVoiceAllowed()) return modelTolerant(base);
   return modelTolerant(base.extend({
     intro: z.string().describe(`a natural DJ intro for the track in the DJ voice; weave in what the listener asked for without reading the request back verbatim. It airs over the track's opening seconds, so write it in the present tense — never "next" or "coming up". ${dj.lengthPhrase('intro')}`),
