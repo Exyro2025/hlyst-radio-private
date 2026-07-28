@@ -16,7 +16,7 @@ import * as listeners from '../broadcast/listeners.js';
 import { autoVoiceAllowed } from '../broadcast/voice-policy.js';
 import * as webhooks from '../broadcast/webhooks.js';
 import * as settings from '../settings.js';
-import { stripScriptedOpener, cleanRequesterName, stillInFlight, guardAck } from '../util/request-guard.js';
+import { stripScriptedOpener, cleanRequesterName, stillInFlight, guardAck, guardIntro } from '../util/request-guard.js';
 import {
   checkRateLimit, checkGlobalRateLimit, clientIp,
   REQUESTS_DISABLED, REQUEST_TEXT_MAX,
@@ -197,6 +197,7 @@ function recordOutcome(entry) {
       ack: entry.ack || null,
       introScript: entry.introScript || null,
       message: entry.message || null,
+      guard: entry.guard ?? null,
     });
   } catch (err) {
     queue.log('error', `request-log record failed: ${err.message}`);
@@ -281,7 +282,7 @@ async function resolveRequest(entry) {
     // Station voice off (settings.tts.enabled) → the request is still honoured
     // and the listener still gets their text ack; there's just no spoken intro,
     // and no model call to write one.
-    const introScript = autoVoiceAllowed()
+    let introScript = autoVoiceAllowed()
       ? await dj.generateIntro({
         track: pick,
         context: ctx,
@@ -292,6 +293,21 @@ async function resolveRequest(entry) {
         recentOpeners: queue.getRecentOpeners(),
       })
       : null;
+    // Echo guard (A2): a script that reads the request back is regenerated with
+    // the request text withheld — it can't echo what it never saw.
+    const guardedMlt = await guardIntro(introScript, text, () => dj.generateIntro({
+      track: pick,
+      context: ctx,
+      requestedBy: requester,
+      recap: queue.getDjRecap(),
+      recentTracks: queue.getRecentTracks(),
+      recentOpeners: queue.getRecentOpeners(),
+    }));
+    if (guardedMlt.guard) {
+      entry.guard = guardedMlt.guard;
+      queue.log('request-guard', `more-like-this intro echoed request text — ${guardedMlt.guard}`);
+    }
+    introScript = guardedMlt.script;
     const pos = await queue.push({
       track: pick, requestedBy: requester, intent: 'more_like_this', introScript,
       introKind: 'dj-speak',
@@ -569,6 +585,19 @@ async function resolveRequest(entry) {
     }
   }
 
+  // Repeat cooldown (B6): a track that just aired can't be re-queued by
+  // request. Checked before intro generation so a cooldown hit never spends a
+  // model call — the listener still gets a friendly, honest ack (`resolved`,
+  // not `failed`).
+  const cdMin = Number((settings.get() as any)?.requests?.repeatCooldownMin ?? 120);
+  if (cdMin > 0 && queue.recentlyPlayedIds(cdMin / 60).has(pick.id)) {
+    entry.pick = pick;
+    entry.pickSource = `${pickSource}:cooldown`;
+    const cdAck = `"${pick.title}" just spun — give it a rest for a bit.`;
+    session.appendTurn({ role: 'dj', kind: 'request', text: cdAck, meta: { trackId: pick.id, requester } });
+    return resolved({ ack: cdAck, track: { title: pick.title, artist: pick.artist }, queuePosition: null });
+  }
+
   queue.log('request', `resolved via ${pickSource}: ${pick.title} — ${pick.artist}`);
 
   // On an artist miss the up-front `ack` (written by matchRequest before the
@@ -576,14 +605,14 @@ async function resolveRequest(entry) {
   // over a Daft Punk track. Replace it with an honest stand-in line.
   const ack = entry.artistMiss
     ? `No ${entry.artistMiss} in the crates — here's something that fits the moment instead.`
-    : matched.ack;
+    : guardAck(matched.ack, text, 'Coming right up.');
 
   // 3. Generate DJ intro that mentions the request. On a miss, pass the
   // requested-but-absent artist so the spoken intro owns the substitution
   // instead of pretending the track is by them.
   // Station voice off → no spoken intro and no model call to write one (see the
   // more_like_this path above). The `ack` below still reaches the listener.
-  const introScript = autoVoiceAllowed()
+  let introScript = autoVoiceAllowed()
     ? await dj.generateIntro({
       track: pick,
       context: ctx,
@@ -595,6 +624,22 @@ async function resolveRequest(entry) {
       recentOpeners: queue.getRecentOpeners(),
     })
     : null;
+  // Echo guard (A2): a script that reads the request back is regenerated with
+  // the request text withheld — it can't echo what it never saw.
+  const guarded = await guardIntro(introScript, text, () => dj.generateIntro({
+    track: pick,
+    context: ctx,
+    requestedBy: requester,
+    artistMiss: entry.artistMiss || null,
+    recap: queue.getDjRecap(),
+    recentTracks: queue.getRecentTracks(),
+    recentOpeners: queue.getRecentOpeners(),
+  }));
+  if (guarded.guard) {
+    entry.guard = guarded.guard;
+    queue.log('request-guard', `intro echoed request text — ${guarded.guard}`);
+  }
+  introScript = guarded.script;
 
   // 4. Add to queue (will trigger Liquidsoap via the queue manager). A
   // concurrent request that already queued this exact track makes push() dedup

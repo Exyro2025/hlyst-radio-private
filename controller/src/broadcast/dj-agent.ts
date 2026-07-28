@@ -47,6 +47,7 @@ import {
 import { enqueuePick, trackFields, trimLinkToIntro } from './dj-agent/enqueue.js';
 import { advanceRun, runActive } from './dj-agent/runs.js';
 import { pickSchemaBase, pickSystem } from './dj-agent/schemas.js';
+import { guardIntro, guardAck } from '../util/request-guard.js';
 
 // Re-exported so every existing `from './dj-agent.js'` import keeps working —
 // including scripts/llm-bench, which sits outside tsconfig's include and so
@@ -695,13 +696,29 @@ async function runRequestViaAgent(queue: any, { requester, text }: { requester: 
       throw new Error(`request agent returned unknown id ${object?.id}`);
     }
 
+    // Repeat cooldown (B6) — mirrors the cascade path.
+    const cdMin = Number((settings.get() as any)?.requests?.repeatCooldownMin ?? 120);
+    if (cdMin > 0 && queue.recentlyPlayedIds(cdMin / 60).has(song.id)) {
+      const cdAck = `"${song.title}" just spun — give it a rest for a bit.`;
+      session.appendTurn({ role: 'dj', kind: 'request', text: cdAck, meta: { trackId: song.id, requester, toolCalls } });
+      return { ack: cdAck, track: { title: song.title, artist: song.artist, id: song.id }, introScript: null };
+    }
+
     // Station voice off (settings.tts.enabled) → no intro. requestSchema()
     // already dropped the field from the agent's contract, so normally there
     // is nothing here to discard — this guard covers the switch flipping
     // mid-run (the schema resolved before the flip) and a model inventing the
     // field anyway. Every read below keys off this one binding, and the
     // session then records the ack rather than a line that never aired.
-    const intro = autoVoiceAllowed() && typeof object.intro === 'string' ? object.intro.trim() : '';
+    // Echo guard (A2): a script that reads the request back is regenerated
+    // with the request text withheld — it can't echo what it never saw.
+    const rawIntro = autoVoiceAllowed() && typeof object.intro === 'string' ? object.intro.trim() : '';
+    const guarded = await guardIntro(rawIntro || null, text, () => dj.generateIntro({
+      track: trackFields(song), context: null, requestedBy: requester,
+    }));
+    if (guarded.guard) queue.log('request-guard', `agent intro echoed request text — ${guarded.guard}`);
+    const intro = guarded.script || '';
+    const ack = guardAck(object.ack, text, 'Coming right up.');
     const pos = await queue.push({
       track: trackFields(song),
       requestedBy: requester,
@@ -730,12 +747,12 @@ async function runRequestViaAgent(queue: any, { requester, text }: { requester: 
     }
     session.appendTurn({
       role: 'dj', kind: 'request',
-      text: intro || object.ack || `Queued "${song.title}".`,
+      text: intro || ack || `Queued "${song.title}".`,
       meta: { trackId: song.id, requester, toolCalls },
     });
 
     return {
-      ack: object.ack || `Coming up for you, ${requester}.`,
+      ack: ack || `Coming up for you, ${requester}.`,
       track: { title: song.title, artist: song.artist, id: song.id },
       introScript: intro || null,
     };
