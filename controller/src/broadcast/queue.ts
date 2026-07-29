@@ -2089,6 +2089,17 @@ class Queue {
       : `That track's already queued — it's on the way.`;
   }
 
+  // Honest acknowledgement for a request refused by the repeat cooldown (B6).
+  // Same on-air split as dedupAck, and for the same reason: recentlyPlayedIds
+  // includes the track CURRENTLY playing, so the plain "just spun" line told a
+  // listener their song was over while they could still hear it.
+  cooldownAck(trackId: string | null | undefined, title: string): string {
+    const onAir = !!trackId && this.current?.track?.id === trackId;
+    return onAir
+      ? `That one's spinning right now — give it a bit before you ask again.`
+      : `"${title}" just spun — give it a rest for a bit.`;
+  }
+
   // Lowercased artist names heard in the last `hours` hours — used by the
   // picker to block recently-heard artists. 2h is a sane default; raising it
   // narrows the pool fast on a small library.
