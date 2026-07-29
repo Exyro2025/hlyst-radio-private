@@ -24,7 +24,7 @@ import { lifetimeTokenCount } from '../llm/log.js';
 import { fetchWithTimeout } from '../util/fetch-timeout.js';
 import { listenerAuthDecision, stationAuthDecision } from '../util/listener-auth.js';
 import { publicGuestIds, publicPersonaShape, soulsArePublic } from '../util/public-persona.js';
-import { checkAuthRateLimit, clientIp } from '../middleware/ratelimit.js';
+import { checkAuthRateLimit, clientIp, listenerAuthFailureDelayMs } from '../middleware/ratelimit.js';
 import { STATE_ROOT } from '../config.js';
 import { activeStationId } from '../stations/resolve.js';
 
@@ -534,6 +534,16 @@ router.get('/state', (req, res) => {
 // always Icecast, so per-IP limiting would throttle every listener through
 // one bucket. The password never gets logged.
 //
+// That "the caller is always Icecast" premise only holds because the edge
+// refuses this path — the bundled Caddyfiles 404 /api/listener-auth, and
+// Icecast reaches the controller directly over the internal network. It was
+// NOT true before that: handle_path /api/* forwarded everything, so the
+// internet could POST here and brute-force the shared privacy.password at full
+// speed, bypassing the 20-per-15-min cap /station-auth puts on the SAME
+// password. byo-proxy operators own their own route table, so failures are
+// also damped in-handler below (successes are never delayed — see
+// listenerAuthFailureDelayMs).
+//
 // This endpoint fails OPEN when listenerAuth is off — see listenerAuthDecision.
 // The web UI must NOT use it for that reason; it has /station-auth below.
 // ---------------------------------------------------------------------------
@@ -554,6 +564,12 @@ router.post(
       res.setHeader('icecast-auth-user', '1');
       res.status(200).send('ok\n');
     } else {
+      // Reaching here means the lock is on and the credential was wrong
+      // (listenerAuthDecision returns true for both listener_remove and the
+      // auth-disabled fail-open path), so slowing this costs a real listener
+      // nothing — the response was going to be 401 either way.
+      const delayMs = listenerAuthFailureDelayMs();
+      if (delayMs > 0) await new Promise((resolve) => setTimeout(resolve, delayMs));
       res.setHeader('icecast-auth-message', 'invalid listener credentials');
       res.status(401).send('denied\n');
     }

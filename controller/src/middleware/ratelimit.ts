@@ -154,3 +154,45 @@ export function checkAuthRateLimit(ip) {
   }
   return { ok: true };
 }
+
+// ---------------------------------------------------------------------------
+// Listener-auth brute-force damper (#478 hardening).
+//
+// POST /listener-auth answers 200/401 on the shared privacy.password, so it is
+// a password oracle for anyone who can reach it. The bundled Caddyfiles now 404
+// it at the edge (Icecast calls the controller directly, never through the
+// proxy), but docker-compose.byo.yml operators write their own route table and
+// may forward it, so the handler carries its own bound too.
+//
+// This deliberately does NOT gate the request the way checkAuthRateLimit does.
+// A cap that rejects over-budget attempts would have to reject CORRECT
+// passwords once tripped — otherwise 429-vs-401 is the same oracle — and that
+// hands an attacker a trivial way to lock every real listener out of a private
+// stream. Instead only FAILURES are slowed: a legitimate listener presenting
+// the right password is never delayed or denied, while a brute-forcer drops
+// from full server speed to a crawl. Counted globally rather than per-IP
+// because behind Icecast every call arrives from one address anyway.
+//
+// Counter is O(1) (window start + count, not a timestamp array) so a flood
+// can't grow it.
+// ---------------------------------------------------------------------------
+const LISTENER_FAIL_WINDOW_MS = 15 * 60_000;
+const LISTENER_FAIL_STEP_MS = 250;
+const LISTENER_FAIL_MAX_DELAY_MS = 2_000;
+let listenerFailWindowStart = 0;
+let listenerFailCount = 0;
+
+export function listenerAuthFailureDelayMs(now = Date.now()) {
+  if (now - listenerFailWindowStart > LISTENER_FAIL_WINDOW_MS) {
+    listenerFailWindowStart = now;
+    listenerFailCount = 0;
+  }
+  listenerFailCount += 1;
+  return Math.min(listenerFailCount * LISTENER_FAIL_STEP_MS, LISTENER_FAIL_MAX_DELAY_MS);
+}
+
+// Test seam — lets the unit test start from a known window.
+export function resetListenerAuthFailures() {
+  listenerFailWindowStart = 0;
+  listenerFailCount = 0;
+}
