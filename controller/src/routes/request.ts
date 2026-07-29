@@ -18,7 +18,7 @@ import * as webhooks from '../broadcast/webhooks.js';
 import * as settings from '../settings.js';
 import { stripScriptedOpener, cleanRequesterName, stillInFlight, screenAck, guardIntro } from '../util/request-guard.js';
 import {
-  checkRateLimit, checkGlobalRateLimit, clientIp,
+  checkRateLimit, checkGlobalRateLimit, commitRateLimit, commitGlobalRateLimit, clientIp,
   REQUESTS_DISABLED, REQUEST_TEXT_MAX,
 } from '../middleware/ratelimit.js';
 import { shuffle } from '../util/shuffle.js';
@@ -761,7 +761,16 @@ router.post('/request', async (req, res) => {
   const stripped = stripScriptedOpener(sanitizeRequestText(rawText));
   const text = stripped.text.slice(0, REQUEST_TEXT_MAX);
   if (!text) {
-    return res.status(400).json({ error: 'Empty request' });
+    // Distinguish "you typed nothing" from "everything you typed was staging
+    // directions for the DJ, so there is no request left to resolve" — the
+    // second is reachable by an ordinary listener via a false-positive match,
+    // and "Empty request" over a message they can see they wrote reads as a
+    // bug. Never echo the text back in the error.
+    return res.status(400).json({
+      error: stripped.injection
+        ? "Couldn't read a song request in that — try just the artist, title, or a vibe."
+        : 'Empty request',
+    });
   }
   const s = settings.get() as any;
   const reservedNames = [
@@ -796,13 +805,39 @@ router.post('/request', async (req, res) => {
       retryAfter: globalGate.retryAfter,
     });
   }
+  // Both queue-state refusals below carry the COOLDOWN as Retry-After, which is
+  // a truthful floor rather than a guess: checkRateLimit above already stamped
+  // this IP's cooldown, so the caller genuinely cannot succeed before it
+  // expires, whatever the queue does in the meantime. A client that honours it
+  // stops hammering; one that doesn't just meets the cooldown 429.
+  const retryAfter = Number(cfg.cooldownSec) > 0 ? Number(cfg.cooldownSec) : 60;
   if (cfg.onePendingPerIp !== false && stillInFlight(lastByIp.get(ip), queue.queuedIds())) {
-    return res.status(429).json({ success: false, message: 'Your last request is still queued — it airs first.' });
+    res.setHeader('Retry-After', String(retryAfter));
+    return res.status(429).json({
+      success: false,
+      message: 'Your last request is still queued — it airs first.',
+      retryAfter,
+    });
   }
   const pendingCount = queue.upcoming.filter((i: any) => i.requestedBy).length;
   if (pendingCount >= (Number(cfg.maxPending) || 6)) {
-    return res.status(429).json({ success: false, message: "The request queue's full — try again in a few minutes." });
+    res.setHeader('Retry-After', String(retryAfter));
+    return res.status(429).json({
+      success: false,
+      message: "The request queue's full — try again in a few minutes.",
+      retryAfter,
+    });
   }
+
+  // Every gate passed — the request is being accepted, so now spend the hourly
+  // budgets. Deliberately AFTER the two queue-state gates above: those reject
+  // without queueing anything, and charging an accept-budget for them let a
+  // full queue burn the station-wide cap down to zero on rejections alone (see
+  // middleware/ratelimit.ts). The per-IP cooldown was already spent by
+  // checkRateLimit, which is what keeps those rejections from being free to
+  // hammer.
+  commitRateLimit(ip);
+  commitGlobalRateLimit();
 
   const id = randomUUID();
   const entry: any = {
