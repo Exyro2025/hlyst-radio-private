@@ -52,6 +52,20 @@ assert.equal(cleared.maxPending, 12, 'cleared maxPending keeps the current value
 assert.equal(cleared.perIpHourlyCap, 20, 'cleared perIpHourlyCap keeps the current value, not the 1 floor');
 assert.equal(cleared.cooldownSec, 90, 'cleared cooldownSec keeps the current value, not the 5s floor');
 assert.equal(cleared.repeatCooldownMin, 90, 'cleared repeatCooldownMin keeps the current value, not the 0 floor');
+// Whitespace and non-string falsy values are "cleared" too — `Number('  ')`,
+// `Number(false)` and `Number([])` are all 0 and would floor the same way.
+// Unreachable from the admin form, reachable from the CLI/API patch surface.
+await settings.update({
+  requests: { globalHourlyCap: '  ', maxPending: false, perIpHourlyCap: [], cooldownSec: {} },
+} as any);
+const junk = settings.get().requests;
+assert.equal(junk.globalHourlyCap, 200, 'whitespace-only keeps the current value');
+assert.equal(junk.maxPending, 12, 'false keeps the current value, not the 1 floor');
+assert.equal(junk.perIpHourlyCap, 20, 'an empty array keeps the current value, not the 1 floor');
+assert.equal(junk.cooldownSec, 90, 'an object keeps the current value');
+// A numeric STRING is still a real value — the wire carries these from forms.
+await settings.update({ requests: { maxPending: '7' } } as any);
+assert.equal(settings.get().requests.maxPending, 7);
 // A real 0 is still a real value where the range allows it (0 = cooldown off).
 await settings.update({ requests: { repeatCooldownMin: 0 } });
 assert.equal(settings.get().requests.repeatCooldownMin, 0);

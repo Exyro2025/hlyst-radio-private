@@ -44,7 +44,7 @@ import {
   breakerOpen,
   breakerSuccess,
 } from './dj-agent/breaker.js';
-import { enqueuePick, trackFields, trimLinkToIntro } from './dj-agent/enqueue.js';
+import { dropEchoedLink, enqueuePick, trackFields, trimLinkToIntro } from './dj-agent/enqueue.js';
 import { advanceRun, runActive } from './dj-agent/runs.js';
 import { pickSchemaBase, pickSystem, requestSystem } from './dj-agent/schemas.js';
 import { guardIntro, screenAck } from '../util/request-guard.js';
@@ -374,7 +374,10 @@ async function pickViaAgent(queue, ctx, { wantLink, audioWaypoint = null, curren
   // the chokepoint (near-idempotent — see the note there); it runs here too so
   // the session turn below records the line as it will actually air — trimmed,
   // and dropped links as null, never a line the listeners didn't hear.
-  const say = trimLinkToIntro(rawSay, song) || '';
+  // dropEchoedLink rides along for the same invariant: the echo guard also runs
+  // at the chokepoint, but a link nulled only in there would leave `meta.say`
+  // below quoting text no listener ever heard.
+  const say = dropEchoedLink(trimLinkToIntro(rawSay, song), queue) || '';
   // Transition effects on this pick (persona djMode via settings.effectsActive),
   // independent of whether a link airs.
   const link = (wantLink && say) ? say : null;

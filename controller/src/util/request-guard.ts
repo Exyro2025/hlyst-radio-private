@@ -146,7 +146,11 @@ export function screenAck(
   return { ack: fallback, guard: 'ack-replaced' };
 }
 
-// Plain-string form of screenAck, for callers that only need the text.
+// Plain-string form of screenAck. Prefer `screenAck` — every production call
+// site uses it, because a replacement the operator can't see is how the raid
+// stayed invisible for five hours. This exists for callers that genuinely have
+// nowhere to report a verdict, and to keep the pinned contract in
+// scripts/request-guard.test.ts intact.
 export function guardAck(ack: string | null | undefined, requestText: string, fallback: string): string {
   return screenAck(ack, requestText, fallback).ack;
 }

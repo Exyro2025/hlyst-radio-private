@@ -54,6 +54,26 @@ export function trackFields(song) {
 // (operator corrections, unit expansion, SUB/WAVE → "Subwave") is applied later
 // and separately by speak(), at render time. It used to be baked in here — one
 // "Ye" → "Yay" rule then had the written line say "Yay" too.
+// Echo guard on the PICK path. The picker agent conditions on the session
+// window, which quotes listener request text verbatim for ~40 turns / 4h — so
+// an injected phrasing that survived the opener regexes can come back out in a
+// LATER pick's spoken link, long after the request that carried it was guarded
+// and resolved. Policy (thresholds, lookback) lives in util/request-guard.ts
+// with the rest of it; this just applies it and logs. Dropping is the only sane
+// action here — the link's generation context is gone, and an unannounced track
+// is a non-event on air.
+//
+// Exported because callers apply it BEFORE enqueuePick too, exactly as they
+// pre-apply trimLinkToIntro and for the same reason: the session turn must
+// record the line as it will actually air, dropped links as null. Idempotent —
+// a pre-applied caller passes null down, so the chokepoint below neither
+// re-checks nor double-logs.
+export function dropEchoedLink(link: string | null, queue: any): string | null {
+  if (!link || !echoesRecentRequest(link, requestLog.recentRequests)) return link;
+  queue.log('request-guard', `pick link echoed recent listener request text — link dropped`);
+  return null;
+}
+
 export function trimLinkToIntro(text: string | null | undefined, song: any): string | null {
   const raw = (text || '').trim();
   if (!raw) return null;
@@ -105,19 +125,7 @@ export async function enqueuePick(
   // whole-line ratio was an over-estimate and this pass trims a little
   // further. Air always honours the duration budget; the session turn can
   // occasionally carry the slightly longer reading.
-  let introLink = trimLinkToIntro(link, song);
-  // Echo guard on the PICK path. The picker agent conditions on the session
-  // window, which quotes listener request text verbatim for ~40 turns / 4h —
-  // so an injected phrasing that survived the opener regexes can come back out
-  // in a LATER pick's spoken link, long after the request that carried it was
-  // guarded and resolved. Policy (thresholds, lookback) lives in
-  // util/request-guard.ts with the rest of it; here it just fires. Dropping is
-  // the only sane action at this point — the link's whole generation context
-  // is gone, and an unannounced track is a non-event on air.
-  if (introLink && echoesRecentRequest(introLink, requestLog.recentRequests)) {
-    queue.log('request-guard', `pick link echoed recent listener request text — link dropped`);
-    introLink = null;
-  }
+  const introLink = dropEchoedLink(trimLinkToIntro(link, song), queue);
   const track: any = trackFields(song);
   // Flag the transition effects on this pick (DJ mode only). getAnnotatedUri
   // stamps liq_sweep / liq_washout / liq_dissolve / liq_chop; radio.liq ramps
