@@ -47,7 +47,7 @@ import {
 import { enqueuePick, trackFields, trimLinkToIntro } from './dj-agent/enqueue.js';
 import { advanceRun, runActive } from './dj-agent/runs.js';
 import { pickSchemaBase, pickSystem, requestSystem } from './dj-agent/schemas.js';
-import { guardIntro, guardAck } from '../util/request-guard.js';
+import { guardIntro, screenAck } from '../util/request-guard.js';
 
 // Re-exported so every existing `from './dj-agent.js'` import keeps working —
 // including scripts/llm-bench, which sits outside tsconfig's include and so
@@ -718,18 +718,25 @@ async function runRequestViaAgent(queue: any, { requester, text }: { requester: 
     // pickViaAgent uses for the identical reason.
     let object = run.object;
 
-    // Chat escape (C1): a null id with a real ack means "this wasn't a music
-    // request" — answer in persona, queue nothing, skip the cascade entirely.
+    // Chat escape (C1): an explicit kind:"chat" WITH a null id means "this
+    // wasn't a music request" — answer in persona, queue nothing, skip the
+    // cascade entirely. The `kind` half is load-bearing: a null id on its own
+    // is also what an OMITTED id looks like by the time coerceModelPayload is
+    // done with it (schemas.ts requestSchema), and a weak model forgetting the
+    // field would otherwise silently turn a real music request into "nothing
+    // plays". Without kind:"chat" this falls through to the repick salvage and
+    // then the caller's stateless cascade, so the listener still gets music.
     // Echo guard (A2): this ack is the model's own free-text answer, generated
     // straight from a message that may carry an injected script — guard it the
     // same way the cascade's chat branch does (request.ts). Not just a display
     // concern: this text becomes a `dj`-role session turn that later
     // `windowMessages()` calls condition on, so an unguarded echo here can
     // poison future generations even though it never reaches tts.speak.
-    if (!object?.id && typeof object?.ack === 'string' && object.ack.trim()) {
-      const ack = guardAck(object.ack, text, 'Heard you loud and clear.');
-      session.appendTurn({ role: 'dj', kind: 'request', text: ack, meta: { requester, toolCalls } });
-      return { ack, track: null, introScript: null };
+    if (object?.kind === 'chat' && !object?.id && typeof object?.ack === 'string' && object.ack.trim()) {
+      const screened = screenAck(object.ack, text, 'Heard you loud and clear.');
+      if (screened.guard) queue.log('request-guard', `agent chat ack echoed request text — replaced`);
+      session.appendTurn({ role: 'dj', kind: 'request', text: screened.ack, meta: { requester, toolCalls } });
+      return { ack: screened.ack, track: null, introScript: null, guard: screened.guard };
     }
 
     let song = object?.id ? extras.seen.get(object.id) : null;
@@ -776,12 +783,15 @@ async function runRequestViaAgent(queue: any, { requester, text }: { requester: 
       throw new Error(`request agent returned unknown id ${object?.id}`);
     }
 
-    // Repeat cooldown (B6) — mirrors the cascade path.
+    // Repeat cooldown (B6) — mirrors the cascade path. `refused` is what tells
+    // the caller nothing was queued: it returns a track (the one it declined,
+    // so the ack and the operator log can name it), and without the flag the
+    // route reported a queue position for a play that will never happen.
     const cdMin = Number((settings.get() as any)?.requests?.repeatCooldownMin ?? 120);
     if (cdMin > 0 && queue.recentlyPlayedIds(cdMin / 60).has(song.id)) {
-      const cdAck = `"${song.title}" just spun — give it a rest for a bit.`;
+      const cdAck = queue.cooldownAck(song.id, song.title);
       session.appendTurn({ role: 'dj', kind: 'request', text: cdAck, meta: { trackId: song.id, requester, toolCalls } });
-      return { ack: cdAck, track: { title: song.title, artist: song.artist, id: song.id }, introScript: null, guard: null };
+      return { ack: cdAck, track: { title: song.title, artist: song.artist, id: song.id }, introScript: null, guard: null, refused: 'cooldown' };
     }
 
     // Station voice off (settings.tts.enabled) → no intro. requestSchema()
@@ -798,7 +808,12 @@ async function runRequestViaAgent(queue: any, { requester, text }: { requester: 
     }));
     if (guarded.guard) queue.log('request-guard', `agent intro echoed request text — ${guarded.guard}`);
     const intro = guarded.script || '';
-    const ack = guardAck(object.ack, text, 'Coming right up.');
+    const screened = screenAck(object.ack, text, 'Coming right up.');
+    if (screened.guard) queue.log('request-guard', `agent ack echoed request text — replaced`);
+    const ack = screened.ack;
+    // Both guards can fire on one request (the model echoed in the ack AND in
+    // the intro) — join rather than let one verdict hide the other.
+    const guardVerdict = [guarded.guard, screened.guard].filter(Boolean).join('+') || null;
     const pos = await queue.push({
       track: trackFields(song),
       requestedBy: requester,
@@ -823,9 +838,10 @@ async function runRequestViaAgent(queue: any, { requester, text }: { requester: 
         text: dupAck,
         meta: { trackId: song.id, requester, toolCalls },
       });
-      // The echo guard already ran above (guarded.guard) even though this
-      // pick turned out to be a duplicate — surface it rather than losing it.
-      return { ack: dupAck, track: { title: song.title, artist: song.artist, id: song.id }, introScript: null, guard: guarded.guard ?? null };
+      // The echo guards already ran above even though this pick turned out to
+      // be a duplicate — surface the verdict rather than losing it. `refused`
+      // for the same reason as the cooldown branch: nothing was queued here.
+      return { ack: dupAck, track: { title: song.title, artist: song.artist, id: song.id }, introScript: null, guard: guardVerdict, refused: 'already-queued' };
     }
     session.appendTurn({
       role: 'dj', kind: 'request',
@@ -837,7 +853,7 @@ async function runRequestViaAgent(queue: any, { requester, text }: { requester: 
       ack: ack || `Coming up for you, ${requester}.`,
       track: { title: song.title, artist: song.artist, id: song.id },
       introScript: intro || null,
-      guard: guarded.guard ?? null,
+      guard: guardVerdict,
     };
   });
 }

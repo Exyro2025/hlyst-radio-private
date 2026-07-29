@@ -16,7 +16,7 @@ import * as listeners from '../broadcast/listeners.js';
 import { autoVoiceAllowed } from '../broadcast/voice-policy.js';
 import * as webhooks from '../broadcast/webhooks.js';
 import * as settings from '../settings.js';
-import { stripScriptedOpener, cleanRequesterName, stillInFlight, guardAck, guardIntro } from '../util/request-guard.js';
+import { stripScriptedOpener, cleanRequesterName, stillInFlight, screenAck, guardIntro } from '../util/request-guard.js';
 import {
   checkRateLimit, checkGlobalRateLimit, clientIp,
   REQUESTS_DISABLED, REQUEST_TEXT_MAX,
@@ -204,6 +204,14 @@ function recordOutcome(entry) {
   }
 }
 
+// Record a guard verdict on the entry without clobbering an earlier one — a
+// single request can trip the ack guard and then the intro guard, and the
+// durable log should show both rather than whichever ran last.
+function flagGuard(entry, verdict: string | null | undefined) {
+  if (!verdict) return;
+  entry.guard = entry.guard ? `${entry.guard}+${verdict}` : verdict;
+}
+
 async function resolveRequest(entry) {
   const { requester, text } = entry;
   entry.startedAt = Date.now();
@@ -304,7 +312,7 @@ async function resolveRequest(entry) {
       recentOpeners: queue.getRecentOpeners(),
     }));
     if (guardedMlt.guard) {
-      entry.guard = guardedMlt.guard;
+      flagGuard(entry, guardedMlt.guard);
       queue.log('request-guard', `more-like-this intro echoed request text — ${guardedMlt.guard}`);
     }
     introScript = guardedMlt.script;
@@ -328,6 +336,9 @@ async function resolveRequest(entry) {
       // honestly instead of airing a second intro over a phantom replay (#619).
       const dupAck = queue.dedupAck(pick.id);
       entry.pickSource = `${entry.pickSource}:already-queued`;
+      // Nothing was queued for THIS listener — don't let the one-pending hold
+      // key on a track they didn't get (stillInFlight).
+      entry.refused = true;
       session.appendTurn({ role: 'dj', kind: 'request', text: dupAck, meta: { trackId: pick.id, requester } });
       return resolved({ ack: dupAck, track: { title: pick.title, artist: pick.artist }, queuePosition: null });
     }
@@ -355,13 +366,29 @@ async function resolveRequest(entry) {
       // djLog entry when it fired; thread the same verdict into the durable
       // request log so `guard` isn't silently unset for every agent-path
       // request (the cascade/more-like-this paths set it inline above).
-      if (agentRes.guard) entry.guard = agentRes.guard;
+      if (agentRes.guard) flagGuard(entry, agentRes.guard);
       if (!agentRes.track) {
         // Chat escape (C1): the agent answered in persona — nothing to queue.
+        // Only reachable on an EXPLICIT kind:"chat" now (dj-agent.ts); an
+        // omitted id no longer lands here, it falls through to the cascade.
         queue.log('request', `agent chat-answered (no track)`);
         entry.path = 'chat';
         entry.pickSource = 'agent-chat';
         return resolved({ ack: agentRes.ack, track: null, queuePosition: null });
+      }
+      if (agentRes.refused) {
+        // The agent declined to queue (repeat cooldown, or push() deduped it)
+        // and returned the track only so the ack and the log can name it.
+        // Reporting `queue.upcoming.length` here put "Queued · Position #N" on
+        // the listener's screen over an ack saying the opposite, and recorded a
+        // clean `agent` resolution in the operator log for a play that never
+        // happened. Keep the marker, no position, no one-pending hold.
+        queue.log('request', `agent refused (${agentRes.refused}): ${agentRes.track.title} — ${agentRes.track.artist}`);
+        entry.path = 'agent';
+        entry.pickSource = `agent:${agentRes.refused}`;
+        entry.pick = agentRes.track;
+        entry.refused = true;
+        return resolved({ ack: agentRes.ack, track: agentRes.track, queuePosition: null });
       }
       queue.log('request', `agent resolved: ${agentRes.track.title} — ${agentRes.track.artist}`);
       entry.path = 'agent';
@@ -400,9 +427,13 @@ async function resolveRequest(entry) {
     queue.log('request', `cascade chat-answered (no track)`);
     entry.path = 'chat';
     entry.pickSource = 'chat';
-    const ack = guardAck(matched.ack, text, 'Heard you loud and clear.');
-    session.appendTurn({ role: 'dj', kind: 'request', text: ack, meta: { requester } });
-    return resolved({ ack, track: null, queuePosition: null });
+    const screened = screenAck(matched.ack, text, 'Heard you loud and clear.');
+    if (screened.guard) {
+      flagGuard(entry, screened.guard);
+      queue.log('request-guard', `cascade chat ack echoed request text — replaced`);
+    }
+    session.appendTurn({ role: 'dj', kind: 'request', text: screened.ack, meta: { requester } });
+    return resolved({ ack: screened.ack, track: null, queuePosition: null });
   }
 
   // Stash the matcher breakdown for the debug record — this path is the
@@ -602,7 +633,9 @@ async function resolveRequest(entry) {
   if (cdMin > 0 && queue.recentlyPlayedIds(cdMin / 60).has(pick.id)) {
     entry.pick = pick;
     entry.pickSource = `${pickSource}:cooldown`;
-    const cdAck = `"${pick.title}" just spun — give it a rest for a bit.`;
+    // Refused, not queued — see the more-like-this dedup branch above.
+    entry.refused = true;
+    const cdAck = queue.cooldownAck(pick.id, pick.title);
     session.appendTurn({ role: 'dj', kind: 'request', text: cdAck, meta: { trackId: pick.id, requester } });
     return resolved({ ack: cdAck, track: { title: pick.title, artist: pick.artist }, queuePosition: null });
   }
@@ -612,9 +645,17 @@ async function resolveRequest(entry) {
   // On an artist miss the up-front `ack` (written by matchRequest before the
   // cascade knew it would miss) is a lie — "Got some Katy Perry coming up!"
   // over a Daft Punk track. Replace it with an honest stand-in line.
-  const ack = entry.artistMiss
-    ? `No ${entry.artistMiss} in the crates — here's something that fits the moment instead.`
-    : guardAck(matched.ack, text, 'Coming right up.');
+  let ack: string;
+  if (entry.artistMiss) {
+    ack = `No ${entry.artistMiss} in the crates — here's something that fits the moment instead.`;
+  } else {
+    const screened = screenAck(matched.ack, text, 'Coming right up.');
+    if (screened.guard) {
+      flagGuard(entry, screened.guard);
+      queue.log('request-guard', `cascade ack echoed request text — replaced`);
+    }
+    ack = screened.ack;
+  }
 
   // 3. Generate DJ intro that mentions the request. On a miss, pass the
   // requested-but-absent artist so the spoken intro owns the substitution
@@ -645,7 +686,7 @@ async function resolveRequest(entry) {
     recentOpeners: queue.getRecentOpeners(),
   }));
   if (guarded.guard) {
-    entry.guard = guarded.guard;
+    flagGuard(entry, guarded.guard);
     queue.log('request-guard', `intro echoed request text — ${guarded.guard}`);
   }
   introScript = guarded.script;
@@ -672,6 +713,8 @@ async function resolveRequest(entry) {
   if (pos === -1) {
     const dupAck = queue.dedupAck(pick.id);
     entry.pickSource = `${pickSource}:already-queued`;
+    // Refused, not queued — see the more-like-this dedup branch above.
+    entry.refused = true;
     session.appendTurn({ role: 'dj', kind: 'request', text: dupAck, meta: { trackId: pick.id, requester } });
     return resolved({ ack: dupAck, track: { title: pick.title, artist: pick.artist }, queuePosition: null });
   }
@@ -729,6 +772,12 @@ router.post('/request', async (req, res) => {
   const requester = cleanRequesterName(rawName, reservedNames);
 
   const ip = clientIp(req);
+  // Run the janitor BEFORE the gates, not after. The one-pending hold below
+  // returns 429 without ever reaching the rest of the handler, so pruning
+  // later meant a request whose resolution never settled held its IP well past
+  // the 10-minute TTL — freed only when some OTHER IP's request got far enough
+  // to prune, which on a single-listener station is "never, until restart".
+  pruneRequests();
   const gate = checkRateLimit(ip);
   if (!gate.ok) {
     res.setHeader('Retry-After', String(gate.retryAfter));
@@ -755,7 +804,6 @@ router.post('/request', async (req, res) => {
     return res.status(429).json({ success: false, message: "The request queue's full — try again in a few minutes." });
   }
 
-  pruneRequests();
   const id = randomUUID();
   const entry: any = {
     id, status: 'pending', requester, text,
