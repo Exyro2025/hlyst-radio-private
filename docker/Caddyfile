@@ -82,6 +82,21 @@
 	}
 
 	# -------------------------------------------------------------------------
+	# /api/listener-auth — NOT reachable from the internet
+	# -------------------------------------------------------------------------
+	# The Icecast URL-auth callback (#478). Icecast lives in the broadcast
+	# container and calls the controller DIRECTLY over the compose network
+	# (http://controller:7701/listener-auth — see docker/broadcast-entrypoint.sh),
+	# so it never needs the edge. Exposing it through /api/* handed the internet
+	# an unthrottled password oracle: it answers 200/401 on the shared
+	# privacy.password, while POST /station-auth throttles that SAME password at
+	# 20 tries / 15 min. Must be declared BEFORE the /api/* handler — Caddy sorts
+	# by specificity, but keeping it adjacent makes the pairing obvious.
+	handle /api/listener-auth {
+		respond 404
+	}
+
+	# -------------------------------------------------------------------------
 	# /api/* — Controller REST API
 	# -------------------------------------------------------------------------
 	# handle_path strips the /api prefix before forwarding, so the controller
