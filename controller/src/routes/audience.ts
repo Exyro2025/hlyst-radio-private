@@ -16,9 +16,10 @@ router.post('/beacon', (req, res) => {
   // Analytics must never break a listener — swallow everything, always 204.
   try {
     const body = (req.body || {}) as Record<string, unknown>;
-    const cfIp = String(req.headers['cf-connecting-ip'] || '').trim();
+    // clientIp() owns the cf-connecting-ip → x-forwarded-for precedence now,
+    // so the two places that resolve a listener's address can't drift apart.
     audience.record({
-      ip: cfIp || clientIp(req),
+      ip: clientIp(req),
       country: String(req.headers['cf-ipcountry'] || '').slice(0, 4) || undefined,
       referrer: typeof body.referrer === 'string' ? body.referrer.slice(0, 500) : undefined,
       utmSource: typeof body.utmSource === 'string' ? body.utmSource.slice(0, 60) : undefined,

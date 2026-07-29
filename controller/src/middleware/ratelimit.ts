@@ -14,7 +14,6 @@
 import * as settings from '../settings.js';
 
 export const REQUEST_TEXT_MAX = 280;
-export const REQUEST_NAME_MAX = 40;
 export const REQUESTS_DISABLED = process.env.REQUESTS_DISABLED === '1' || process.env.REQUESTS_DISABLED === 'true';
 
 // Live limits from settings.requests (raid hardening 2026-07-28) — read per
@@ -30,9 +29,29 @@ function limits() {
 
 const requestHistory = new Map(); // ip → { last: ts, hits: [ts,...] }
 
+// The identity EVERY per-IP gate keys on — the /request cooldown, the per-IP
+// hourly cap, the one-pending hold, and the station-password throttle. Order
+// matters and is not cosmetic:
+//
+//   1. `cf-connecting-ip` — Cloudflare sets this itself and overwrites any
+//      client-supplied copy at the edge.
+//   2. left-most `x-forwarded-for` — the pre-Cloudflare / bare-Caddy shape.
+//   3. the socket peer.
+//
+// X-Forwarded-For cannot be first: Cloudflare APPENDS the real client IP to
+// the chain rather than replacing it, so a header the CLIENT sent survives as
+// the left-most entry all the way to here. One rotating value per request then
+// defeats all three per-IP gates at once, leaving only the station-wide cap.
+//
+// Caveat, deliberately not papered over: `cf-connecting-ip` is only
+// trustworthy while the controller is reachable *only* through the edge that
+// sets it. Anyone who can hit the origin directly can forge it exactly like
+// XFF — this narrows the attack to whoever can bypass the proxy, it does not
+// close it. Durable enforcement belongs at the edge (see the header comment).
+// Same precedence routes/audience.ts uses for the beacon's client IP.
 export function clientIp(req) {
-  // trust proxy chain (Caddy → controller). Take the left-most public-ish
-  // entry. We don't need cryptographic precision — just per-source bucketing.
+  const cf = String(req.headers['cf-connecting-ip'] || '').trim();
+  if (cf) return cf;
   const xff = (req.headers['x-forwarded-for'] || '').split(',').map(s => s.trim()).filter(Boolean);
   return xff[0] || req.socket.remoteAddress || 'unknown';
 }
@@ -81,9 +100,10 @@ export function checkGlobalRateLimit() {
 // ---------------------------------------------------------------------------
 // Station-password attempts (#478). A separate bucket from the /request one
 // above, deliberately shaped differently: /request throttles an expensive
-// side-effecting action, so it can afford a 20s cooldown and 8/hour. A
-// password box can't — one typo would lock a legitimate listener out for 20
-// seconds, and a household sharing a NAT would exhaust 8/hour in a sitting.
+// side-effecting action, so it can afford a 60s cooldown and 8/hour (the
+// settings-driven defaults). A password box can't — one typo would lock a
+// legitimate listener out for a full minute, and a household sharing a NAT
+// would exhaust 8/hour in a sitting.
 //
 // So: no cooldown, but a hard ceiling per window. Generous enough that real
 // people never notice, tight enough that the shared password isn't
