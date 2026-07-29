@@ -19,6 +19,7 @@ import { writeFileAtomic } from '../util/atomic-file.js';
 import * as subsonic from '../music/subsonic.js';
 import * as mix from '../music/mix.js';
 import * as library from '../music/library.js';
+import * as loudness from '../music/loudness.js';
 import * as blocklist from '../music/blocklist.js';
 import { speak, voiceGainDb } from '../audio/tts.js';
 import * as djAgent from './dj-agent.js';
@@ -500,43 +501,14 @@ class Queue {
   // peak would cap against a different scan). Null loudness from every
   // allowed source → leaves gainDb undefined, so getAnnotatedUri emits no
   // liq_amplify and the track plays at unity gain.
+  //
+  // The resolution itself lives in music/loudness.ts because the stem-blend
+  // render needs the SAME answer (#1240) — a clip carries no liq_amplify, so
+  // the render bakes this figure in, and a second implementation there is how
+  // rendered seams ended up at a different level than the tracks around them.
   async applyLoudnessGain(track: Track | null) {
     if (!track) return;
-    const loud = settings.get().loudness;
-    const source = loud?.source ?? 'replaygain-then-measured';
-    let lufs: number | null | undefined = null;
-    let peakDb: number | null | undefined = null;
-    if (source !== 'measured') {
-      let rg = mix.loudnessFromReplayGain(track.replayGain);
-      if (!rg && track.replayGain === undefined && track.id) {
-        try {
-          const song = await subsonic.getSong(track.id);
-          track.replayGain = song?.replayGain ?? null; // cache the answer either way
-          rg = mix.loudnessFromReplayGain(song?.replayGain);
-        } catch (err) {
-          // Best-effort — an unreachable Navidrome falls through to measured.
-          this.log('warn', `replayGain lookup failed for ${track.id}: ${(err as Error).message}`);
-        }
-      }
-      if (rg) {
-        lufs = rg.lufs;
-        peakDb = rg.peakDb;
-      }
-    }
-    if (lufs == null && source !== 'replaygain') {
-      lufs = track.loudnessLufs;
-      peakDb = track.peakDb;
-      if ((lufs == null || peakDb == null) && track.id) {
-        const rec = library.get(track.id);
-        if (lufs == null) lufs = rec?.loudnessLufs ?? null;
-        if (peakDb == null) peakDb = rec?.peakDb ?? null;
-      }
-    }
-    const gain = mix.gainForLoudness(lufs, {
-      peakDb,
-      targetLufs: loud?.targetLufs,
-      maxBoostDb: loud?.maxBoostDb,
-    });
+    const gain = await loudness.resolveGainDb(track, msg => this.log('warn', msg));
     if (gain != null) track.gainDb = gain;
   }
 
