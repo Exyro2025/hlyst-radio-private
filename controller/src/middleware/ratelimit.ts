@@ -34,6 +34,13 @@ const requestHistory = new Map(); // ip → { last: ts, hits: [ts,...] }
 export const TRUST_CF_CONNECTING_IP =
   process.env.TRUST_CF_CONNECTING_IP === '1' || process.env.TRUST_CF_CONNECTING_IP === 'true';
 
+// The raw header read, shared so there is one parse of it in the tree. NOT a
+// trusted identity on its own — only clientIp() (gated) and analytics (which
+// accepts an untrusted hint by design) may call it.
+export function unverifiedCfIp(req): string {
+  return String(req.headers['cf-connecting-ip'] || '').trim();
+}
+
 // The identity EVERY per-IP gate keys on — the /request cooldown + per-IP
 // hourly cap + one-pending hold, `requireAdmin`'s brute-force lockout
 // (middleware/auth.ts), the station-password throttle (routes/public.ts), and
@@ -64,16 +71,9 @@ export const TRUST_CF_CONNECTING_IP =
 // forge whichever header is being trusted (`docker-compose.byo.yml` binds the
 // controller on a host port by design). Durable enforcement belongs at the
 // edge — see the header comment.
-// The raw header read, shared so there is one parse of it in the tree. NOT a
-// trusted identity on its own — only clientIp() (gated) and analytics (which
-// accepts an untrusted hint by design) may call it.
-export function cfConnectingIp(req): string {
-  return String(req.headers['cf-connecting-ip'] || '').trim();
-}
-
 export function clientIp(req) {
   if (TRUST_CF_CONNECTING_IP) {
-    const cf = cfConnectingIp(req);
+    const cf = unverifiedCfIp(req);
     if (cf) return cf;
   }
   const xff = (req.headers['x-forwarded-for'] || '').split(',').map(s => s.trim()).filter(Boolean);

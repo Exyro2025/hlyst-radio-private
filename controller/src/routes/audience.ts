@@ -7,7 +7,7 @@
 // GET /audience — admin-gated rollup for the Stats page.
 import express from 'express';
 import { requireAdmin } from '../middleware/auth.js';
-import { cfConnectingIp, clientIp } from '../middleware/ratelimit.js';
+import { unverifiedCfIp, clientIp } from '../middleware/ratelimit.js';
 import * as audience from '../broadcast/audience.js';
 
 export const router = express.Router();
@@ -21,7 +21,7 @@ router.post('/beacon', (req, res) => {
     // rollup, and nothing gates on it. clientIp() must stay the gated one —
     // never reuse this ordering for anything that throttles or locks out.
     audience.record({
-      ip: cfConnectingIp(req) || clientIp(req),
+      ip: unverifiedCfIp(req) || clientIp(req),
       country: String(req.headers['cf-ipcountry'] || '').slice(0, 4) || undefined,
       referrer: typeof body.referrer === 'string' ? body.referrer.slice(0, 500) : undefined,
       utmSource: typeof body.utmSource === 'string' ? body.utmSource.slice(0, 60) : undefined,
