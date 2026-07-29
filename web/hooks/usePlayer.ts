@@ -1,6 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useRef, useState, type Dispatch, type RefObject, type SetStateAction } from 'react';
+import { attachBufferedStream, type BufferedStreamHandle } from '@/lib/bufferedStream';
 import { isIOSDevice } from '@/lib/platform';
 import { useStationOrigin } from '@/lib/stationOrigin';
 import { withStreamAuth } from '@/lib/stationAuth';
@@ -141,10 +142,43 @@ export function usePlayer({ initialVolume = 1 }: UsePlayerOptions = {}): Player 
   // watchdog stops retrying a dead Opus URL (e.g. an operator who disabled the
   // server-side Opus encoder, so /stream.opus 404s).
   const opusFailedRef = useRef(false);
+  // Live MediaSource feed, when this browser/mount supports one (issue #1231).
+  // Null means we're on the plain-element path and el.src owns the download.
+  const bufferedHandle = useRef<BufferedStreamHandle | null>(null);
+  // Set by the watchdog effect to its own onError, so a buffered feed that
+  // dies takes the identical reconnect-with-backoff path as an element error.
+  const streamFatalRef = useRef<() => void>(() => {});
   useEffect(() => { tunedInRef.current = tunedIn; }, [tunedIn]);
   useEffect(() => { streamUrlRef.current = streamUrl; }, [streamUrl]);
   useEffect(() => { streamsRef.current = streams; }, [streams]);
   useEffect(() => { volumeRef.current = volume; }, [volume]);
+
+  // The single place playback gets pointed at a mount. Prefers the buffered
+  // (MediaSource) feed, which keeps Icecast's connect burst as a real cushion
+  // — a plain <audio> element discards it and holds only ~2.3s, so any upstream
+  // hiccup longer than that is audible (issue #1231). Falls back to the plain
+  // element wherever the feed can't run (iOS Safari, the Ogg-Opus mount, a
+  // CORS-blocked fetch): a shallow cushion beats no audio.
+  //
+  // Callers still drive play() themselves. Playing immediately is correct on
+  // both paths — on the buffered one the element starts at the OLDEST audio in
+  // the burst, so the cushion costs nothing at startup.
+  const attachSource = useCallback((el: HTMLAudioElement, url: string) => {
+    bufferedHandle.current?.detach();
+    bufferedHandle.current = attachBufferedStream(el, url, {
+      onFatal: () => { streamFatalRef.current(); },
+    });
+    if (!bufferedHandle.current) el.src = url;
+  }, []);
+
+  // Tear the source down. Detaching matters even on the plain path: the
+  // buffered feed's in-flight fetch is what holds the Icecast connection, so
+  // leaving it running would keep a phantom listener on the mount.
+  const detachSource = useCallback((el: HTMLAudioElement) => {
+    bufferedHandle.current?.detach();
+    bufferedHandle.current = null;
+    el.src = '';
+  }, []);
 
   useEffect(() => {
     if (audioRef.current) audioRef.current.volume = volume;
@@ -238,7 +272,7 @@ export function usePlayer({ initialVolume = 1 }: UsePlayerOptions = {}): Player 
         return;
       }
       const myGen = ++gen.current;
-      audio.src = withStreamAuth(`${streamUrlRef.current}?t=${Date.now()}`);
+      attachSource(audio, withStreamAuth(`${streamUrlRef.current}?t=${Date.now()}`));
       audio.volume = volumeRef.current;
       setStatus('connecting');
       const p = audio.play();
@@ -305,6 +339,11 @@ export function usePlayer({ initialVolume = 1 }: UsePlayerOptions = {}): Player 
       retryCount.current += 1;
       armWatchdog(delay);
     };
+    // A buffered feed that dies (body ended, network error) is the same event
+    // as a dead element: same status reset, same Opus→MP3 demotion, same
+    // backoff. Routed through a ref because attachSource is stable and can't
+    // close over this effect's handlers.
+    streamFatalRef.current = onError;
     el.addEventListener('playing', onPlaying);
     el.addEventListener('waiting', onWaiting);
     el.addEventListener('stalled', onStalled);
@@ -312,13 +351,19 @@ export function usePlayer({ initialVolume = 1 }: UsePlayerOptions = {}): Player 
     el.addEventListener('error', onError);
     return () => {
       clearWatchdog();
+      streamFatalRef.current = () => {};
+      // This element is being replaced (the private-station gate remounts it
+      // mid-session — issue #1232). Its feed can never reach the new node, and
+      // an orphaned fetch would sit on the mount as a phantom listener.
+      bufferedHandle.current?.detach();
+      bufferedHandle.current = null;
       el.removeEventListener('playing', onPlaying);
       el.removeEventListener('waiting', onWaiting);
       el.removeEventListener('stalled', onStalled);
       el.removeEventListener('timeupdate', onTimeUpdate);
       el.removeEventListener('error', onError);
     };
-  }, [audioEl]);
+  }, [audioEl, attachSource]);
 
   // Idle cutoff (issue #343): a tab left tuned in with no listener activity
   // for IDLE_TUNE_OUT_MS gets tuned out, so an abandoned browser doesn't sit
@@ -370,7 +415,7 @@ export function usePlayer({ initialVolume = 1 }: UsePlayerOptions = {}): Player 
       .then(() => {
         if (gen.current !== myGen) return;
         el.pause();
-        el.src = '';
+        detachSource(el);
       });
   };
   stopRef.current = stop;
@@ -388,7 +433,7 @@ export function usePlayer({ initialVolume = 1 }: UsePlayerOptions = {}): Player 
     lastActivityAt.current = Date.now();
     setIdleStopped(false);
     retryCount.current = 0;
-    el.src = withStreamAuth(`${streamUrl}?t=${Date.now()}`);
+    attachSource(el, withStreamAuth(`${streamUrl}?t=${Date.now()}`));
     el.volume = volume;
     setTunedIn(true);
     setStatus('connecting');
@@ -416,10 +461,14 @@ export function usePlayer({ initialVolume = 1 }: UsePlayerOptions = {}): Player 
 
   // How far behind the live edge this tab's audio actually is. The flat
   // stream.bufferSeconds from /now-playing is only the depth Icecast *tries*
-  // to burst on the MP3 mount — the real per-connection lag differs whenever
-  // the mount's byte rate differs (Opus/FLAC/AAC), the ring was short at
-  // connect, or playback paused and drifted. The element knows the truth:
-  // buffered.end − currentTime. Null (→ callers fall back to bufferSeconds)
+  // to burst on the MP3 mount — what a given listener actually holds differs
+  // by an order of magnitude depending on how they're fed. On the buffered
+  // (MediaSource) path the burst survives and this reads ≈ bufferSeconds; on
+  // the plain-element fallback the browser discards the burst and it reads
+  // ~2.3s (measured — see lib/bufferedStream.ts). Both are the truth for that
+  // listener, which is exactly why the measurement wins over the advertised
+  // figure. The element knows it: buffered.end − currentTime.
+  // Null (→ callers fall back to bufferSeconds)
   // unless this tab is tuned in and audibly playing, since a paused element's
   // stale ranges say nothing about what the viewer is hearing elsewhere.
   const getListenerLagMs = useCallback((): number | null => {
