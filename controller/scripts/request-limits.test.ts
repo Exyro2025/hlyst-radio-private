@@ -71,17 +71,48 @@ await settings.update({ requests: { repeatCooldownMin: 0 } });
 assert.equal(settings.get().requests.repeatCooldownMin, 0);
 
 // --- rate limiting is settings-driven ---------------------------------------
-const { checkRateLimit, checkGlobalRateLimit } = await import('../src/middleware/ratelimit.js');
+const {
+  checkRateLimit, checkGlobalRateLimit, commitRateLimit, commitGlobalRateLimit,
+} = await import('../src/middleware/ratelimit.js');
 
 await settings.update({ requests: { enabled: true, cooldownSec: 5, perIpHourlyCap: 2, globalHourlyCap: 5 } });
 assert.equal(checkRateLimit('10.0.0.1').ok, true);
 assert.equal(checkRateLimit('10.0.0.1').ok, false); // inside 5s cooldown
 
 // Global bucket: 5 allowed across ANY ips, 6th refused with a retryAfter.
-for (let i = 0; i < 5; i++) assert.equal(checkGlobalRateLimit().ok, true);
+for (let i = 0; i < 5; i++) {
+  assert.equal(checkGlobalRateLimit().ok, true);
+  commitGlobalRateLimit();
+}
 const g = checkGlobalRateLimit();
 assert.equal(g.ok, false);
 assert.ok(g.retryAfter > 0);
+
+// --- check/commit are SEPARATE: a rejected request must not spend the hourly
+// budgets. POST /request has gates after these two (the one-pending hold, the
+// maxPending depth cap) that reject without queueing; when check() also spent
+// the budget, a full queue let rejected retries burn globalHourlyCap to zero
+// and close the request line station-wide for an hour with six requests
+// actually taken. --------------------------------------------------------------
+
+// Global: 5 hits already banked above. Raise the cap to 6 so there is exactly
+// one slot left, then peek repeatedly — every peek must still see that slot.
+await settings.update({ requests: { globalHourlyCap: 6 } });
+for (let i = 0; i < 20; i++) {
+  assert.equal(checkGlobalRateLimit().ok, true, 'checkGlobalRateLimit must not consume the budget');
+}
+commitGlobalRateLimit();                       // the one accepted request
+assert.equal(checkGlobalRateLimit().ok, false, 'commit is what spends the slot');
+
+// Per-IP: commit alone fills the hourly budget, and does NOT stamp the cooldown
+// (so the refusal below is the hourly leg — retryAfter is most of an hour, not
+// the 5s cooldown).
+await settings.update({ requests: { cooldownSec: 5, perIpHourlyCap: 2 } });
+commitRateLimit('10.0.0.99');
+commitRateLimit('10.0.0.99');
+const capped = checkRateLimit('10.0.0.99');
+assert.equal(capped.ok, false);
+assert.ok(capped.retryAfter > 3000, `hourly refusal, not the 5s cooldown (got ${capped.retryAfter})`);
 
 // --- schema shape: chat escapes exist on both request paths -----------------
 const { requestSchema } = await import('../src/broadcast/dj-agent/schemas.js');

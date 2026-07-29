@@ -8,14 +8,31 @@
 // directive, so cutting at the earliest match keeps the musical intent
 // ("Play something Lo-Fi.") and drops the script. en + ru cover the observed
 // raid; extend the list, never inline new patterns at call sites.
+//
+// The `(?=…)` tail on the first pattern is load-bearing, not decoration: the
+// directive nouns are ordinary words, so "open the message BOARD and play some
+// jazz" matched and silently truncated a real request to "Please". Requiring
+// what follows to look like the start of a payload ("… as follows", "… with
+// 'X'", "…: X") keeps every observed raid phrasing and drops the mid-sentence
+// collisions. The residue guard below is the backstop for the ones a lookahead
+// can't express (notably the two ru patterns).
 const OPENER_DIRECTIVES: RegExp[] = [
-  /\b(start|begin|open)\s+(your|the)\s+(message|answer|reply|response)\b/i,
+  /\b(?:start|begin|open)\s+(?:your|the)\s+(?:message|answer|reply|response)\b(?=\s*(?:with|as|by|using|like|[:,]|["“'‘«]))/i,
   /\b(answer|respond|reply|write)(\s+\S+){0,3}\s+as\s+follows\b/i,
   /\bonly\s+(write|say|output)\s+the\s+following\b/i,
   /\bdo\s+not\s+(answer|respond\s+to|mention)\s+this\s+(message|part|prompt)\b/i,
   /начн[иё]\s+(сво[йеё]\s+)?(ответ|сообщение)(?!\w)/iu,
   /ответь?\s+следующим\s+образом(?!\w)/iu,
 ];
+
+// Below this many words, whatever survived the cut is not a request — it's the
+// tail of a false positive ("Please") or a message that was nothing BUT script.
+// Either way it must not go on to the matcher: resolving "Please" against the
+// library airs an arbitrary track nobody asked for. Returning '' routes it to
+// the route's 400, which is the honest answer — we could not read a request out
+// of it. Two words clears every real short request we see ("Добавь рэгги",
+// "surprise me", "sunny afternoon").
+const MIN_KEPT_WORDS = 2;
 
 export function stripScriptedOpener(raw: string): { text: string; injection: string | null } {
   const text = String(raw ?? '');
@@ -27,6 +44,7 @@ export function stripScriptedOpener(raw: string): { text: string; injection: str
   if (cut === -1) return { text, injection: null };
   // Trim a dangling connective the cut can leave behind ("... и", "... and").
   const kept = text.slice(0, cut).replace(/[\s,;:—-]+(and|и)?\s*$/iu, '').trim();
+  if (words(kept).length < MIN_KEPT_WORDS) return { text: '', injection: 'scripted-opener' };
   return { text: kept, injection: 'scripted-opener' };
 }
 
@@ -41,16 +59,36 @@ function words(s: string | null | undefined): string[] {
     .filter(Boolean);
 }
 
-// True when `script` reads the request back: a common contiguous run of
-// >= minRun words, or (for requests of >= minWordsForRatio words) >= ratio of
-// the request's words appearing in the script in order. Real intros quote a
-// few words at most; both thresholds sit far above legitimate traffic —
-// validated against every intro aired during the 2026-07-28 raid window.
+// True when `script` reads the request back: a common CONTIGUOUS run of
+// >= minRun words. Verbatim quotation is the whole signal — an injected script
+// is reproduced, not paraphrased.
+//
+// There used to be a second measure here: an in-order longest-common-
+// SUBSEQUENCE ratio, on the theory that it would catch a reordered echo the
+// contiguous run misses. It was removed because it does not separate. Measured
+// against the raid fixtures and a corpus of natural intros/acks:
+//
+//   case                        run   lcs-ratio
+//   raid: "Get Crank"      TRUE  15        0.58
+//   reordered echo         TRUE  10        0.59
+//   "like the track now"   FALSE  5        0.86   <- highest ratio of the set
+//   "slow sad song"        FALSE  8        0.67
+//
+// The ratio ranked two ordinary paraphrases ABOVE both real attacks, so no
+// threshold exists that admits the attacks and rejects the paraphrases —
+// filtering stopwords or short words doesn't move it either. In production it
+// meant a listener writing more than ~10 words got a canned ack and a
+// regenerated (request-blind) intro almost every time. The contiguous run
+// separates cleanly on the same corpus (true: 10/15/26, false: 5-8).
+//
+// What this gives up, stated plainly: an echo the model genuinely shuffles
+// below minRun words of contiguity now passes. That path is covered downstream
+// rather than here — the prompts forbid readback on both agent paths
+// (LISTENER_TEXT_CLAUSE), and dropEchoedLink re-checks the pick path.
 export function echoesRequest(
   script: string | null | undefined,
   requestText: string | null | undefined,
-  { minRun = 8, ratio = 0.6, minWordsForRatio = 10 }:
-    { minRun?: number; ratio?: number; minWordsForRatio?: number } = {},
+  { minRun = 8 }: { minRun?: number } = {},
 ): boolean {
   const a = words(script);
   const b = words(requestText);
@@ -69,21 +107,7 @@ export function echoesRequest(
     }
     dp = next;
   }
-  if (best >= minRun) return true;
-
-  if (b.length >= minWordsForRatio) {
-    // Longest common subsequence (in-order overlap) vs the request's length.
-    let prev = new Array(b.length + 1).fill(0);
-    for (let i = 1; i <= a.length; i++) {
-      const next = new Array(b.length + 1).fill(0);
-      for (let j = 1; j <= b.length; j++) {
-        next[j] = a[i - 1] === b[j - 1] ? prev[j - 1] + 1 : Math.max(prev[j], next[j - 1]);
-      }
-      prev = next;
-    }
-    if (prev[b.length] / b.length >= ratio) return true;
-  }
-  return false;
+  return best >= minRun;
 }
 
 // Common-script allow-list: kills hieroglyph/cuneiform/emoji floods while
@@ -123,9 +147,23 @@ export async function guardIntro(
   return { script: null, guard: 'echo-dropped' };
 }
 
-// Acks are <= 20 words, so the contiguous-run threshold tightens to 6. A
-// failing ack is replaced, not regenerated — it's one line, the fallback reads
-// fine, and it saves a model call under raid load.
+// Acks get a LOOSER threshold than intros (10 vs 8), which is the opposite of
+// what it was — worth spelling out, because "shorter line, tighter guard" is
+// the intuitive answer and it was wrong on both halves.
+//
+// An ack's job is to restate the ask ("Old school hip hop from the nineties, on
+// the way") — quoting a few words is the line working, not failing. And unlike
+// an intro it never airs: `introScript` is the only field that reaches
+// tts.speak; the ack is the HTTP receipt the requester reads back on their own
+// screen, plus a session turn. So the blast radius of a missed echo is the
+// session window, which dropEchoedLink already re-checks on the way to air.
+// At 6 the guard replaced a correct ack with the canned fallback for most
+// requests over ~10 words. At 10 a real injected readback (>= 10 contiguous
+// words, which every raid sample cleared by a wide margin) still trips it.
+//
+// A failing ack is replaced, not regenerated — it's one line, the fallback
+// reads fine, and it saves a model call under raid load.
+const ACK_MIN_RUN = 10;
 //
 // Reports the verdict so call sites get guardIntro's treatment: log the swap
 // and flag it on the durable request record. Silent replacement left the
@@ -142,7 +180,7 @@ export function screenAck(
 ): { ack: string; guard: string | null } {
   const a = String(ack ?? '').trim();
   if (!a) return { ack: fallback, guard: null };
-  if (!echoesRequest(a, requestText, { minRun: 6 })) return { ack: a, guard: null };
+  if (!echoesRequest(a, requestText, { minRun: ACK_MIN_RUN })) return { ack: a, guard: null };
   return { ack: fallback, guard: 'ack-replaced' };
 }
 

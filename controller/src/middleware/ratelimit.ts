@@ -80,6 +80,26 @@ export function clientIp(req) {
   return xff[0] || req.socket.remoteAddress || 'unknown';
 }
 
+// The two budgets here are spent at DIFFERENT times, and conflating them was a
+// live bug. POST /request has gates after these (the one-pending hold, the
+// maxPending queue-depth cap) that reject without queueing anything, and the
+// counters were already incremented by the time those ran:
+//
+//   * `rec.last` (the cooldown) SHOULD be spent on every attempt. It is the
+//     anti-hammer, it is per-IP, and it clears itself in cooldownSec. Not
+//     spending it on rejections would leave the queue-full path with no
+//     backpressure at all — an unthrottled loop that re-runs listeners.refresh()
+//     (an Icecast round-trip) every time.
+//   * `rec.hits` / `globalHits` (the hourly caps) are budgets of ACCEPTED
+//     requests and must only be spent when one is actually accepted. Charging
+//     them for rejections is self-inflicted denial of service: with the queue
+//     full at maxPending=6, thirty rejected retries burned the whole
+//     globalHourlyCap=30 and closed the request line station-wide for an hour
+//     with six requests actually taken. The per-IP version locked a single
+//     impatient listener out for an hour the same way.
+//
+// So check() spends the cooldown and PEEKS at the hourly caps; commit() spends
+// the hourly caps, and POST /request calls it only once every gate has passed.
 export function checkRateLimit(ip) {
   const now = Date.now();
   const oneHourAgo = now - 3_600_000;
@@ -94,7 +114,6 @@ export function checkRateLimit(ip) {
     return { ok: false, retryAfter: Math.ceil((oldest + 3_600_000 - now) / 1000) };
   }
   rec.last = now;
-  rec.hits.push(now);
   requestHistory.set(ip, rec);
   // Opportunistic cleanup so the map doesn't grow unbounded over weeks.
   if (requestHistory.size > 2000) {
@@ -105,10 +124,24 @@ export function checkRateLimit(ip) {
   return { ok: true };
 }
 
+// Spend the per-IP hourly budget. Call only once the request is being accepted.
+// Touches `hits` and nothing else — the cooldown is checkRateLimit's business,
+// and a commit that also stamped `last` would double-charge it. Tolerates a
+// missing record (the janitor above can evict between check and commit) by
+// seeding one with a clear cooldown, so a commit is never silently dropped and
+// an eviction fails open rather than locking the IP out.
+export function commitRateLimit(ip) {
+  const rec = requestHistory.get(ip) || { last: 0, hits: [] };
+  rec.hits.push(Date.now());
+  requestHistory.set(ip, rec);
+}
+
 // All-IP combined ceiling — per-IP buckets are useless against a distributed
 // raid (2026-07-28: ~106 requests from many addresses inside 5 hours).
 const globalHits: number[] = [];
 
+// Peek only — see the note above checkRateLimit for why this must not spend the
+// budget. Pair every ok:true with commitGlobalRateLimit() at the accept point.
 export function checkGlobalRateLimit() {
   const now = Date.now();
   const cutoff = now - 3_600_000;
@@ -117,8 +150,11 @@ export function checkGlobalRateLimit() {
   if (globalHits.length >= globalHourlyCap) {
     return { ok: false, retryAfter: Math.ceil((globalHits[0] + 3_600_000 - now) / 1000) };
   }
-  globalHits.push(now);
   return { ok: true };
+}
+
+export function commitGlobalRateLimit() {
+  globalHits.push(Date.now());
 }
 
 // ---------------------------------------------------------------------------
