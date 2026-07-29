@@ -29,29 +29,53 @@ function limits() {
 
 const requestHistory = new Map(); // ip → { last: ts, hits: [ts,...] }
 
-// The identity EVERY per-IP gate keys on — the /request cooldown, the per-IP
-// hourly cap, the one-pending hold, and the station-password throttle. Order
-// matters and is not cosmetic:
+// OPT-IN: trust `CF-Connecting-IP` as the client identity. Off by default, and
+// the default is the safe one — read clientIp() below before flipping it.
+export const TRUST_CF_CONNECTING_IP =
+  process.env.TRUST_CF_CONNECTING_IP === '1' || process.env.TRUST_CF_CONNECTING_IP === 'true';
+
+// The identity EVERY per-IP gate keys on — the /request cooldown + per-IP
+// hourly cap + one-pending hold, `requireAdmin`'s brute-force lockout
+// (middleware/auth.ts), the station-password throttle (routes/public.ts), and
+// per-IP like dedup (routes/likes.ts). A wrong answer here weakens all of them
+// at once, so the resolution order is a security decision, not plumbing:
 //
-//   1. `cf-connecting-ip` — Cloudflare sets this itself and overwrites any
-//      client-supplied copy at the edge.
-//   2. left-most `x-forwarded-for` — the pre-Cloudflare / bare-Caddy shape.
+//   1. `cf-connecting-ip` — ONLY when TRUST_CF_CONNECTING_IP is set.
+//   2. left-most `x-forwarded-for`.
 //   3. the socket peer.
 //
-// X-Forwarded-For cannot be first: Cloudflare APPENDS the real client IP to
-// the chain rather than replacing it, so a header the CLIENT sent survives as
-// the left-most entry all the way to here. One rotating value per request then
-// defeats all three per-IP gates at once, leaving only the station-wide cap.
+// Why the header is gated rather than simply preferred: on the shipped stack
+// the only peer is Caddy, and `docker/Caddyfile` lists Cloudflare's ranges as
+// `trusted_proxies` — so Caddy DISCARDS a client-supplied X-Forwarded-For
+// unless the connection really came from a Cloudflare edge, and `xff[0]` is
+// the true peer. `CF-Connecting-IP` gets no such treatment: it is an ordinary
+// header Caddy passes straight through. Trusting it unconditionally would
+// therefore hand every attacker a one-header bypass of all of the above on
+// exactly the deployments that were previously sound — an honest client never
+// sends it, so "absent by default" is not a defence.
 //
-// Caveat, deliberately not papered over: `cf-connecting-ip` is only
-// trustworthy while the controller is reachable *only* through the edge that
-// sets it. Anyone who can hit the origin directly can forge it exactly like
-// XFF — this narrows the attack to whoever can bypass the proxy, it does not
-// close it. Durable enforcement belongs at the edge (see the header comment).
-// Same precedence routes/audience.ts uses for the beacon's client IP.
+// With the flag ON (proxied-DNS Cloudflare in front, the documented prod
+// topology) the header is the right answer and XFF is the wrong one, because
+// Cloudflare APPENDS the real client IP to the chain rather than replacing it
+// — a client-supplied left-most entry survives the edge intact.
+//
+// Still true either way: this is only as good as the guarantee that the origin
+// is reachable ONLY through that edge. Anyone who can hit it directly can
+// forge whichever header is being trusted (`docker-compose.byo.yml` binds the
+// controller on a host port by design). Durable enforcement belongs at the
+// edge — see the header comment.
+// The raw header read, shared so there is one parse of it in the tree. NOT a
+// trusted identity on its own — only clientIp() (gated) and analytics (which
+// accepts an untrusted hint by design) may call it.
+export function cfConnectingIp(req): string {
+  return String(req.headers['cf-connecting-ip'] || '').trim();
+}
+
 export function clientIp(req) {
-  const cf = String(req.headers['cf-connecting-ip'] || '').trim();
-  if (cf) return cf;
+  if (TRUST_CF_CONNECTING_IP) {
+    const cf = cfConnectingIp(req);
+    if (cf) return cf;
+  }
   const xff = (req.headers['x-forwarded-for'] || '').split(',').map(s => s.trim()).filter(Boolean);
   return xff[0] || req.socket.remoteAddress || 'unknown';
 }

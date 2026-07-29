@@ -7,7 +7,7 @@
 // GET /audience — admin-gated rollup for the Stats page.
 import express from 'express';
 import { requireAdmin } from '../middleware/auth.js';
-import { clientIp } from '../middleware/ratelimit.js';
+import { cfConnectingIp, clientIp } from '../middleware/ratelimit.js';
 import * as audience from '../broadcast/audience.js';
 
 export const router = express.Router();
@@ -16,10 +16,12 @@ router.post('/beacon', (req, res) => {
   // Analytics must never break a listener — swallow everything, always 204.
   try {
     const body = (req.body || {}) as Record<string, unknown>;
-    // clientIp() owns the cf-connecting-ip → x-forwarded-for precedence now,
-    // so the two places that resolve a listener's address can't drift apart.
+    // Analytics deliberately takes the CF header as an unverified HINT even
+    // when TRUST_CF_CONNECTING_IP is off: a forged value here only skews a
+    // rollup, and nothing gates on it. clientIp() must stay the gated one —
+    // never reuse this ordering for anything that throttles or locks out.
     audience.record({
-      ip: clientIp(req),
+      ip: cfConnectingIp(req) || clientIp(req),
       country: String(req.headers['cf-ipcountry'] || '').slice(0, 4) || undefined,
       referrer: typeof body.referrer === 'string' ? body.referrer.slice(0, 500) : undefined,
       utmSource: typeof body.utmSource === 'string' ? body.utmSource.slice(0, 60) : undefined,
