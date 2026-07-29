@@ -90,12 +90,16 @@ export function echoesRequest(
 // keeping every ordinary name (Latin, Cyrillic, Arabic, Indic, CJK, ...).
 const NAME_DISALLOWED = /[^\p{sc=Latin}\p{sc=Cyrillic}\p{sc=Greek}\p{sc=Arabic}\p{sc=Hebrew}\p{sc=Devanagari}\p{sc=Gurmukhi}\p{sc=Han}\p{sc=Hiragana}\p{sc=Katakana}\p{sc=Hangul}\p{sc=Thai}\p{Nd}\s\-_.']/gu;
 
+// The screen-name cap. Lives here, next to the only code that applies it —
+// middleware/ratelimit.ts used to export a REQUEST_NAME_MAX nobody read.
+const NAME_MAX = 40;
+
 export function cleanRequesterName(raw: string | null | undefined, reserved: string[] = []): string {
   const cleaned = String(raw ?? '')
     .replace(NAME_DISALLOWED, ' ')
     .replace(/\s+/g, ' ')
     .trim()
-    .slice(0, 40)
+    .slice(0, NAME_MAX)
     .trim();
   if (!cleaned) return 'anon';
   const lc = cleaned.toLowerCase();
@@ -122,10 +126,50 @@ export async function guardIntro(
 // Acks are <= 20 words, so the contiguous-run threshold tightens to 6. A
 // failing ack is replaced, not regenerated — it's one line, the fallback reads
 // fine, and it saves a model call under raid load.
-export function guardAck(ack: string | null | undefined, requestText: string, fallback: string): string {
+//
+// Reports the verdict so call sites get guardIntro's treatment: log the swap
+// and flag it on the durable request record. Silent replacement left the
+// operator with no signal at all under conversational trolling — the ack is
+// the one line that always reaches the listener, so a run of replacements is
+// exactly the shape of an attack in progress.
+//
+// An EMPTY ack is not a replacement: the model wrote nothing, so the fallback
+// is filling a hole rather than covering an echo. Only a real echo flags.
+export function screenAck(
+  ack: string | null | undefined,
+  requestText: string,
+  fallback: string,
+): { ack: string; guard: string | null } {
   const a = String(ack ?? '').trim();
-  if (!a) return fallback;
-  return echoesRequest(a, requestText, { minRun: 6 }) ? fallback : a;
+  if (!a) return { ack: fallback, guard: null };
+  if (!echoesRequest(a, requestText, { minRun: 6 })) return { ack: a, guard: null };
+  return { ack: fallback, guard: 'ack-replaced' };
+}
+
+// Plain-string form of screenAck, for callers that only need the text.
+export function guardAck(ack: string | null | undefined, requestText: string, fallback: string): string {
+  return screenAck(ack, requestText, fallback).ack;
+}
+
+// Pick-path echo guard. The picker agent reads the live session window, which
+// carries listener request text verbatim for up to ~40 turns / 4h, so an
+// injected phrasing that slipped past the opener regexes can resurface in a
+// LATER pick's spoken link — a path neither guardIntro nor screenAck sees
+// (they only run on the request that carried the text). Same thresholds as
+// guardIntro; `recent` is the request log's newest-first ring, so only the
+// last `lookback` texts are checked — an echo of something asked hours ago
+// isn't the attack this defends against, and the scan is O(script x text).
+export function echoesRecentRequest(
+  script: string | null | undefined,
+  recent: Array<{ text?: string | null }> | null | undefined,
+  { lookback = 5 }: { lookback?: number } = {},
+): boolean {
+  if (!script || !Array.isArray(recent)) return false;
+  for (const entry of recent.slice(0, lookback)) {
+    const text = entry?.text;
+    if (text && echoesRequest(script, text)) return true;
+  }
+  return false;
 }
 
 // One-pending-per-IP hold (routes/request.ts POST /request): an IP's previous
@@ -137,11 +181,17 @@ export function guardAck(ack: string | null | undefined, requestText: string, fa
 // future resolution path silently forgetting to set `pick` and defeating the
 // hold with nothing catching it.
 export function stillInFlight(
-  prev: { status?: string; pick?: { id?: string } } | null | undefined,
+  prev: { status?: string; refused?: boolean; pick?: { id?: string } } | null | undefined,
   queuedIds: Set<string>,
 ): boolean {
   if (!prev) return false;
   if (prev.status === 'pending') return true;
+  // A REFUSED resolution (repeat cooldown, already-queued dedup) still records
+  // the track it declined on `pick`, so the operator log names it — but
+  // nothing was queued on this listener's behalf. Holding their next request
+  // until that track leaves the queue would lock them out over a play they
+  // never got: "that one just spun" followed by minutes of silence.
+  if (prev.refused) return false;
   if (prev.status === 'resolved' && prev.pick?.id) return queuedIds.has(prev.pick.id);
   return false;
 }

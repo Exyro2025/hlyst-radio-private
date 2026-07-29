@@ -6,6 +6,7 @@
 import assert from 'node:assert/strict';
 import {
   stripScriptedOpener, echoesRequest, cleanRequesterName, guardIntro, guardAck, stillInFlight,
+  screenAck, echoesRecentRequest,
 } from '../src/util/request-guard.js';
 
 // --- stripScriptedOpener -----------------------------------------------------
@@ -120,5 +121,57 @@ assert.equal(
   stillInFlight({ status: 'failed', pick: { id: 'x' } }, new Set(['x'])),
   false,
 ); // failed entry never holds, even with a stray pick
+
+// --- screenAck (guardAck's reporting form) -----------------------------------
+// Same policy, but the verdict reaches the operator: a silently swapped ack
+// left conversational trolling completely invisible in the booth log.
+assert.deepEqual(
+  screenAck('Coming right up.', REQ_CRANK, 'fallback'),
+  { ack: 'Coming right up.', guard: null },
+);
+assert.deepEqual(
+  screenAck(AIRED_CRANK, REQ_CRANK, 'fallback'),
+  { ack: 'fallback', guard: 'ack-replaced' },
+);
+// An EMPTY ack is the model writing nothing, not an echo being covered up —
+// the fallback fills a hole and must NOT read as a guard event.
+assert.deepEqual(screenAck('', REQ_CRANK, 'fallback'), { ack: 'fallback', guard: null });
+assert.deepEqual(screenAck(null, REQ_CRANK, 'fallback'), { ack: 'fallback', guard: null });
+
+// --- echoesRecentRequest (pick-path guard) -----------------------------------
+// The picker agent reads the session window, which quotes listener request
+// text verbatim for ~40 turns — so an injected phrasing can resurface in a
+// LATER pick's link, a path neither guardIntro nor screenAck ever sees.
+const ring = [
+  { text: 'sunny afternoon' },
+  { text: REQ_CRANK },
+  { text: 'play some hard techno please' },
+];
+assert.equal(echoesRecentRequest(AIRED_CRANK, ring), true);
+assert.equal(echoesRecentRequest('Stingray SZN, "The River." 136 BPM of sunny driving reggae.', ring), false);
+assert.equal(echoesRecentRequest(null, ring), false);
+assert.equal(echoesRecentRequest(AIRED_CRANK, []), false);
+assert.equal(echoesRecentRequest(AIRED_CRANK, null), false);
+// Entries without usable text never throw the scan.
+assert.equal(echoesRecentRequest(AIRED_CRANK, [{}, { text: null }] as any), false);
+// Lookback is bounded: an echo of something asked long ago is out of scope.
+assert.equal(echoesRecentRequest(AIRED_CRANK, ring, { lookback: 1 }), false);
+
+// --- stillInFlight: a REFUSED resolution must not hold the IP ----------------
+// Repeat cooldown and the already-queued dedup both record the declined track
+// on `pick` so the operator log names it — but nothing was queued for this
+// listener, so holding their next request until that track leaves the queue
+// locked them out over a play they never got.
+assert.equal(
+  stillInFlight({ status: 'resolved', refused: true, pick: { id: 'x' } }, new Set(['x'])),
+  false,
+);
+// …while an ordinary resolution still holds exactly as before.
+assert.equal(
+  stillInFlight({ status: 'resolved', refused: false, pick: { id: 'x' } }, new Set(['x'])),
+  true,
+);
+// A refused entry that is still PENDING holds — it hasn't resolved yet.
+assert.equal(stillInFlight({ status: 'pending', refused: true }, new Set()), true);
 
 console.log('request-guard.test.ts: all assertions passed');

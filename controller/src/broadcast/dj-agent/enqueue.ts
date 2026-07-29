@@ -9,6 +9,8 @@ import * as subsonic from '../../music/subsonic.js';
 import * as dj from '../../llm/dj.js';
 import { stripThinking } from '../../llm/sdk.js';
 import { recordPick } from '../../llm/log.js';
+import * as requestLog from '../request-log.js';
+import { echoesRecentRequest } from '../../util/request-guard.js';
 import { speechPaceScale } from '../../audio/tts.js';
 import { normalizeForDisplay, normalizeForSpeech, spokenWordScale } from '../../audio/speech-text.js';
 import { introMsOf } from './runs.js';
@@ -103,7 +105,19 @@ export async function enqueuePick(
   // whole-line ratio was an over-estimate and this pass trims a little
   // further. Air always honours the duration budget; the session turn can
   // occasionally carry the slightly longer reading.
-  const introLink = trimLinkToIntro(link, song);
+  let introLink = trimLinkToIntro(link, song);
+  // Echo guard on the PICK path. The picker agent conditions on the session
+  // window, which quotes listener request text verbatim for ~40 turns / 4h —
+  // so an injected phrasing that survived the opener regexes can come back out
+  // in a LATER pick's spoken link, long after the request that carried it was
+  // guarded and resolved. Policy (thresholds, lookback) lives in
+  // util/request-guard.ts with the rest of it; here it just fires. Dropping is
+  // the only sane action at this point — the link's whole generation context
+  // is gone, and an unannounced track is a non-event on air.
+  if (introLink && echoesRecentRequest(introLink, requestLog.recentRequests)) {
+    queue.log('request-guard', `pick link echoed recent listener request text — link dropped`);
+    introLink = null;
+  }
   const track: any = trackFields(song);
   // Flag the transition effects on this pick (DJ mode only). getAnnotatedUri
   // stamps liq_sweep / liq_washout / liq_dissolve / liq_chop; radio.liq ramps
