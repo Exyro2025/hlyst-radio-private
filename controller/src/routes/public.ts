@@ -46,6 +46,22 @@ const TRANSPARENT_PNG = Buffer.from(
   'base64',
 );
 
+// Public handlers must not reflect their internal error text: these endpoints
+// answer unauthenticated callers, and err.message here can carry state-dir
+// paths (a failed settings.load()) or upstream registry URLs (the community
+// proxies) — low-value recon, but free to withhold.
+//
+// The logging half is the load-bearing part. Most of these handlers had no
+// server-side log at all, so the response WAS the only record; genericising
+// without this would have made 500s silent. Routes behind requireAdmin keep
+// reflecting err.message — the recipient there is already trusted and the
+// detail is the point.
+function publicError(res: express.Response, route: string, err: unknown): void {
+  const detail = err instanceof Error ? err.message : String(err);
+  queue.log('error', `${route} failed: ${detail}`);
+  res.status(500).json({ error: 'internal error' });
+}
+
 function mimeForAvatar(filename: string): string {
   if (filename.endsWith('.png')) return 'image/png';
   if (filename.endsWith('.webp')) return 'image/webp';
@@ -302,7 +318,7 @@ router.get('/now-playing', async (req, res) => {
       locale: stationSettings.locale,
     });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    publicError(res, '/now-playing', err);
   }
 });
 
@@ -396,7 +412,7 @@ router.get('/dj', async (req, res) => {
       locale: s.locale,
     });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    publicError(res, '/dj', err);
   }
 });
 
@@ -448,8 +464,8 @@ router.get('/schedule', async (req, res) => {
       timezone: getStationTimezone(),
       locale: s.locale,
     });
-  } catch (err: any) {
-    res.status(500).json({ error: err.message });
+  } catch (err) {
+    publicError(res, '/schedule', err);
   }
 });
 
@@ -476,8 +492,8 @@ router.get('/personas', async (req, res) => {
       // rendering a wall of empty cards.
       soulsPublished: withSouls,
     });
-  } catch (err: any) {
-    res.status(500).json({ error: err.message });
+  } catch (err) {
+    publicError(res, '/personas', err);
   }
 });
 
@@ -637,7 +653,7 @@ router.get('/themes', async (req, res) => {
         : stationDefault;
     res.json({ active, themes });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    publicError(res, '/themes', err);
   }
 });
 
@@ -680,8 +696,7 @@ router.get('/skills/community', async (req, res) => {
     const community = await listCommunitySkills();
     res.json({ community });
   } catch (err) {
-    queue.log('error', `/skills/community failed: ${err.message}`);
-    res.status(500).json({ error: err.message });
+    publicError(res, '/skills/community', err);
   }
 });
 
@@ -699,8 +714,7 @@ router.get('/personas/community', async (req, res) => {
     const community = await listCommunityPersonas();
     res.json({ community });
   } catch (err) {
-    queue.log('error', `/personas/community failed: ${err.message}`);
-    res.status(500).json({ error: err.message });
+    publicError(res, '/personas/community', err);
   }
 });
 
@@ -717,8 +731,7 @@ router.get('/shows/community', async (req, res) => {
     const community = await listCommunityShows();
     res.json({ community });
   } catch (err) {
-    queue.log('error', `/shows/community failed: ${err.message}`);
-    res.status(500).json({ error: err.message });
+    publicError(res, '/shows/community', err);
   }
 });
 
