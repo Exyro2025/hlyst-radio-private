@@ -811,7 +811,12 @@ async function runRequestViaAgent(queue: any, { requester, text }: { requester: 
     }));
     if (guarded.guard) queue.log('request-guard', `agent intro echoed request text — ${guarded.guard}`);
     const intro = guarded.script || '';
-    const screened = screenAck(object.ack, text, 'Coming right up.');
+    // The personalised line is screenAck's FALLBACK rather than a `||` on the
+    // return below: screenAck already substitutes for an empty ack, so `ack`
+    // is never falsy and a downstream `||` is unreachable. Threading it in here
+    // means the listener gets the named line in both cases the fallback covers
+    // — the model wrote nothing, and the model echoed their own text back.
+    const screened = screenAck(object.ack, text, `Coming up for you, ${requester}.`);
     if (screened.guard) queue.log('request-guard', `agent ack echoed request text — replaced`);
     const ack = screened.ack;
     // Both guards can fire on one request (the model echoed in the ack AND in
@@ -848,12 +853,15 @@ async function runRequestViaAgent(queue: any, { requester, text }: { requester: 
     }
     session.appendTurn({
       role: 'dj', kind: 'request',
+      // `ack` is guaranteed non-empty (screenAck substitutes), so it always
+      // wins over the title fallback when there's no intro — the fallback is
+      // kept only as a guard against a future edit making `ack` optional.
       text: intro || ack || `Queued "${song.title}".`,
       meta: { trackId: song.id, requester, toolCalls },
     });
 
     return {
-      ack: ack || `Coming up for you, ${requester}.`,
+      ack,
       track: { title: song.title, artist: song.artist, id: song.id },
       introScript: intro || null,
       guard: guardVerdict,
