@@ -238,6 +238,13 @@ const SCHEDULE_PATH = `${STATE_DIR}/schedule.json`;
 // below — round, then clamp into [min, max]; a non-finite input (missing,
 // non-numeric, hand-edited junk) falls back to `def` rather than NaN.
 const intIn = (v: unknown, def: number, min: number, max: number) => {
+  // A CLEARED field is absent, not zero. `Number(null)`, `Number('')` and
+  // `Number([])` are all 0 — finite — so without this guard an emptied admin
+  // input (parseInt('') → NaN → JSON null on the wire) clamped to `min` and
+  // silently committed that field's FLOOR: clearing the station hourly cap
+  // set it to 5/hour and closed the request line for everyone, with the form
+  // redisplaying 5 as though the operator had typed it.
+  if (v === null || v === undefined || v === '') return def;
   const n = Number(v);
   return Number.isFinite(n) ? Math.min(max, Math.max(min, Math.round(n))) : def;
 };
