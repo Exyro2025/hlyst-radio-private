@@ -7,9 +7,7 @@
 // node:assert-via-tsx style, matching scripts/programme.test.ts.
 
 import assert from 'node:assert/strict';
-import {
-  fallbackTextFor, orderedFallbacks, resolvedPrimaryTextFor,
-} from '../src/audio/tts-fallback.js';
+import { fallbackTextFor, orderedFallbacks } from '../src/audio/tts-fallback.js';
 
 const allUsable = () => true;
 
@@ -45,17 +43,6 @@ assert.equal(
   'The [live] version stays labelled.',
   'non-S2.1 Fish models do not trigger cue stripping',
 );
-assert.equal(
-  resolvedPrimaryTextFor('chatterbox', 'piper', '', '[laugh] Preflight rerouted this line.'),
-  'Preflight rerouted this line.',
-  'resolve-time Chatterbox fallback sanitizes the first render',
-);
-assert.equal(
-  resolvedPrimaryTextFor('chatterbox', 'chatterbox', '', '[laugh] Primary keeps its native cue.'),
-  '[laugh] Primary keeps its native cue.',
-  'an expressive requested primary keeps cues when it actually renders',
-);
-
 // No configured default: Piper floor, then Kokoro.
 assert.deepEqual(
   orderedFallbacks('cloud', undefined, allUsable),

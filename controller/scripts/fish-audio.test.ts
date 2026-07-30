@@ -7,14 +7,7 @@ import { mkdtemp, readFile, readdir, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
-import {
-  buildFishTtsRequest,
-  listFishVoices,
-  normalizeFishVoices,
-  probeFishKey,
-  shouldRetryFishStatus,
-  synthesizeFish,
-} from '../src/llm/internal/speech/fish-audio.js';
+import { buildFishTtsRequest, listFishVoices, normalizeFishVoices, probeFishKey, shouldRetryFishStatus, synthesizeFish } from '../src/llm/internal/speech/fish-audio.js';
 
 function validMp3Audio(): Buffer {
   // Two structurally valid consecutive MPEG-1 Layer III, 128 kbps, 44.1 kHz
@@ -31,10 +24,7 @@ async function readJson(req: IncomingMessage): Promise<unknown> {
   return JSON.parse(Buffer.concat(chunks).toString('utf8'));
 }
 
-async function withServer(
-  handler: (req: IncomingMessage, res: ServerResponse) => void | Promise<void>,
-  run: (origin: string) => Promise<void>,
-): Promise<void> {
+async function withServer(handler: (req: IncomingMessage, res: ServerResponse) => void | Promise<void>, run: (origin: string) => Promise<void>): Promise<void> {
   const server = createServer((req, res) => {
     Promise.resolve(handler(req, res)).catch(err => {
       res.statusCode = 500;

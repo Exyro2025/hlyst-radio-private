@@ -35,6 +35,21 @@ export interface FishTtsRequest {
   prosody: { speed: number };
 }
 
+interface FishTtsParams {
+  text: string;
+  referenceId: string;
+  temperature?: number;
+  topP?: number;
+  latency?: string;
+  speed?: number;
+}
+
+interface FishSynthesisParams extends FishTtsParams {
+  apiKey: string;
+  model?: string;
+  outPath?: string;
+}
+
 export interface FishTransportOptions {
   /** Internal test seam. Production callers always use FISH_API_ORIGIN. */
   origin?: string;
@@ -72,26 +87,10 @@ function cleanReferenceId(value: unknown): string {
   return v;
 }
 
-export function buildFishTtsRequest({
-  text,
-  referenceId,
-  temperature = 0.7,
-  topP = 0.7,
-  latency = 'normal',
-  speed = 1,
-}: {
-  text: string;
-  referenceId: string;
-  temperature?: number;
-  topP?: number;
-  latency?: string;
-  speed?: number;
-}): FishTtsRequest {
+export function buildFishTtsRequest({ text, referenceId, temperature = 0.7, topP = 0.7, latency = 'normal', speed = 1 }: FishTtsParams): FishTtsRequest {
   const cleanText = String(text || '').trim();
   if (!cleanText) throw new Error('Empty TTS text');
-  const cleanLatency = FISH_LATENCIES.includes(latency as FishLatency)
-    ? latency as FishLatency
-    : 'normal';
+  const cleanLatency = FISH_LATENCIES.includes(latency as FishLatency) ? latency as FishLatency : 'normal';
   return {
     text: cleanText,
     reference_id: cleanReferenceId(referenceId),
@@ -246,30 +245,7 @@ async function streamResponseToFile(res: Response, outPath: string): Promise<voi
   }
 }
 
-export async function synthesizeFish(
-  {
-    apiKey,
-    model = FISH_DEFAULT_MODEL,
-    text,
-    referenceId,
-    temperature,
-    topP,
-    latency,
-    speed,
-    outPath: customPath,
-  }: {
-    apiKey: string;
-    model?: string;
-    text: string;
-    referenceId: string;
-    temperature?: number;
-    topP?: number;
-    latency?: string;
-    speed?: number;
-    outPath?: string;
-  },
-  transport: FishTransportOptions = {},
-): Promise<string> {
+export async function synthesizeFish({ apiKey, model = FISH_DEFAULT_MODEL, text, referenceId, temperature, topP, latency, speed, outPath: customPath }: FishSynthesisParams, transport: FishTransportOptions = {}): Promise<string> {
   const key = String(apiKey || '').trim();
   if (!key) throw new Error('Fish Audio API key not configured');
   const cleanModel = cleanHeaderValue(model, 'model');
@@ -333,10 +309,7 @@ export function normalizeFishVoices(payload: unknown): FishVoice[] {
   return voices;
 }
 
-export async function listFishVoices(
-  apiKey: string,
-  transport: Pick<FishTransportOptions, 'origin' | 'timeoutMs' | 'signal'> = {},
-): Promise<FishVoice[]> {
+export async function listFishVoices(apiKey: string, transport: Pick<FishTransportOptions, 'origin' | 'timeoutMs' | 'signal'> = {}): Promise<FishVoice[]> {
   const key = String(apiKey || '').trim();
   if (!key) throw new Error('Fish Audio API key not set');
   const collected: FishVoice[] = [];
@@ -370,10 +343,7 @@ export async function listFishVoices(
   return collected;
 }
 
-export async function probeFishKey(
-  apiKey: string,
-  transport: Pick<FishTransportOptions, 'origin' | 'timeoutMs' | 'signal'> = {},
-): Promise<void> {
+export async function probeFishKey(apiKey: string, transport: Pick<FishTransportOptions, 'origin' | 'timeoutMs' | 'signal'> = {}): Promise<void> {
   const key = String(apiKey || '').trim();
   if (!key) throw new Error('Fish Audio API key not set');
   // Use the documented, read-only account voice endpoint rather than a wallet

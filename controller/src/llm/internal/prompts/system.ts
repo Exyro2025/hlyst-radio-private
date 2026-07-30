@@ -3,10 +3,7 @@
 // otherwise the admin-selected active persona — settings.getEffectivePersona).
 
 import * as settings from '../../../settings.js';
-import {
-  resolveCloudModelForPersona,
-  resolveCloudProviderForPersona,
-} from '../speech/cloud-speech.js';
+import { resolveCloudModelForPersona, resolveCloudProviderForPersona } from '../speech/cloud-speech.js';
 import { cloudExpressionCueFamily } from '../core/pure.js';
 
 // Paralinguistic tags Chatterbox renders as actual non-verbal sounds. Every

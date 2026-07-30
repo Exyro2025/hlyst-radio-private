@@ -24,9 +24,7 @@ const CUSTOM_ROW = { id: CUSTOM_VOICE_ID, label: 'Custom voice id…', previewVo
 // Providers with a voice-list endpoint. Mirrors listVoices() in
 // controller/src/llm/internal/speech/voice-catalog.ts.
 export function providerSupportsDiscovery(provider: string): boolean {
-  return provider === 'openai-compatible'
-    || provider === 'elevenlabs'
-    || provider === 'fish-audio';
+  return provider === 'openai-compatible' || provider === 'elevenlabs' || provider === 'fish-audio';
 }
 
 function curatedFor(provider: string) {

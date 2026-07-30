@@ -90,11 +90,7 @@ export function VoicePreviewButton({
     discardSample();
     setState('idle');
     setError(null);
-  }, [
-    engine, voice, cloudProvider, cloudModel, speed, lang, language,
-    fishSettings?.temperature, fishSettings?.topP, fishSettings?.latency,
-    discardSample,
-  ]);
+  }, [engine, voice, cloudProvider, cloudModel, speed, lang, language, fishSettings?.temperature, fishSettings?.topP, fishSettings?.latency, discardSample]);
 
   const onClick = async () => {
     // Re-click while synthesizing cancels the request.

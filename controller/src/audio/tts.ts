@@ -12,7 +12,7 @@ import * as pocketTts from './pocketTts.js';
 import { heavyEnabledEngines } from './ttsHeavyClient.js';
 import * as remoteTts from './remoteTts.js';
 import { normalizeForSpeech } from './speech-text.js';
-import { fallbackTextFor, orderedFallbacks, resolvedPrimaryTextFor } from './tts-fallback.js';
+import { fallbackTextFor, orderedFallbacks } from './tts-fallback.js';
 import { localizedPreviewText } from './preview-text.js';
 import * as cloud from '../llm/speech.js';
 import { stripThinking } from '../llm/sdk.js';
@@ -233,16 +233,9 @@ async function speakWith(engine: string, text: string, opts: any, personaTts: an
     const personaOverride = (personaTts && personaTts.engine === 'cloud')
       ? { provider: personaTts.cloudProvider, voice: personaTts.voice }
       : null;
-    const cloudModelOverride = typeof opts.cloudModel === 'string'
-      ? { model: opts.cloudModel }
-      : null;
+    const cloudModelOverride = typeof opts.cloudModel === 'string' ? { model: opts.cloudModel } : null;
     const cloudOverride = (personaOverride || cloudModelOverride || opts.cloudVoiceSettings || opts.fishSettings)
-      ? {
-        ...(personaOverride || {}),
-        ...(cloudModelOverride || {}),
-        ...(opts.cloudVoiceSettings || {}),
-        ...(opts.fishSettings || {}),
-      }
+      ? { ...(personaOverride || {}), ...(cloudModelOverride || {}), ...(opts.cloudVoiceSettings || {}), ...(opts.fishSettings || {}) }
       : null;
     return cloud.speak(text, { ...opts, cloudOverride });
   }
@@ -281,19 +274,7 @@ const PREVIEW_TEXT_MAX = 200;
 const DEFAULT_PREVIEW_TEXT = "You're listening to SUB/WAVE. This is a voice preview.";
 
 export async function synthesizeSample(
-  {
-    engine,
-    voice = '',
-    cloudProvider = 'openai',
-    cloudModel,
-    speed,
-    lang,
-    language,
-    text,
-    voiceSettings,
-    fishSettings: requestedFishSettings,
-    signal,
-  }: {
+  { engine, voice = '', cloudProvider = 'openai', cloudModel, speed, lang, language, text, voiceSettings, fishSettings: requestedFishSettings, signal }: {
     engine: string;
     voice?: string;
     cloudProvider?: string;
@@ -370,21 +351,7 @@ export async function synthesizeSample(
         : settings.get().tts?.cloud?.latency || 'normal',
     };
   }
-  return speakWith(
-    engine,
-    sample,
-    {
-      speedScale: scale,
-      language: '',
-      soul: '',
-      lang,
-      cloudModel: previewCloudModel,
-      cloudVoiceSettings,
-      fishSettings,
-      signal,
-    },
-    personaTts,
-  );
+  return speakWith(engine, sample, { speedScale: scale, language: '', soul: '', lang, cloudModel: previewCloudModel, cloudVoiceSettings, fishSettings, signal }, personaTts);
 }
 
 // Public entry point. Tries the configured engine; on failure, falls back to
@@ -423,8 +390,8 @@ export async function speak(
   const cloudCueFamily = requested === 'cloud' && speakingPersona
     ? cloud.requestedCloudExpressionCueFamilyForPersona(speakingPersona)
     : '';
-  const primaryText = resolvedPrimaryTextFor(requested, primary, cloudCueFamily, speakText);
   const rescueText = fallbackTextFor(requested, cloudCueFamily, speakText);
+  const primaryText = requested === primary ? speakText : rescueText;
   // Persona on-air language (e.g. "French") rides along to the cloud engine as a
   // pronunciation hint so a non-English script isn't read with English phonetics
   // (issue #558). DJ-voiced kinds only — never jingles — and '' (ignored) for

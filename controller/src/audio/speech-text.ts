@@ -174,17 +174,6 @@ export function normalizeForSpeech(
   return collapseSpace(t);
 }
 
-// Remove engine-native square-bracket performance directions before routing a
-// failed expressive-cloud render into an engine that would speak them aloud.
-// This is intentionally separate from normalizeForSpeech(): supported primary
-// engines must receive the original brackets, and only the rescue path calls
-// this helper. Fish permits natural-language cues rather than a fixed list, so
-// the bounded bracket shape is the safest provider-agnostic discriminator.
-export function stripBracketedPerformanceCues(text: string): string {
-  if (!text) return text;
-  return collapseSpace(text.replace(/\s*\[[^\]\r\n]{1,80}\]\s*/g, ' '));
-}
-
 function wordCount(text: string): number {
   const t = text.trim();
   return t ? t.split(/\s+/).length : 0;

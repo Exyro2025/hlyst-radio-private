@@ -957,8 +957,7 @@ export function TtsSection({ data, form, setForm, busy, saveSettings, adminFetch
               <Seg
                 accent
                 value={form.tts.cloud.provider}
-                options={(data.tts?.cloudProviders || ['openai', 'elevenlabs', 'fish-audio', 'openai-compatible'])
-                  .map(p => ({ id: p, label: cloudProviderLabel(p) }))}
+                options={(data.tts?.cloudProviders || ['openai', 'elevenlabs', 'fish-audio', 'openai-compatible']).map(p => ({ id: p, label: cloudProviderLabel(p) }))}
                 onChange={v => setForm(f => selectCloudProvider(f, v))}
               />
             </div>

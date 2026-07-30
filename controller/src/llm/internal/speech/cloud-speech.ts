@@ -135,16 +135,6 @@ export function resolveCloudProviderForPersona(persona: CloudPersona): string {
   return provider;
 }
 
-// The exact expressive-cue policy used by djSystem(), exposed through the
-// public speech barrel so the TTS rescue path can remove tags only when the
-// failed primary was actually allowed to generate them.
-export function resolveCloudExpressionCueFamilyForPersona(persona: CloudPersona) {
-  return cloudExpressionCueFamily(
-    resolveCloudProviderForPersona(persona),
-    resolveCloudModelForPersona(persona),
-  );
-}
-
 // Availability-independent twin for already-generated/queued speech. A script
 // can contain tags from when its provider was healthy even if the key or Cloud
 // switch changes before airtime; fallback sanitization must preserve that

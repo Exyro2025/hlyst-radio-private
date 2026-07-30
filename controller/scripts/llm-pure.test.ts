@@ -21,12 +21,7 @@ import { personaToneDirectives, normalizeDial, DIAL_NEUTRAL, validatePersonasStr
 import { lengthMode, lengthPhrase } from '../src/llm/internal/prompts/system.js';
 import { showMusicLean } from '../src/llm/internal/prompts/picker.js';
 import { planSchema } from '../src/llm/internal/prompts/programme.js';
-import {
-  modelForCloudRequest,
-  resolveCloudModel,
-  resolveCloudProvider,
-  sharedCloudApiKeyForRequest,
-} from '../src/llm/internal/speech/cloud-speech.js';
+import { modelForCloudRequest, resolveCloudModel, resolveCloudProvider, sharedCloudApiKeyForRequest } from '../src/llm/internal/speech/cloud-speech.js';
 
 let failures = 0;
 function test(name: string, fn: () => void | Promise<void>) {

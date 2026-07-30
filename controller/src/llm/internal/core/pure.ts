@@ -779,10 +779,7 @@ export function isFishS21Model(model: string): boolean {
   return /^s2[._-]?1(?:[._-]|$)/i.test(model || '');
 }
 
-export function cloudExpressionCueFamily(
-  provider: string,
-  model: string,
-): 'fish-s21' | 'elevenlabs-v3' | null {
+export function cloudExpressionCueFamily(provider: string, model: string): 'fish-s21' | 'elevenlabs-v3' | null {
   if (provider === 'fish-audio' && isFishS21Model(model)) return 'fish-s21';
   if (provider === 'elevenlabs' && isElevenLabsV3(model)) return 'elevenlabs-v3';
   return null;
