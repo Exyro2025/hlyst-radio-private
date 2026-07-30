@@ -326,7 +326,7 @@ export function TtsStep({ w }: { w: WizardController }) {
     <div>
       <StepHeader
         title="Choose a voice engine"
-        blurb="Piper is the default — fast, local, decent. Kokoro is slower but more natural. Cloud routes through OpenAI or ElevenLabs."
+        blurb="Piper is the default — fast, local, decent. Kokoro is slower but more natural. Cloud routes through OpenAI, ElevenLabs, or Fish Audio."
       />
       <div className="grid gap-3">
         <Field label="Default engine">
@@ -340,7 +340,7 @@ export function TtsStep({ w }: { w: WizardController }) {
           >
             <option value="piper">Piper (fast, local)</option>
             <option value="kokoro">Kokoro (natural, local)</option>
-            <option value="cloud">Cloud (OpenAI / ElevenLabs)</option>
+            <option value="cloud">Cloud (OpenAI / ElevenLabs / Fish Audio)</option>
             <option value="chatterbox">Chatterbox (voice cloning, sidecar)</option>
             <option value="pocket-tts">PocketTTS (multilingual, sidecar)</option>
             <option value="remote">Remote (your own server)</option>
@@ -395,14 +395,27 @@ export function TtsStep({ w }: { w: WizardController }) {
             <Field label="Cloud TTS provider">
               <Select
                 value={w.data.tts.cloud.provider}
-                onChange={e =>
+                onChange={e => {
+                  const provider = e.target.value;
                   w.patch(d => ({
-                    tts: { ...d.tts, cloud: { ...d.tts.cloud, provider: e.target.value } },
-                  }))
-                }
+                    tts: {
+                      ...d.tts,
+                      cloud: {
+                        ...d.tts.cloud,
+                        provider,
+                        // Credentials are provider-specific. Never carry a
+                        // previously typed OpenAI/ElevenLabs key into Fish (or
+                        // vice versa) when the selector changes.
+                        apiKey: '',
+                        ...(provider === 'fish-audio' ? { model: 's2.1-pro', voice: '' } : {}),
+                      },
+                    },
+                  }));
+                }}
               >
                 <option value="openai">OpenAI</option>
                 <option value="elevenlabs">ElevenLabs</option>
+                <option value="fish-audio">Fish Audio</option>
               </Select>
             </Field>
             <Field label="API key">
@@ -417,6 +430,37 @@ export function TtsStep({ w }: { w: WizardController }) {
                 }
               />
             </Field>
+            {w.data.tts.cloud.provider === 'fish-audio' && (
+              <>
+                <Field label="Fish model id">
+                  <TextInput
+                    value={w.data.tts.cloud.model}
+                    maxLength={100}
+                    placeholder="s2.1-pro"
+                    onChange={e =>
+                      w.patch(d => ({
+                        tts: { ...d.tts, cloud: { ...d.tts.cloud, model: e.target.value } },
+                      }))
+                    }
+                  />
+                </Field>
+                <Field label="Fish voice reference id">
+                  <TextInput
+                    value={w.data.tts.cloud.voice}
+                    maxLength={100}
+                    placeholder="Paste an account, public, or custom reference_id"
+                    onChange={e =>
+                      w.patch(d => ({
+                        tts: { ...d.tts, cloud: { ...d.tts.cloud, voice: e.target.value } },
+                      }))
+                    }
+                  />
+                </Field>
+                <p className="text-xs text-ink/60">
+                  Account voice discovery is available after setup in Admin → Settings → TTS.
+                </p>
+              </>
+            )}
           </>
         )}
       </div>

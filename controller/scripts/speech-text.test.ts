@@ -12,7 +12,7 @@
 
 import assert from 'node:assert/strict';
 import {
-  normalizeForDisplay, normalizeForSpeech, spokenWordScale,
+  normalizeForDisplay, normalizeForSpeech, spokenWordScale, stripBracketedPerformanceCues,
 } from '../src/audio/speech-text.js';
 
 let failures = 0;
@@ -196,6 +196,24 @@ async function main() {
   await test('[laugh] tags and empty input behave as in the speech pass', () => {
     assert.equal(normalizeForDisplay('[laugh] anyway'), '[laugh] anyway');
     assert.equal(normalizeForDisplay(''), '');
+  });
+
+  // --- expressive-provider rescue -----------------------------------------
+  console.log('\nstripBracketedPerformanceCues — cue-safe fallback text');
+
+  await test('removes Fish natural-language cues and collapses the join', () => {
+    assert.equal(
+      stripBracketedPerformanceCues('[soft and warm] Welcome back to the night shift.'),
+      'Welcome back to the night shift.',
+    );
+    assert.equal(
+      stripBracketedPerformanceCues('Stay close [whispers] this one is special.'),
+      'Stay close this one is special.',
+    );
+  });
+  await test('leaves ordinary unbracketed speech and malformed brackets alone', () => {
+    assert.equal(stripBracketedPerformanceCues('Plain speech stays plain.'), 'Plain speech stays plain.');
+    assert.equal(stripBracketedPerformanceCues('A [live version with no close'), 'A [live version with no close');
   });
 
   // --- the intro-budget bridge --------------------------------------------

@@ -255,4 +255,4 @@ export interface CloudVoice {
   label: string;
 }
 
-export type CloudProvider = 'openai' | 'elevenlabs' | 'openai-compatible';
+export type CloudProvider = 'openai' | 'elevenlabs' | 'fish-audio' | 'openai-compatible';

@@ -6,6 +6,7 @@ import { m } from 'motion/react';
 import { notify, errorMessage } from '../../../lib/notify';
 import { cn } from '../../../lib/cn';
 import type { StationLocale } from '../../../lib/format';
+import type { EngineAvailability } from '../tts/engineMeta';
 import { Play } from 'lucide-react';
 import { Btn, Eyebrow, Metric } from '../ui';
 import { Button } from '../../ui/button';
@@ -18,6 +19,7 @@ export const KEY_HINTS: Record<string, string> = {
   OPENROUTER_API_KEY: 'sk-or-v1-...',
   AI_GATEWAY_API_KEY: 'gateway API key',
   ELEVENLABS_API_KEY: 'el_...',
+  FISH_API_KEY: 'fish_...',
   EMBEDDING_API_KEY: 'optional — defaults to chat key',
 };
 
@@ -46,6 +48,11 @@ export interface CloudTtsCfg {
   voiceStyle: number;
   voiceSimilarityBoost: number;
   voiceUseSpeakerBoost: boolean;
+  // Fish Audio S2.1 controls. Persisted across provider switches, surfaced and
+  // sent only when provider === 'fish-audio'.
+  temperature: number;
+  topP: number;
+  latency: 'low' | 'normal' | 'balanced';
 }
 
 // ElevenLabs voice_settings defaults — the single client-side copy, read by
@@ -57,6 +64,12 @@ export const ELEVENLABS_VS_DEFAULTS = {
   voiceSimilarityBoost: 0.75,
   voiceUseSpeakerBoost: true,
 } as const;
+
+export const FISH_TTS_DEFAULTS = {
+  temperature: 0.7,
+  topP: 0.7,
+  latency: 'normal' as const,
+};
 
 export interface TtsForm {
   // Station-wide voice switch. false = music only — the DJ never speaks and no
@@ -354,7 +367,7 @@ export interface SettingsData {
   };
   tts?: {
     engines?: string[];
-    available?: Record<string, boolean>;
+    available?: EngineAvailability;
     kokoroVoices?: string[];
     kokoroVoiceLanguages?: Record<string, string>;
     kokoroLangs?: string[];
@@ -407,7 +420,7 @@ export interface SettingsData {
 }
 
 export type Patch = Record<string, unknown>;
-export type SaveSettings = (patch: Patch) => Promise<void>;
+export type SaveSettings = (patch: Patch) => Promise<boolean>;
 
 export type FormUpdater = (updater: (f: FormState) => FormState) => void;
 

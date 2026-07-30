@@ -49,11 +49,13 @@ export function PersonaVoiceCard({ persona, data, defaultEngine, cloudIssueText,
   // on a key actually being set, so we don't fire a request we know will fail.
   const cloudProvider = persona.tts.cloudProvider;
   const elevenLabsReady = data?.tts?.available?.cloudByProvider?.elevenlabs !== false;
+  const fishReady = data?.tts?.available?.cloudByProvider?.['fish-audio'] !== false;
   const voiceDiscovery = useVoiceDiscovery({
     provider: cloudProvider,
     enabled: persona.tts.engine === 'cloud'
       && providerSupportsDiscovery(cloudProvider)
-      && (cloudProvider !== 'elevenlabs' || elevenLabsReady),
+      && (cloudProvider !== 'elevenlabs' || elevenLabsReady)
+      && (cloudProvider !== 'fish-audio' || fishReady),
     adminFetch,
   });
   const discoveredVoices = voiceDiscovery.voices;
@@ -379,15 +381,22 @@ export function PersonaVoiceCard({ persona, data, defaultEngine, cloudIssueText,
                     <Label>Cloud provider</Label>
                     <Seg
                       value={persona.tts.cloudProvider}
-                      options={cloudProviders.map(id => ({ id, label: id }))}
+                      options={cloudProviders.map(id => ({
+                        id,
+                        label: id === 'fish-audio'
+                          ? 'Fish Audio'
+                          : id === 'elevenlabs'
+                            ? 'ElevenLabs'
+                            : id === 'openai'
+                              ? 'OpenAI'
+                              : 'OpenAI-compatible',
+                      }))}
                       onChange={v => {
                         // Switching provider invalidates the old voice id.
                         // openai-compatible has no curated voices — leave the
                         // field blank so the operator picks from the new
                         // server's discovered list (or the server's default).
-                        const next = v === 'openai-compatible'
-                          ? ''
-                          : (CLOUD_VOICES[v as keyof typeof CLOUD_VOICES]?.[0]?.id || persona.tts.voice);
+                        const next = CLOUD_VOICES[v as keyof typeof CLOUD_VOICES]?.[0]?.id || '';
                         updateTts({ cloudProvider: v, voice: next });
                       }}
                     />
@@ -451,7 +460,7 @@ export function PersonaVoiceCard({ persona, data, defaultEngine, cloudIssueText,
                                 on your {isCompat ? 'server' : 'account'}. Choose <em>Custom voice id…</em> to
                                 enter one that isn&apos;t listed.</>
                             : <>Pick a default voice, or choose <em>Custom voice id…</em> to enter your own
-                                (e.g. an OpenAI voice name or an ElevenLabs voice id).</>}
+                                (e.g. an OpenAI voice name, ElevenLabs voice id, or Fish Audio reference id).</>}
                         </div>
                       </>
                     )}

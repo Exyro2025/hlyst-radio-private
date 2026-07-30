@@ -129,8 +129,10 @@ export default function ImagingPanel() {
       // lives in Settings → Danger zone (JinglesSection's hint points there).
       notify.ok(j.requiresRestart ? 'saved, restart the mixer to apply' : 'saved');
       await refresh();
+      return true;
     } catch (e) {
       notify.err(errorMessage(e));
+      return false;
     } finally { setBusy(false); }
   };
 

@@ -1,3 +1,5 @@
+import { stripBracketedPerformanceCues } from './speech-text.js';
+
 // Pure ordering logic for speak()'s runtime rescue chain — extracted from
 // tts.ts so scripts/tts-fallback.test.ts can pin it without dragging in the
 // engine modules (settings reads, venv existsSyncs, live /health probes).
@@ -8,6 +10,27 @@
 // anything the caller's `usable` gate rejects are dropped — so the chain never
 // re-attempts the engine that just threw, and never attempts one the
 // pre-flight gate already knows can't speak.
+export function fallbackTextFor(
+  primary: string,
+  cloudCueFamily: string | null,
+  text: string,
+): string {
+  const expressivePrimary = primary === 'chatterbox'
+    || cloudCueFamily === 'fish-s21'
+    || cloudCueFamily === 'elevenlabs-v3';
+  if (!expressivePrimary) return text;
+  return stripBracketedPerformanceCues(text);
+}
+
+export function resolvedPrimaryTextFor(
+  requested: string,
+  resolved: string,
+  cloudCueFamily: string | null,
+  text: string,
+): string {
+  return requested === resolved ? text : fallbackTextFor(requested, cloudCueFamily, text);
+}
+
 export function orderedFallbacks(
   primary: string,
   defaultEngine: string | null | undefined,
