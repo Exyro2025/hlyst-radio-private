@@ -693,6 +693,16 @@ router.post('/library/retag', requireAdmin, async (req, res) => {
             genres: subsonic.songGenres(song),
           },
           { lastfmTags, lyricExcerpt },
+          // Same measured-acoustics input as the bulk path (#1246), read back
+          // from the row this route just upserted — a single-track retag must
+          // produce the SAME text as phaseEmbed would, or this one track drifts
+          // in the KNN space exactly like a task-prefix mismatch would.
+          (() => {
+            const rec = db.getTrack(id);
+            return rec
+              ? { bpm: rec.bpm, musicalKey: rec.musicalKey, audioMoods: rec.audioMoods }
+              : null;
+          })(),
         );
         // Document embed — must match the task-prefix mode the rest of the
         // index was built in, or this one track drifts in the KNN space.
