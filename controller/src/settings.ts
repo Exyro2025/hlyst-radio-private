@@ -87,6 +87,7 @@ import {
 import { minTrackSeconds, peek, setCache } from './settings/store.js';
 import {
   SKILL_RENAMES,
+  normalizeArchiveRetentionDays,
   normalizeDjPrompts,
   normalizePersonaArray,
   normalizeSchedule,
@@ -373,10 +374,9 @@ export async function load() {
           ? stored.archive.enabled
           : DEFAULTS.archive.enabled,
       bitrate: archiveBitrate,
-      retentionDays:
-        Number.isInteger(stored.archive?.retentionDays) && stored.archive.retentionDays >= 0
-          ? stored.archive.retentionDays
-          : DEFAULTS.archive.retentionDays,
+      // Bounded default with the keep-forever upgrade guard — a pre-existing
+      // enabled archive without a stored value stays at 0, never pruned.
+      retentionDays: normalizeArchiveRetentionDays(stored.archive),
     },
     stream: {
       opusEnabled:
