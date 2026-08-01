@@ -48,6 +48,7 @@ import { dropEchoedLink, enqueuePick, trackFields, trimLinkToIntro } from './dj-
 import { advanceRun, runActive } from './dj-agent/runs.js';
 import { pickSchemaBase, pickSystem, requestSystem } from './dj-agent/schemas.js';
 import { guardIntro, screenAck } from '../util/request-guard.js';
+import { classifyPickFailure, type PickFailure } from '../util/pick-seed.js';
 
 // Re-exported so every existing `from './dj-agent.js'` import keeps working —
 // including scripts/llm-bench, which sits outside tsconfig's include and so
@@ -292,8 +293,24 @@ async function pickViaAgent(queue, ctx, { wantLink, audioWaypoint = null, curren
     // without this explicit event the rejection is invisible to /debug and the
     // log analyzer, which then over-report agent health. Emit it inside the
     // live trace so agent-pick reliability is real.
-    logEvent('pick.rejected', { agent: 'pick', id: object?.id ?? null, candidates: extras.seen.size, steps, toolCalls });
-    throw new Error(`agent returned unknown id ${object?.id}`);
+    //
+    // `cause` separates the three ways this lands (#1247) — most usefully the
+    // zero-candidate run, where the model's answer is a symptom of an index that
+    // couldn't answer rather than a model that couldn't choose. Classification
+    // lives in util/pick-seed.ts, never inline.
+    const failure = classifyPickFailure({
+      pickedId: object?.id ?? null,
+      seedId: current?.id ?? null,
+      candidates: extras.seen.size,
+    });
+    logEvent('pick.rejected', {
+      agent: 'pick', id: object?.id ?? null, candidates: extras.seen.size, steps, toolCalls,
+      cause: failure.kind,
+    });
+    // The verdict rides ON the error so the caller's catch can tell a model that
+    // can't drive the harness from tools that had nothing to answer from —
+    // only the first is what the circuit breaker exists to catch.
+    throw Object.assign(new Error(failure.message), { pickFailure: failure });
   }
 
   // Back-to-back artist guard (#1124). The discovery tools — especially
@@ -649,8 +666,20 @@ export async function runTrackEvent(queue, ctx, { wantLink, showAt = null, prede
         // if even the pool can only find an already-queued track).
         queue.log('picker', 'agent pick already queued — falling back to pool');
       } catch (err) {
-        queue.log('error', `DJ agent pick failed: ${err.message} — falling back to pool`);
-        breakerFailure(queue);
+        // A run the agent DROVE correctly but couldn't answer from — every
+        // discovery call came back empty — is a library-coverage problem, not a
+        // model one (#1247). Counting it would open the breaker after three
+        // tracks, disable the session-aware picker for 10 minutes, and point the
+        // operator at "switch model", which repairs nothing. Same carve-out, and
+        // same reasoning, as the already-queued case just above; the pool
+        // fallback below still fills the slot either way.
+        const failure = (err as any)?.pickFailure as PickFailure | undefined;
+        if (failure && !failure.countsAgainstBreaker) {
+          queue.log('picker', `${failure.message} — falling back to pool`);
+        } else {
+          queue.log('error', `DJ agent pick failed: ${err.message} — falling back to pool`);
+          breakerFailure(queue);
+        }
       }
     }
     await pickViaPool(queue, ctx, { wantLink, current, showAt }, rankTarget, audioWaypoint);
