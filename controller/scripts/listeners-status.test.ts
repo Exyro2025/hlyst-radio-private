@@ -9,7 +9,7 @@
 // "online" forever. node:assert-via-tsx style, matching llm-pure.test.ts.
 
 import assert from 'node:assert/strict';
-import { gatedCount, statusAfterFailure, type StreamStatus } from '../src/broadcast/listeners.js';
+import { gatedCount, singleFlight, statusAfterFailure, type StreamStatus } from '../src/broadcast/listeners.js';
 
 let failures = 0;
 function test(name: string, fn: () => void | Promise<void>) {
@@ -121,6 +121,48 @@ async function main() {
     // Failure #3 holds 0; the next poll succeeds with 1 and that is what shows.
     assert.equal(gatedCount(null, 0, 3, LIMIT), 0);
     assert.equal(gatedCount(1, 0, 0, LIMIT), 1);
+  });
+
+  // singleFlight — the guard that keeps the 15s monitor, the idle monitor's 5s
+  // refresh, and POST /request's on-demand refresh from running overlapping
+  // polls. The race it exists to close: the failure path commits ~1.5s after
+  // the success path (its fetch timeout), so a slow doomed poll could
+  // overwrite the state a younger successful poll just wrote.
+  console.log('\nsingleFlight (overlapping polls coalesce):');
+
+  await test('concurrent callers join one in-flight run', async () => {
+    let runs = 0;
+    let release!: (n: number) => void;
+    const poll = singleFlight(() => {
+      runs++;
+      return new Promise<number>((res) => { release = res; });
+    });
+    const a = poll();
+    const b = poll();       // second caller while the first is still in flight
+    release(7);
+    assert.equal(await a, 7);
+    assert.equal(await b, 7);
+    assert.equal(runs, 1);  // one fetch served both — no overlapping commit
+  });
+
+  await test('a settled run re-arms: the next call polls afresh', async () => {
+    let runs = 0;
+    const poll = singleFlight(() => Promise.resolve(++runs));
+    assert.equal(await poll(), 1);
+    assert.equal(await poll(), 2);  // not pinned to the first result
+  });
+
+  await test('a failed run re-arms too — one rejection cannot wedge polling', async () => {
+    let runs = 0;
+    const poll = singleFlight(() =>
+      ++runs === 1 ? Promise.reject(new Error('timeout')) : Promise.resolve(9)
+    );
+    const first = poll();
+    const joined = poll();  // joiner sees the same rejection, not a hang
+    await assert.rejects(first, /timeout/);
+    await assert.rejects(joined, /timeout/);
+    assert.equal(await poll(), 9);
+    assert.equal(runs, 2);
   });
 
   console.log(failures === 0 ? '\nAll listeners-status tests passed.' : `\n${failures} test(s) FAILED.`);

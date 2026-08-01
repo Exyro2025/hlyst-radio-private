@@ -129,7 +129,31 @@ function audioParam(src: any, key: 'samplerate' | 'channels'): number | null {
   return m ? Number(m[1]) : null;
 }
 
-async function fetchCount(persistHistory = true) {
+// Coalesce overlapping polls into one in-flight run. Pure mechanism (no I/O),
+// exported so the join/settle/re-arm behaviour is unit-pinned
+// (scripts/listeners-status.test.ts).
+export function singleFlight<T>(run: () => Promise<T>): () => Promise<T> {
+  let inFlight: Promise<T> | null = null;
+  return () => {
+    inFlight ??= run().finally(() => { inFlight = null; });
+    return inFlight;
+  };
+}
+
+// The poll, single-flighted. pollCount() commits module state
+// (lastCount/lastGoodCount/consecutiveStatusFailures/lastStatus) and is driven
+// from three cadences at once — the 15s monitor interval, the idle monitor's
+// forced 5s refresh (stream-idle.ts), and POST /request's on-demand refresh().
+// The two commit points are ~1.5s apart (the failure path waits out the fetch
+// timeout), so without the guard a slow doomed poll could land AFTER a younger
+// successful one and overwrite its fresh state — a phantom blip on the raw
+// readers and a "consecutive" failure count that isn't. Joining the poll
+// already in flight keeps every caller's freshness contract (the answer is at
+// most one timeout old — refresh() callers included) and stops the idle window
+// double-polling Icecast when the 5s and 15s timers collide.
+const fetchCount = singleFlight(() => pollCount(true));
+
+async function pollCount(persistHistory: boolean) {
   let online = false;
   let bitrate: number | null = null;
   let sampleRate: number | null = null;
@@ -265,8 +289,11 @@ export async function refresh() {
 // monitor loop. Same status fetch + Safari dedupe as the monitor, but skips
 // the history append: the server process already persists one row per minute,
 // and a second writer would stripe duplicate rows into the sparkline JSONL.
+// Calls pollCount directly, bypassing the single-flight guard: the child has
+// no concurrent pollers to coalesce with, and joining would silently drop the
+// skip-history flag.
 export async function probeListenerCount(): Promise<number | null> {
-  return fetchCount(false);
+  return pollCount(false);
 }
 
 // Set by broadcast/stream-idle.ts (via setStreamIdle) while the programme is
