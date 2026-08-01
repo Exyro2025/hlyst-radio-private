@@ -21,6 +21,7 @@ import * as mix from '../music/mix.js';
 import * as library from '../music/library.js';
 import * as loudness from '../music/loudness.js';
 import * as blocklist from '../music/blocklist.js';
+import { artistRootKey } from '../music/recency.js';
 import { speak, voiceGainDb } from '../audio/tts.js';
 import * as djAgent from './dj-agent.js';
 import * as programme from './programme.js';
@@ -2070,6 +2071,51 @@ class Queue {
     return onAir
       ? `That one's spinning right now — give it a bit before you ask again.`
       : `"${title}" just spun — give it a rest for a bit.`;
+  }
+
+  // The LEAD-artist keys (artistRootKey — collaborations collapse onto the
+  // artist fronting them) of the slots AROUND the next pick: everything queued
+  // and still unaired, the track on air, and the last `n` DISTINCT tracks
+  // played. Count-based and clock-independent, exactly like
+  // recentlyPlayedByCount above and for the same reason: this answers "who has
+  // been in the last few slots", which is a question about slots, not hours.
+  //
+  // The queued side matters because a pick is not always adjacent to the track
+  // on air — with pair-aware drains (and with any request stacked ahead) it
+  // lands behind one or more queued tracks, which have no play row yet. It
+  // takes the TAIL of the queue: a pick appends to the end, so its nearest
+  // neighbours are the last `n` queued, not the first.
+  //
+  // Sole consumer is the agent path's back-to-back artist guard (#1251), whose
+  // re-pick steps around these artists — hence root keys rather than the raw
+  // keys recentArtistsSince returns; that one feeds the pool picker's relaxable
+  // recentArtists filter, which matches raw against raw. Empty set when n <= 0.
+  neighbourArtistRoots(n = 0): Set<string> {
+    const out = new Set<string>();
+    if (!Number.isFinite(n) || n <= 0) return out;
+    const add = (artist: string | null | undefined) => {
+      const key = artistRootKey({ artist });
+      if (key) out.add(key);
+    };
+    const keyOf = (title: string | null | undefined, artist: string | null | undefined) =>
+      `${(title || '').toLowerCase().trim()}|${(artist || '').toLowerCase().trim()}`;
+    for (const item of this.upcoming.slice(-n)) add(item?.track?.artist);
+    add(this.current?.track?.artist);
+    // Distinct TRACKS, not rows — the sidecar can hold two entries for one play
+    // (see recentlyPlayedByCount), and a duplicate row must not burn a slot.
+    const seenIds = new Set<string>();
+    const seenKeys = new Set<string>();
+    let distinct = 0;
+    for (const p of this._recentPlays) {
+      if (distinct >= n) break;
+      const k = keyOf(p.title, p.artist);
+      if ((p.id && seenIds.has(p.id)) || (k && seenKeys.has(k))) continue;
+      distinct++;
+      if (p.id) seenIds.add(p.id);
+      if (k) seenKeys.add(k);
+      add(p.artist);
+    }
+    return out;
   }
 
   // Lowercased artist names heard in the last `hours` hours — used by the
