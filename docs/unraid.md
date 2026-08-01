@@ -228,6 +228,9 @@ that isn't in the lean image (the `-heavy` images are ~1.9 GB):
   release runs on CPU-only boxes, with a longer default window (30 minutes):
   the heavy models load once for a backfill or a sound search and would
   otherwise sit in RAM — and eventually swap — for the life of the container.
+  The first heavy request after a release pays a cold reload from the on-disk
+  cache (a few seconds for CLAP, longer for Demucs) — set
+  `ANALYZE_IDLE_UNLOAD_S=0` if you'd rather keep them resident.
 
   Fair warning on size: the CUDA image is **~4 GB compressed** (~11 GB on disk)
   against `-heavy`'s ~1.3 GB, because the CUDA runtime ships inside the torch

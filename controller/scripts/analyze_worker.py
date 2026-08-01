@@ -279,6 +279,9 @@ def _release_models(idle_s=None):
     except Exception:  # noqa: BLE001 — best-effort, absent on musl/macOS
         pass
     idle_note = f"idle {int(idle_s)}s — " if idle_s else ""
+    # The sidecar's /health residency tracking matches this line on the
+    # worker's stderr ("released" + "reloads on next use" — see
+    # docker/analyzer/server.py _pump_stderr); keep the wording in sync.
     log(
         f"{idle_note}released {' + '.join(freed)} from {where} "
         "(reloads on next use)"

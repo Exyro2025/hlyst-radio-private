@@ -90,18 +90,18 @@ def main():
 
     test("releases both models without latching the failure flags", case_release_both)
 
-    # Releasing just one loaded model leaves the other alone.
+    # A release drops whichever singleton is loaded; the absent one stays None
+    # (there is no third state — a release can't resurrect or latch anything).
     def case_release_one():
-        keep = FakeModel()
-        reset(embedder=None, detector=keep)
+        reset(embedder=None, detector=FakeModel())
         aw._release_models()
-        assert aw._vocal_detector is None
-        assert aw._embedder is None
+        assert aw._vocal_detector is None, "the loaded detector is released"
+        assert aw._embed_failed is False, "the absent embedder's flag stays clear"
 
-        only_clap = FakeModel()
-        reset(embedder=only_clap, detector=None)
+        reset(embedder=FakeModel(), detector=None)
         aw._release_models()
-        assert aw._embedder is None, "the loaded model is released"
+        assert aw._embedder is None, "the loaded embedder is released"
+        assert aw._vocal_failed is False, "the absent detector's flag stays clear"
 
     test("releases whichever models are loaded", case_release_one)
 
