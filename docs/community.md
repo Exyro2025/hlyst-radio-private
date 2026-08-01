@@ -165,10 +165,10 @@ body is the **topic** brief, up to 2000 characters.
 ---
 name: <slug>
 displayName: Late Feels          # show name, 1–60 chars (required)
-moods: reflective, night         # each from the mood vocab below, max 6 (optional)
-genres: shoegaze, dream pop      # free text, ≤64 chars each, max 6 (optional)
+moods: reflective, night         # each from the mood vocab below, max 15 (optional)
+genres: shoegaze, dream pop      # free text, ≤64 chars each, max 15 (optional)
 eras: 1988-1999                  # comma list of YYYY or YYYY-YYYY windows, years 1900–2100 (optional)
-energies: low                    # low | medium | high, max 6 (optional)
+energies: low                    # low | medium | high, max 15 (optional)
 filtersStrict: false             # true = hard filter instead of a soft lean
 programme: false                 # true = produced-episode mode (intro / feature / outro)
 banter: false                    # true = scripted multi-voice breaks (needs guests, added on install)

@@ -792,9 +792,24 @@ export const GUESTS_PER_SHOW = 3;
 export const PLAYLISTS_PER_SHOW = 10;
 export const EXCLUDED_PLAYLISTS_PER_SHOW = 10;
 // Values per multi-select music filter (moods / genres / eras). Within one
-// attribute the values OR together at pick time; across attributes they AND —
-// so past a handful the filter stops meaning anything.
-export const SHOW_FILTER_VALUES_MAX = 6;
+// attribute the values OR together at pick time; across attributes they AND.
+// Raised 6 → 15: the AND-across argument for keeping it small never applied
+// WITHIN an attribute, and genre is where it bites — a strict alt/punk show
+// has to name every library tag it wants (Punk Rock, Emo, Pop Punk,
+// Post-Hardcore, Emo Pop, …) because matching only REFINES, never broadens
+// (see trackGenres/genreMatches in music/show-filter.ts), so 6 forced the
+// operator to either drop valid tags or retag the library.
+//
+// What made 6 load-bearing was cost, not meaning: every genre used to cost a
+// getGenres() round trip to resolve (music/subsonic.ts) plus two discovery
+// fetches per genre in each pool builder, all sequential. Both are bounded now
+// — getGenres is TTL-cached and the per-genre fetches run through mapPool — so
+// the wall-clock of a pick no longer scales with this number. The per-genre
+// size budgets already divide a FIXED total (randomSize / genreSetSize in
+// music/picker.ts + broadcast/scheduler.ts), so the pool doesn't grow either.
+// Keep in lockstep with FILTER_VALUES_MAX in
+// web/components/admin/shows/types.ts (pinned by scripts/show-filter-cap.test.ts).
+export const SHOW_FILTER_VALUES_MAX = 15;
 // Must comfortably exceed a realistic skill library: unticking one skill on an
 // "all skills" (null) persona materialises the FULL catalog minus one, so a cap
 // near the library size would make that first untick fail (#skill-organization).
