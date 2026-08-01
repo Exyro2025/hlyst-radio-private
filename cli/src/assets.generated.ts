@@ -367,8 +367,11 @@ services:
       # meaningful on the cuda analyzer flavour (docker-compose.analyzer-gpu.yml);
       # cpu-wheel images always resolve to cpu.
       - ANALYZE_DEVICE=\${ANALYZE_DEVICE:-}
-      # Seconds of no requests before the cuda flavour drops its models out of
-      # VRAM (default 300; 0 = never). CPU images ignore it.
+      # Seconds of no CLAP/Demucs use before the worker drops the models
+      # (0 = never). Applies on BOTH devices: default 300 on cuda (frees VRAM),
+      # 1800 on cpu — one backfill or sound search loads them into the
+      # long-lived worker and nothing else ever releases them, so on a small
+      # host they end up parked in swap (#1204).
       - ANALYZE_IDLE_UNLOAD_S=\${ANALYZE_IDLE_UNLOAD_S:-}
       - CLAP_MODEL=\${CLAP_MODEL:-}
       - CLAP_MODEL_PATH=\${CLAP_MODEL_PATH:-}
@@ -716,8 +719,11 @@ services:
       # meaningful on the cuda analyzer flavour (docker-compose.analyzer-gpu.yml);
       # cpu-wheel images always resolve to cpu.
       - ANALYZE_DEVICE=\${ANALYZE_DEVICE:-}
-      # Seconds of no requests before the cuda flavour drops its models out of
-      # VRAM (default 300; 0 = never). CPU images ignore it.
+      # Seconds of no CLAP/Demucs use before the worker drops the models
+      # (0 = never). Applies on BOTH devices: default 300 on cuda (frees VRAM),
+      # 1800 on cpu — one backfill or sound search loads them into the
+      # long-lived worker and nothing else ever releases them, so on a small
+      # host they end up parked in swap (#1204).
       - ANALYZE_IDLE_UNLOAD_S=\${ANALYZE_IDLE_UNLOAD_S:-}
       - CLAP_MODEL=\${CLAP_MODEL:-}
       - CLAP_MODEL_PATH=\${CLAP_MODEL_PATH:-}
@@ -999,8 +1005,11 @@ services:
       # meaningful on the cuda analyzer flavour (docker-compose.analyzer-gpu.yml);
       # cpu-wheel images always resolve to cpu.
       - ANALYZE_DEVICE=\${ANALYZE_DEVICE:-}
-      # Seconds of no requests before the cuda flavour drops its models out of
-      # VRAM (default 300; 0 = never). CPU images ignore it.
+      # Seconds of no CLAP/Demucs use before the worker drops the models
+      # (0 = never). Applies on BOTH devices: default 300 on cuda (frees VRAM),
+      # 1800 on cpu — one backfill or sound search loads them into the
+      # long-lived worker and nothing else ever releases them, so on a small
+      # host they end up parked in swap (#1204).
       - ANALYZE_IDLE_UNLOAD_S=\${ANALYZE_IDLE_UNLOAD_S:-}
       - CLAP_MODEL=\${CLAP_MODEL:-}
       - CLAP_MODEL_PATH=\${CLAP_MODEL_PATH:-}
@@ -1104,10 +1113,11 @@ export const COMPOSE_ANALYZER_GPU_YML = `# GPU opt-in overlay for the analyzer �
 # degrades, not fails). To force CPU temporarily without dropping the overlay,
 # set ANALYZE_DEVICE=cpu in your root .env (the base compose passes it through).
 #
-# VRAM etiquette: after ~5 idle minutes the worker drops its models out of
-# VRAM so a co-resident TTS/LLM gets the card back between passes
-# (ANALYZE_IDLE_UNLOAD_S in .env tunes it; 0 keeps models resident). A few
-# hundred MB of CUDA context remain until the container stops.
+# VRAM etiquette: after ~5 idle minutes with no CLAP/Demucs use the worker
+# drops its models out of VRAM so a co-resident TTS/LLM gets the card back
+# between passes (ANALYZE_IDLE_UNLOAD_S in .env tunes it; 0 keeps models
+# resident). A few hundred MB of CUDA context remain until the container stops.
+# The same release runs on CPU with a longer default window (#1204).
 services:
   analyzer:
     image: ghcr.io/perminder-klair/subwave-analyzer-cuda:\${SUBWAVE_VERSION:-latest}
@@ -1299,9 +1309,13 @@ SITE_URL=
 # the container. See docs/unraid.md.)
 # ANALYZE_DEVICE=    # auto (default) / cpu / cuda — torch device for CLAP/Demucs;
 #                    # only meaningful on the cuda analyzer flavour
-# ANALYZE_IDLE_UNLOAD_S=  # cuda flavour: seconds of no analysis before models are
-#                         # dropped from VRAM (default 300; 0 = keep resident).
-#                         # Frees the GPU for co-resident TTS/LLM between passes.
+# ANALYZE_IDLE_UNLOAD_S=  # seconds of no CLAP/Demucs use before the models are
+#                         # dropped (0 = keep resident). Defaults per device:
+#                         # 300 on cuda (frees the GPU for co-resident TTS/LLM
+#                         # between passes), 1800 on cpu (a backfill or sound
+#                         # search loads them once and they'd otherwise sit in
+#                         # RAM/swap forever; the longer window keeps the cold
+#                         # reload off interactive sound searches).
 #
 # Runtime flags — env wins ON over the admin toggles (settings.audio.*), never
 # off. A flag with no matching backend in the image is a clean no-op.
