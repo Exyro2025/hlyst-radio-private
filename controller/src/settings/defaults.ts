@@ -35,9 +35,12 @@ export const DEFAULTS = {
   // paying for the tape by default (issue #137). Dropping the bitrate (e.g.
   // 128 → 64 mono in a future change) also helps for operators who want it.
   // retentionDays: hourly recordings older than this many days are deleted by
-  // the scheduler's hourly cleanup. 0 = keep forever — the default, because a
-  // retention default would silently delete archives operators already have.
-  archive: { enabled: false, bitrate: 128, retentionDays: 0 },
+  // the scheduler's hourly cleanup. Bounded by default — the old keep-forever
+  // default (0) grew ~1.4 GB/day at 128 kbps until the disk filled, and
+  // operators only noticed at 99 GB. The default must NOT reach installs that
+  // already archive under keep-forever: normalizeArchiveRetentionDays keeps
+  // them at 0 (see settings/normalize.ts), so upgrades never delete tapes.
+  archive: { enabled: false, bitrate: 128, retentionDays: 30 },
   // Secondary Ogg-Opus broadcast mount (/stream.opus). Off by default — only
   // Blink (Chrome/Edge) clients ever select it (web/hooks/usePlayer.ts keeps
   // Safari/iOS/Firefox on MP3), and it adds a continuous Opus encoder + a

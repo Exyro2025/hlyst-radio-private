@@ -119,7 +119,7 @@ export default function SettingsPanel() {
       archive: {
         enabled: v.archive?.enabled ?? false,
         bitrate: String(v.archive?.bitrate ?? 128),
-        retentionDays: String(v.archive?.retentionDays ?? 0),
+        retentionDays: String(v.archive?.retentionDays ?? 30),
       },
       stream: {
         opusEnabled: v.stream?.opusEnabled ?? true,
@@ -624,10 +624,12 @@ export default function SettingsPanel() {
                       </Btn>
                     </div>
                     <div className="field-hint">
-                      0 = keep forever (the default). With a window set, the hourly cleanup
-                      deletes whole days of recordings once they age past it. At 128 kbps the
-                      archive grows ~1.4 GB per day, so an unbounded archive eventually fills
-                      the disk. Applies live, no restart.
+                      Defaults to 30 days; 0 = keep forever. With a window set, the hourly
+                      cleanup deletes whole days of recordings once they age past it. At
+                      128 kbps the archive grows ~1.4 GB per day, so an unbounded archive
+                      eventually fills the disk. Stations that were already archiving before
+                      the 30-day default keep their keep-forever setting. Applies live, no
+                      restart.
                     </div>
                   </div>
                 </div>
