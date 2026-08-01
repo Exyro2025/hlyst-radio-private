@@ -5,6 +5,7 @@
 // two columns from lg up — the engine's voice selector + a "Play sample" button
 // on the left, the level meter + speed slider on the right.
 import type { ChangeEvent } from 'react';
+import Link from 'next/link';
 import type { Persona, PersonaTts, SettingsResponse } from './types';
 import type { AdminAuth } from '../../../lib/adminAuth';
 import { CLOUD_VOICES } from '../../../lib/cloudVoices';
@@ -254,9 +255,10 @@ export function PersonaVoiceCard({ persona, data, defaultEngine, cloudIssueText,
                   preview={{ engine: 'chatterbox', speed: persona.tts.speed, language: persona.language, adminFetch }}
                 />
                 <div className="field-hint">
-                  ~5s of clean speech is enough to clone a voice. Drop WAVs into{' '}
-                  <code>{cbDir}</code> on the host and they’ll show up here.
-                  Chatterbox also voices paralinguistic tags ([laugh], [sigh], …) the
+                  ~5s of clean speech is enough to clone a voice.{' '}
+                  <Link href="/admin/imaging?tab=voices" className="underline">Import one on the Voices page</Link>
+                  {' '}— or drop WAVs into <code>{cbDir}</code> on the host — and it’ll show up
+                  here. Chatterbox also voices paralinguistic tags ([laugh], [sigh], …) the
                   DJ may insert.
                 </div>
               </div>
@@ -321,9 +323,10 @@ export function PersonaVoiceCard({ persona, data, defaultEngine, cloudIssueText,
                 />
                 <div className="field-hint">
                   CPU-only, ~6× real-time. Built-in voices cover English, French, German,
-                  Italian, Spanish and Portuguese. Drop a ~5s WAV into{' '}
-                  <code>state/voices/</code> to clone a voice; it’ll appear under
-                  <em> Custom</em> on next reload (cloning needs <code>HF_TOKEN</code>; see above).
+                  Italian, Spanish and Portuguese. To clone one,{' '}
+                  <Link href="/admin/imaging?tab=voices" className="underline">import a ~5s clip on the Voices page</Link>
+                  {' '}and it’ll appear under <em>Custom</em> (cloning needs <code>HF_TOKEN</code>;
+                  see above).
                 </div>
               </div>
             );

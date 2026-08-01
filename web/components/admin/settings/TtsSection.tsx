@@ -1,6 +1,7 @@
 'use client';
 
 import type { ChangeEvent, ReactNode } from 'react';
+import Link from 'next/link';
 import { useEffect, useState } from 'react';
 import { notify, errorMessage } from '../../../lib/notify';
 import { useModelDiscovery } from '@/hooks/useModelDiscovery';
@@ -763,20 +764,18 @@ export function TtsSection({ data, form, setForm, busy, saveSettings, adminFetch
                     </SelectContent>
                   </Select>
                   <div className="field-hint">
-                    ~5 seconds of clean speech is enough to clone a voice. Drop WAVs into{' '}
-                    <code>state/voices/</code>
-                    {' '}on the host (the legacy <code>state/chatterbox-voices/</code> is
-                    still read) and they’ll appear here on next reload. Personas can
+                    ~5 seconds of clean speech is enough to clone a voice.{' '}
+                    <Link href="/admin/imaging?tab=voices" className="underline">Import one on the Voices page</Link>
+                    {' '}— or drop WAVs into <code>state/voices/</code> on the host (the legacy{' '}
+                    <code>state/chatterbox-voices/</code> is still read). Personas can
                     override this on the Personas page.
                   </div>
                 </>
               ) : (
                 <div className="field-hint">
-                  No reference voices found in{' '}
-                  <code>state/voices/</code>{' '}
-                  (legacy <code>state/chatterbox-voices/</code> also empty). The engine will
-                  use its built-in default voice. Drop a 5-second WAV into that directory
-                  to enable cloning.
+                  No reference voices yet, so the engine uses its built-in default voice.{' '}
+                  <Link href="/admin/imaging?tab=voices" className="underline">Import a 5-second clip on the Voices page</Link>
+                  {' '}to enable cloning.
                 </div>
               )}
             </div>
@@ -819,10 +818,11 @@ export function TtsSection({ data, form, setForm, busy, saveSettings, adminFetch
                   </Select>
                   <div className="field-hint">
                     100M-param CPU-only model from kyutai-labs. Built-in voices speak
-                    English, French, German, Italian, Spanish and Portuguese. Drop a
-                    ~5-second WAV into <code>state/voices/</code> to clone a voice and it
-                    will appear under <em>Custom</em> on next reload. Personas can override
-                    this on the Personas page.
+                    English, French, German, Italian, Spanish and Portuguese. To clone a
+                    voice,{' '}
+                    <Link href="/admin/imaging?tab=voices" className="underline">import a ~5-second clip on the Voices page</Link>
+                    {' '}and it will appear under <em>Custom</em>. Personas can override this
+                    on the Personas page.
                   </div>
                 </>
               ) : (
