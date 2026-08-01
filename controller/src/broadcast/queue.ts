@@ -1597,10 +1597,19 @@ class Queue {
       showName: onAirShow?.name || null,
     });
 
+    // `sourceTrackId` is the id from the music backend (Subsonic/Navidrome, or
+    // whatever a router fronts), so a relay can resolve the exact library item
+    // instead of fuzzy-matching artist+title (#1250). Same id `recordPlay` and
+    // `scrobble` already take below. Null when the annotated URI carried no
+    // `subsonic_id` — untracked auto-playlist plays, mainly — so consumers must
+    // handle its absence. Deliberately NOT folded into `source`: that field
+    // means how the track got queued (auto | ai | request) and existing relays
+    // branch on it.
     const trackPayload = {
       title: this.current.track.title,
       artist: this.current.track.artist || null,
       album: this.current.track.album || null,
+      sourceTrackId: this.current.track.id || null,
       source: this.current.source,
       requestedBy: this.current.requestedBy || null,
     };
