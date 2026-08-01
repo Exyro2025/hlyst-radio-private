@@ -59,7 +59,34 @@ function main() {
   });
 
   test('rendered WAV but no script left on the item → still counts as speaking', () => {
+    // No wavExists probe supplied — the file is assumed present.
     assert.equal(boundaryCarriesTrackVoice({ introWav: '/var/sub-wave/voices/link.wav' }, PREV), true);
+  });
+
+  // airIntro's own drop paths, injected via opts — each leaves the boundary
+  // silent, so the ident may take it after all.
+  test('station voice off — airIntro drops the link, boundary silent → ident airs', () => {
+    assert.equal(
+      boundaryCarriesTrackVoice(
+        { introScript: "here's something new", introKind: 'link' },
+        PREV, { voiceAllowed: false }),
+      false);
+  });
+
+  test('WAV reaped and no script to re-render from → boundary silent, ident airs', () => {
+    assert.equal(
+      boundaryCarriesTrackVoice(
+        { introWav: '/var/sub-wave/voices/gone.wav' },
+        PREV, { wavExists: () => false }),
+      false);
+  });
+
+  test('WAV reaped but the script survives (airIntro re-renders) → still speaks', () => {
+    assert.equal(
+      boundaryCarriesTrackVoice(
+        { introScript: "here's something new", introWav: '/var/sub-wave/voices/gone.wav' },
+        PREV, { wavExists: () => false }),
+      true);
   });
 
   // Example 2 in the report: 09:46:18 link, 09:46:43 ident — reversed, because
@@ -69,7 +96,7 @@ function main() {
   test('BED case — link already aired over the bed, item still upcoming → ident holds', () => {
     assert.equal(
       boundaryCarriesTrackVoice(
-        { introScript: 'up next, something warm', introKind: 'link', introAired: true, bedded: true },
+        { introScript: 'up next, something warm', introKind: 'link', introAired: true },
         PREV),
       true);
   });

@@ -1344,8 +1344,15 @@ class Queue {
     // and can't be moved; the ident is generic, so it keeps its slot and takes
     // the next boundary — with a whole track of music in between, which is the
     // entire point. Nothing is regenerated: the rendered WAV just waits.
+    // voiceAllowed/wavExists cover airIntro's own drop paths — a boundary whose
+    // line airIntro will drop (voice switch off, WAV reaped with no script) is
+    // silent, so holding for it would trade one voice for none. Both checks are
+    // synchronous, keeping the decision ahead of this function's first await.
     const incoming = this.upcoming[this.matchUpcomingIndex(np)] || null;
-    if (boundaryCarriesTrackVoice(incoming, this.current?.track || null)) {
+    if (boundaryCarriesTrackVoice(incoming, this.current?.track || null, {
+      voiceAllowed: autoVoiceAllowed(),
+      wavExists: path => existsSync(path),
+    })) {
       this.log('scheduler',
         `Holding ${p.kind} — the track's own ${KIND_LABEL[incoming!.introKind || 'dj-speak'] || 'intro'} takes this boundary`);
       return;

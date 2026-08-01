@@ -188,16 +188,37 @@ export function shouldDropStaleLink(
 // back-announce: that boundary ends up silent after all, so the ident is the
 // only thing that would speak and it should. Pure + exported so the rule is
 // unit-pinned (scripts/ident-link-collision.test.ts).
+//
+// The rule mirrors airIntro's own airing decision, and `opts` carries the two
+// runtime drop paths the item's fields alone can't predict — both of which
+// leave the boundary silent, so the ident may take it after all:
+//   - `voiceAllowed` — airIntro's station-voice backstop (settings.tts.enabled
+//     off) drops the line outright. The pending segment itself may still air:
+//     manual /dj/segment triggers are exempt from the voice switch.
+//   - `wavExists` — a rendered WAV the voice reaper has already deleted, with
+//     no script left on the item to re-render from, is a silent return in
+//     airIntro. A surviving script always speaks (airIntro re-renders).
+// Injected rather than read here so the rule stays pure; omitting them assumes
+// voice on and the WAV present.
 export function boundaryCarriesTrackVoice(
   item: {
     introScript?: string | null;
     introWav?: string | null;
+    // Part of the contract even though this rule never reads them: introAired
+    // is deliberately ignored (the BED case above), and introKind doesn't
+    // matter — links and request intros are both track-tied and unmovable.
+    introKind?: string | null;
+    introAired?: boolean;
     linkPrev?: { id?: string | null; title?: string | null; artist?: string | null } | null;
   } | null | undefined,
   predecessor: { id?: string | null; title?: string | null } | null,
+  opts: { voiceAllowed?: boolean; wavExists?: (path: string) => boolean } = {},
 ): boolean {
   if (!item) return false;
-  if (!item.introScript && !item.introWav) return false;
+  if (opts.voiceAllowed === false) return false;
+  const canSpeak = !!item.introScript
+    || (!!item.introWav && (opts.wavExists ? opts.wavExists(item.introWav) : true));
+  if (!canSpeak) return false;
   return !shouldDropStaleLink(item, predecessor);
 }
 
