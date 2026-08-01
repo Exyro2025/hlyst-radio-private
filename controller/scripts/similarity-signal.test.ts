@@ -64,6 +64,11 @@ async function main() {
     // Anything that isn't a Camelot code contributes nothing rather than noise.
     assert.deepEqual(soundDescriptors({ musicalKey: 'A minor' }), []);
     assert.deepEqual(soundDescriptors({ musicalKey: '' }), []);
+    // The wheel is 1–12; out-of-range numbers aren't Camelot codes either.
+    assert.deepEqual(soundDescriptors({ musicalKey: '0A' }), []);
+    assert.deepEqual(soundDescriptors({ musicalKey: '13B' }), []);
+    assert.deepEqual(soundDescriptors({ musicalKey: '12B' }), ['major key']);
+    assert.deepEqual(soundDescriptors({ musicalKey: '1A' }), ['minor key']);
   });
 
   await test('nothing analysed yields no words at all', () => {
@@ -134,8 +139,11 @@ async function main() {
     assert.equal(resolveIndexTextFormat(1, 20_000, true), EMBED_TEXT_VERSION);
   });
 
-  await test('a format from the future is never written backwards', () => {
-    // Downgrading the controller must not stamp a newer index as older.
+  await test('a format from the future clamps to this build\'s version', () => {
+    // A downgraded controller embeds any NEW vectors at its own (older) shape,
+    // so the index becomes a mix whose oldest shape is this build's — record
+    // that, and the newer controller sees the mix and re-raises the advisory
+    // once it's restored.
     assert.equal(resolveIndexTextFormat(99, 20_000), EMBED_TEXT_VERSION);
   });
 

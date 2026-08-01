@@ -471,9 +471,18 @@ export default function TaggingPanel(p: TaggingPanelProps) {
       ? labelOnly / embeddedVectors
       : null;
   const similarityThin = labelOnlyShare != null && labelOnlyShare >= 0.5;
-  // An older text format only matters once there IS something better to embed,
-  // so it rides with the same advisory rather than nagging on its own.
-  const embeddingFormatStale = p.coverage?.embeddingFormatStale === true;
+  // An older text format only matters once there IS something better to embed
+  // (some embedded tracks' rows now carry signal → share < 1). It must NOT be
+  // nested inside similarityThin: labelOnlyVectors counts the rows as they are
+  // TODAY, not what was in the text at embed time, so following the banner's
+  // own advice (run analysis) drops the share below the threshold and would
+  // hide the one remaining step — re-embedding — exactly when it becomes the
+  // step that matters. So it rides inside that banner while both are up, and
+  // stands alone once analysis has thickened the rows.
+  const embeddingFormatStale =
+    p.coverage?.embeddingFormatStale === true &&
+    labelOnlyShare != null &&
+    labelOnlyShare < 1;
 
   // Structured live-run progress from the tagger child — survives page
   // reloads and runs started elsewhere (no client-captured baseline). Null
@@ -689,6 +698,23 @@ export default function TaggingPanel(p: TaggingPanelProps) {
                   </>
                 )}
               </span>
+            </div>
+          )}
+          {embeddingFormatStale && !similarityThin && !embeddingStale && (
+            <div className="mt-3 flex flex-wrap items-center gap-x-3 gap-y-1 border border-[color-mix(in_oklab,var(--accent)_30%,transparent)] bg-[var(--accent-soft)] px-3 py-2 text-[11px] text-ink">
+              <span>
+                <b>Your similarity vectors predate the sound descriptors.</b> Tracks now carry
+                measured sound (tempo, key, audio moods) that wasn&rsquo;t part of the text when
+                they were embedded, so similarity is still comparing the old label-heavy text.
+                Re-embed to fold the measured sound in.
+              </span>
+              <button
+                type="button"
+                className="font-bold text-vermilion underline-offset-2 hover:underline"
+                onClick={() => openModal('reembed')}
+              >
+                Re-embed now →
+              </button>
             </div>
           )}
           {embeddingMissing && !embeddingStale && (

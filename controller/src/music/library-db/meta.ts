@@ -36,11 +36,16 @@ export function getEmbeddingMeta(): {
   };
 }
 
+// `textFormat` is deliberately required, not defaulted: a NULL write reads
+// back as format 1 (see getEmbeddingMeta), so a caller that forgot the arg
+// would silently regress the recorded shape to v1 and re-fire the re-embed
+// advisory even after a reseed. Callers must resolve it explicitly
+// (embeddings.resolveIndexTextFormat).
 export function setEmbeddingMeta(
   model: string,
   dim: number,
-  textMode: EmbeddingTextMode | null = null,
-  textFormat: number | null = null,
+  textMode: EmbeddingTextMode | null,
+  textFormat: number,
 ): void {
   requireDb()
     .prepare(

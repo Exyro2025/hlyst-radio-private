@@ -84,8 +84,10 @@ function tempoWord(bpm: number): string | null {
 // token. The musically-legible half of it is the mode: 'A' = minor, 'B' =
 // major. The number is the tonic (which key), and two tracks sharing a tonic
 // are no more alike in mood than two sharing a BPM digit — so it stays out.
+// The wheel only has positions 1–12; anything else ('0A', '13B') isn't a
+// Camelot code and contributes nothing rather than a fabricated mode.
 function keyModeWord(camelot: string): string | null {
-  const m = /^\s*\d{1,2}\s*([AB])\s*$/i.exec(camelot);
+  const m = /^\s*(?:[1-9]|1[0-2])\s*([AB])\s*$/i.exec(camelot);
   if (!m) return null;
   return m[1].toUpperCase() === 'A' ? 'minor key' : 'major key';
 }
@@ -266,6 +268,12 @@ export function resolveIndexTextMode(
 // advisory stays up until a reseed genuinely rebuilds everything. An empty
 // index has nothing to be inconsistent with, so it adopts the current format —
 // which is why a fresh install never sees the advisory at all.
+//
+// A stored format NEWER than this build (a downgraded controller) clamps to
+// this build's version for the same mixed-index reason: this run embeds any
+// new vectors at ITS shape, so the oldest shape now present is its own — and
+// recording it means the newer controller, once restored, sees the mix and
+// raises the advisory again.
 //
 // `reseed` is the one case that rewrites every vector, so it always adopts.
 export function resolveIndexTextFormat(

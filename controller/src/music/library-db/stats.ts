@@ -27,9 +27,14 @@ const STATS_TTL_MS = 5000;
 // and "Nick Drake" lands next to "Drake".
 //
 // Counted over track_vectors, not tracks: a track with no vector isn't in the
-// KNN space and isn't the problem. The four signals mirror formatTrackText's
-// optional lines exactly (Last.fm tags, lyric excerpt, audio moods, tempo) —
-// keep them in step, or the advisory stops describing the text.
+// KNN space and isn't the problem. The five signals mirror what feeds
+// formatTrackText's optional lines (Last.fm tags, lyric excerpt, and the Sound
+// line's audio moods, tempo and key mode) — keep them in step, or the advisory
+// stops describing the text. The key predicate is a non-empty check rather
+// than full Camelot validation (SQL has no cheap regex); the analyzer only
+// ever writes Camelot codes there, so the approximation only matters for
+// hand-edited rows, and then it undercounts — the safe direction for an
+// advisory.
 //
 // Deliberately a raw count with no threshold or verdict attached: what counts
 // as "too high" depends on library size and on which enrichment the operator
@@ -56,7 +61,8 @@ function computeLabelOnlyVectorCount(): number {
         WHERE (t.lastfm_tags   IS NULL OR t.lastfm_tags   = '' OR t.lastfm_tags   = '[]')
           AND (t.lyric_excerpt IS NULL OR t.lyric_excerpt = '')
           AND (t.audio_moods   IS NULL OR t.audio_moods   = '' OR t.audio_moods   = '[]')
-          AND (t.bpm IS NULL OR t.bpm <= 0)`,
+          AND (t.bpm IS NULL OR t.bpm <= 0)
+          AND (t.musical_key   IS NULL OR t.musical_key   = '')`,
     )
     .get() as { n: number }).n;
 }
