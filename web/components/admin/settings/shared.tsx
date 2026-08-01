@@ -19,7 +19,8 @@ export const KEY_HINTS: Record<string, string> = {
   OPENROUTER_API_KEY: 'sk-or-v1-...',
   AI_GATEWAY_API_KEY: 'gateway API key',
   ELEVENLABS_API_KEY: 'el_...',
-  FISH_API_KEY: 'fish_...',
+  // Fish keys have no documented prefix — point at where to mint one instead.
+  FISH_API_KEY: 'key from fish.audio/app/api-keys',
   EMBEDDING_API_KEY: 'optional — defaults to chat key',
 };
 
@@ -312,7 +313,9 @@ export interface SettingsData {
       kokoro?: { voice?: string; lang?: string };
       chatterbox?: { referenceVoice?: string };
       pocketTts?: { voice?: string };
-      cloud?: Partial<CloudTtsCfg>;
+      // The saved shape also carries the redacted key sentinels ('set' when a
+      // key is on file, '' otherwise) — GET /settings never returns raw keys.
+      cloud?: Partial<CloudTtsCfg> & { apiKey?: string; compatApiKey?: string };
       remote?: { url?: string };
       gainDb?: Record<string, number>;
       speed?: Record<string, number>;

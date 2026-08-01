@@ -36,12 +36,14 @@ router.post('/settings/tts/preview', requireAdmin, async (req, res) => {
   }
   // A closed picker/button aborts its browser request. Carry that cancellation
   // through Express into the provider call so a discarded Fish preview does
-  // not continue as an invisible metered synthesis.
+  // not continue as an invisible metered synthesis. `close` on the response
+  // fires for client disconnects (the deprecated `req 'aborted'` event is
+  // redundant with it) and also after a normal send, where writableEnded
+  // makes the abort a no-op.
   const previewAbort = new AbortController();
   const abortOnDisconnect = () => {
     if (!res.writableEnded) previewAbort.abort();
   };
-  req.once('aborted', abortOnDisconnect);
   res.once('close', abortOnDisconnect);
   let filePath: string | null = null;
   try {
@@ -71,7 +73,6 @@ router.post('/settings/tts/preview', requireAdmin, async (req, res) => {
       res.status(422).json({ ok: false, message: (err as { message?: string })?.message || 'Preview synthesis failed' });
     }
   } finally {
-    req.off('aborted', abortOnDisconnect);
     res.off('close', abortOnDisconnect);
     if (filePath) unlink(filePath).catch(() => {});
   }

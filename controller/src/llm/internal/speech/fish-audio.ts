@@ -21,6 +21,12 @@ const MAX_RETRY_AFTER_MS = 1_000;
 const MAX_ERROR_BODY = 500;
 const MAX_VOICES = 500;
 const PAGE_SIZE = 100;
+// Hard page ceiling for voice discovery. `collected` only grows on trained TTS
+// voices, so a server that reports `has_more: true` forever while returning
+// only filtered-out items (ASR models, in-training voices) would otherwise
+// loop until the route's outer abort. Twice the pages MAX_VOICES needs is
+// enough slack for accounts whose voice list is mostly non-TTS models.
+const MAX_PAGES = (MAX_VOICES / PAGE_SIZE) * 2;
 const MAX_MP3_PROBE_BYTES = 1024 * 1024;
 
 type FishLatency = (typeof FISH_LATENCIES)[number];
@@ -117,8 +123,26 @@ function retryDelayMs(res: Response, fallbackMs: number): number {
   return Math.min(MAX_RETRY_AFTER_MS, Math.max(0, fallbackMs));
 }
 
-function sleep(ms: number): Promise<void> {
-  return ms > 0 ? new Promise(resolve => setTimeout(resolve, ms)) : Promise.resolve();
+function abortError(signal: AbortSignal): unknown {
+  return signal.reason ?? new DOMException('This operation was aborted', 'AbortError');
+}
+
+// Retry backoffs must observe the caller's cancellation — a discarded preview
+// should stop during the wait, not fire one more billable attempt after it.
+function sleep(ms: number, signal?: AbortSignal): Promise<void> {
+  if (signal?.aborted) return Promise.reject(abortError(signal));
+  if (ms <= 0) return Promise.resolve();
+  return new Promise((resolve, reject) => {
+    const onAbort = () => {
+      clearTimeout(timer);
+      reject(abortError(signal!));
+    };
+    const timer = setTimeout(() => {
+      signal?.removeEventListener('abort', onAbort);
+      resolve();
+    }, ms);
+    signal?.addEventListener('abort', onAbort, { once: true });
+  });
 }
 
 function redactSecret(detail: string, secret: string): string {
@@ -277,7 +301,7 @@ export async function synthesizeFish({ apiKey, model = FISH_DEFAULT_MODEL, text,
     if (!shouldRetryFishStatus(res.status) || attempt === attempts - 1) {
       throw new Error(`Fish Audio TTS failed (${res.status}): ${detail}`);
     }
-    await sleep(retryDelayMs(res, delays[attempt] ?? 0));
+    await sleep(retryDelayMs(res, delays[attempt] ?? 0), transport.signal);
   }
 
   throw new Error('Fish Audio TTS failed');
@@ -314,7 +338,7 @@ export async function listFishVoices(apiKey: string, transport: Pick<FishTranspo
   if (!key) throw new Error('Fish Audio API key not set');
   const collected: FishVoice[] = [];
 
-  for (let page = 1; collected.length < MAX_VOICES; page++) {
+  for (let page = 1; collected.length < MAX_VOICES && page <= MAX_PAGES; page++) {
     const url = new URL(`${cleanOrigin(transport.origin)}/model`);
     url.searchParams.set('self', 'true');
     url.searchParams.set('page_size', String(PAGE_SIZE));

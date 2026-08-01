@@ -369,3 +369,55 @@ test('normalizeFishVoices keeps trained TTS voices and listFishVoices uses accou
     ]);
   });
 });
+
+test('synthesizeFish aborted during a retry backoff rejects without waiting it out', async () => {
+  const work = await mkdtemp(path.join(tmpdir(), 'subwave-fish-'));
+  const outPath = path.join(work, 'sample.mp3');
+  let calls = 0;
+  try {
+    await withServer((req, res) => {
+      calls++;
+      req.resume();
+      res.writeHead(500, { 'content-type': 'application/json' });
+      res.end(JSON.stringify({ message: 'flaky' }));
+    }, async origin => {
+      const ctrl = new AbortController();
+      setTimeout(() => ctrl.abort(), 25);
+      const started = Date.now();
+      await assert.rejects(
+        synthesizeFish({
+          apiKey: 'test-only-key',
+          text: 'Abort mid-backoff.',
+          referenceId: 'voice-abc',
+          outPath,
+        }, { origin, retryDelaysMs: [1_000], timeoutMs: 5_000, signal: ctrl.signal }),
+        err => err instanceof DOMException && err.name === 'AbortError',
+      );
+      // The 1s backoff never elapses — the sleep observes the abort signal
+      // instead of letting a discarded preview line up one more attempt.
+      assert.ok(Date.now() - started < 900, 'aborted rejection waited out the backoff');
+    });
+    assert.equal(calls, 1);
+    assert.deepEqual(await readdir(work), []);
+  } finally {
+    await rm(work, { recursive: true, force: true });
+  }
+});
+
+test('listFishVoices stops at its page ceiling when a server never runs dry', async () => {
+  let calls = 0;
+  await withServer((_req, res) => {
+    calls++;
+    res.writeHead(200, { 'content-type': 'application/json' });
+    // has_more stays true forever and every item is filtered out (still in
+    // training), so only the internal page cap can end discovery.
+    res.end(JSON.stringify({
+      total: 100_000,
+      has_more: true,
+      items: [{ _id: `pending-${calls}`, type: 'tts', state: 'training', title: 'Not ready' }],
+    }));
+  }, async origin => {
+    assert.deepEqual(await listFishVoices('discovery-key', { origin, timeoutMs: 5_000 }), []);
+  });
+  assert.equal(calls, 10); // MAX_PAGES in fish-audio.ts
+});

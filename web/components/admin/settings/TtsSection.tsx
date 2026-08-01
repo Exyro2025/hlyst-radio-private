@@ -486,7 +486,7 @@ export function TtsSection({ data, form, setForm, busy, saveSettings, adminFetch
       setCloudKeyInput('');
       if (isFish && !form.tts.cloud.voice.trim()) {
         await refresh();
-        notify.info('Fish Audio key saved — choose an account or custom voice, then save TTS settings.');
+        notify.info('Fish Audio key saved — TTS settings are not saved yet. Pick an account or custom voice, then press Save again.');
         return;
       }
     }
@@ -494,6 +494,8 @@ export function TtsSection({ data, form, setForm, busy, saveSettings, adminFetch
     const savedCloudProvider = String(data.values?.tts?.cloud?.provider || '');
     const clearInlineCloudKey = isFish
       || (!!savedCloudProvider && savedCloudProvider !== form.tts.cloud.provider);
+    // Redacted sentinel: 'set' means an inline key is on file in settings.json.
+    const hadStoredInlineKey = data.values?.tts?.cloud?.apiKey === 'set';
     const settingsSaved = await saveSettings({
       tts: {
         enabled: form.tts.enabled,
@@ -535,6 +537,11 @@ export function TtsSection({ data, form, setForm, busy, saveSettings, adminFetch
     if (!settingsSaved && managedKeySaved) {
       await refresh();
       notify.info('API key saved; TTS settings were not changed.');
+    }
+    // Clearing the legacy inline key is deliberate (keys are provider-scoped
+    // now), but it must never be silent: the operator may have relied on it.
+    if (settingsSaved && clearInlineCloudKey && hadStoredInlineKey) {
+      notify.info(`The API key stored in settings for ${cloudProviderLabel(savedCloudProvider)} was cleared — keys are provider-scoped. Re-enter it in Settings (or set its env key) if you switch back.`);
     }
   };
 
