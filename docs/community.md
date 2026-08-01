@@ -135,7 +135,7 @@ the default profile (everything except `weather`).
 ### Personas — `personas/<slug>/PERSONA.md`
 
 A DJ character. The body is the **soul** — the character prose the DJ writes in,
-up to 1000 characters. Station-specific bindings (voice, avatar, which skills it
+up to 2000 characters. Station-specific bindings (voice, avatar, which skills it
 runs) are set by the operator after install, so they aren't part of the catalog
 entry.
 
@@ -159,7 +159,7 @@ notes: who played on it, where it was cut, why this pressing. Never rushed.
 A **show template**: a standing brief plus music-steering filters and mode flags.
 A show carries only what travels between stations — everything tied to your
 particular library and schedule is bound on install (see the next section). The
-body is the **topic** brief, up to 1000 characters.
+body is the **topic** brief, up to 2000 characters.
 
 ```markdown
 ---
