@@ -5,7 +5,8 @@
 
 
 export const NAME_MAX = 60;
-export const TOPIC_MAX = 1000;
+// Mirrors the controller's SHOW_TOPIC_MAX (settings/vocab.ts).
+export const TOPIC_MAX = 2000;
 export const SHOWS_MAX = 64;
 // Mirrors the controller's GUESTS_PER_SHOW cap (settings.ts).
 export const GUESTS_MAX = 3;

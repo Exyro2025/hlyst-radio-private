@@ -21,6 +21,7 @@ import {
   POCKET_TTS_VOICE_RE,
   SCRIPT_LENGTHS,
   SHOWS_LIMIT,
+  SHOW_TOPIC_MAX,
   SKILLS_PER_PERSONA_LIMIT,
   SKILL_SLUG_RE,
   SOUL_MAX,
@@ -274,7 +275,7 @@ export function normalizeShows(raw: unknown, personaIds: string[]): NormalizedSh
     out.push({
       id,
       name,
-      topic: typeof item.topic === 'string' ? item.topic.trim().slice(0, 1000) : '',
+      topic: typeof item.topic === 'string' ? item.topic.trim().slice(0, SHOW_TOPIC_MAX) : '',
       personaId: item.personaId,
       guestPersonaIds,
       banter,

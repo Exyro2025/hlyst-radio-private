@@ -26,6 +26,7 @@ import {
   SCRIPT_LENGTHS,
   SHOW_MOODS,
   SHOW_ENERGY,
+  SHOW_TOPIC_MAX,
   SOUL_MAX,
   type EraWindow,
 } from '../settings.js';
@@ -223,7 +224,7 @@ function normalizeShow(raw: any): CommunityShow | null {
   return {
     slug,
     name,
-    topic: str(raw?.topic).slice(0, 1000),
+    topic: str(raw?.topic).slice(0, SHOW_TOPIC_MAX),
     moods: strList(raw?.moods, 6).filter(m => (SHOW_MOODS as string[]).includes(m)),
     genres: strList(raw?.genres, 6),
     eras: normalizeEras(raw?.eras),

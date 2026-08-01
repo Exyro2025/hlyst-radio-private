@@ -777,6 +777,14 @@ export const PERSONA_LIMIT = 48;
 // llm/internal/core/pure.ts.
 export const SOUL_MAX = 2000;
 export const SHOWS_LIMIT = 64;
+// Show `topic` — the standing brief the DJ works from while the show is on air.
+// Injected into the pick prompts (picker.ts / dj-agent schemas) and the
+// programme producer plan, so like SOUL_MAX it is a recurring per-call token
+// cost rather than a structural limit. Matched to SOUL_MAX so a show brief can
+// carry the same amount of detail as a persona sketch. Keep in lockstep with
+// TOPIC_MAX in web/components/admin/shows/types.ts and the AI-fill draft schema
+// in llm/internal/prompts/generate.ts.
+export const SHOW_TOPIC_MAX = 2000;
 // Guest co-hosts per show. Small on purpose: each guest is a full persona the
 // speaker rotation can hand a segment to, and past ~3 the host stops sounding
 // like the host.
