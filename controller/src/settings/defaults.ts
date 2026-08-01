@@ -257,8 +257,9 @@ export const DEFAULTS = {
     // pocket-tts but no persona-level voice is set. Built-in voice id.
     pocketTts: { voice: 'alba' },
     // Cloud engine config — used when an engine resolves to 'cloud'. A persona
-    // chooses provider+voice; `model` and `apiKey` stay shared here. `apiKey`
-    // empty means "read the provider's env var" (OPENAI_API_KEY etc.).
+    // chooses provider+voice; `model` stays shared here. Managed credentials
+    // use provider env vars; authenticated compatibility servers use the
+    // dedicated `compatApiKey` slot below.
     // `enabled` is the operator's "Off" switch — when false the cloud engine
     // reports unavailable regardless of key, so the engine pickers grey it out.
     cloud: {
@@ -266,7 +267,13 @@ export const DEFAULTS = {
       provider: 'openai',
       model: 'gpt-4o-mini-tts',
       voice: 'alloy',
+      // Legacy managed-provider inline key. New managed credentials live in
+      // secrets.env; retained for backward compatibility with older settings.
       apiKey: '',
+      // Dedicated bearer for authenticated openai-compatible TTS servers. It
+      // remains provider-scoped even when personas use compat alongside a
+      // different station-wide Cloud provider.
+      compatApiKey: '',
       // Base URL for the openai-compatible provider, including the /v1 suffix
       // (e.g. http://192.168.1.101:5000/v1). Required — and only used — when
       // provider === 'openai-compatible'.
@@ -281,6 +288,12 @@ export const DEFAULTS = {
       voiceStyle: 0,
       voiceSimilarityBoost: 0.75,
       voiceUseSpeakerBoost: true,
+      // Fish Audio S2.1 synthesis controls. Persisted alongside the shared
+      // cloud config so switching providers preserves the operator's tuning,
+      // but sent only when provider === 'fish-audio'.
+      temperature: 0.7,
+      topP: 0.7,
+      latency: 'normal' as 'low' | 'normal' | 'balanced',
     },
     // Remote engine — a user-configured self-hosted TTS endpoint that renders
     // audio over HTTP (POST /speak → audio body, gated on a /health probe).

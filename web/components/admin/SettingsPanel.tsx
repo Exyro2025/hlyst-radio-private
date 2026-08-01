@@ -23,7 +23,7 @@ import {
   Activity, Archive, Save, AlertTriangle, Heart, Music2,
 } from 'lucide-react';
 import {
-  SectionHeader, ELEVENLABS_VS_DEFAULTS,
+  SectionHeader, ELEVENLABS_VS_DEFAULTS, FISH_TTS_DEFAULTS,
   type FormState, type FormUpdater, type SettingsData, type SaveSettings,
   type LoudnessSource, type LlmForm, type LlmFallbackForm,
 } from './settings/shared';
@@ -183,6 +183,13 @@ export default function SettingsPanel() {
           voiceStyle: typeof v.tts?.cloud?.voiceStyle === 'number' ? v.tts.cloud.voiceStyle : ELEVENLABS_VS_DEFAULTS.voiceStyle,
           voiceSimilarityBoost: typeof v.tts?.cloud?.voiceSimilarityBoost === 'number' ? v.tts.cloud.voiceSimilarityBoost : ELEVENLABS_VS_DEFAULTS.voiceSimilarityBoost,
           voiceUseSpeakerBoost: typeof v.tts?.cloud?.voiceUseSpeakerBoost === 'boolean' ? v.tts.cloud.voiceUseSpeakerBoost : ELEVENLABS_VS_DEFAULTS.voiceUseSpeakerBoost,
+          temperature: typeof v.tts?.cloud?.temperature === 'number' ? v.tts.cloud.temperature : FISH_TTS_DEFAULTS.temperature,
+          topP: typeof v.tts?.cloud?.topP === 'number' ? v.tts.cloud.topP : FISH_TTS_DEFAULTS.topP,
+          latency: v.tts?.cloud?.latency === 'low'
+            ? 'low'
+            : v.tts?.cloud?.latency === 'balanced'
+              ? 'balanced'
+              : FISH_TTS_DEFAULTS.latency,
         },
         remote: { url: v.tts?.remote?.url ?? '' },
         // Per-engine voice level (dB). Zero default for all 6 engine ids, then
@@ -336,8 +343,10 @@ export default function SettingsPanel() {
       if (j.requiresRestart) setPendingRestart(true);
       notify.ok(j.requiresRestart ? 'saved, restart the mixer to apply' : 'saved');
       await refresh();
+      return true;
     } catch (e) {
       notify.err(errorMessage(e));
+      return false;
     } finally { setBusy(false); }
   };
 

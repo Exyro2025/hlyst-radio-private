@@ -622,7 +622,7 @@ export async function load() {
         enabled:
           typeof stored.tts?.cloud?.enabled === 'boolean'
             ? stored.tts.cloud.enabled
-            : !!stored.tts?.cloud?.apiKey,
+            : !!(stored.tts?.cloud?.apiKey || stored.tts?.cloud?.compatApiKey),
         provider: TTS_CLOUD_PROVIDERS.includes(stored.tts?.cloud?.provider)
           ? stored.tts.cloud.provider
           : DEFAULTS.tts.cloud.provider,
@@ -634,7 +634,21 @@ export async function load() {
           typeof stored.tts?.cloud?.voice === 'string' && stored.tts.cloud.voice.trim()
             ? stored.tts.cloud.voice.trim()
             : DEFAULTS.tts.cloud.voice,
-        apiKey: typeof stored.tts?.cloud?.apiKey === 'string' ? stored.tts.cloud.apiKey : '',
+        // Migrate the old shared slot into the dedicated compatibility slot
+        // only when it was saved under the compatibility provider. Managed
+        // provider keys remain legacy-readable but can no longer cross over.
+        apiKey:
+          stored.tts?.cloud?.provider !== 'openai-compatible'
+          && typeof stored.tts?.cloud?.apiKey === 'string'
+            ? stored.tts.cloud.apiKey
+            : '',
+        compatApiKey:
+          typeof stored.tts?.cloud?.compatApiKey === 'string'
+            ? stored.tts.cloud.compatApiKey
+            : stored.tts?.cloud?.provider === 'openai-compatible'
+              && typeof stored.tts?.cloud?.apiKey === 'string'
+              ? stored.tts.cloud.apiKey
+              : '',
         baseUrl:
           typeof stored.tts?.cloud?.baseUrl === 'string'
             ? stored.tts.cloud.baseUrl.trim()
@@ -658,6 +672,20 @@ export async function load() {
           typeof stored.tts?.cloud?.voiceUseSpeakerBoost === 'boolean'
             ? stored.tts.cloud.voiceUseSpeakerBoost
             : DEFAULTS.tts.cloud.voiceUseSpeakerBoost,
+        // Fish Audio controls — lenient load for hand-edited/older settings.
+        // Only the Fish provider sends these fields on the wire.
+        temperature:
+          typeof stored.tts?.cloud?.temperature === 'number' && Number.isFinite(stored.tts.cloud.temperature)
+            ? clamp01(stored.tts.cloud.temperature)
+            : DEFAULTS.tts.cloud.temperature,
+        topP:
+          typeof stored.tts?.cloud?.topP === 'number' && Number.isFinite(stored.tts.cloud.topP)
+            ? clamp01(stored.tts.cloud.topP)
+            : DEFAULTS.tts.cloud.topP,
+        latency:
+          ['low', 'normal', 'balanced'].includes(stored.tts?.cloud?.latency)
+            ? stored.tts.cloud.latency
+            : DEFAULTS.tts.cloud.latency,
       },
       remote: {
         url:
@@ -1417,6 +1445,7 @@ export async function update(patch) {
     }
     if (t.cloud !== undefined) {
       const c = t.cloud || {};
+      const savedCloudProvider = next.tts.cloud.provider;
       if (c.enabled !== undefined) {
         next.tts.cloud.enabled = !!c.enabled;
       }
@@ -1428,7 +1457,9 @@ export async function update(patch) {
       }
       if (c.model !== undefined) {
         const v = String(c.model).trim();
-        if (v.length < 1 || v.length > 100) throw new Error('tts.cloud.model must be 1-100 chars');
+        if (v.length < 1 || v.length > 100 || /[\r\n]/.test(v)) {
+          throw new Error('tts.cloud.model must be 1-100 chars with no line breaks');
+        }
         next.tts.cloud.model = v;
       }
       if (c.voice !== undefined) {
@@ -1451,6 +1482,17 @@ export async function update(patch) {
       // round-tripped settings form doesn't overwrite the real key.
       if (c.apiKey !== undefined && c.apiKey !== 'set') {
         next.tts.cloud.apiKey = String(c.apiKey);
+      } else if (c.provider !== undefined && c.provider !== savedCloudProvider) {
+        // The shared inline slot belongs to the provider that created it. A
+        // provider transition without an explicit replacement must clear it,
+        // otherwise a managed key can be forwarded to an arbitrary compatible
+        // URL (or a compatibility bearer can be reinterpreted as managed).
+        next.tts.cloud.apiKey = '';
+      }
+      // Dedicated compatibility bearer. Unlike the legacy shared slot, this
+      // may safely persist while another managed provider is selected globally.
+      if (c.compatApiKey !== undefined && c.compatApiKey !== 'set') {
+        next.tts.cloud.compatApiKey = String(c.compatApiKey);
       }
       if (c.baseUrl !== undefined) {
         const v = String(c.baseUrl).trim();
@@ -1480,6 +1522,29 @@ export async function update(patch) {
       }
       if (c.voiceUseSpeakerBoost !== undefined) {
         next.tts.cloud.voiceUseSpeakerBoost = !!c.voiceUseSpeakerBoost;
+      }
+      // Fish Audio synthesis controls. Clamp numeric knobs like the existing
+      // ElevenLabs sliders; reject an unknown enum so a typo cannot silently
+      // turn into a provider-side 422 and a different fallback voice.
+      if (c.temperature !== undefined) {
+        const n = Number(c.temperature);
+        next.tts.cloud.temperature = Number.isFinite(n) ? clamp01(n) : DEFAULTS.tts.cloud.temperature;
+      }
+      if (c.topP !== undefined) {
+        const n = Number(c.topP);
+        next.tts.cloud.topP = Number.isFinite(n) ? clamp01(n) : DEFAULTS.tts.cloud.topP;
+      }
+      if (c.latency !== undefined) {
+        if (!['low', 'normal', 'balanced'].includes(c.latency)) {
+          throw new Error('tts.cloud.latency must be one of: low, normal, balanced');
+        }
+        next.tts.cloud.latency = c.latency;
+      }
+      // Fish credentials live only in process env/state/secrets.env. Clear the
+      // legacy inline compatibility slot on every Fish save so a later provider
+      // switch cannot reinterpret a stale bearer as OpenAI/ElevenLabs.
+      if (next.tts.cloud.provider === 'fish-audio') {
+        next.tts.cloud.apiKey = '';
       }
       // An OpenAI-compatible TTS server has no canonical endpoint — refuse to
       // save the provider without one. Mirrors the LLM-side check below.

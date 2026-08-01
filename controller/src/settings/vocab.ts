@@ -519,7 +519,7 @@ export function normalizeLlmProviderBaseUrls(
 // any self-hosted OpenAI-compatible speech server (Chatterbox, Qwen3 TTS,
 // VibeVoice, etc.) via the operator-supplied `tts.cloud.baseUrl` — mirrors the
 // LLM provider of the same name.
-export const TTS_CLOUD_PROVIDERS = ['openai', 'elevenlabs', 'openai-compatible'];
+export const TTS_CLOUD_PROVIDERS = ['openai', 'elevenlabs', 'fish-audio', 'openai-compatible'];
 
 // Web-search backends for the segment director's `web-search` capability.
 // `duckduckgo` is the homelab default — DuckDuckGo's Instant Answer API is free
