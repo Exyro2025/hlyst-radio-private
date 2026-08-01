@@ -27,7 +27,7 @@
 export const SEED_NOT_A_PICK_CLAUSE =
   'The track already playing is only the SEED you pass to the discovery tools — its id is never a valid answer, even when a tool comes back empty.';
 
-export type PickFailureKind = 'no-candidates' | 'seed-echo' | 'unknown-id';
+export type PickFailureKind = 'no-candidates' | 'no-discovery' | 'seed-echo' | 'unknown-id';
 
 export interface PickFailure {
   kind: PickFailureKind;
@@ -49,18 +49,35 @@ export interface PickFailure {
 }
 
 export function classifyPickFailure(
-  { pickedId, seedId, candidates }:
-  { pickedId: string | null; seedId: string | null; candidates: number },
+  { pickedId, seedId, candidates, toolCalls }:
+  { pickedId: string | null; seedId: string | null; candidates: number; toolCalls: number },
 ): PickFailure {
   const echoed = !!pickedId && !!seedId && pickedId === seedId;
 
-  // Zero candidates first, and regardless of what the model answered: with an
-  // empty `seen` map BOTH salvage stages are structurally unable to help
-  // (nearestId has no keys to match against, repickFromSeen returns null on its
-  // first line), so the run was lost the moment discovery came back empty — the
-  // answer the model gave is a symptom, not the cause. This is the #1247 path:
-  // one discovery call (COMMIT_AFTER_STEPS = 1 leaves no second) into a tool
-  // whose index doesn't cover the seed, then a forced commit with nothing.
+  // An empty `seen` has TWO causes, and only one is exempt. `toolCalls` counts
+  // real discovery calls (flattenToolCalls excludes the synthetic `done`), so
+  // zero means the model never explored at all — possible on the
+  // toolChoice:'auto' downgrade (#570) or a provider that ignores 'required',
+  // where a salvage leg then fabricates an id against an empty trail. That IS
+  // the can't-drive-the-harness failure the breaker exists for; exempting it on
+  // candidates===0 alone would let a tool-call-incapable model dodge the
+  // breaker forever while every pick burns the full agent deadline.
+  if (candidates === 0 && toolCalls === 0) {
+    return {
+      kind: 'no-discovery',
+      message: 'agent made no discovery call at all, so its answer could not come from any tool — the configured model may not drive tool calls',
+      countsAgainstBreaker: true,
+    };
+  }
+
+  // Zero candidates with real discovery, and regardless of what the model
+  // answered: with an empty `seen` map BOTH salvage stages are structurally
+  // unable to help (nearestId has no keys to match against, repickFromSeen
+  // returns null on its first line), so the run was lost the moment discovery
+  // came back empty — the answer the model gave is a symptom, not the cause.
+  // This is the #1247 path: one discovery call (COMMIT_AFTER_STEPS = 1 leaves
+  // no second) into a tool whose index doesn't cover the seed, then a forced
+  // commit with nothing.
   if (candidates === 0) {
     return {
       kind: 'no-candidates',

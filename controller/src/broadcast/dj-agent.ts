@@ -302,6 +302,10 @@ async function pickViaAgent(queue, ctx, { wantLink, audioWaypoint = null, curren
       pickedId: object?.id ?? null,
       seedId: current?.id ?? null,
       candidates: extras.seen.size,
+      // Real discovery calls only (flattenToolCalls drops the synthetic
+      // `done`), so a zero here means the model never explored — which must
+      // NOT ride the no-candidates breaker exemption.
+      toolCalls: toolCalls.length,
     });
     logEvent('pick.rejected', {
       agent: 'pick', id: object?.id ?? null, candidates: extras.seen.size, steps, toolCalls,

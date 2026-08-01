@@ -50,7 +50,7 @@ async function main() {
   await test('zero candidates is NOT a breaker failure, even though the id was wrong', () => {
     // The #1247 path: one discovery call into an index that does not cover the
     // seed, then a forced commit with nothing to commit.
-    const f = classifyPickFailure({ pickedId: SEED, seedId: SEED, candidates: 0 });
+    const f = classifyPickFailure({ pickedId: SEED, seedId: SEED, candidates: 0, toolCalls: 1 });
     assert.equal(f.kind, 'no-candidates');
     assert.equal(f.countsAgainstBreaker, false);
     assert.match(f.message, /no candidates/i);
@@ -60,16 +60,32 @@ async function main() {
     // With an empty `seen` BOTH salvage stages are structurally unable to help,
     // so the answer is a symptom either way — a fabricated id is the same story
     // as an echoed seed.
-    const f = classifyPickFailure({ pickedId: 'made-up-id', seedId: SEED, candidates: 0 });
+    const f = classifyPickFailure({ pickedId: 'made-up-id', seedId: SEED, candidates: 0, toolCalls: 1 });
     assert.equal(f.kind, 'no-candidates');
     assert.equal(f.countsAgainstBreaker, false);
+  });
+
+  await test('zero candidates with ZERO discovery calls DOES count against the breaker', () => {
+    // The other way `seen` ends up empty: the model never explored at all
+    // (toolChoice:'auto' downgrade, or a provider ignoring 'required') and a
+    // salvage leg fabricated an id against an empty trail. That is precisely
+    // the can't-drive-tool-calls failure the breaker watches for — exempting it
+    // would let such a model dodge the breaker forever while every pick burns
+    // the full agent deadline.
+    const f = classifyPickFailure({ pickedId: 'made-up-id', seedId: SEED, candidates: 0, toolCalls: 0 });
+    assert.equal(f.kind, 'no-discovery');
+    assert.equal(f.countsAgainstBreaker, true);
+    assert.match(f.message, /no discovery call/i);
+    const echoed = classifyPickFailure({ pickedId: SEED, seedId: SEED, candidates: 0, toolCalls: 0 });
+    assert.equal(echoed.kind, 'no-discovery');
+    assert.equal(echoed.countsAgainstBreaker, true);
   });
 
   await test('zero candidates names the seed echo when that is what happened', () => {
     // Same verdict, different diagnosis in the booth log — an operator reading
     // "answered with the on-air track's own id" knows to check index coverage.
-    const echoed = classifyPickFailure({ pickedId: SEED, seedId: SEED, candidates: 0 });
-    const other = classifyPickFailure({ pickedId: 'made-up-id', seedId: SEED, candidates: 0 });
+    const echoed = classifyPickFailure({ pickedId: SEED, seedId: SEED, candidates: 0, toolCalls: 1 });
+    const other = classifyPickFailure({ pickedId: 'made-up-id', seedId: SEED, candidates: 0, toolCalls: 1 });
     assert.match(echoed.message, /on-air track's own id/i);
     assert.notEqual(echoed.message, other.message);
   });
@@ -77,14 +93,14 @@ async function main() {
   await test('seed echo WITH candidates IS a breaker failure', () => {
     // The run had real candidates and the z.enum-constrained re-pick over them
     // also missed. That is the harness failing, which is what the breaker is for.
-    const f = classifyPickFailure({ pickedId: SEED, seedId: SEED, candidates: 8 });
+    const f = classifyPickFailure({ pickedId: SEED, seedId: SEED, candidates: 8, toolCalls: 1 });
     assert.equal(f.kind, 'seed-echo');
     assert.equal(f.countsAgainstBreaker, true);
     assert.match(f.message, /8 candidate/);
   });
 
   await test('an unrelated unknown id with candidates is a plain rejection', () => {
-    const f = classifyPickFailure({ pickedId: OTHER, seedId: SEED, candidates: 5 });
+    const f = classifyPickFailure({ pickedId: OTHER, seedId: SEED, candidates: 5, toolCalls: 1 });
     assert.equal(f.kind, 'unknown-id');
     assert.equal(f.countsAgainstBreaker, true);
     assert.match(f.message, new RegExp(OTHER));
@@ -93,7 +109,7 @@ async function main() {
   await test('a null pick id with candidates is a plain rejection, not an echo', () => {
     // The model returned no usable id at all — repickFromSeen's other entry
     // point. Must not read as a seed echo just because seedId is present.
-    const f = classifyPickFailure({ pickedId: null, seedId: SEED, candidates: 5 });
+    const f = classifyPickFailure({ pickedId: null, seedId: SEED, candidates: 5, toolCalls: 1 });
     assert.equal(f.kind, 'unknown-id');
     assert.equal(f.countsAgainstBreaker, true);
   });
@@ -101,9 +117,9 @@ async function main() {
   await test('an unknown seed (boot / untracked track) never reads as an echo', () => {
     // current?.id is null on recover and on an untracked auto-playlist track.
     // Comparing null to null must not classify every failure as a seed echo.
-    const f = classifyPickFailure({ pickedId: null, seedId: null, candidates: 3 });
+    const f = classifyPickFailure({ pickedId: null, seedId: null, candidates: 3, toolCalls: 1 });
     assert.equal(f.kind, 'unknown-id');
-    const g = classifyPickFailure({ pickedId: OTHER, seedId: null, candidates: 3 });
+    const g = classifyPickFailure({ pickedId: OTHER, seedId: null, candidates: 3, toolCalls: 1 });
     assert.equal(g.kind, 'unknown-id');
   });
 

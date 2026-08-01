@@ -290,7 +290,17 @@ export function buildPickerTools({
     const otherIndexed = audioFirst ? hasTextEmbeddings : hasAudioEmbeddings;
     if (otherIndexed) {
       const alt = lookup(other);
-      if (alt.length) return { tracks: collect(alt), matched: alt.length, fellBack: true };
+      if (alt.length) {
+        const rescued = collect(alt);
+        // Only report the rescue if something SURVIVED the recency/lock
+        // filters. Reporting the raw alt count with empty tracks would render
+        // emptyResult's matched>0 message — "N exist but were all played
+        // recently" — about hits from an index the model never asked, glued to
+        // a "no embedding yet" hint about the one it did: two contradictory
+        // clauses. Falling through to matched 0 keeps the coherent hint, whose
+        // "try similarSongs / tracksByMood" steer is right here anyway.
+        if (rescued.length) return { tracks: rescued, matched: alt.length, fellBack: true };
+      }
     }
     return { tracks: [] as any[], matched: 0, fellBack: false };
   };
