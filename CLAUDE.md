@@ -128,4 +128,4 @@ The shared `/var/sub-wave` mount in **both** Broadcast and Controller is what ma
 
 ### Heavy TTS engines (Chatterbox + PocketTTS)
 
-Chatterbox + PocketTTS are heavy PyTorch engines, sidecar-or-local-worker, env-switched on `TTS_HEAVY_URL`. Details in [`controller/CLAUDE.md`](controller/CLAUDE.md).
+Chatterbox + PocketTTS are heavy PyTorch engines, sidecar-or-local-worker, env-switched on `TTS_HEAVY_URL`. Their shared clone-reference folder (`state/voices/`) is owned by `audio/voice-library.ts` and imported from `/admin/imaging?tab=voices` — the folder deliberately keeps **no JSON sidecar** because it stays operator-writable by hand, and its cheap `scan()` is what the 3s `/settings` poll rides (only the admin-only `list()` probes durations). Details in [`controller/CLAUDE.md`](controller/CLAUDE.md).
