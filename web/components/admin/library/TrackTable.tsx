@@ -54,6 +54,12 @@ interface TrackTableProps {
   onClearLikes: (t: Track) => void;
 }
 
+// The actions column is a FIXED grid track (see .lib-row in globals.css), so
+// the heart is the one button whose width varies with its content. Cap the
+// label: without this a heavily-liked track widens the cluster past its track
+// and the whole row's actions overlap the mood/energy column.
+const countLabel = (n: number) => (n > 99 ? '99+' : String(n));
+
 // Heart state for one row: the inline `likedByOperator`/`likeCount` on a
 // /library/liked row if present, otherwise the shared index.
 function likeStateFor(t: Track, index: LikeIndex): { liked: boolean; count: number } {
@@ -205,7 +211,7 @@ export function TrackTable(p: TrackTableProps) {
                     />
                     {/* The count is every like on the song, listeners included —
                         the filled heart is the operator's own, separately. */}
-                    {like.count > 0 && <span className="mono-num text-[10px]">{like.count}</span>}
+                    {like.count > 0 && <span className="mono-num text-[10px]">{countLabel(like.count)}</span>}
                   </span>
                 )}
               </Btn>

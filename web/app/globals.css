@@ -4006,8 +4006,14 @@ html:has(.admin-root.paper) {
     /* leading 16px column: the row-selection checkbox (add-to-playlist flow).
        Trailing actions column is FIXED, not auto: header and rows are sibling
        grids, so an auto track resolves to 0 in the (empty-celled) header and
-       ~150px in the rows, skewing every fr column between them. */
-    grid-template-columns: 16px 56px minmax(0, 2fr) minmax(0, 1fr) 150px;
+       ~240px in the rows, skewing every fr column between them.
+       240px is measured, not guessed: five 36px buttons (heart, queue, edit,
+       retag, block) + four 6px gaps = 204px, and the heart carries a like
+       count so it runs to ~63px at its capped "99+" label — 231px worst case.
+       Keep this in step with the button cluster in library/TrackTable.tsx:
+       the cluster is justify-end, so anything that overflows this track spills
+       LEFT over the mood/energy column instead of being clipped. */
+    grid-template-columns: 16px 56px minmax(0, 2fr) minmax(0, 1fr) 240px;
     gap: 14px; align-items: center;
 }
 .admin-root .lib-colhead { padding: 9px 16px; border-bottom: 1px solid var(--ink); }
@@ -4050,8 +4056,13 @@ html:has(.admin-root.paper) {
 }
 
 @media (max-width: 860px) {
+    /* Tags hide here, but the inline buttons don't — they're gated on Tailwind's
+       sm: (640px), so 640-860px still renders the full five-button cluster and
+       needs the same 240px track. Below 640px the row switches to flex
+       (`!flex sm:!grid`) and only the overflow menu shows, so this never
+       applies to phones. */
     .admin-root .lib-row,
-    .admin-root .lib-colhead { grid-template-columns: 16px 48px 1fr 150px; gap: 12px; }
+    .admin-root .lib-colhead { grid-template-columns: 16px 48px 1fr 240px; gap: 12px; }
     .admin-root .lib-row .lib-tags,
     .admin-root .lib-colhead .h-tags { display: none; }
     .admin-root .lib-thumb { width: 48px; height: 48px; }
