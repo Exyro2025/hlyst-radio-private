@@ -23,15 +23,26 @@ import { artistRootKey, type CandidateLike } from '../../music/recency.js';
 // point where a show-filtered run's candidate set is likely to be wholly recent
 // — and if it ever is, the fallback below hands the bare exclusion back rather
 // than starving.
+//
+// NOTE the effective exclusion is wider than "5 plays": neighbourArtistRoots(n)
+// gathers up to n queued-and-unaired tracks AND the on-air track AND the last n
+// distinct plays — so this window can exclude up to 2n+1 artists, by design
+// (the queued side is what covers pair-aware drains, where the pick is not
+// adjacent to the track on air).
 export const ARTIST_VARIETY_WINDOW = 5;
 
 export interface AlternativePool<T> {
   // The candidates the re-pick may choose from, keyed by id as `seen` is.
   alt: Map<string, T>;
   // How many other-artist candidates the recency window removed. 0 means it
-  // changed nothing — either no recent artist was in the pool, or the window
-  // emptied it and the bare on-air exclusion was handed back instead.
+  // removed none — because no recent artist was in the pool, or because the
+  // window emptied it and was overridden (see `starved`).
   dropped: number;
+  // True when EVERY alternative was a recently-heard artist and the window was
+  // overridden — the bare on-air exclusion was handed back. Distinguishes
+  // "the window was a no-op" from "the window was overruled" in telemetry;
+  // `dropped` is 0 in both cases.
+  starved: boolean;
 }
 
 // The candidate set for a guard re-pick.
@@ -50,7 +61,7 @@ export function alternativeCandidates<T extends CandidateLike>(
     const root = artistRootKey(s);
     return !root || root !== avoidRoot;
   });
-  if (!base.length || !recentRoots.size) return { alt: new Map(base), dropped: 0 };
+  if (!base.length || !recentRoots.size) return { alt: new Map(base), dropped: 0, starved: false };
 
   const fresh = base.filter(([, s]) => {
     const root = artistRootKey(s);
@@ -60,7 +71,7 @@ export function alternativeCandidates<T extends CandidateLike>(
   // a same-artist repeat one slot later is a worse outcome than a same-artist
   // repeat five slots later, and the caller's pool rescue is the wrong escalation
   // here — the run DID surface another artist.
-  if (!fresh.length) return { alt: new Map(base), dropped: 0 };
+  if (!fresh.length) return { alt: new Map(base), dropped: 0, starved: true };
 
-  return { alt: new Map(fresh), dropped: base.length - fresh.length };
+  return { alt: new Map(fresh), dropped: base.length - fresh.length, starved: false };
 }

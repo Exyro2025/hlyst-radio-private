@@ -21,7 +21,7 @@ import * as mix from '../music/mix.js';
 import * as library from '../music/library.js';
 import * as loudness from '../music/loudness.js';
 import * as blocklist from '../music/blocklist.js';
-import { artistRootKey } from '../music/recency.js';
+import { artistRootKey, trackKey } from '../music/recency.js';
 import { speak, voiceGainDb } from '../audio/tts.js';
 import * as djAgent from './dj-agent.js';
 import * as programme from './programme.js';
@@ -2097,8 +2097,6 @@ class Queue {
       const key = artistRootKey({ artist });
       if (key) out.add(key);
     };
-    const keyOf = (title: string | null | undefined, artist: string | null | undefined) =>
-      `${(title || '').toLowerCase().trim()}|${(artist || '').toLowerCase().trim()}`;
     for (const item of this.upcoming.slice(-n)) add(item?.track?.artist);
     add(this.current?.track?.artist);
     // Distinct TRACKS, not rows — the sidecar can hold two entries for one play
@@ -2108,7 +2106,7 @@ class Queue {
     let distinct = 0;
     for (const p of this._recentPlays) {
       if (distinct >= n) break;
-      const k = keyOf(p.title, p.artist);
+      const k = trackKey(p);
       if ((p.id && seenIds.has(p.id)) || (k && seenKeys.has(k))) continue;
       distinct++;
       if (p.id) seenIds.add(p.id);

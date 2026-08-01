@@ -328,7 +328,7 @@ async function pickViaAgent(queue, ctx, { wantLink, audioWaypoint = null, curren
   // every-other-slot repeat this guard was supposed to prevent.
   const curArtist = artistRootKey(current || {});
   if (curArtist && artistRootKey(song) === curArtist) {
-    const { alt, dropped } = alternativeCandidates<any>(
+    const { alt, dropped, starved } = alternativeCandidates<any>(
       extras.seen, curArtist, queue.neighbourArtistRoots(ARTIST_VARIETY_WINDOW),
     );
     let altSong: any = null;
@@ -344,8 +344,8 @@ async function pickViaAgent(queue, ctx, { wantLink, audioWaypoint = null, curren
       // tolerance for ids it didn't offer.
       altSong = repicked?.id ? alt.get(repicked.id) : null;
       if (altSong) {
-        logEvent('pick.artistGuard', { relaxed: false, from: song.artist, to: altSong.artist, candidates: alt.size, recencySkipped: dropped });
-        queue.log('picker', `back-to-back artist "${song.artist}" avoided — re-picked "${altSong.title}" by ${altSong.artist} from ${alt.size} other-artist candidate(s)${dropped ? `, ${dropped} more skipped as recently-played artists` : ''}`);
+        logEvent('pick.artistGuard', { relaxed: false, from: song.artist, to: altSong.artist, candidates: alt.size, recencySkipped: dropped, recencyStarved: starved });
+        queue.log('picker', `back-to-back artist "${song.artist}" avoided — re-picked "${altSong.title}" by ${altSong.artist} from ${alt.size} other-artist candidate(s)${dropped ? `, ${dropped} more skipped as recently-played artists` : ''}${starved ? ' (every alternative was recently played — recency window waived)' : ''}`);
         object = repicked;
         song = altSong;
       }

@@ -96,9 +96,10 @@ const sly = { id: 's1', title: 'Fun', artist: 'Sly & the Family Stone' };
 // re-pick is free to return to Marvin — and did, every time.
 {
   const recent = new Set(['the beatles', 'marvin gaye', 'the clash'].map((a) => artistRootKey(a)));
-  const { alt, dropped } = alternativeCandidates(seenOf(marvin, sly), artistRootKey('The Beatles'), recent);
+  const { alt, dropped, starved } = alternativeCandidates(seenOf(marvin, sly), artistRootKey('The Beatles'), recent);
   assert.deepEqual([...alt.keys()], ['s1'], 'an artist inside the recency window must not win the re-pick');
   assert.equal(dropped, 1, 'the narrowing is counted so the booth log can report it');
+  assert.equal(starved, false, 'a narrowing that left candidates is not starvation');
 }
 
 // A recently-played artist's COLLABORATION is inside the window too — otherwise
@@ -116,9 +117,10 @@ const sly = { id: 's1', title: 'Fun', artist: 'Sly & the Family Stone' };
 // escalating to the pool rescue here would be the wrong answer.
 {
   const recent = new Set(['marvin gaye', 'sly & the family stone'].map((a) => artistRootKey(a)));
-  const { alt, dropped } = alternativeCandidates(seenOf(marvin, sly), artistRootKey('The Beatles'), recent);
+  const { alt, dropped, starved } = alternativeCandidates(seenOf(marvin, sly), artistRootKey('The Beatles'), recent);
   assert.deepEqual([...alt.keys()].sort(), ['m1', 's1'], 'a wholly-recent alternative set must not empty the pool');
   assert.equal(dropped, 0, 'the fallback reports no narrowing — it narrowed nothing');
+  assert.equal(starved, true, 'the waived window is reported as starved, distinct from a no-op window');
 }
 
 // An untagged candidate is not evidence of a repeat: it survives both filters.
@@ -135,9 +137,10 @@ const sly = { id: 's1', title: 'Fun', artist: 'Sly & the Family Stone' };
 // No recency data (a fresh boot, or a queue with nothing played) → byte-for-byte
 // the pre-#1251 behaviour: the on-air artist excluded, nothing else.
 {
-  const { alt, dropped } = alternativeCandidates(seenOf(marvin, sly, beatles), artistRootKey('Marvin Gaye'));
+  const { alt, dropped, starved } = alternativeCandidates(seenOf(marvin, sly, beatles), artistRootKey('Marvin Gaye'));
   assert.deepEqual([...alt.keys()].sort(), ['b1', 's1'], 'an empty recency window leaves the old behaviour intact');
   assert.equal(dropped, 0, 'nothing dropped when there is no recency window');
+  assert.equal(starved, false, 'a window that never applied is a no-op, not starvation');
 }
 
 // Every candidate is the on-air artist → empty, which is what tells the caller
