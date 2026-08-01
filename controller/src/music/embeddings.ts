@@ -37,6 +37,13 @@ export interface SongMeta {
   year?: number | string | null;
   genres?: string[] | null;
   genre?: string | null;
+  // The year the track's ERA is judged by — resolved by the CALLER via
+  // show-filter.resolveEraYear (original year wins; a compilation's plain
+  // year is untrusted), never raw `year`. Word-formed into an `Era: 1990s`
+  // line: the head line's "(2013)" digits embed as near-arbitrary tokens,
+  // while the decade as a WORD gives era-similarity something to grab — and
+  // for reissues it's the true era, where the digits are the reissue's.
+  eraYear?: number | null;
 }
 
 export interface TrackEnrichment {
@@ -57,6 +64,18 @@ export interface TrackAcoustics {
   // against the track's audio vector, so these are how it SOUNDS, never what
   // its title suggests. Heavy-tier only; absent on a lean analyzer.
   audioMoods?: string[] | null;
+  // Vocal-presence ranges (tracks.vocal_ranges). [] = measured instrumental,
+  // non-empty = has vocals, null/undefined = not computed. Only the MINORITY
+  // marker is written ('instrumental'); vocal tracks get no word, because a
+  // word carried by ~80% of a library clusters nothing.
+  vocalRanges?: unknown[] | null;
+  // The pace curve is deliberately NOT an input. An energy word was tried and
+  // backed out: the curve's practical range is ~0.02–0.5 (measured mean 0.09
+  // across a fully-analysed library), so any fixed threshold stamps one word
+  // on ~everything ("calm" on 99.5% of tracks, contradicting CLAP's
+  // "energetic" in the same line), and library-relative thresholds would make
+  // the text non-deterministic. CLAP's mood vocabulary already carries energy
+  // words measured from sound; the raw mean stays LLM-facing (picker payload).
 }
 
 // Bump when the shape of formatTrackText's output changes in a way that moves
@@ -65,7 +84,8 @@ export interface TrackAcoustics {
 // silently mixing two text shapes in one KNN space. Legacy rows read as 1.
 //
 //   1  head line + Last.fm tags + lyric excerpt
-//   2  ... + the Sound: descriptor line (#1246)
+//   2  ... + the Sound: descriptor line (audio moods, tempo band, key mode,
+//      instrumental marker) + the Era: decade line (#1246)
 export const EMBED_TEXT_VERSION = 2;
 
 // Tempo as a word, not a number: an embedding model reads "uptempo" as a
@@ -111,7 +131,22 @@ export function soundDescriptors(acoustics?: TrackAcoustics | null): string[] {
   if (tempo) words.push(tempo);
   const mode = acoustics.musicalKey ? keyModeWord(acoustics.musicalKey) : null;
   if (mode) words.push(mode);
+  // [] is a MEASUREMENT ("no vocals found"), null is its absence — only the
+  // measured-instrumental case speaks (see the interface note).
+  if (Array.isArray(acoustics.vocalRanges) && acoustics.vocalRanges.length === 0) {
+    words.push('instrumental');
+  }
   return words;
+}
+
+// The Era line's decade word ('1990s'). Input is the RESOLVED era year
+// (show-filter.resolveEraYear) — callers must never pass raw `year`, which on
+// a compilation is the compilation's own release date. Sub-millennium years
+// are junk tags (TDRC=0007 and friends), not ancient recordings.
+export function decadeWord(eraYear?: number | null): string | null {
+  const y = Number(eraYear);
+  if (!Number.isFinite(y) || y < 1000) return null;
+  return `${Math.floor(y / 10) * 10}s`;
 }
 
 export function isAvailable(): boolean {
@@ -171,8 +206,10 @@ export function resolveEmbeddingDim(): number {
 //    Lyrics: I slid off, ain't been the same since the call dropped..."
 //
 // With measured acoustics (v2, #1246 — present as soon as the analyzer has run,
-// which needs no API key and no LLM call):
-//   "... Sound: smooth, late-night, mid-tempo, minor key"
+// which needs no API key and no LLM call), plus the resolved era as a decade
+// word:
+//   "... Sound: smooth, late-night, mid-tempo, minor key
+//        Era: 2020s"
 //
 // Every optional line is omitted when its signal is absent, never emitted
 // empty: a constant "Sound:" label on un-analysed tracks would be noise shared
@@ -205,6 +242,11 @@ export function formatTrackText(
   // cheapest musical signal that exists before the tagger has decided anything.
   const sound = soundDescriptors(acoustics);
   if (sound.length) lines.push(`Sound: ${sound.join(', ')}`);
+  // Era as a word (#1246). Label-derived, not measured — which is why it gets
+  // its own line instead of riding Sound:, and why labelOnlyVectorCount
+  // deliberately does NOT treat it as musical signal.
+  const decade = decadeWord(song.eraYear);
+  if (decade) lines.push(`Era: ${decade}`);
   return lines.join('\n');
 }
 

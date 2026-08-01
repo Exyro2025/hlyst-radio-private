@@ -77,6 +77,23 @@ async function main() {
     assert.deepEqual(soundDescriptors({ audioMoods: [] }), []);
   });
 
+  await test('only measured-instrumental speaks; vocal tracks get no word', () => {
+    // [] is a MEASUREMENT (Demucs found no vocals); null is its absence. And
+    // "vocal" on ~80% of a library would be shared noise, so it stays silent.
+    assert.deepEqual(soundDescriptors({ vocalRanges: [] }), ['instrumental']);
+    assert.deepEqual(soundDescriptors({ vocalRanges: [{ startMs: 0, endMs: 1000 }] }), []);
+    assert.deepEqual(soundDescriptors({ vocalRanges: null }), []);
+  });
+
+  await test('full descriptor order is moods, tempo, mode, instrumental', () => {
+    assert.deepEqual(
+      soundDescriptors({
+        audioMoods: ['dreamy'], bpm: 92, musicalKey: '8A', vocalRanges: [],
+      }),
+      ['dreamy', 'mid-tempo', 'minor key', 'instrumental'],
+    );
+  });
+
   console.log('formatTrackText (the canonical embed text):');
 
   const song = { title: 'Parasite', artist: 'Nick Drake', album: 'Pink Moon', year: 2013, genres: ['Folk'] };
@@ -117,6 +134,18 @@ async function main() {
   await test('the formatter is deterministic — same input, same string', () => {
     const a = { audioMoods: ['dreamy', 'warm'], bpm: 92, musicalKey: '8A' };
     assert.equal(formatTrackText(song, null, a), formatTrackText(song, null, { ...a }));
+  });
+
+  await test('a resolved era becomes a decade word on its own line, last', () => {
+    // eraYear comes from show-filter.resolveEraYear at the call sites — the
+    // formatter never reads raw `year` for this (a compilation's year is the
+    // compilation's own release date).
+    const text = formatTrackText({ ...song, eraYear: 1994 }, null, { bpm: 88 });
+    assert.match(text, /\nEra: 1990s$/);
+    assert.match(text, /\nSound: mid-tempo\n/);
+    // No resolved era (null = unknown) → no line, and junk years stay silent.
+    assert.doesNotMatch(formatTrackText(song, null, { bpm: 88 }), /Era:/);
+    assert.doesNotMatch(formatTrackText({ ...song, eraYear: 7 }, null, null), /Era:/);
   });
 
   console.log('resolveIndexTextFormat (what shape the stored index actually is):');

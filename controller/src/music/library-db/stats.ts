@@ -36,6 +36,12 @@ const STATS_TTL_MS = 5000;
 // hand-edited rows, and then it undercounts — the safe direction for an
 // advisory.
 //
+// vocal_ranges (the 'instrumental' marker) is deliberately NOT predicated
+// here: it's only ever written by an analysis pass that also writes bpm, so
+// the bpm check subsumes it. And the Era: line never counts as musical signal
+// at all — it's derived from the year LABEL, i.e. exactly the kind of text
+// this count exists to flag.
+//
 // Deliberately a raw count with no threshold or verdict attached: what counts
 // as "too high" depends on library size and on which enrichment the operator
 // has deliberately turned off, so the judgement belongs at the surface that

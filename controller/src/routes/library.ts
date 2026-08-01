@@ -14,6 +14,7 @@ import * as lastfm from '../music/lastfm.js';
 import * as musicbrainz from '../music/musicbrainz.js';
 import * as settings from '../settings.js';
 import * as embeddings from '../music/embeddings.js';
+import { resolveEraYear } from '../music/show-filter.js';
 import { buildGenreSuggest } from '../music/genre-suggest.js';
 import { tagBatch, taggerBatchSystem } from '../music/tagger-core.js';
 import { promptVocabHash } from '../music/embeddings.js';
@@ -684,6 +685,11 @@ router.post('/library/retag', requireAdmin, async (req, res) => {
     // 3. Re-embed (best-effort — if embeddings are off or fail, fall through).
     if (embedCfg.enabled !== false && embeddings.isAvailable()) {
       try {
+        // Same acoustics + era inputs as the bulk path (#1246), read back from
+        // the row this route just upserted — a single-track retag must produce
+        // the SAME text as phaseEmbed would, or this one track drifts in the
+        // KNN space exactly like a task-prefix mismatch would.
+        const rec = db.getTrack(id);
         const text = embeddings.formatTrackText(
           {
             title: song.title,
@@ -691,18 +697,17 @@ router.post('/library/retag', requireAdmin, async (req, res) => {
             album: song.album,
             year: song.year ?? null,
             genres: subsonic.songGenres(song),
+            eraYear: resolveEraYear(
+              rec?.year ?? song.year, rec?.originalYear ?? null, rec?.isCompilation ?? null,
+            ),
           },
           { lastfmTags, lyricExcerpt },
-          // Same measured-acoustics input as the bulk path (#1246), read back
-          // from the row this route just upserted — a single-track retag must
-          // produce the SAME text as phaseEmbed would, or this one track drifts
-          // in the KNN space exactly like a task-prefix mismatch would.
-          (() => {
-            const rec = db.getTrack(id);
-            return rec
-              ? { bpm: rec.bpm, musicalKey: rec.musicalKey, audioMoods: rec.audioMoods }
-              : null;
-          })(),
+          rec
+            ? {
+                bpm: rec.bpm, musicalKey: rec.musicalKey, audioMoods: rec.audioMoods,
+                vocalRanges: rec.vocalRanges,
+              }
+            : null,
         );
         // Document embed — must match the task-prefix mode the rest of the
         // index was built in, or this one track drifts in the KNN space.
