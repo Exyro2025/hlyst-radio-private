@@ -805,9 +805,9 @@ export default function SettingsPanel() {
                     </div>
                     <div className="field-hint">
                       Keeps the drum/bass/vocal/other stems the heavy analyzer already separates
-                      during analysis (~25&nbsp;MB per track, oldest evicted past the budget).
-                      Needs the heavy analyzer image (Demucs). Turning it on now also backfills:
-                      the analysis pass targets tracks with no cached stems, so an
+                      during analysis (typically 13&ndash;25&nbsp;MB per track, oldest evicted past
+                      the budget). Needs the heavy analyzer image (Demucs). Turning it on now also
+                      backfills: the analysis pass targets tracks with no cached stems, so an
                       already-scanned library fills in over successive runs.
                     </div>
                   </div>
@@ -821,7 +821,7 @@ export default function SettingsPanel() {
                         type="number"
                         step={1}
                         min={1}
-                        max={500}
+                        max={1000}
                         value={form.transitions.stemCacheGb}
                         onChange={(e: ChangeEvent<HTMLInputElement>) =>
                           setForm(f =>
@@ -833,9 +833,15 @@ export default function SettingsPanel() {
                       />
                       <span className="text-sm opacity-70">
                         GB &middot; holds ~
-                        {/* /25 mirrors the controller's stem-cache APPROX_TRACK_BYTES (~25 MB/track) */}
+                        {/* /25 mirrors the controller's stem-cache APPROX_TRACK_BYTES ceiling;
+                            /13 the field-measured average (#1257) — the real figure lands
+                            between, and the doctor sizes off the cache's own average. */}
                         {Math.floor(
                           ((Number(form.transitions.stemCacheGb) || 15) * 1024) / 25,
+                        ).toLocaleString('en-GB')}
+                        &ndash;
+                        {Math.floor(
+                          ((Number(form.transitions.stemCacheGb) || 15) * 1024) / 13,
                         ).toLocaleString('en-GB')}{' '}
                         tracks
                       </span>

@@ -557,7 +557,8 @@ export const DEFAULTS = {
     // pass keeps the Demucs stems it already computes (head + tail windows)
     // as FLAC under state/stems/<id>/ so transition renders are a fast mix
     // instead of a fresh separation. Needs the demucs stack like
-    // vocalActivity; ~21-25 MB per track, LRU-swept to stemCacheGb.
+    // vocalActivity; ~13-25 MB per track (field average ~13, #1257),
+    // LRU-swept to stemCacheGb.
     stemCache: false,
     stemCacheGb: 15,
     // Quiet-times gate (#1099): pause the analysis pass while anyone is

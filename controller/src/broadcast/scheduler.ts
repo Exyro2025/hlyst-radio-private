@@ -774,10 +774,21 @@ async function cleanup() {
   // operator's byte budget (feature: stem-blend transitions). The analysis
   // pass sweeps after itself too; this catches lazily-added dirs.
   try {
-    const { removed, freedBytes } = await stemCacheStore.sweep();
+    const { removed, freedBytes, failedDirs, overBudgetBytes } = await stemCacheStore.sweep();
     if (removed) {
       queue.log('scheduler',
         `Stem cache: evicted ${removed} track dir(s) (${Math.round(freedBytes / 1_000_000)} MB freed)`);
+    }
+    // A sweep that couldn't reach the budget is an operator problem, not a
+    // no-op (#1257) — say so every hour it persists rather than sitting
+    // silently 170 GB over. The usual cause is the controller container
+    // being unable to delete what the analyzer wrote (ownership/permissions
+    // on state/stems, e.g. a relocated stems mount).
+    if (overBudgetBytes > 0) {
+      const budgetGb = settings.get()?.audio?.stemCacheGb ?? 15;
+      queue.log('error',
+        `Stem cache: still ${(overBudgetBytes / 1024 ** 3).toFixed(1)} GB over its ${budgetGb} GB budget after the sweep` +
+        (failedDirs ? ` — ${failedDirs} dir delete(s) failed; check ownership/permissions on state/stems` : ''));
     }
   } catch (err) {
     queue.log('error', `Stem cache sweep failed: ${err.message}`);

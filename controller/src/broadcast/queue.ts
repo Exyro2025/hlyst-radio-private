@@ -2177,6 +2177,11 @@ class Queue {
       endedAt: i.endedAt,
       queuedAt: i.queuedAt,
       sent: i.sent,
+      // The track arrives via a pre-rendered stem blend rather than a plain
+      // crossfade (#1257 — the admin queue badges the seam type). Stamped at
+      // pair drain, cleared if the clip is pulled with a cancel, so it's
+      // definitive, not a prediction; absent = plain crossfade.
+      stemSeam: i.stemSeam || undefined,
     });
     return {
       current: this.current ? mapItem(this.current) : null,
