@@ -28,6 +28,7 @@ import asyncio
 import json
 import logging
 import os
+import time
 from contextlib import asynccontextmanager
 from typing import Any
 
@@ -48,6 +49,37 @@ ANALYZE_SECONDS = os.environ.get("ANALYZE_SECONDS", "").strip() or "40"
 # CLAP_MODEL_PATH is given — transformers then pulls the CLAP weights here. The
 # compose files mount a named volume over it so the download survives recreates.
 ANALYZER_HF_HOME = os.environ.get("ANALYZER_HF_HOME", "/opt/analyzer/hf-cache")
+
+# Idle worker recycle (#1204 follow-up). The worker's own idle release
+# (ANALYZE_IDLE_UNLOAD_S, analyze_worker.py) drops the CLAP/Demucs singletons,
+# but ~1GB of librosa/numba/torch scratch stays resident in the process — heap
+# a release can't reach. Restarting the worker is the only full reclaim (on
+# cuda it also drops the few-hundred-MB CUDA context the docs lament), so after
+# this many seconds with no HEAVY use — same clock semantics as the worker's
+# release: lean bpm/key traffic doesn't count — the shim terminates the worker
+# and lets run()'s supervisor respawn it. The recycle holds the request lock,
+# so a request that lands mid-recycle queues behind the respawn instead of
+# 500ing; the cost is one re-paid boot (imports, a few seconds) on the next
+# request. Default sits above the worker's largest release window so the cheap
+# release always fires first; 0 disables.
+_RECYCLE_ENV = os.environ.get("ANALYZE_RECYCLE_IDLE_S", "").strip()
+try:
+    RECYCLE_IDLE_S = float(_RECYCLE_ENV) if _RECYCLE_ENV else 3600.0
+except ValueError:
+    logging.getLogger("analyzer").warning(
+        f"ANALYZE_RECYCLE_IDLE_S={_RECYCLE_ENV!r} is not a number; using 3600"
+    )
+    RECYCLE_IDLE_S = 3600.0
+
+# Mirror of the worker's env-default flags (same truthy set as
+# analyze_worker.py) — when either is on, the worker loads models even for
+# requests that don't ask, so every /analyze counts as heavy use.
+def _env_flag(name: str) -> bool:
+    return os.environ.get(name, "").strip().lower() in ("1", "true", "yes")
+
+
+EMBED_DEFAULT = _env_flag("ANALYZE_AUDIO_EMBEDDING")
+VOCAL_DEFAULT = _env_flag("ANALYZE_VOCAL_ACTIVITY")
 
 # Max bytes of one worker stdout line. asyncio's default StreamReader limit is
 # 64 KiB, which a batch /embed-text response blows straight past (17 mood
@@ -91,6 +123,15 @@ class StdioWorker:
         # capability metadata (audio_embedding_capable / vocal_activity_capable).
         # Cleared on every restart cycle.
         self.ready_meta: dict[str, Any] = {}
+        # Heavy-use bookkeeping for /health residency + the idle recycle.
+        # `last_heavy` is monotonic time of the last completed request that
+        # actually exercised CLAP/Demucs (None = none since this spawn);
+        # `models_resident` is best-effort — set true when a heavy request
+        # completes, cleared when the worker's idle-release log line goes by
+        # (see _pump_stderr) or the worker restarts.
+        self.last_heavy: float | None = None
+        self.models_resident = False
+        self.recycles = 0
 
     async def run(self) -> None:
         """Keep the worker alive forever (or until cancelled)."""
@@ -118,6 +159,11 @@ class StdioWorker:
         self.ready = False
         self.proc = None
         self.ready_meta = {}
+        # A fresh worker holds no models (env pre-warm is re-detected at ready);
+        # clearing last_heavy also stands the recycle loop down until the next
+        # heavy request against the new process.
+        self.last_heavy = None
+        self.models_resident = False
 
     def _terminate(self) -> None:
         if self.proc and self.proc.returncode is None:
@@ -158,6 +204,14 @@ class StdioWorker:
             raise
         self.ready_meta = {k: v for k, v in msg.items() if k != "ready"}
         log.info(f"[{self.name}] ready {self.ready_meta or ''}".rstrip())
+        # With an env flag on, the worker pre-warms that model BEFORE ready —
+        # count it as resident (and as heavy use, so the recycle clock runs)
+        # unless the capability probe says the load failed.
+        if (EMBED_DEFAULT and self.ready_meta.get("audio_embedding_capable")) or (
+            VOCAL_DEFAULT and self.ready_meta.get("vocal_activity_capable")
+        ):
+            self.models_resident = True
+            self.last_heavy = time.monotonic()
         self.ready = True
 
     async def _await_message(self) -> dict[str, Any]:
@@ -184,7 +238,30 @@ class StdioWorker:
             line = await proc.stderr.readline()
             if not line:
                 break
-            log.info(f"[{self.name}] {line.decode().rstrip()}")
+            text = line.decode().rstrip()
+            log.info(f"[{self.name}] {text}")
+            # The worker announces its idle release on stderr (the wording is
+            # pinned by a keep-in-sync note at the log call in
+            # analyze_worker._release_models). Unsolicited stdout would corrupt
+            # the one-request-in-flight protocol, so stderr is the only channel
+            # this fact can ride — best-effort by design.
+            if "released" in text and "reloads on next use" in text:
+                self.models_resident = False
+
+    @staticmethod
+    def _wants_models(payload: dict[str, Any]) -> bool:
+        """Whether this request can load/use CLAP or Demucs. Texts always force
+        CLAP; a render_transition mixes already-cached stems (no model); an
+        analyze counts when it opts in per-request OR the worker's env default
+        flags opt every request in."""
+        if payload.get("texts") is not None:
+            return True
+        if payload.get("op"):
+            return False
+        return bool(
+            payload.get("embed") or payload.get("vocal") or payload.get("stems_dir")
+            or EMBED_DEFAULT or VOCAL_DEFAULT
+        )
 
     async def request(self, payload: dict[str, Any]) -> dict[str, Any]:
         async with self.lock:
@@ -198,7 +275,52 @@ class StdioWorker:
             req = json.dumps(payload, ensure_ascii=False)
             self.proc.stdin.write((req + "\n").encode())
             await self.proc.stdin.drain()
-            return await self._await_message()
+            msg = await self._await_message()
+            # Stamp heavy use from what actually came back, not just what was
+            # asked: an analyze whose CLAP load failed still answers ok=true
+            # (graceful degrade) but carries no model-derived fields, and must
+            # not read as "models resident".
+            if self._wants_models(payload) and (
+                (payload.get("texts") is not None and msg.get("ok"))
+                or any(k in msg for k in ("audio_embedding", "vocal_ranges", "stems_cached"))
+            ):
+                self.last_heavy = time.monotonic()
+                self.models_resident = True
+            return msg
+
+    async def recycle_loop(self, idle_s: float) -> None:
+        """Terminate the worker after `idle_s` seconds with no heavy use so
+        run()'s supervisor respawns it fresh — the full-memory counterpart to
+        the worker's own model release (see ANALYZE_RECYCLE_IDLE_S above).
+        Holding the lock across the respawn means a request that races the
+        recycle queues and then runs against the new worker instead of 500ing."""
+        while True:
+            await asyncio.sleep(60)
+            if not self.ready or self.last_heavy is None:
+                continue
+            if time.monotonic() - self.last_heavy < idle_s:
+                continue
+            async with self.lock:
+                # Re-check under the lock: a heavy request may have completed
+                # while we waited to acquire it.
+                if self.last_heavy is None or time.monotonic() - self.last_heavy < idle_s:
+                    continue
+                log.info(
+                    f"[{self.name}] idle {int(idle_s)}s without heavy use — recycling worker "
+                    "for a full memory reclaim (re-pays imports on next request)"
+                )
+                self.recycles += 1
+                self.ready = False
+                self._terminate()
+                # Wait (bounded) for run() to respawn and re-ready before
+                # releasing the lock. On timeout, release anyway — queued
+                # requests then fail fast exactly as they do for a crashed
+                # worker, and run() keeps retrying the respawn upstream.
+                deadline = time.monotonic() + 180.0
+                while time.monotonic() < deadline and not self.ready:
+                    await asyncio.sleep(0.5)
+                if not self.ready:
+                    log.warning(f"[{self.name}] worker not back within 180s of recycle")
 
 
 analyzer_worker = StdioWorker(
@@ -214,12 +336,19 @@ async def lifespan(_app: FastAPI):
     # Kick the worker supervisor as a background task so uvicorn binds :8080
     # immediately — otherwise a cold CLAP/Demucs load would block the port bind
     # and the controller's probe would see "connection refused" during boot.
-    task = asyncio.create_task(analyzer_worker.run(), name="analyze-run")
+    tasks = [asyncio.create_task(analyzer_worker.run(), name="analyze-run")]
+    if RECYCLE_IDLE_S > 0:
+        tasks.append(
+            asyncio.create_task(
+                analyzer_worker.recycle_loop(RECYCLE_IDLE_S), name="analyze-recycle"
+            )
+        )
     try:
         yield
     finally:
-        task.cancel()
-        await asyncio.gather(task, return_exceptions=True)
+        for task in tasks:
+            task.cancel()
+        await asyncio.gather(*tasks, return_exceptions=True)
 
 
 app = FastAPI(title="subwave-analyzer", lifespan=lifespan)
@@ -264,6 +393,22 @@ async def health():
         "analyze_text_capable": (
             analyzer_worker.ready_meta.get("text_embedding_capable") if analyzer_worker.ready else None
         ),
+        # Best-effort residency (#1204 follow-up): whether CLAP/Demucs are
+        # believed loaded in the worker right now — true after a heavy request
+        # completes, false once the worker's idle release fires or the worker
+        # restarts. Lets an operator confirm the release without grepping logs.
+        # None while the worker is down.
+        "analyze_models_resident": analyzer_worker.models_resident if analyzer_worker.ready else None,
+        # Seconds since the last completed heavy (model-using) request against
+        # THIS worker process; null when none has run since it spawned.
+        "analyze_heavy_idle_s": (
+            round(time.monotonic() - analyzer_worker.last_heavy, 1)
+            if analyzer_worker.ready and analyzer_worker.last_heavy is not None
+            else None
+        ),
+        # How many times the idle recycle (ANALYZE_RECYCLE_IDLE_S) has bounced
+        # the worker for a full memory reclaim since the container started.
+        "analyze_worker_recycles": analyzer_worker.recycles,
     }
 
 

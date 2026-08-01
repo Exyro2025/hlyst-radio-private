@@ -321,6 +321,12 @@ services:
       # long-lived worker and nothing else ever releases them, so on a small
       # host they end up parked in swap (#1204).
       - ANALYZE_IDLE_UNLOAD_S=${ANALYZE_IDLE_UNLOAD_S:-}
+      # Seconds of no heavy (CLAP/Demucs) use before the sidecar recycles the
+      # whole worker process — the full-memory reclaim behind the model release
+      # above, catching the ~1GB of librosa/numba/torch scratch a release can't
+      # return (default 3600; 0 = never). Requests racing a recycle queue
+      # behind the respawn rather than failing.
+      - ANALYZE_RECYCLE_IDLE_S=${ANALYZE_RECYCLE_IDLE_S:-}
       - CLAP_MODEL=${CLAP_MODEL:-}
       - CLAP_MODEL_PATH=${CLAP_MODEL_PATH:-}
       # Demucs model + analysis-window overrides (worker reads both; see
