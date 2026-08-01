@@ -164,6 +164,39 @@ await check('removeVoice refuses an unknown name', async () => {
   await assert.rejects(lib.removeVoice('ghost.wav'), /unknown voice/i);
 });
 
+// --- chatterbox.listReferenceVoices delegates to the one scanner -----------
+// Signature is load-bearing: routes/settings/core.ts publishes the result as
+// both tts.chatterboxVoices and tts.pocketTtsCustomVoices on every 3s poll.
+const chatterbox = await import('../src/audio/chatterbox.js');
+
+await check('listReferenceVoices returns the same filenames scan() found', async () => {
+  const scanned = (await lib.scan()).map(e => e.file);
+  const listed = await chatterbox.listReferenceVoices();
+  assert.deepEqual(listed, scanned);
+});
+await check('listReferenceVoices returns a plain string[] of .wav names', async () => {
+  const listed = await chatterbox.listReferenceVoices();
+  assert.ok(Array.isArray(listed));
+  for (const v of listed) {
+    assert.equal(typeof v, 'string', 'must be filenames, not objects');
+    assert.match(v, /\.wav$/i);
+  }
+});
+await check('a newly imported voice shows up without a restart', async () => {
+  // No ffmpeg needed: a .wav upload is stored through untouched.
+  writeFileSync(join(VOICES, 'seed-check.wav'), 'seed');
+  assert.ok((await chatterbox.listReferenceVoices()).includes('seed-check.wav'));
+});
+await check('listReferenceVoices never offers a directory named *.wav', async () => {
+  // The discriminating case for the delegation: the pre-refactor scanner
+  // filtered on the extension alone and would hand a DIRECTORY to the picker,
+  // where selecting it fails at render time with a confusing worker error.
+  // scan() stats every entry, so only real files survive.
+  mkdirSync(join(VOICES, 'bogus.wav'), { recursive: true });
+  assert.ok(!(await chatterbox.listReferenceVoices()).includes('bogus.wav'));
+  assert.ok(!(await lib.scan()).some(e => e.file === 'bogus.wav'));
+});
+
 rmSync(root, { recursive: true, force: true });
 if (failures) {
   console.error(`\nvoice-library: ${failures} failure(s)`);
