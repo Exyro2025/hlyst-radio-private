@@ -7,13 +7,13 @@
 // Part of the library/ split - see ../LibraryPanel.tsx.
 
 import { Fragment, useRef, useState } from 'react';
-import { RotateCcw, Sparkles, ListPlus, X, Pencil, Ban, Tags, MoreVertical } from 'lucide-react';
+import { RotateCcw, Sparkles, ListPlus, X, Pencil, Ban, Tags, MoreVertical, Heart, HeartOff } from 'lucide-react';
 import { Btn } from '../ui';
 import { cn } from '../../../lib/cn';
  
 import { SkeletonRows } from '@/components/ui/skeleton';
 import { EmptyState } from '@/components/ui/empty-state';
-import type { BlockType, TableVariant, Track } from './types';
+import type { BlockType, LikeIndex, TableVariant, Track } from './types';
 import {
   CHECK_HIT,
   EnergyMeter,
@@ -45,6 +45,23 @@ interface TrackTableProps {
   selected: Set<string>;
   onToggleSelect: (id: string) => void;
   onToggleAll: (rows: Track[]) => void;
+  // Likes (#1253). `likeIndex` decorates rows from every source; `liking` is the
+  // id with a toggle in flight. `onClearLikes` wraps DELETE /likes/song/:id —
+  // the operator's tool for pruning LISTENER likes, which the heart never does.
+  likeIndex: LikeIndex;
+  liking: string | null;
+  onToggleLike: (t: Track, liked: boolean) => void;
+  onClearLikes: (t: Track) => void;
+}
+
+// Heart state for one row: the inline `likedByOperator`/`likeCount` on a
+// /library/liked row if present, otherwise the shared index.
+function likeStateFor(t: Track, index: LikeIndex): { liked: boolean; count: number } {
+  if (t.likedByOperator != null || t.likeCount != null) {
+    return { liked: !!t.likedByOperator, count: t.likeCount ?? 0 };
+  }
+  const hit = index[t.id];
+  return { liked: !!hit?.operator, count: hit?.count ?? 0 };
 }
 
 export function TrackTable(p: TrackTableProps) {
@@ -62,6 +79,13 @@ export function TrackTable(p: TrackTableProps) {
         )}
         {p.tab === 'untagged' && (
           <EmptyState compact title="Everything's tagged" description="Nice — the whole library has moods." />
+        )}
+        {p.tab === 'liked' && (
+          <EmptyState
+            compact
+            title="No likes yet"
+            description="The heart on the player feeds this, and you can heart tracks here yourself."
+          />
         )}
         {p.tab === 'recent' && <EmptyState compact title="Nothing here yet" />}
       </>
@@ -99,6 +123,7 @@ export function TrackTable(p: TrackTableProps) {
         const tagged = !!(t.moods && t.moods.length > 0);
         const editing = p.editingId === t.id;
         const dur = fmtDuration(t.duration);
+        const like = likeStateFor(t, p.likeIndex);
         return (
           <Fragment key={t.id}>
           <div className={cn('lib-row !flex sm:!grid', p.flashId === t.id && 'flash')}>
@@ -158,7 +183,32 @@ export function TrackTable(p: TrackTableProps) {
                 onEdit={p.onEdit}
                 onRetag={p.onRetag}
                 onBlock={p.onBlock}
+                like={like}
+                liking={p.liking === t.id}
+                onToggleLike={p.onToggleLike}
+                onClearLikes={p.onClearLikes}
               />
+              <Btn
+                sm
+                className="hidden sm:inline-flex"
+                onClick={() => p.onToggleLike(t, like.liked)}
+                disabled={p.liking === t.id}
+                title={like.liked ? 'Remove your heart' : 'Heart this track'}
+                aria-pressed={like.liked}
+                aria-label={like.liked ? `unlike ${t.title || 'track'}` : `like ${t.title || 'track'}`}
+              >
+                {p.liking === t.id ? '…' : (
+                  <span className="inline-flex items-center gap-1">
+                    <Heart
+                      size={12}
+                      className={cn(like.liked && 'fill-vermilion text-vermilion')}
+                    />
+                    {/* The count is every like on the song, listeners included —
+                        the filled heart is the operator's own, separately. */}
+                    {like.count > 0 && <span className="mono-num text-[10px]">{like.count}</span>}
+                  </span>
+                )}
+              </Btn>
               <Btn sm className="hidden sm:inline-flex" onClick={() => p.onQueue(t)} disabled={!!p.queuing} title="Queue on air">
                 {p.queuing === t.id ? '…' : <ListPlus size={12} />}
               </Btn>
@@ -220,6 +270,7 @@ export function TrackTable(p: TrackTableProps) {
 
 export function RowActionsMenu({
   track, tagged, editing, queuing, retagging, blocking, disabled, onQueue, onEdit, onRetag, onBlock,
+  like, liking, onToggleLike, onClearLikes,
 }: {
   track: Track;
   tagged: boolean;
@@ -232,13 +283,17 @@ export function RowActionsMenu({
   onEdit: (t: Track) => void;
   onRetag: (t: Track) => void;
   onBlock: (t: Track, type: BlockType) => void;
+  like: { liked: boolean; count: number };
+  liking: boolean;
+  onToggleLike: (t: Track, liked: boolean) => void;
+  onClearLikes: (t: Track) => void;
 }) {
   const [open, setOpen] = useState(false);
   const rootRef = useRef<HTMLDivElement>(null);
   const triggerRef = useRef<HTMLButtonElement>(null);
   const run = (fn: () => void) => { setOpen(false); fn(); };
   useDismissOnOutside(open, () => setOpen(false), rootRef, triggerRef);
-  const busy = queuing || retagging || blocking;
+  const busy = queuing || retagging || blocking || liking;
 
   return (
     <div ref={rootRef} className="relative sm:hidden">
@@ -266,6 +321,19 @@ export function RowActionsMenu({
           <button type="button" className={MENU_ITEM} disabled={disabled} onClick={() => run(() => onRetag(track))}>
             {tagged ? <RotateCcw size={13} /> : <Sparkles size={13} />} {tagged ? 'Retag with AI' : 'Tag with AI'}
           </button>
+          <button type="button" className={MENU_ITEM} disabled={disabled} onClick={() => run(() => onToggleLike(track, like.liked))}>
+            <Heart size={13} className={cn(like.liked && 'fill-vermilion text-vermilion')} />
+            {like.liked ? 'Unlike this track' : 'Like this track'}
+          </button>
+          {like.count > 0 && (
+            <button type="button" className={cn(MENU_ITEM, 'items-start')} disabled={disabled} onClick={() => run(() => onClearLikes(track))}>
+              <HeartOff size={13} className="mt-px flex-none" />
+              <span>
+                Clear all likes ({like.count})
+                <span className="block text-[10px] text-muted">drops listener likes too — un-hearting only removes yours</span>
+              </span>
+            </button>
+          )}
           <span className="my-1 block border-t border-dashed border-separator-strong" />
           <button type="button" className={MENU_ITEM} disabled={disabled} onClick={() => run(() => onBlock(track, 'track'))}>
             <Ban size={13} /> Never play this track

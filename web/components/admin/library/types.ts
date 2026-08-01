@@ -28,7 +28,19 @@ export interface Track {
   instrumental?: boolean | null;
   // Cosine match vs the query — only on sounds-like search results.
   similarity?: number | null;
+  // Likes (#1253). Only /library/liked rows carry these inline; every other
+  // listing gets its heart state from the shared LikeIndex instead, so one
+  // fetch covers library.db rows, Navidrome search hits and CLAP results alike.
+  likeCount?: number;
+  likedByOperator?: boolean;
+  lastLikedAt?: string;
 }
+
+// GET /likes/index — {songId: {count, operator}} for every liked song. Bounded
+// by distinct liked songs (the store caps at 5000 records).
+export type LikeIndex = Record<string, { count: number; operator: boolean }>;
+
+export interface LikedResponse { rows: Track[]; total: number }
 
 export interface BrowseResponse {
   rows: Track[];
@@ -101,8 +113,11 @@ export type Tab = 'tracks' | 'browse' | 'search' | 'history' | 'blocked';
 // The Tracks tab folds the old Recent + Untagged tabs into one view with an
 // All / Needs-tags toggle; TableVariant keeps TrackTable's per-view behaviour
 // (empty-state copy, accent Tag button) keyed on what's actually shown.
-export type TrackMode = 'all' | 'needs';
-export type TableVariant = 'recent' | 'browse' | 'search' | 'untagged';
+export type TrackMode = 'all' | 'needs' | 'liked';
+export type TableVariant = 'recent' | 'browse' | 'search' | 'untagged' | 'liked';
+// Ordering for the Liked mode. 'recent' (default) is what replaces the Dash
+// card's recent-likes feed; 'count' replaces its most-liked leaderboard.
+export type LikedSort = 'recent' | 'count' | 'artist';
 export type Sort = 'artist' | 'title' | 'year' | 'taggedAt' | 'bpm' | 'loudness' | 'pace';
 export type Energy = 'any' | 'low' | 'medium' | 'high';
 export type Vocal = 'any' | 'instrumental' | 'vocal';

@@ -6,6 +6,7 @@ import express from 'express';
 import { requireAdmin } from '../middleware/auth.js';
 import * as library from '../music/library.js';
 import * as blocklist from '../music/blocklist.js';
+import * as likes from '../broadcast/likes.js';
 import * as db from '../music/library-db.js';
 import * as analyzer from '../music/analyzer.js';
 import * as coverage from '../music/library-coverage.js';
@@ -105,6 +106,79 @@ router.get('/library/history', requireAdmin, async (req, res) => {
     const offset = Math.max(parseIntSafe(req.query?.offset, 0), 0);
     const { total, rows } = db.listPlays({ limit, offset });
     res.json({ total, rows });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ---------------------------------------------------------------------------
+// GET /library/liked — the Liked mode of the admin Library's Tracks tab.
+// Query: limit=50 offset=0 sort=recent|count|artist q=foo
+//
+// Sourced from the likes store rather than library.db, then enriched from the
+// index where a row exists. That order matters: a liked track may never have
+// been walked or tagged (listeners heart whatever is on air), and the Browse
+// tab's tagged-only gate would hide exactly those. The stored snapshot is
+// always present, so every liked track renders either way.
+//
+// It lives here rather than in routes/likes.ts because it does the library-db
+// enrichment and returns the row shape the library table already renders.
+// ---------------------------------------------------------------------------
+router.get('/library/liked', requireAdmin, async (req, res) => {
+  try {
+    await library.load();
+    await likes.load();
+    const limit = Math.min(Math.max(parseIntSafe(req.query?.limit, 50), 1), 200);
+    const offset = Math.max(parseIntSafe(req.query?.offset, 0), 0);
+    const sort = req.query?.sort === 'count' || req.query?.sort === 'artist'
+      ? req.query.sort
+      : 'recent';
+    const q = (typeof req.query?.q === 'string' ? req.query.q : '').trim().toLowerCase();
+
+    const rows = likes.likedSongs().map((entry) => {
+      let rec: any = null;
+      try { rec = db.getTrack(entry.songId); } catch { /* index unavailable */ }
+      const snap = entry.track;
+      return {
+        id: entry.songId,
+        title: rec?.title ?? snap.title ?? null,
+        artist: rec?.artist ?? snap.artist ?? null,
+        album: rec?.album ?? snap.album ?? null,
+        year: rec?.year ?? snap.year ?? null,
+        genre: rec?.genre ?? snap.genre ?? null,
+        // The snapshot names it `duration`, library.db `durationSec`; the table
+        // reads `duration`, so normalise here rather than at the call site.
+        duration: snap.duration ?? rec?.durationSec ?? null,
+        moods: rec?.moods ?? [],
+        energy: rec?.energy ?? null,
+        source: rec?.source ?? null,
+        taggedAt: rec?.taggedAt ?? null,
+        bpm: rec?.bpm ?? null,
+        musicalKey: rec?.musicalKey ?? null,
+        loudnessLufs: rec?.loudnessLufs ?? null,
+        instrumental: rec?.vocalRanges == null ? null : rec.vocalRanges.length === 0,
+        likeCount: entry.count,
+        likedByOperator: entry.operator,
+        lastLikedAt: entry.lastLikedAt,
+      };
+    }).filter((row) => !subsonic.isStationArchive(row));
+
+    const matched = q
+      ? rows.filter((r) =>
+        `${r.title ?? ''} ${r.artist ?? ''} ${r.album ?? ''}`.toLowerCase().includes(q))
+      : rows;
+
+    const byName = (r: typeof rows[number]) =>
+      `${(r.artist ?? '').toLowerCase()} ${(r.album ?? '').toLowerCase()} ${(r.title ?? '').toLowerCase()}`;
+    matched.sort((a, b) => {
+      if (sort === 'artist') return byName(a).localeCompare(byName(b));
+      // Equal counts tie-break on recency so the order is stable rather than
+      // whatever insertion order the store happened to hold.
+      if (sort === 'count' && b.likeCount !== a.likeCount) return b.likeCount - a.likeCount;
+      return b.lastLikedAt.localeCompare(a.lastLikedAt);
+    });
+
+    res.json({ total: matched.length, rows: matched.slice(offset, offset + limit) });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
