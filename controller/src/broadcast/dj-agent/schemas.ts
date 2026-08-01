@@ -11,6 +11,7 @@ import * as dj from '../../llm/dj.js';
 import { modelTolerant } from '../../llm/sdk.js';
 import * as likes from '../likes.js';
 import { autoVoiceAllowed } from '../voice-policy.js';
+import { SEED_NOT_A_PICK_CLAUSE } from '../../util/pick-seed.js';
 
 
 // Plain .nullable() fields, deliberately — GLM's malformed spellings of
@@ -21,7 +22,13 @@ import { autoVoiceAllowed } from '../voice-policy.js';
 // SDK renders Zod with io:'input'), which invites every provider to omit it —
 // see modelTolerant's comment in core/pure.ts.
 export const PICK_SCHEMA = z.object({
-  id: z.string().describe('the exact song id returned by one of the discovery tools — never invent or compose ids'),
+  // The seed clause is NOT decoration (#1247): "never invent or compose ids" is
+  // literally satisfied by the on-air track's id, which the pick event message
+  // hands over precisely so the model can seed the discovery tools with it — so
+  // a model cornered into committing with an empty tool result answered with it,
+  // the run was discarded, and the slot fell to the pool picker. One shared
+  // wording, in util/pick-seed.ts; don't inline a second copy here.
+  id: z.string().describe(`the exact song id returned by one of the discovery tools — never invent or compose ids. ${SEED_NOT_A_PICK_CLAUSE}`),
   reason: z.string().describe('internal scratchpad only — max 12 words, never shown to the listener; do not justify, just note what makes THIS pick a fresh step (new artist, a shift in energy/era/texture), not a vibe label you would recycle pick after pick (e.g. "new artist, lifts the energy", never a repeated "mellow reflective step")'),
   say: z.string().nullable().describe('when the latest event message says to write a spoken link, set this to one or two natural sentences in the DJ voice that INTRODUCE the track you are about to play — set it up, name the artist or capture its feel, vary your opener. Do NOT back-announce, recap, or name the track that just played (a listener request may slip in ahead of your pick, so what aired right before it is not certain). Never state a clock time unless the event message tells you when the link airs — then use exactly that time. When the event says stay silent, set this to null'),
   // Transition effects (only honoured when the system prompt offers them — persona djMode, see settings.effectsActive).
@@ -85,7 +92,12 @@ export function requestSchema() {
     // salvage and then the caller's stateless cascade — the branch that keeps
     // the "never refuse music" rule true.
     kind: z.enum(['track', 'chat']).describe('"track" when the listener wants music played — the normal case, and the right answer whenever you are unsure. "chat" ONLY when the message is not a music request at all (a question, a greeting, banter, a demand to change how the station behaves) — then "ack" answers them, "id" is null, and nothing is queued.'),
-    id: z.string().nullable().describe('the exact song id returned by one of the discovery tools — never invent or compose ids. Null ONLY when kind is "chat"'),
+    // Same seed clause as PICK_SCHEMA.id above — the request event line carries
+    // the on-air track's `[id: …]` too (routes/request.ts + runRequestViaAgent),
+    // and repickRequestFromSeen's comment records the same id-copied-from-the-
+    // session-turn signature. requestSystem() says it in prose; the field
+    // description is what travels to every provider as the output contract.
+    id: z.string().nullable().describe(`the exact song id returned by one of the discovery tools — never invent or compose ids. ${SEED_NOT_A_PICK_CLAUSE} Null ONLY when kind is "chat"`),
     ack: z.string().describe('short on-air acknowledgement of the listener, in character — max 20 words; no "thank you for listening" or self-intros'),
   });
   // `kind` is REQUIRED and non-nullable, so coerceModelPayload deliberately
