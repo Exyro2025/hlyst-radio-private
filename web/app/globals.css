@@ -3082,9 +3082,13 @@ html:has(.admin-root.paper) {
 }
 .admin-root .card-body {
     /* Same reason — pre/code content inside expanded <details> needs a
-       width constraint to actually wrap. */
+       width constraint to actually wrap. `clip` rather than `hidden`:
+       hidden makes the body a scroll container (overflow-y computes to
+       auto), so a 1px vertical overflow grows a full scrollbar inside
+       every editor section on desktop-scrollbar platforms. clip clips
+       the same horizontal blowout without creating a scroll container. */
     min-width: 0;
-    overflow-x: hidden;
+    overflow-x: clip;
 }
 .admin-root details {
     min-width: 0;
