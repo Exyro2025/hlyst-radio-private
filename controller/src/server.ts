@@ -280,8 +280,13 @@ app.listen(config.server.port, async () => {
     console.error('[curiosity] ledger load failed:', err.message);
   }
 
+  // Take one listener reading BEFORE the watcher can dispatch a pick: an
+  // unknown count fails open, so a watcher that beats the first poll bought the
+  // DJ a free agent pick on every restart (#1256). Bounded internally — a slow
+  // or absent Icecast costs at most FIRST_POLL_WAIT_MS, never a boot hang, and
+  // the HTTP server is already listening by this point.
+  await startListenerMonitor();
   queue.startWatcher();
-  startListenerMonitor();
   startStreamIdleMonitor();
   startAudienceMonitor().catch(err => console.error('[audience] init failed:', err.message));
   // Load likes up front so the sync readers (pickSystem's favourites lean, the

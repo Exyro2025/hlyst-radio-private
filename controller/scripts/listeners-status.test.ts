@@ -9,7 +9,7 @@
 // "online" forever. node:assert-via-tsx style, matching llm-pure.test.ts.
 
 import assert from 'node:assert/strict';
-import { statusAfterFailure, type StreamStatus } from '../src/broadcast/listeners.js';
+import { gatedCount, statusAfterFailure, type StreamStatus } from '../src/broadcast/listeners.js';
 
 let failures = 0;
 function test(name: string, fn: () => void | Promise<void>) {
@@ -80,6 +80,47 @@ async function main() {
     statusAfterFailure(prev, 1, LIMIT, 7);
     assert.equal(prev.listeners.peak, 5);         // input untouched
     assert.equal(prev.listeners.current, 3);
+  });
+
+  // gatedCount — the same transient-vs-sustained doctrine applied to the number
+  // the fail-open gates (djCallsAllowed, the idle monitor) act on. Issue #1256:
+  // on the raw count a single 1.5s fetch timeout read as "unknown", both gates
+  // fail open on unknown, and the idle pause released ~28s after engaging.
+  console.log('\ngatedCount (blip vs outage, for the fail-open gates):');
+
+  await test('a successful poll always wins, whatever came before', () => {
+    assert.equal(gatedCount(2, 0, 0, LIMIT), 2);
+    assert.equal(gatedCount(0, 7, 0, LIMIT), 0);   // a real 0 is an observation, not a hold
+  });
+
+  await test('one failed poll holds the last real reading (the #1256 regression)', () => {
+    // The room was empty; one poll times out. Before the fix this read null,
+    // the idle monitor failed open, and the pause released.
+    assert.equal(gatedCount(null, 0, 1, LIMIT), 0);
+  });
+
+  await test('a blip while occupied holds the occupancy too', () => {
+    assert.equal(gatedCount(null, 3, 1, LIMIT), 3);
+  });
+
+  await test('failures just below the limit still hold', () => {
+    assert.equal(gatedCount(null, 0, LIMIT - 1, LIMIT), 0);
+  });
+
+  await test('at the limit a sustained outage reports unknown (fails open)', () => {
+    assert.equal(gatedCount(null, 0, LIMIT, LIMIT), null);
+    assert.equal(gatedCount(null, 3, LIMIT + 9, LIMIT), null);
+  });
+
+  await test('never polled reads unknown, not a fabricated 0', () => {
+    assert.equal(gatedCount(null, null, 0, LIMIT), null);
+    assert.equal(gatedCount(null, null, 2, LIMIT), null);
+  });
+
+  await test('recovery drops the hold immediately', () => {
+    // Failure #3 holds 0; the next poll succeeds with 1 and that is what shows.
+    assert.equal(gatedCount(null, 0, 3, LIMIT), 0);
+    assert.equal(gatedCount(1, 0, 0, LIMIT), 1);
   });
 
   console.log(failures === 0 ? '\nAll listeners-status tests passed.' : `\n${failures} test(s) FAILED.`);

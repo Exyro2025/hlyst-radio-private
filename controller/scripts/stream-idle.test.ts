@@ -11,6 +11,7 @@
 
 import assert from 'node:assert/strict';
 import { nextIdleState, type IdleState } from '../src/broadcast/stream-idle-pure.js';
+import { gatedCount } from '../src/broadcast/listeners.js';
 
 let failures = 0;
 function test(name: string, fn: () => void | Promise<void>) {
@@ -102,6 +103,68 @@ async function main() {
     assert.equal(r.action, null);
     assert.equal(r.state.idle, false);
     assert.equal(r.state.zeroSince, T0 + 1); // clock restarts from now
+  });
+
+  // ── The #1256 regression, driven the way the monitor drives it ────────────
+  // stream-idle.ts forces a fresh Icecast poll every 5s while paused — ~120
+  // polls per 10-minute pause — and feeds the result to nextIdleState. The
+  // branching above is right; what was wrong was the INPUT: on the raw poll
+  // result one 1.5s timeout read as null, which is the fail-open branch, so a
+  // sub-1% poll failure rate released nearly every pause (measured: paused,
+  // resumed 28s later, 13 times in one night). The count now comes through
+  // listeners.gatedCount, so these two must be tested together.
+  const LIMIT = 4;   // STALE_STATUS_LIMIT
+
+  // Replay a pause window: `polls` is one raw poll result per 5s tick (null =
+  // failed fetch). Returns every action the monitor would have fired.
+  function replayPause(polls: (number | null)[]): (string | null)[] {
+    let st: IdleState = { idle: true, zeroSince: null };
+    let lastGood: number | null = 0;   // the poll that armed the pause read 0
+    let consecutive = 0;
+    const actions: (string | null)[] = [];
+    polls.forEach((raw, i) => {
+      if (raw === null) consecutive++;
+      else { consecutive = 0; lastGood = raw; }
+      const count = gatedCount(raw, lastGood, consecutive, LIMIT);
+      const r = nextIdleState(st, {
+        enabled: true, count, now: T0 + i * 5_000, idleAfterMs: AFTER,
+      });
+      actions.push(r.action);
+      st = r.state;
+    });
+    return actions;
+  }
+
+  await test('a single failed poll mid-pause no longer releases the pause', () => {
+    const polls: (number | null)[] = Array(120).fill(0);
+    polls[37] = null;                                   // one AbortError, next poll fine
+    const actions = replayPause(polls);
+    assert.equal(actions.includes('resume'), false);    // the whole window held
+    assert.equal(actions.every(a => a === 'reassert'), true);
+  });
+
+  await test('scattered isolated blips still hold the pause', () => {
+    const polls: (number | null)[] = Array(120).fill(0);
+    for (const i of [3, 4, 5, 40, 41, 90]) polls[i] = null;  // never 4 in a row
+    const actions = replayPause(polls);
+    assert.equal(actions.includes('resume'), false);
+  });
+
+  await test('a sustained outage still resumes (fail-open preserved)', () => {
+    const polls: (number | null)[] = Array(120).fill(0);
+    for (let i = 10; i < 20; i++) polls[i] = null;      // Icecast genuinely gone
+    const actions = replayPause(polls);
+    assert.equal(actions[12], 'reassert');              // 3rd failure: still held
+    assert.equal(actions[13], 'resume');                // 4th: unknown → fail open
+  });
+
+  await test('a real listener still wakes the stream on the next tick', () => {
+    const polls: (number | null)[] = Array(120).fill(0);
+    polls[8] = null;                                    // blip first, so it can't
+    polls[9] = 1;                                       // be credited with the wake
+    const actions = replayPause(polls);
+    assert.equal(actions[8], 'reassert');
+    assert.equal(actions[9], 'resume');
   });
 
   process.exit(failures ? 1 : 0);

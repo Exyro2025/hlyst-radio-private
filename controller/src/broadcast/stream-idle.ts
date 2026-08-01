@@ -14,7 +14,10 @@
 // the automatic power-save.
 //
 // Fail-open like djCallsAllowed: an unknown count (Icecast unreachable) can
-// never hold the station silent — an unobservable room resumes. Telnet
+// never hold the station silent — an unobservable room resumes. "Unknown"
+// means sustained failure, not one timed-out poll — the count comes from
+// listeners.gatedListenerCount(), which holds the last real reading through a
+// blip (#1256). Telnet
 // failures keep the current state and retry next tick. Idle state is not
 // persisted; a mixer restart always comes back live, and the monitor
 // re-asserts idle_on (idempotent) on its next tick while the room stays
@@ -27,7 +30,7 @@
 // scripts/stream-idle.test.ts.
 
 import * as settings from '../settings.js';
-import { getListenerCount, refresh, setStreamIdle } from './listeners.js';
+import { gatedListenerCount, refresh, setStreamIdle } from './listeners.js';
 import { idleOn, idleOff, idleStatus } from './liquidsoap-control.js';
 import { queue } from './queue.js';
 import { nextIdleState, type IdleState } from './stream-idle-pure.js';
@@ -52,7 +55,13 @@ async function tick() {
   const idleAfterMin = Number(st?.idleAfterMinutes) >= 1 ? Number(st?.idleAfterMinutes) : 10;
   // While idle, force a fresh Icecast poll — the 15s monitor cadence would
   // add up to 15s to the wake-up. While live, the cached count is plenty.
-  const count = state.idle && enabled ? await refresh() : getListenerCount();
+  //
+  // Read the count through gatedListenerCount() either way, NOT refresh()'s raw
+  // return: forcing a poll every 5s is ~120 polls per 10-minute pause, and on
+  // the raw count a single one of them timing out released the pause (#1256).
+  // A sustained outage still reads null here and still resumes.
+  if (state.idle && enabled) await refresh();
+  const count = gatedListenerCount();
   const { state: next, action } = nextIdleState(state, {
     enabled,
     count,
