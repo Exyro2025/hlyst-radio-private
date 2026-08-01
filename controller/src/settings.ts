@@ -1875,9 +1875,11 @@ export async function update(patch) {
       // Throw rather than silently ignore, matching analyzeQuietMinutes below.
       // Swallowing an out-of-range value meant the admin UI showed a saved
       // budget the sweep was never using.
+      // Ceiling raised 500 → 1000 (#1257): at the measured ~13 MB/track a
+      // 500 GB budget stops short of a ~50k-track library.
       const gb = Number(au.stemCacheGb);
-      if (!Number.isFinite(gb) || gb < 1 || gb > 500) {
-        throw new Error('audio.stemCacheGb must be between 1 and 500');
+      if (!Number.isFinite(gb) || gb < 1 || gb > 1000) {
+        throw new Error('audio.stemCacheGb must be between 1 and 1000');
       }
       next.audio.stemCacheGb = gb;
     }
