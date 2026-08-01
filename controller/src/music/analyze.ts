@@ -352,10 +352,21 @@ export async function runAnalysisPass(opts: AnalyzeOptions = {}): Promise<Analyz
     existingStemDirs = await stemCacheStore.cachedTrackIdSet();
   }
   if (stemCache && !reAnalyzeScope) {
-    if (stemSlotsLeft <= 0) {
+    // The loop below spends stemSlotsLeft in ids order, and the tracks the
+    // earlier widenings queued run FIRST — every one of them without a dir on
+    // disk drains a slot before the backfill's own slice is reached. Sizing
+    // (and announcing) off the raw pass-start figure re-creates the exact
+    // "announced N, silently wrote fewer" truncation for the backfill's tail,
+    // so reserve those slots up front.
+    const reserved = ids.filter(id => !existingStemDirs.has(id)).length;
+    const backfillSlots = Math.max(0, stemSlotsLeft - reserved);
+    if (backfillSlots <= 0) {
       console.log(
-        `[analyze] stem backfill skipped — cache is at its ${settings.get()?.audio?.stemCacheGb ?? 15} GB budget ` +
-          '(raise it in Settings → Transitions to cache more tracks)',
+        stemSlotsLeft <= 0
+          ? `[analyze] stem backfill skipped — cache is at its ${settings.get()?.audio?.stemCacheGb ?? 15} GB budget ` +
+              '(raise it in Settings → Transitions to cache more tracks)'
+          : `[analyze] stem backfill skipped — the ${reserved} ride-along stem writes already queued this pass ` +
+              `claim the budget's remaining ~${stemSlotsLeft} track slots`,
       );
     } else {
       const seen = new Set(ids);
@@ -364,14 +375,14 @@ export async function runAnalysisPass(opts: AnalyzeOptions = {}): Promise<Analyz
       // spent are available — sizing off the raw cap would log stem tracks a
       // final slice then silently drops, the exact "reads as finished"
       // truncation the announcement exists to avoid.
-      const room = cap ? Math.min(Math.max(0, cap - ids.length), stemSlotsLeft) : stemSlotsLeft;
+      const room = cap ? Math.min(Math.max(0, cap - ids.length), backfillSlots) : backfillSlots;
       const stemIds = needing.slice(0, room);
       if (stemIds.length > 0) {
         ids = [...ids, ...stemIds];
         const left = needing.length - stemIds.length;
         console.log(
           `[analyze] stem backfill: +${stemIds.length} tracks with no cached stems` +
-            (left > 0 ? ` (${left} left for later passes — budget holds ~${stemSlotsLeft} more)` : ''),
+            (left > 0 ? ` (${left} left for later passes — budget holds ~${backfillSlots} more)` : ''),
         );
       }
     }

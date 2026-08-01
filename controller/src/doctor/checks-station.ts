@@ -277,7 +277,7 @@ export async function checkTuning(s: StationSettings | null): Promise<Finding[]>
     // why. Report the real numbers and name the two things that cause it — a
     // backfill that hasn't run yet, or a budget too small to hold the library.
     //
-    // Coverage is counted from DISK (stemCache.cachedTrackCount), not the
+    // Coverage is counted from DISK (stemCache.usage().dirs), not the
     // stems_at stamps: stamps record attempts and keep growing as new tracks
     // analyse while the sweep evicts old dirs, so the stamp count drifts
     // optimistic over time and would eventually mute this warning on exactly
