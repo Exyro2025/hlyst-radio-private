@@ -7,20 +7,22 @@
 // Part of the library/ split - see ../LibraryPanel.tsx.
 
 import { Fragment, useRef, useState } from 'react';
-import { RotateCcw, Sparkles, ListPlus, X, Pencil, Ban, Tags, MoreVertical, Heart, HeartOff } from 'lucide-react';
+import { RotateCcw, Sparkles, ListPlus, X, Pencil, Ban, Tags, MoreVertical, Undo2, Heart, HeartOff } from 'lucide-react';
 import { Btn } from '../ui';
 import { cn } from '../../../lib/cn';
  
 import { SkeletonRows } from '@/components/ui/skeleton';
 import { EmptyState } from '@/components/ui/empty-state';
-import type { BlockType, LikeIndex, TableVariant, Track } from './types';
+import type { BlockRef, BlockType, LikeIndex, TableVariant, Track } from './types';
 import {
   CHECK_HIT,
   EnergyMeter,
   MENU_ITEM,
   MENU_PANEL,
   Thumb,
+  blockedByLabel,
   fmtDuration,
+  unblockLabel,
   useDismissOnOutside,
 } from './bits';
 import { ManualTagEditor } from './ManualTagEditor';
@@ -36,6 +38,7 @@ interface TrackTableProps {
   onRetag: (t: Track) => void;
   blocking: string | null;
   onBlock: (t: Track, type: BlockType) => void;
+  onUnblock: (t: Track, ref: BlockRef) => void;
   vocab: string[];
   editingId: string | null;
   manualBusy: string | null;
@@ -145,7 +148,28 @@ export function TrackTable(p: TrackTableProps) {
             {/* flex-1 drives the phone layout; grid items ignore flex-*, so the
                 sm:+ grid column sizing is untouched. */}
             <div className="min-w-0 flex-1">
-              <div className="lib-title">{t.title || '—'}</div>
+              {/* The badge sits with the TITLE, not in the mood/energy cell:
+                  .lib-tags is display:none below 860px, and a never-play
+                  marker that disappears on a phone is not a marker. */}
+              <div className="flex min-w-0 items-center gap-2">
+                <div className="lib-title">{t.title || '—'}</div>
+                {t.blockedBy && (
+                  <span className="lib-btag shrink-0" title={`blocked via ${blockedByLabel(t.blockedBy)}`}>
+                    <Ban size={10} aria-hidden />
+                    {/* The scope word drops below sm: — at 390px the badge and
+                        the title compete for the same ~210px, and "never play"
+                        alone still answers the question the row poses. The full
+                        scope stays one tap away in the row menu. */}
+                    <span aria-hidden>
+                      never play
+                      {t.blockedBy.type !== 'track' && (
+                        <span className="hidden sm:inline"> · {t.blockedBy.type}</span>
+                      )}
+                    </span>
+                    <span className="sr-only">never play — blocked via {blockedByLabel(t.blockedBy)}</span>
+                  </span>
+                )}
+              </div>
               <div className="lib-artist">{t.artist || '—'}{t.year ? ` · ${t.year}` : ''}{dur ? ` · ${dur}` : ''}</div>
               {t.album && <div className="lib-album">{t.album}</div>}
             </div>
@@ -189,6 +213,7 @@ export function TrackTable(p: TrackTableProps) {
                 onEdit={p.onEdit}
                 onRetag={p.onRetag}
                 onBlock={p.onBlock}
+                onUnblock={p.onUnblock}
                 like={like}
                 liking={p.liking === t.id}
                 onToggleLike={p.onToggleLike}
@@ -242,13 +267,29 @@ export function TrackTable(p: TrackTableProps) {
                   ? <RotateCcw size={11} />
                   : <Sparkles size={11} />}
               </Btn>
-              <BlockMenu
-                className="hidden sm:block"
-                track={t}
-                busy={p.blocking === t.id}
-                disabled={!!p.blocking}
-                onBlock={p.onBlock}
-              />
+              {/* A blocked row offers the reverse, not another scope to add:
+                  one click lifts the entry that matched, wherever it was made
+                  from. */}
+              {t.blockedBy ? (
+                <Btn
+                  sm
+                  tone="accent"
+                  className="hidden sm:inline-flex"
+                  onClick={() => p.onUnblock(t, t.blockedBy!)}
+                  disabled={!!p.blocking}
+                  title={unblockLabel(t.blockedBy)}
+                >
+                  {p.blocking === t.id ? '…' : <Undo2 size={12} />}
+                </Btn>
+              ) : (
+                <BlockMenu
+                  className="hidden sm:block"
+                  track={t}
+                  busy={p.blocking === t.id}
+                  disabled={!!p.blocking}
+                  onBlock={p.onBlock}
+                />
+              )}
             </div>
           </div>
           {editing && (
@@ -275,7 +316,7 @@ export function TrackTable(p: TrackTableProps) {
 // nothing. Reset at sm:, where the box sits in a 16px grid column.
 
 export function RowActionsMenu({
-  track, tagged, editing, queuing, retagging, blocking, disabled, onQueue, onEdit, onRetag, onBlock,
+  track, tagged, editing, queuing, retagging, blocking, disabled, onQueue, onEdit, onRetag, onBlock, onUnblock,
   like, liking, onToggleLike, onClearLikes,
 }: {
   track: Track;
@@ -289,6 +330,7 @@ export function RowActionsMenu({
   onEdit: (t: Track) => void;
   onRetag: (t: Track) => void;
   onBlock: (t: Track, type: BlockType) => void;
+  onUnblock: (t: Track, ref: BlockRef) => void;
   like: { liked: boolean; count: number };
   liking: boolean;
   onToggleLike: (t: Track, liked: boolean) => void;
@@ -341,22 +383,30 @@ export function RowActionsMenu({
             </button>
           )}
           <span className="my-1 block border-t border-dashed border-separator-strong" />
-          <button type="button" className={MENU_ITEM} disabled={disabled} onClick={() => run(() => onBlock(track, 'track'))}>
-            <Ban size={13} /> Never play this track
-          </button>
-          {track.album && (
-            <button type="button" className={MENU_ITEM} disabled={disabled} onClick={() => run(() => onBlock(track, 'album'))}>
-              <Ban size={13} /> Never play this album
+          {track.blockedBy ? (
+            <button type="button" className={MENU_ITEM} disabled={disabled} onClick={() => run(() => onUnblock(track, track.blockedBy!))}>
+              <Undo2 size={13} /> {unblockLabel(track.blockedBy)}
             </button>
-          )}
-          {track.artist && (
-            <button type="button" className={cn(MENU_ITEM, 'items-start')} disabled={disabled} onClick={() => run(() => onBlock(track, 'artist'))}>
-              <Ban size={13} className="mt-px flex-none" />
-              <span>
-                Never play this artist
-                <span className="block text-[10px] text-muted">primary credit only — collabs filed under other artists still play</span>
-              </span>
-            </button>
+          ) : (
+            <>
+              <button type="button" className={MENU_ITEM} disabled={disabled} onClick={() => run(() => onBlock(track, 'track'))}>
+                <Ban size={13} /> Never play this track
+              </button>
+              {track.album && (
+                <button type="button" className={MENU_ITEM} disabled={disabled} onClick={() => run(() => onBlock(track, 'album'))}>
+                  <Ban size={13} /> Never play this album
+                </button>
+              )}
+              {track.artist && (
+                <button type="button" className={cn(MENU_ITEM, 'items-start')} disabled={disabled} onClick={() => run(() => onBlock(track, 'artist'))}>
+                  <Ban size={13} className="mt-px flex-none" />
+                  <span>
+                    Never play this artist
+                    <span className="block text-[10px] text-muted">primary credit only — collabs filed under other artists still play</span>
+                  </span>
+                </button>
+              )}
+            </>
           )}
         </div>
       )}

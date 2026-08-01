@@ -315,9 +315,18 @@ services:
       # meaningful on the cuda analyzer flavour (docker-compose.analyzer-gpu.yml);
       # cpu-wheel images always resolve to cpu.
       - ANALYZE_DEVICE=${ANALYZE_DEVICE:-}
-      # Seconds of no requests before the cuda flavour drops its models out of
-      # VRAM (default 300; 0 = never). CPU images ignore it.
+      # Seconds of no CLAP/Demucs use before the worker drops the models
+      # (0 = never). Applies on BOTH devices: default 300 on cuda (frees VRAM),
+      # 1800 on cpu — one backfill or sound search loads them into the
+      # long-lived worker and nothing else ever releases them, so on a small
+      # host they end up parked in swap (#1204).
       - ANALYZE_IDLE_UNLOAD_S=${ANALYZE_IDLE_UNLOAD_S:-}
+      # Seconds of no heavy (CLAP/Demucs) use before the sidecar recycles the
+      # whole worker process — the full-memory reclaim behind the model release
+      # above, catching the ~1GB of librosa/numba/torch scratch a release can't
+      # return (default 3600; 0 = never). Requests racing a recycle queue
+      # behind the respawn rather than failing.
+      - ANALYZE_RECYCLE_IDLE_S=${ANALYZE_RECYCLE_IDLE_S:-}
       - CLAP_MODEL=${CLAP_MODEL:-}
       - CLAP_MODEL_PATH=${CLAP_MODEL_PATH:-}
       # Demucs model + analysis-window overrides (worker reads both; see

@@ -33,7 +33,8 @@ import { energyForDaypart } from '../context.js';
 import { djObject, nearestId, modelTolerant } from '../llm/sdk.js';
 import * as budget from './dj-budget.js';
 import { withTrace, logEvent } from '../observability/events.js';
-import { recencyWindowsForLibrary, effectiveNoRepeatWindow, artistKey } from '../music/recency.js';
+import { recencyWindowsForLibrary, effectiveNoRepeatWindow, artistRootKey } from '../music/recency.js';
+import { ARTIST_VARIETY_WINDOW, alternativeCandidates } from './dj-agent/artist-guard.js';
 import { hasEraBound, genreResolutionWarningOnce } from '../music/show-filter.js';
 import { djCallsAllowed } from './listeners.js';
 import { autoVoiceAllowed } from './voice-policy.js';
@@ -48,6 +49,7 @@ import { dropEchoedLink, enqueuePick, trackFields, trimLinkToIntro } from './dj-
 import { advanceRun, runActive } from './dj-agent/runs.js';
 import { pickSchemaBase, pickSystem, requestSystem } from './dj-agent/schemas.js';
 import { guardIntro, screenAck } from '../util/request-guard.js';
+import { classifyPickFailure, type PickFailure } from '../util/pick-seed.js';
 
 // Re-exported so every existing `from './dj-agent.js'` import keeps working —
 // including scripts/llm-bench, which sits outside tsconfig's include and so
@@ -292,8 +294,28 @@ async function pickViaAgent(queue, ctx, { wantLink, audioWaypoint = null, curren
     // without this explicit event the rejection is invisible to /debug and the
     // log analyzer, which then over-report agent health. Emit it inside the
     // live trace so agent-pick reliability is real.
-    logEvent('pick.rejected', { agent: 'pick', id: object?.id ?? null, candidates: extras.seen.size, steps, toolCalls });
-    throw new Error(`agent returned unknown id ${object?.id}`);
+    //
+    // `cause` separates the three ways this lands (#1247) — most usefully the
+    // zero-candidate run, where the model's answer is a symptom of an index that
+    // couldn't answer rather than a model that couldn't choose. Classification
+    // lives in util/pick-seed.ts, never inline.
+    const failure = classifyPickFailure({
+      pickedId: object?.id ?? null,
+      seedId: current?.id ?? null,
+      candidates: extras.seen.size,
+      // Real discovery calls only (flattenToolCalls drops the synthetic
+      // `done`), so a zero here means the model never explored — which must
+      // NOT ride the no-candidates breaker exemption.
+      toolCalls: toolCalls.length,
+    });
+    logEvent('pick.rejected', {
+      agent: 'pick', id: object?.id ?? null, candidates: extras.seen.size, steps, toolCalls,
+      cause: failure.kind,
+    });
+    // The verdict rides ON the error so the caller's catch can tell a model that
+    // can't drive the harness from tools that had nothing to answer from —
+    // only the first is what the circuit breaker exists to catch.
+    throw Object.assign(new Error(failure.message), { pickFailure: failure });
   }
 
   // Back-to-back artist guard (#1124). The discovery tools — especially
@@ -318,9 +340,18 @@ async function pickViaAgent(queue, ctx, { wantLink, audioWaypoint = null, curren
   // only allow the repeat if even that comes back empty. That last case is
   // logged with the candidate count so an operator can still tell "no
   // alternative existed" from a real bug (#1124 ask #2).
-  const curArtist = artistKey(current || {});
-  if (curArtist && artistKey(song) === curArtist) {
-    const alt = new Map<string, any>([...extras.seen].filter(([, s]) => artistKey(s) !== curArtist));
+  //
+  // Both sides of the comparison — and the alternative set — are keyed on the
+  // LEAD artist (#1251), so "Marvin Gaye & Tammi Terrell" no longer walks past a
+  // guard on "Marvin Gaye". The alternatives also step around the artists of the
+  // last few plays (alternativeCandidates), because a re-pick that knows only
+  // the on-air artist keeps returning to whoever ranks next-highest — the
+  // every-other-slot repeat this guard was supposed to prevent.
+  const curArtist = artistRootKey(current || {});
+  if (curArtist && artistRootKey(song) === curArtist) {
+    const { alt, dropped, starved } = alternativeCandidates<any>(
+      extras.seen, curArtist, queue.neighbourArtistRoots(ARTIST_VARIETY_WINDOW),
+    );
     let altSong: any = null;
     if (alt.size) {
       const repicked = await repickFromSeen({
@@ -328,10 +359,14 @@ async function pickViaAgent(queue, ctx, { wantLink, audioWaypoint = null, curren
         playlistResolved: !!playlistTracks?.length,
         reason: `The track you chose is by ${song.artist}, the artist already on air — never play the same artist twice in a row. Choose a DIFFERENT artist from the candidates above.`,
       });
-      altSong = repicked?.id ? extras.seen.get(repicked.id) : null;
+      // Resolved from `alt`, not `extras.seen`: the re-pick's id is constrained
+      // to the alternatives by construction (z.enum), and reading it back out of
+      // the narrower map is what keeps that true if the schema ever gains a
+      // tolerance for ids it didn't offer.
+      altSong = repicked?.id ? alt.get(repicked.id) : null;
       if (altSong) {
-        logEvent('pick.artistGuard', { relaxed: false, from: song.artist, to: altSong.artist, candidates: alt.size });
-        queue.log('picker', `back-to-back artist "${song.artist}" avoided — re-picked "${altSong.title}" by ${altSong.artist} from ${alt.size} other-artist candidate(s)`);
+        logEvent('pick.artistGuard', { relaxed: false, from: song.artist, to: altSong.artist, candidates: alt.size, recencySkipped: dropped, recencyStarved: starved });
+        queue.log('picker', `back-to-back artist "${song.artist}" avoided — re-picked "${altSong.title}" by ${altSong.artist} from ${alt.size} other-artist candidate(s)${dropped ? `, ${dropped} more skipped as recently-played artists` : ''}${starved ? ' (every alternative was recently played — recency window waived)' : ''}`);
         object = repicked;
         song = altSong;
       }
@@ -649,8 +684,20 @@ export async function runTrackEvent(queue, ctx, { wantLink, showAt = null, prede
         // if even the pool can only find an already-queued track).
         queue.log('picker', 'agent pick already queued — falling back to pool');
       } catch (err) {
-        queue.log('error', `DJ agent pick failed: ${err.message} — falling back to pool`);
-        breakerFailure(queue);
+        // A run the agent DROVE correctly but couldn't answer from — every
+        // discovery call came back empty — is a library-coverage problem, not a
+        // model one (#1247). Counting it would open the breaker after three
+        // tracks, disable the session-aware picker for 10 minutes, and point the
+        // operator at "switch model", which repairs nothing. Same carve-out, and
+        // same reasoning, as the already-queued case just above; the pool
+        // fallback below still fills the slot either way.
+        const failure = (err as any)?.pickFailure as PickFailure | undefined;
+        if (failure && !failure.countsAgainstBreaker) {
+          queue.log('picker', `${failure.message} — falling back to pool`);
+        } else {
+          queue.log('error', `DJ agent pick failed: ${err.message} — falling back to pool`);
+          breakerFailure(queue);
+        }
       }
     }
     await pickViaPool(queue, ctx, { wantLink, current, showAt }, rankTarget, audioWaypoint);

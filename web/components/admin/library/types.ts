@@ -34,6 +34,11 @@ export interface Track {
   likeCount?: number;
   likedByOperator?: boolean;
   lastLikedAt?: string;
+  // Which never-play entry keeps this row off the air, or null when it's clear.
+  // Stamped server-side (music/blocklist.ts annotate/matchOf) so the browser
+  // never re-implements the match rules. Absent on an older controller — treat
+  // undefined and null the same.
+  blockedBy?: BlockRef | null;
 }
 
 // GET /likes/index — {songId: {count, operator}} for every liked song. Bounded
@@ -60,6 +65,15 @@ export interface UntaggedResponse { rows: Track[]; nextCursor: string | null }
 // Never-play blocklist entry (GET /library/blocklist) — name/artist/album are
 // display snapshots taken at block time, so no Navidrome re-lookup to render.
 export type BlockType = 'track' | 'album' | 'artist';
+
+// The slice of an entry a listing row carries: enough to render the badge and
+// to issue the DELETE that lifts it.
+export interface BlockRef {
+  type: BlockType;
+  id: string;
+  name: string | null;
+}
+
 export interface BlockEntry {
   type: BlockType;
   id: string;

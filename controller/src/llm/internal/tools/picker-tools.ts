@@ -17,6 +17,7 @@ import * as analyzer from '../../../music/analyzer.js';
 import { filterPickerCandidates, durationSeconds } from '../../../music/recency.js';
 import { applyStrictLocks } from '../../../music/show-filter.js';
 import { shuffle } from '../../../util/shuffle.js';
+import { SEED_NOT_A_PICK_CLAUSE } from '../../../util/pick-seed.js';
 import { searchWeb, searchReady } from '../../../skills/web-search.js';
 import { identifyTrackFromText } from '../prompts/request.js';
 
@@ -230,12 +231,17 @@ export function buildPickerTools({
   // them makes "matches exist but were filtered" a real cause the note should
   // name, not just recency (steering the model to switch tools, not retry).
   const hasStrictLock = !!(genreLock?.length || eraLock?.length || moodLock?.length || energyLock?.length || playlistLock || excludedIds);
+  // The seed clause rides HERE as well as on the schema field (#1247): this is
+  // the message sitting in the model's context at the exact moment it fails, and
+  // "never invent a song id" is literally satisfied by echoing the on-air id
+  // from the event message — a real id, just not one a tool returned. Shared
+  // wording from util/pick-seed.ts.
   const emptyResult = (matched: number, hint: string) => ({
     tracks: [],
     note: matched > 0
       ? `${matched} matching track(s) exist but were all played recently, already shown this pick${hasStrictLock ? ', or outside this show\'s strict filters' : ''} — ${hint}`
       : hint,
-    rule: 'Never invent a song id — only ids returned by a tool are valid picks.',
+    rule: `Never invent a song id — only ids returned by a tool are valid picks. ${SEED_NOT_A_PICK_CLAUSE}`,
   });
 
   // Snapshot the embedding index counts once at tool-build time (synchronous
@@ -248,6 +254,56 @@ export function buildPickerTools({
   const hasTextEmbeddings  = (_stats.withEmbedding      ?? 0) > 0;
   const hasAudioEmbeddings = (_stats.withAudioEmbedding ?? 0) > 0;
   const hasEmbeddingProvider = embeddings.isAvailable();
+
+  // Seed-similarity with a cross-index rescue (#1247).
+  //
+  // A seed tool that comes back empty is far more expensive than a slow one: the
+  // agent harness allows exactly ONE discovery call (COMMIT_AFTER_STEPS = 1,
+  // llm/internal/strategy/agent.ts) and then pins activeTools to `done`, so an
+  // empty result leaves the model cornered with nothing to commit — and the only
+  // real, well-formed track id anywhere in its context is the on-air seed it was
+  // handed to pass in here. Both salvage stages in pickViaAgent then no-op on an
+  // empty `seen` (nearestId has no keys to match, repickFromSeen returns null on
+  // its first line), so the whole run is discarded to the pool picker.
+  //
+  // Both indexes answer the same question ("tracks like this seed"), and each is
+  // registered on whether it holds ANY vectors — never on whether it covers THIS
+  // seed. Coverage is routinely partial and uneven (CLAP analysis backfills over
+  // days; the text index needs the tagger to have reached the track), so the
+  // seed falling in the other index's gap is ordinary, not exceptional. When the
+  // index the model reached for doesn't cover the seed, answer from the other one
+  // and SAY so, rather than handing back a result that can only end the run.
+  //
+  // Deliberately gated on the primary index returning NOTHING AT ALL (matched
+  // === 0 — the seed has no vector there). A primary that DID match but whose
+  // hits were all filtered by recency keeps today's emptyResult: that note
+  // ("N exist but were all played recently") steers the model correctly and is a
+  // different situation from a dead index.
+  const seedSimilarity = (songId: string, primary: 'audio' | 'text') => {
+    const K = 60;
+    const audioFirst = primary === 'audio';
+    const lookup = (which: 'audio' | 'text') =>
+      which === 'audio' ? library.tracksLikeThisAudio(songId, K) : library.tracksLikeThis(songId, K);
+    const list = lookup(primary);
+    if (list.length) return { tracks: collect(list), matched: list.length, fellBack: false };
+    const other = audioFirst ? 'text' : 'audio';
+    const otherIndexed = audioFirst ? hasTextEmbeddings : hasAudioEmbeddings;
+    if (otherIndexed) {
+      const alt = lookup(other);
+      if (alt.length) {
+        const rescued = collect(alt);
+        // Only report the rescue if something SURVIVED the recency/lock
+        // filters. Reporting the raw alt count with empty tracks would render
+        // emptyResult's matched>0 message — "N exist but were all played
+        // recently" — about hits from an index the model never asked, glued to
+        // a "no embedding yet" hint about the one it did: two contradictory
+        // clauses. Falling through to matched 0 keeps the coherent hint, whose
+        // "try similarSongs / tracksByMood" steer is right here anyway.
+        if (rescued.length) return { tracks: rescued, matched: alt.length, fellBack: true };
+      }
+    }
+    return { tracks: [] as any[], matched: 0, fellBack: false };
+  };
 
   const tools = {
     searchLibrary: tool({
@@ -414,9 +470,17 @@ export function buildPickerTools({
         execute: async ({ songId }) => {
           try {
             await library.load();
-            const list = library.tracksLikeThis(songId, 60);
-            const out = collect(list);
-            return out.length ? out : emptyResult(list.length,
+            const { tracks, matched, fellBack } = seedSimilarity(songId, 'text');
+            if (tracks.length) {
+              // Say which index answered. Without this the model reads audio
+              // neighbours as mood/lyric matches and reasons about them on the
+              // wrong axis — the same mislabelling #1246 reports in the other
+              // direction.
+              return fellBack
+                ? { tracks, note: 'that track has no mood/lyric embedding yet, so these come from the SOUND index instead — they match the seed\'s timbre and production, not its tags or words' }
+                : tracks;
+            }
+            return emptyResult(matched,
               `that track has no embedding yet (${_stats.withEmbedding ?? 0} of ${_stats.total} tracks indexed so far) — try similarSongs or tracksByMood`);
           }
           catch (err) { return { error: err.message }; }
@@ -441,9 +505,13 @@ export function buildPickerTools({
         execute: async ({ songId }) => {
           try {
             await library.load();
-            const list = library.tracksLikeThisAudio(songId, 60);
-            const out = collect(list);
-            return out.length ? out : emptyResult(list.length,
+            const { tracks, matched, fellBack } = seedSimilarity(songId, 'audio');
+            if (tracks.length) {
+              return fellBack
+                ? { tracks, note: `the seed has no audio fingerprint yet (audio analysis covers ${_stats.withAudioEmbedding ?? 0} of ${_stats.total} tracks so far), so these come from the mood/lyric index instead — they match the seed's tags and words, not its sound` }
+                : tracks;
+            }
+            return emptyResult(matched,
               `the seed track likely has no audio vector yet (audio analysis covers ${_stats.withAudioEmbedding ?? 0} of ${_stats.total} tracks so far) — try tracksLikeThis or similarSongs`);
           }
           catch (err) { return { error: err.message }; }

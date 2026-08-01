@@ -42,7 +42,7 @@ import { Suggestion, Suggestions } from '../ai-elements/suggestion';
 import { Message, MessageContent } from '../ai-elements/message';
 import type { ChatStatus } from 'ai';
 import { ScrollArea, ScrollBar } from '../ui/scroll-area';
-import { RefreshCw, X } from 'lucide-react';
+import { Blend, RefreshCw, X } from 'lucide-react';
 import StationHeader, { type HealthMetrics } from './StationHeader';
 import { cn } from '../../lib/cn';
 import { RequestsCard } from './dash/RequestsCard';
@@ -430,6 +430,19 @@ export default function DashPanel() {
                         <QueueItemContent className="text-[12px] text-ink">
                           {t.title} <span className="text-muted">— {t.artist}</span>
                         </QueueItemContent>
+                        {/* Seam-type badge (#1257): stamped only once the seam's
+                            blend clip is actually queued, so no icon = plain
+                            crossfade, icon = stem blend. Definitive, not a
+                            prediction — blends are decided at pair drain. */}
+                        {t.stemSeam ? (
+                          <span
+                            title="Arrives via a stem blend (mixed from cached stems)"
+                            aria-label="Arrives via a stem blend"
+                            className="shrink-0 text-vermilion/70"
+                          >
+                            <Blend className="h-3 w-3" />
+                          </span>
+                        ) : null}
                         <span className="mono-num text-[10px] whitespace-nowrap text-muted">
                           {typeof t.duration === 'number' || typeof t.duration === 'string'
                             ? t.duration
