@@ -117,8 +117,12 @@ Sharing the card with a local TTS or LLM? The worker plays nice: after ~5
 minutes with no CLAP/Demucs use it drops its models out of VRAM and reloads
 them on the next request (`ANALYZE_IDLE_UNLOAD_S` in `.env` tunes the window;
 `0` keeps them resident; CPU-only hosts get the same release with a longer
-30-minute default — #1204). A few hundred MB of CUDA context remain until the
-analyzer container stops. Pair it with the **quiet times** toggle on the admin
+30-minute default — #1204). The trade: the first heavy request after a release
+pays a cold reload from the on-disk cache — a few seconds for CLAP on a typical
+box (measured ~2s; a "sounds like ..." search may feel it on slower hardware),
+longer for Demucs. If your station leans on sound search and RAM is plentiful,
+`ANALYZE_IDLE_UNLOAD_S=0` restores the old always-resident behaviour. A few
+hundred MB of CUDA context remain until the analyzer container stops. Pair it with the **quiet times** toggle on the admin
 Library page and a long scan pauses — and frees the GPU — whenever listeners
 are tuned in.
 
