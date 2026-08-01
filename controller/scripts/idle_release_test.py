@@ -195,11 +195,21 @@ def main():
     # station with steady analysis traffic pins CLAP+Demucs forever and the
     # gate removal above buys nothing.
     def case_lean_request_does_not_refresh():
+        # A lean bpm/key pass reaches the getters exactly like analyze() does —
+        # get_embedder(force=False) / get_vocal_detector(force=False) with the
+        # env flags off — and must bounce off the early return BEFORE the
+        # _touch_heavy() stamp. This is the precise call shape of the #1204
+        # traffic that pinned the models forever under the shared clock.
         reset(heavy_age_s=600.0)
         stale = aw._heavy_last_used
-        # A lean pass calls neither getter (embed/vocal resolve to falsy), so
-        # nothing should touch the clock. Assert the getters are the ONLY writers
-        # by confirming a no-model code path leaves it alone.
+        saved = aw.EMBED_ENABLED, aw.VOCAL_ENABLED
+        try:
+            aw.EMBED_ENABLED = False
+            aw.VOCAL_ENABLED = False
+            assert aw.get_embedder(force=False) is None, "lean pass loads no embedder"
+            assert aw.get_vocal_detector(force=False) is None, "lean pass loads no detector"
+        finally:
+            aw.EMBED_ENABLED, aw.VOCAL_ENABLED = saved
         aw._release_models()  # nothing loaded → no-op, must not stamp either
         assert aw._heavy_last_used == stale, (
             "#1204: a request that loads no model must not refresh the heavy clock"

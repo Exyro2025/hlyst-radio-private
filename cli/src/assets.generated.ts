@@ -719,8 +719,11 @@ services:
       # meaningful on the cuda analyzer flavour (docker-compose.analyzer-gpu.yml);
       # cpu-wheel images always resolve to cpu.
       - ANALYZE_DEVICE=\${ANALYZE_DEVICE:-}
-      # Seconds of no requests before the cuda flavour drops its models out of
-      # VRAM (default 300; 0 = never). CPU images ignore it.
+      # Seconds of no CLAP/Demucs use before the worker drops the models
+      # (0 = never). Applies on BOTH devices: default 300 on cuda (frees VRAM),
+      # 1800 on cpu — one backfill or sound search loads them into the
+      # long-lived worker and nothing else ever releases them, so on a small
+      # host they end up parked in swap (#1204).
       - ANALYZE_IDLE_UNLOAD_S=\${ANALYZE_IDLE_UNLOAD_S:-}
       - CLAP_MODEL=\${CLAP_MODEL:-}
       - CLAP_MODEL_PATH=\${CLAP_MODEL_PATH:-}
@@ -1002,8 +1005,11 @@ services:
       # meaningful on the cuda analyzer flavour (docker-compose.analyzer-gpu.yml);
       # cpu-wheel images always resolve to cpu.
       - ANALYZE_DEVICE=\${ANALYZE_DEVICE:-}
-      # Seconds of no requests before the cuda flavour drops its models out of
-      # VRAM (default 300; 0 = never). CPU images ignore it.
+      # Seconds of no CLAP/Demucs use before the worker drops the models
+      # (0 = never). Applies on BOTH devices: default 300 on cuda (frees VRAM),
+      # 1800 on cpu — one backfill or sound search loads them into the
+      # long-lived worker and nothing else ever releases them, so on a small
+      # host they end up parked in swap (#1204).
       - ANALYZE_IDLE_UNLOAD_S=\${ANALYZE_IDLE_UNLOAD_S:-}
       - CLAP_MODEL=\${CLAP_MODEL:-}
       - CLAP_MODEL_PATH=\${CLAP_MODEL_PATH:-}
