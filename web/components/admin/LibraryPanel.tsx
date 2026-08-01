@@ -52,6 +52,9 @@ import type {
   BlockType,
   BrowseResponse,
   Energy,
+  LikeIndex,
+  LikedResponse,
+  LikedSort,
   PlayEntry,
   SearchMode,
   Sort,
@@ -150,6 +153,18 @@ export default function LibraryPanel() {
   const [recent, setRecent] = useState<Track[] | null>(null);
   const [recentLoading, setRecentLoading] = useState(false);
 
+  // likes state (#1253). `likeIndex` decorates rows on EVERY tab, so it's
+  // fetched once on mount rather than per listing — browse, search and
+  // sounds-like results come from three different sources and only this map
+  // covers all of them. `liked` is the Liked mode's own paged listing.
+  const [likeIndex, setLikeIndex] = useState<LikeIndex>({});
+  const [liking, setLiking] = useState<string | null>(null);
+  const [liked, setLiked] = useState<Track[] | null>(null);
+  const [likedTotal, setLikedTotal] = useState(0);
+  const [likedPage, setLikedPage] = useState(0);
+  const [likedSort, setLikedSort] = useState<LikedSort>('recent');
+  const [likedLoading, setLikedLoading] = useState(false);
+
   // playlist state — row selection (any track tab) + the Navidrome playlist
   // list shared by the add-to-playlist bar and the Playlists tab.
   const [selected, setSelected] = useState<Set<string>>(new Set());
@@ -186,7 +201,9 @@ export default function LibraryPanel() {
     else if (t === 'recent') setTab('tracks');
     else if (t === 'playlists') { window.location.replace('/admin/playlists'); return; }
     else if (t && (TABS as string[]).includes(t)) setTab(t as Tab);
-    if (sp.get('view') === 'needs') { setTab('tracks'); setTrackMode('needs'); }
+    const view = sp.get('view');
+    if (view === 'needs') { setTab('tracks'); setTrackMode('needs'); }
+    else if (view === 'liked') { setTab('tracks'); setTrackMode('liked'); }
     const m = (sp.get('moods') || '').split(',').map(s => s.trim()).filter(Boolean);
     if (m.length) setMoods(m);
     const en = sp.get('energy');
@@ -213,7 +230,7 @@ export default function LibraryPanel() {
     if (!urlRestored) return;
     const sp = new URLSearchParams();
     if (tab !== 'tracks') sp.set('tab', tab);
-    if (tab === 'tracks' && trackMode === 'needs') sp.set('view', 'needs');
+    if (tab === 'tracks' && trackMode !== 'all') sp.set('view', trackMode);
     if (moods.length) sp.set('moods', moods.join(','));
     if (energy !== 'any') sp.set('energy', energy);
     if (vocal !== 'any') sp.set('vocal', vocal);
@@ -494,6 +511,125 @@ export default function LibraryPanel() {
     if (tab !== 'tracks' || trackMode !== 'all' || !ready) return;
     if (recent === null) loadRecent();
   }, [tab, trackMode, ready, recent, loadRecent]);
+
+  // -----------------------------------------------------------------------
+  // likes (#1253) — the shared index plus the Liked mode's own listing
+  // -----------------------------------------------------------------------
+  const loadLikeIndex = useCallback(async () => {
+    if (!ready) return;
+    try {
+      const r = await adminFetch('/likes/index');
+      if (!r.ok) throw new Error(`likes failed (${r.status})`);
+      const j = await r.json() as { songs?: LikeIndex };
+      setLikeIndex(j.songs || {});
+    } catch {
+      // A missing index just means no hearts are lit — every other library
+      // view still works, so this must never surface as an error toast.
+      setLikeIndex({});
+    }
+  }, [adminFetch, ready]);
+
+  useEffect(() => { loadLikeIndex(); }, [loadLikeIndex]);
+
+  const loadLiked = useCallback(async () => {
+    if (!ready) return;
+    setLikedLoading(true);
+    try {
+      const sp = new URLSearchParams({
+        limit: String(PAGE_SIZE),
+        offset: String(likedPage * PAGE_SIZE),
+        sort: likedSort,
+      });
+      const r = await adminFetch(`/library/liked?${sp}`);
+      if (!r.ok) throw new Error(`liked failed (${r.status})`);
+      const j = await r.json() as LikedResponse;
+      setLiked(j.rows || []);
+      setLikedTotal(j.total || 0);
+    } catch (err) {
+      notify.err(errorMessage(err));
+      setLiked([]);
+    } finally {
+      setLikedLoading(false);
+    }
+  }, [adminFetch, ready, likedPage, likedSort]);
+
+  useEffect(() => {
+    if (tab !== 'tracks' || trackMode !== 'liked' || !ready) return;
+    loadLiked();
+  }, [tab, trackMode, ready, loadLiked]);
+
+  // Sorting or leaving the mode resets paging, so a page-3 view can't survive
+  // into a shorter list and render empty.
+  useEffect(() => { setLikedPage(0); }, [likedSort]);
+
+  // Patch the index (and any inline row fields) without a refetch — the whole
+  // point of the optimistic toggle is that the heart responds immediately.
+  const patchLike = (id: string, next: { count: number; operator: boolean } | null) => {
+    setLikeIndex(prev => {
+      const out = { ...prev };
+      if (next && next.count > 0) out[id] = next; else delete out[id];
+      return out;
+    });
+    setLiked(prev => prev && prev.map(t => (
+      t.id === id ? { ...t, likeCount: next?.count ?? 0, likedByOperator: !!next?.operator } : t
+    )));
+  };
+
+  const toggleLike = async (track: Track, isLiked: boolean) => {
+    const before = likeIndex[track.id] ?? { count: track.likeCount ?? 0, operator: !!track.likedByOperator };
+    setLiking(track.id);
+    // Optimistic: the operator's own heart is +1/-1 on the total.
+    patchLike(track.id, {
+      count: Math.max(0, before.count + (isLiked ? -1 : 1)),
+      operator: !isLiked,
+    });
+    try {
+      const r = isLiked
+        ? await adminFetch(`/likes/song/${encodeURIComponent(track.id)}/operator`, { method: 'DELETE' })
+        : await adminFetch(`/likes/song/${encodeURIComponent(track.id)}`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            title: track.title, artist: track.artist, album: track.album,
+            genre: track.genre, year: track.year, duration: track.duration,
+          }),
+        });
+      const j = await r.json().catch(() => ({})) as { count?: number; error?: string };
+      if (!r.ok) throw new Error(j.error || `like failed (${r.status})`);
+      // Settle on the server's count, which also folds in any listener likes
+      // that landed between render and click.
+      patchLike(track.id, { count: j.count ?? 0, operator: !isLiked });
+      // In Liked mode a track nobody likes any more is no longer in the list.
+      if (isLiked && (j.count ?? 0) === 0) {
+        setLiked(prev => prev && prev.filter(t => t.id !== track.id));
+        setLikedTotal(n => Math.max(0, n - 1));
+      }
+    } catch (err) {
+      patchLike(track.id, before);
+      notify.err(errorMessage(err));
+    } finally {
+      setLiking(null);
+    }
+  };
+
+  // Wraps DELETE /likes/song/:id — drops LISTENER likes too, which the heart
+  // deliberately never does.
+  const clearLikes = async (track: Track) => {
+    setLiking(track.id);
+    try {
+      const r = await adminFetch(`/likes/song/${encodeURIComponent(track.id)}`, { method: 'DELETE' });
+      const j = await r.json().catch(() => ({})) as { removed?: number; error?: string };
+      if (!r.ok) throw new Error(j.error || `clear failed (${r.status})`);
+      patchLike(track.id, null);
+      setLiked(prev => prev && prev.filter(t => t.id !== track.id));
+      setLikedTotal(n => Math.max(0, n - 1));
+      notify.ok(`Cleared ${j.removed ?? 0} like${j.removed === 1 ? '' : 's'} on “${track.title || track.id}”`);
+    } catch (err) {
+      notify.err(errorMessage(err));
+    } finally {
+      setLiking(null);
+    }
+  };
 
   // -----------------------------------------------------------------------
   // playlists — list fetch, row selection, add-to-playlist
@@ -1203,17 +1339,25 @@ export default function LibraryPanel() {
   // What the merged Tracks tab actually shows right now — drives the table's
   // rows, empty-state copy, and accent Tag button (TrackTable keys on this).
   const tableVariant: TableVariant =
-    tab === 'tracks' ? (trackMode === 'needs' ? 'untagged' : 'recent') : (tab as TableVariant);
+    tab === 'tracks'
+      ? (trackMode === 'needs' ? 'untagged' : trackMode === 'liked' ? 'liked' : 'recent')
+      : (tab as TableVariant);
   const tableRows: Track[] =
     tableVariant === 'browse' ? (browse?.rows || []) :
     tableVariant === 'search' ? (searchResults || []) :
     tableVariant === 'untagged' ? untagged :
+    tableVariant === 'liked' ? (liked || []) :
     (recent || []);
   const tableLoading =
     tableVariant === 'browse' ? browseLoading :
     tableVariant === 'search' ? searching :
     tableVariant === 'untagged' ? untaggedLoading :
+    tableVariant === 'liked' ? likedLoading :
     recentLoading;
+  // Distinct liked songs — free off the already-fetched index, so the mode
+  // label stays correct after an optimistic toggle with no extra request.
+  const likedCount = Object.keys(likeIndex).length;
+  const likedPages = Math.max(1, Math.ceil(likedTotal / PAGE_SIZE));
 
   return (
     // grid-cols-1: the implicit `auto` track is sized by its items' min-content,
@@ -1432,6 +1576,7 @@ export default function LibraryPanel() {
         title={
           tableVariant === 'browse' ? 'Tracks' :
           tableVariant === 'search' ? 'Search results' :
+          tableVariant === 'liked' ? 'Liked' :
           tableVariant === 'untagged' ? 'Needs tags' :
           'Recently added'
         }
@@ -1439,6 +1584,7 @@ export default function LibraryPanel() {
           tableVariant === 'browse'
             ? (browse ? `${num(browse.total)} match${browse.total === 1 ? '' : 'es'}` : '')
             : tableVariant === 'search' ? (searchResults ? `${searchResults.length} result${searchResults.length === 1 ? '' : 's'}` : 'enter a query')
+            : tableVariant === 'liked' ? `${num(likedTotal)} liked track${likedTotal === 1 ? '' : 's'}`
             : tableVariant === 'untagged' ? `${untagged.length} loaded${remaining != null ? ` · ${num(remaining)} need tags` : ''}`
             : (recent ? `${recent.length} tracks` : '')
         }
@@ -1450,6 +1596,7 @@ export default function LibraryPanel() {
                 options={[
                   { id: 'all', label: 'All' },
                   { id: 'needs', label: `Needs tags${remaining != null ? ` · ${num(remaining)}` : ''}` },
+                  { id: 'liked', label: `Liked${likedCount ? ` · ${num(likedCount)}` : ''}` },
                 ]}
                 onChange={(v: string) => setTrackMode(v as TrackMode)}
               />
@@ -1457,6 +1604,21 @@ export default function LibraryPanel() {
                 <Btn sm tone="accent" onClick={() => startTagger()} disabled={tagger?.running || taggerBusy}>
                   <Sparkles size={11} /> Tag all
                 </Btn>
+              ) : trackMode === 'liked' ? (
+                <>
+                  <Seg
+                    value={likedSort}
+                    options={[
+                      { id: 'recent', label: 'Recent' },
+                      { id: 'count', label: 'Most liked' },
+                      { id: 'artist', label: 'Artist' },
+                    ]}
+                    onChange={(v: string) => setLikedSort(v as LikedSort)}
+                  />
+                  <Btn sm onClick={loadLiked} disabled={likedLoading}>
+                    <RefreshCw size={11} /> {likedLoading ? 'Loading…' : 'Refresh'}
+                  </Btn>
+                </>
               ) : trackMode === 'all' ? (
                 <Btn sm onClick={loadRecent} disabled={recentLoading}>
                   <RefreshCw size={11} /> {recentLoading ? 'Loading…' : 'Refresh'}
@@ -1488,6 +1650,10 @@ export default function LibraryPanel() {
           selected={selected}
           onToggleSelect={toggleSelect}
           onToggleAll={toggleAllRows}
+          likeIndex={likeIndex}
+          liking={liking}
+          onToggleLike={toggleLike}
+          onClearLikes={clearLikes}
         />
       </Card>
       )}
@@ -1510,6 +1676,21 @@ export default function LibraryPanel() {
           <Btn onClick={loadMoreSearch} disabled={searchingMore}>
             {searchingMore ? 'Loading…' : 'Load more'}
           </Btn>
+        </div>
+      )}
+
+      {/* Offset paging like Browse, not the untagged tab's cursor — the likes
+          store is a bounded in-memory array with a cheap, stable total. */}
+      {tab === 'tracks' && trackMode === 'liked' && likedTotal > PAGE_SIZE && (
+        <div className="flex flex-wrap items-center justify-between gap-y-2 text-[11px] text-muted">
+          <span className="mono-num">
+            {likedPage * PAGE_SIZE + 1}–{Math.min((likedPage + 1) * PAGE_SIZE, likedTotal)} of {num(likedTotal)}
+          </span>
+          <span className="flex items-center gap-2">
+            <Btn sm disabled={likedPage === 0} onClick={() => setLikedPage(p => Math.max(0, p - 1))}>‹ prev</Btn>
+            <span className="mono-num">page {likedPage + 1} of {likedPages}</span>
+            <Btn sm disabled={likedPage + 1 >= likedPages} onClick={() => setLikedPage(p => p + 1)}>next ›</Btn>
+          </span>
         </div>
       )}
 
