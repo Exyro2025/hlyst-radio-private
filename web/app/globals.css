@@ -4042,6 +4042,18 @@ html:has(.admin-root.paper) {
     border-style: dashed; font-variant-numeric: tabular-nums;
     letter-spacing: 0.04em; font-size: 9px;
 }
+/* never-play marker — rides the TITLE line, not .lib-tags (which the ≤860px
+   query hides). Solid danger fill rather than another outlined chip: it has to
+   read as a stop at a glance when two copies of the same song sit next to each
+   other and only one of them is blocked. */
+.admin-root .lib-btag {
+    display: inline-flex; align-items: center; gap: 4px;
+    font-size: 9px; letter-spacing: 0.06em; text-transform: uppercase;
+    padding: 2px 6px; white-space: nowrap;
+    color: var(--danger);
+    border: 1px solid color-mix(in oklab, var(--danger) 40%, transparent);
+    background: color-mix(in oklab, var(--danger) 12%, transparent);
+}
 /* "needs tags" marker — icon-only chip (tooltip carries the words) */
 .admin-root .lib-needs {
     display: inline-flex; align-items: center;
