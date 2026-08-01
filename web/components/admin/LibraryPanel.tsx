@@ -48,6 +48,7 @@ import type {
 import type { PlaylistSummary } from './LibraryPlaylistsTab';
 import type {
   BlockEntry,
+  BlockRef,
   BlockType,
   BrowseResponse,
   Energy,
@@ -69,6 +70,10 @@ import { TrackTable } from './library/TrackTable';
 import { BlockedTab } from './library/BlockedTab';
 import { HistoryTab } from './library/HistoryTab';
 import { AddToPlaylistBar } from './library/AddToPlaylistBar';
+
+// Per-call cap on POST /library/blocklist/check, matching the controller's.
+// A Search tab paged deep with Load more can hold more rows than that.
+const CHECK_CHUNK = 500;
 
 export default function LibraryPanel() {
   const { adminFetch, needsAuth, hydrated } = useAdminAuth();
@@ -163,6 +168,7 @@ export default function LibraryPanel() {
   const [blockedLoading, setBlockedLoading] = useState(false);
   const [blocking, setBlocking] = useState<string | null>(null);
   const [unblocking, setUnblocking] = useState<string | null>(null);
+  const [bulkBusy, setBulkBusy] = useState(false);
 
   // -----------------------------------------------------------------------
   // URL state — tab, browse filters, and the search query live in the query
@@ -610,6 +616,59 @@ export default function LibraryPanel() {
     if (tab === 'blocked' && ready) loadBlocked();
   }, [tab, ready, loadBlocked]);
 
+  // Re-mark the rows already on screen after a block or unblock. Refetching the
+  // tab instead would lose pagination and re-hit Navidrome on the Search tab,
+  // and matching client-side would mean a second copy of the normalised-name
+  // rules in music/blocklist.ts, free to drift. The server owns the answer;
+  // this just asks it about the rows we're holding.
+  const recheckBlocked = useCallback(async () => {
+    const pools: Track[][] = [browse?.rows || [], searchResults || [], untagged, recent || []];
+    const byId = new Map<string, Track>();
+    for (const pool of pools) for (const t of pool) if (t?.id && !byId.has(t.id)) byId.set(t.id, t);
+    if (byId.size === 0) return;
+    const rows = [...byId.values()].map(t => ({ id: t.id, artist: t.artist, album: t.album }));
+    try {
+      const map: Record<string, BlockRef | null> = {};
+      // Chunked to stay under the endpoint's per-call cap, which a Search tab
+      // paged deep with Load more can otherwise exceed.
+      for (let i = 0; i < rows.length; i += CHECK_CHUNK) {
+        const r = await adminFetch('/library/blocklist/check', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ tracks: rows.slice(i, i + CHECK_CHUNK) }),
+        });
+        if (!r.ok) return;
+        const j = await r.json() as { blocked?: Record<string, BlockRef | null> };
+        Object.assign(map, j.blocked || {});
+      }
+      const patch = (t: Track): Track => (t.id in map ? { ...t, blockedBy: map[t.id] } : t);
+      setBrowse(prev => (prev ? { ...prev, rows: prev.rows.map(patch) } : prev));
+      setSearchResults(prev => (prev ? prev.map(patch) : prev));
+      setUntagged(prev => prev.map(patch));
+      setRecent(prev => (prev ? prev.map(patch) : prev));
+    } catch {
+      // Enrichment, not the operation — the block itself succeeded. Leave the
+      // last-known marks rather than blaming the operator with a toast.
+    }
+  }, [adminFetch, browse, searchResults, untagged, recent]);
+
+  // Lift one entry. Shared by the Blocked tab's Unblock button, the row-level
+  // unblock, and the Undo action on the block toast, so all three converge on
+  // the same request, the same list update and the same re-mark.
+  const removeEntry = useCallback(async (
+    e: { type: BlockType; id: string; name?: string | null },
+    { quiet = false }: { quiet?: boolean } = {},
+  ) => {
+    const r = await adminFetch(`/library/blocklist/${e.type}/${encodeURIComponent(e.id)}`, { method: 'DELETE' });
+    if (!r.ok && r.status !== 404) {
+      const j = await r.json().catch(() => ({})) as { error?: string };
+      throw new Error(j.error || `unblock failed (${r.status})`);
+    }
+    setBlockedEntries(prev => (prev ? prev.filter(x => !(x.type === e.type && x.id === e.id)) : prev));
+    if (!quiet) notify.ok(`“${e.name || e.id}” can play again`);
+    await recheckBlocked();
+  }, [adminFetch, recheckBlocked]);
+
   const blockTrack = async (track: Track, type: BlockType) => {
     setBlocking(track.id);
     try {
@@ -621,8 +680,22 @@ export default function LibraryPanel() {
       const j = await r.json().catch(() => ({})) as { entry?: BlockEntry; purged?: number; error?: string };
       if (!r.ok) throw new Error(j.error || `block failed (${r.status})`);
       const what = type === 'track' ? `“${track.title}”` : type === 'album' ? `album “${track.album}”` : track.artist;
-      notify.ok(`${what} will never air${j.purged ? ` · ${j.purged} dropped from queue` : ''} — manage in the Blocked tab`);
-      setBlockedEntries(prev => (prev && j.entry ? [...prev, j.entry] : prev));
+      const entry = j.entry;
+      // Undo rather than a confirm dialog: a modal would tax every correct
+      // block to guard the occasional misclick, and the row badge means a
+      // wrong scope is visible even after the toast goes.
+      const msg = `${what} will never air${j.purged ? ` · ${j.purged} dropped from queue` : ''}`;
+      if (entry) {
+        notify.undo(msg, () => {
+          removeEntry(entry, { quiet: true })
+            .then(() => notify.ok(`“${entry.name || entry.id}” can play again`))
+            .catch(err => notify.err(errorMessage(err)));
+        });
+      } else {
+        notify.ok(`${msg} — manage in the Blocked tab`);
+      }
+      setBlockedEntries(prev => (prev && entry ? [...prev, entry] : prev));
+      await recheckBlocked();
     } catch (err) {
       notify.err(errorMessage(err));
     } finally {
@@ -631,20 +704,52 @@ export default function LibraryPanel() {
   };
 
   const unblockEntry = async (e: BlockEntry) => {
-    const key = `${e.type}:${e.id}`;
-    setUnblocking(key);
+    setUnblocking(`${e.type}:${e.id}`);
     try {
-      const r = await adminFetch(`/library/blocklist/${e.type}/${encodeURIComponent(e.id)}`, { method: 'DELETE' });
-      if (!r.ok && r.status !== 404) {
-        const j = await r.json().catch(() => ({})) as { error?: string };
-        throw new Error(j.error || `unblock failed (${r.status})`);
-      }
-      notify.ok(`“${e.name || e.id}” can play again`);
-      setBlockedEntries(prev => (prev ? prev.filter(x => !(x.type === e.type && x.id === e.id)) : prev));
+      await removeEntry(e);
     } catch (err) {
       notify.err(errorMessage(err));
     } finally {
       setUnblocking(null);
+    }
+  };
+
+  // Row-level unblock: lifts whichever entry matched this row, which may be an
+  // album or artist block made from a different row entirely.
+  const unblockRow = async (track: Track, ref: BlockRef) => {
+    setBlocking(track.id);
+    try {
+      await removeEntry(ref);
+    } catch (err) {
+      notify.err(errorMessage(err));
+    } finally {
+      setBlocking(null);
+    }
+  };
+
+  // Bulk unblock from the Blocked tab. One request, not N concurrent DELETEs:
+  // the controller rewrites blocklist.json once, so parallel single removes
+  // could persist a stale snapshot.
+  const bulkUnblock = async (batch: BlockEntry[]) => {
+    if (batch.length === 0) return;
+    setBulkBusy(true);
+    try {
+      const r = await adminFetch('/library/blocklist', {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ entries: batch.map(e => ({ type: e.type, id: e.id })) }),
+      });
+      const j = await r.json().catch(() => ({})) as { removed?: number; error?: string };
+      if (!r.ok) throw new Error(j.error || `unblock failed (${r.status})`);
+      const removed = j.removed ?? 0;
+      const keys = new Set(batch.map(e => `${e.type}:${e.id}`));
+      setBlockedEntries(prev => (prev ? prev.filter(x => !keys.has(`${x.type}:${x.id}`)) : prev));
+      notify.ok(`${removed} entr${removed === 1 ? 'y' : 'ies'} can play again`);
+      await recheckBlocked();
+    } catch (err) {
+      notify.err(errorMessage(err));
+    } finally {
+      setBulkBusy(false);
     }
   };
 
@@ -1301,7 +1406,9 @@ export default function LibraryPanel() {
           entries={blockedEntries}
           loading={blockedLoading}
           unblocking={unblocking}
+          bulkBusy={bulkBusy}
           onUnblock={unblockEntry}
+          onBulkUnblock={bulkUnblock}
           onRefresh={loadBlocked}
         />
       )}
@@ -1371,6 +1478,7 @@ export default function LibraryPanel() {
           onRetag={retagTrack}
           blocking={blocking}
           onBlock={blockTrack}
+          onUnblock={unblockRow}
           vocab={vocab}
           editingId={editingId}
           manualBusy={manualBusy}

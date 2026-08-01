@@ -74,7 +74,9 @@ router.get('/library/browse', requireAdmin, async (req, res) => {
     // is clean without requiring a re-tag.
     const cleanRows = result.rows.filter((row) => !subsonic.isStationArchive(row));
     const removed = result.rows.length - cleanRows.length;
-    result.rows = cleanRows;
+    // Blocked rows STAY (the library browser shows the library) — they just
+    // carry the entry that blocks them, so the UI can mark and unblock them.
+    result.rows = blocklist.annotate(cleanRows);
     result.total = Math.max(0, result.total - removed);
     const stats = library.stats();
     res.json({
@@ -157,7 +159,7 @@ router.get('/library/search-sound', requireAdmin, async (req, res) => {
         instrumental: t.vocalRanges == null ? null : t.vocalRanges.length === 0,
         similarity: typeof t._similarity === 'number' ? t._similarity : null,
       }));
-    res.json({ results });
+    res.json({ results: blocklist.annotate(results) });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -491,7 +493,7 @@ router.get('/library/untagged', requireAdmin, async (req, res) => {
       albumOffset += albums.length;
       songIndex = 0;
     }
-    res.json({ rows, nextCursor });
+    res.json({ rows: blocklist.annotate(rows), nextCursor });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -923,6 +925,69 @@ router.delete('/library/blocklist/:type/:id', requireAdmin, async (req, res) => 
     queue.log('error', `/library/blocklist delete failed: ${err.message}`);
     res.status(500).json({ error: err.message });
   }
+});
+
+// Bulk unblock — body { entries: [{type, id}, …] }. One rewrite and one persist
+// (blocklist.removeMany); firing N single DELETEs concurrently would race on the
+// async write and could land the file in a stale state. Reports how many came
+// off and which were already gone, so a partially-stale selection is honest
+// rather than a 404 for the whole batch.
+const BULK_UNBLOCK_MAX = 500;
+
+router.delete('/library/blocklist', requireAdmin, async (req, res) => {
+  const raw = req.body?.entries;
+  if (!Array.isArray(raw) || raw.length === 0) {
+    return res.status(400).json({ error: 'entries must be a non-empty array of { type, id }' });
+  }
+  if (raw.length > BULK_UNBLOCK_MAX) {
+    return res.status(400).json({ error: `at most ${BULK_UNBLOCK_MAX} entries per call` });
+  }
+  const targets: Array<{ type: blocklist.BlockType; id: string }> = [];
+  for (const e of raw) {
+    const type = e?.type;
+    const id = e?.id;
+    if (!['track', 'album', 'artist'].includes(type) || typeof id !== 'string' || !id) {
+      return res.status(400).json({ error: 'each entry needs a valid type and id' });
+    }
+    targets.push({ type, id });
+  }
+  try {
+    const { removed, missing } = await blocklist.removeMany(targets);
+    if (removed) {
+      queue.log('blocked', `${removed} entr${removed === 1 ? 'y' : 'ies'} removed from the never-play blocklist`);
+    }
+    res.json({ removed, missing });
+  } catch (err) {
+    queue.log('error', `/library/blocklist bulk delete failed: ${err.message}`);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// POST /library/blocklist/check — body { tracks: [{id, artist?, album?,
+// albumId?, artistId?}, …] } → { blocked: { <id>: BlockRef | null } }.
+//
+// Re-marks rows the admin already has on screen after a block or unblock.
+// Refetching the tab instead would lose pagination and re-hit Navidrome on the
+// Search tab; matching client-side would mean a second copy of the
+// normalised-name rules, free to drift from the one in music/blocklist.ts.
+const BLOCK_CHECK_MAX = 500;
+
+router.post('/library/blocklist/check', requireAdmin, (req, res) => {
+  const rows = req.body?.tracks;
+  if (!Array.isArray(rows)) {
+    return res.status(400).json({ error: 'tracks must be an array' });
+  }
+  if (rows.length > BLOCK_CHECK_MAX) {
+    return res.status(400).json({ error: `at most ${BLOCK_CHECK_MAX} tracks per call` });
+  }
+  const blocked: Record<string, blocklist.BlockRef | null> = {};
+  for (const row of rows) {
+    const id = row?.id;
+    if (typeof id !== 'string' || !id) continue;
+    const hit = blocklist.matchOf(row);
+    blocked[id] = hit ? blocklist.refOf(hit) : null;
+  }
+  res.json({ blocked });
 });
 
 // ---------------------------------------------------------------------------
