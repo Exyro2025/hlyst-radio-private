@@ -2024,6 +2024,85 @@ html.lite .sw-ripple-circle {
     }
 }
 
+/* Seam sheet — Part Three's stack as a hi-fi wiring manual. Each swappable
+   seam opens with a dotted patch leader (contents-page style: mono tag left,
+   leader dots, the seam's name right in the second ink), then the copy at
+   full measure with a vertical FITS rail of compatible engines beside it.
+   Not a card grid; the dotted leader is this section's device. */
+.bs-seam {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) 220px;
+    gap: 10px clamp(32px, 4vw, 64px);
+    padding: 26px 0 30px;
+}
+.bs-seam-rule {
+    grid-column: 1 / -1;
+    display: flex;
+    align-items: baseline;
+    gap: 14px;
+}
+.bs-seam-tag,
+.bs-seam-name {
+    font-family: var(--mono-font), monospace;
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.2em;
+    text-transform: uppercase;
+    white-space: nowrap;
+}
+.bs-seam-tag {
+    color: var(--ink);
+}
+.bs-seam-name {
+    color: var(--accent-2);
+}
+.bs-seam-lead {
+    flex: 1;
+    min-width: 40px;
+    border-bottom: 2px dotted color-mix(in oklab, var(--ink) 35%, transparent);
+    transform: translateY(-4px);
+}
+.bs-seam h3 {
+    margin: 4px 0 10px;
+    font-size: clamp(20px, 2.2vw, 26px);
+    line-height: 1.15;
+    font-weight: 800;
+    letter-spacing: -0.02em;
+}
+.bs-seam-copy p {
+    margin: 0;
+    max-width: 64ch;
+    font-size: 14px;
+    line-height: 1.6;
+    color: var(--muted);
+}
+.bs-seam-fits {
+    display: flex;
+    flex-wrap: wrap;
+    align-content: flex-start;
+    gap: 6px;
+    padding-top: 10px;
+}
+.bs-seam-fits-cap {
+    width: 100%;
+    margin: 0 0 2px;
+    font-family: var(--mono-font), monospace;
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 0.2em;
+    text-transform: uppercase;
+    color: var(--muted);
+}
+@media (max-width: 780px) {
+    .bs-seam {
+        grid-template-columns: 1fr;
+        gap: 10px 0;
+    }
+    .bs-seam-fits {
+        padding-top: 4px;
+    }
+}
+
 /* Console directory — Part Five's ledger. The admin console presented as a
    numbered index of its real departments (the same names as the console nav),
    not another headline+blurb card grid: a ghosted mono numeral + second-ink
