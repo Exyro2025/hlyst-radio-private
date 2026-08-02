@@ -175,7 +175,9 @@
        :root, gets a real value, and so the admin sidebar's mobile drawer
        resolves its fills even though Radix portals it to <body>, outside
        .admin-root. --page-bg deepens slightly in dark mode below. */
-    --card-bg: var(--bg);
+    /* Cards lift off the page on the theme's raised surface tier (was
+       var(--bg), which left card and page in one plane). */
+    --card-bg: var(--surface);
     --page-bg: color-mix(in oklab, var(--bg) 90%, var(--ink));
     /* The sidebar rail sits ~6% darker than the admin page so it reads as its
        own chrome. "Darker" flips direction per theme: toward --ink in light
@@ -3079,8 +3081,8 @@ html.lite .sw-ripple-circle {
        control panel, so labels + help copy need to clear the readable-contrast
        floor (the theme's editorial --muted sits ~3.5:1 on the card). Derived
        from --ink/--bg so it tracks the palette and flips in dark mode. */
-    --muted: color-mix(in oklab, var(--ink) 55%, var(--bg));
-    --muted-2: color-mix(in oklab, var(--muted) 70%, var(--bg));
+    --muted: color-mix(in oklab, var(--ink) 62%, var(--bg));
+    --muted-2: color-mix(in oklab, var(--muted) 75%, var(--bg));
     /* Two-tone surface split (--card-bg / --page-bg) and the shadcn --sidebar-*
        family live at :root now — see the note there. The admin subtree just
        inherits them; only the higher-contrast --muted override stays local. */
@@ -3123,14 +3125,14 @@ html:has(.admin-root.paper) {
 
 /* ── Type ── */
 .admin-root .eyebrow {
-    font-size: 10px;
+    font-size: 11px;
     letter-spacing: 0.28em;
     text-transform: uppercase;
     font-weight: 700;
 }
 .admin-root .caption {
-    font-size: 10px;
-    letter-spacing: 0.18em;
+    font-size: 11px;
+    letter-spacing: 0.16em;
     text-transform: uppercase;
     font-weight: 500;
     color: var(--muted);
@@ -3205,7 +3207,7 @@ html:has(.admin-root.paper) {
     font-weight: 700;
 }
 .admin-root .card-head .sub {
-    font-size: 10px;
+    font-size: 11px;
     letter-spacing: 0.18em;
     color: var(--muted);
     text-transform: uppercase;
@@ -3428,11 +3430,19 @@ html:has(.admin-root.paper) {
    on the producer's read before the raw findings. */
 .admin-root .card.is-spotlight {
     border-color: var(--accent);
-    box-shadow: inset 3px 0 0 0 var(--accent);
+    box-shadow:
+        inset 3px 0 0 0 var(--accent),
+        var(--plate-shadow);
     background: color-mix(in srgb, var(--accent) 4%, var(--card-bg));
 }
 .admin-root .card.is-spotlight > .card-head {
     border-bottom-color: color-mix(in srgb, var(--accent) 30%, transparent);
+}
+/* Raised — the hard print-plate shadow for the few cards that anchor a page
+   (dash now-playing, stats, the station header strip). Not the default: a
+   settings stack where every card shouts is no hierarchy at all. */
+.admin-root .card.is-raised {
+    box-shadow: var(--plate-shadow);
 }
 
 /* Buttons, inputs, the segmented control and the toggle are now shadcn/ui
@@ -3449,7 +3459,7 @@ html:has(.admin-root.paper) {
     margin: 0 0 12px 0;
 }
 .admin-root .field-hint {
-    font-size: 11px;
+    font-size: 12px;
     color: var(--muted);
     line-height: 1.2;
     font-family: var(--font-jetbrains);
@@ -3465,7 +3475,7 @@ html:has(.admin-root.paper) {
     margin: 0;
 }
 .admin-root .kv dt {
-    font-size: 10px;
+    font-size: 11px;
     letter-spacing: 0.18em;
     text-transform: uppercase;
     color: var(--muted);
@@ -3481,7 +3491,7 @@ html:has(.admin-root.paper) {
     display: flex;
     align-items: center;
     gap: 12px;
-    font-size: 10px;
+    font-size: 11px;
     letter-spacing: 0.28em;
     text-transform: uppercase;
     color: var(--muted);
@@ -3510,7 +3520,7 @@ html:has(.admin-root.paper) {
     font-variant-numeric: tabular-nums;
 }
 .admin-root .metric .l {
-    font-size: 9px;
+    font-size: 10px;
     letter-spacing: 0.28em;
     text-transform: uppercase;
     color: var(--muted);

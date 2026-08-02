@@ -460,10 +460,10 @@ function ListenerChart({ samples }: { samples: ListenerSample[] }) {
           y1={peakY}
           x2={W}
           y2={peakY}
-          stroke="var(--ink)"
+          stroke="var(--accent-2)"
           strokeWidth={1}
           strokeDasharray="2 3"
-          opacity={0.18}
+          opacity={0.55}
           vectorEffect="non-scaling-stroke"
         />
       )}
@@ -748,6 +748,7 @@ export default function StatsPanel() {
         title="Audience"
         sub={`listeners over the last ${rangeLabel}`}
         right={<Seg value={range} options={RANGE_OPTIONS} onChange={setRange} />}
+        className="is-raised"
       >
         <div className="grid gap-0">
           <MetricStrip>

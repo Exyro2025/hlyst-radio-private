@@ -147,7 +147,9 @@ function buildGauge(
       y1: cy - rTickIn,
       x2: cx,
       y2: cy - rTickOut - 2,
-      stroke: 'var(--accent)',
+      // Second ink: the peak-hold marker is a reference, not the live value —
+      // it reads apart from the accent needle sweep on two-color themes.
+      stroke: 'var(--accent-2)',
       'stroke-width': 2.4,
     });
     svg.appendChild(peak);
@@ -289,7 +291,7 @@ export default function StationHeader({
   const offline = metrics.online === false;
 
   return (
-    <section className="card border-ink">
+    <section className="card is-raised border-ink">
       {/* now-playing header row */}
       <div className="stack-mobile grid grid-cols-[1fr_auto] items-center gap-6 border-b border-ink p-[18px]">
         <div>
