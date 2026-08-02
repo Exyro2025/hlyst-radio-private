@@ -619,6 +619,9 @@ body::after {
     inherits: false;
     initial-value: transparent;
 }
+/* TODO(skins-colocation): the .v3-cover-* block is classic-private and should
+   eventually move to a co-located classic module (shared v3- primitives stay
+   global). Deferred so the contrast retune below isn't tangled with a move. */
 .v3-cover-ambient {
     position: absolute;
     inset: 0;
@@ -626,13 +629,13 @@ body::after {
     opacity: 0;
     background-image:
         radial-gradient(
-            58% 52% at 20% 36%,
-            color-mix(in oklab, var(--cover-tint) 32%, transparent) 0,
+            64% 56% at 20% 36%,
+            color-mix(in oklab, var(--cover-tint) 45%, transparent) 0,
             transparent 70%
         ),
         radial-gradient(
             68% 58% at 82% 76%,
-            color-mix(in oklab, var(--cover-tint-2) 22%, transparent) 0,
+            color-mix(in oklab, var(--cover-tint-2) 32%, transparent) 0,
             transparent 72%
         );
     transition:
@@ -643,22 +646,44 @@ body::after {
 .v3-cover-ambient.v3-cover-ambient-on {
     opacity: 1;
 }
-/* Dark theme leans on the tint a touch more — the colour has to lift charcoal
-   rather than settle onto cream, so a soft-light blend keeps it luminous. The
-   explicit [data-theme="dark"] and the prefers-dark-without-explicit-light
-   media query mirror the same dark-mode pattern used by the paper-grain rules. */
+/* Dark theme leans on the tint harder — soft-light compresses on charcoal, so
+   the pools run richer mixes there to actually lift the base. The explicit
+   [data-theme="dark"] and the prefers-dark-without-explicit-light media query
+   mirror the same dark-mode pattern used by the paper-grain rules. */
 :root[data-theme="dark"] .v3-cover-ambient {
     mix-blend-mode: soft-light;
+    background-image:
+        radial-gradient(
+            64% 56% at 20% 36%,
+            color-mix(in oklab, var(--cover-tint) 58%, transparent) 0,
+            transparent 70%
+        ),
+        radial-gradient(
+            68% 58% at 82% 76%,
+            color-mix(in oklab, var(--cover-tint-2) 42%, transparent) 0,
+            transparent 72%
+        );
 }
 :root[data-theme="dark"] .v3-cover-ambient.v3-cover-ambient-on {
-    opacity: 0.85;
+    opacity: 1;
 }
 @media (prefers-color-scheme: dark) {
     :root:not([data-theme="light"]) .v3-cover-ambient {
         mix-blend-mode: soft-light;
+        background-image:
+            radial-gradient(
+                64% 56% at 20% 36%,
+                color-mix(in oklab, var(--cover-tint) 58%, transparent) 0,
+                transparent 70%
+            ),
+            radial-gradient(
+                68% 58% at 82% 76%,
+                color-mix(in oklab, var(--cover-tint-2) 42%, transparent) 0,
+                transparent 72%
+            );
     }
     :root:not([data-theme="light"]) .v3-cover-ambient.v3-cover-ambient-on {
-        opacity: 0.85;
+        opacity: 1;
     }
 }
 
@@ -684,9 +709,11 @@ body::after {
 .v3-cover-frame:focus-visible {
     outline: none;
 }
-/* Frame wakes from muted to ink on engage. */
+/* Frame wakes from muted to ink on engage; the print-plate shadow gives the
+   art the same raised-plate footing as the landing figures. */
 .v3-cover-frame .v3-cover-glitch {
     transition: border-color 0.25s ease;
+    box-shadow: var(--plate-shadow);
 }
 .v3-cover-frame:is(:hover, :focus-visible, .v3-cover-live) .v3-cover-glitch {
     border-color: var(--ink);
@@ -1011,7 +1038,7 @@ html.lite .sw-ripple-circle {
    smaller than the masthead caption and a lighter, more faded ink. */
 .player-topbar .v3-caption.player-topbar-subline {
     font-size: 10px;
-    color: color-mix(in srgb, var(--muted) 65%, transparent);
+    color: color-mix(in srgb, var(--muted) 85%, transparent);
 }
 
 /* ─────────────────────────────────────────────────────────────────────────
@@ -1022,18 +1049,21 @@ html.lite .sw-ripple-circle {
    Tailwind on the JSX; only the analog part internals (rings, ticks, needle,
    conic knob scale, grille dots) live here where utilities can't reach.
    ───────────────────────────────────────────────────────────────────────── */
+/* TODO(skins-colocation): the .fz-* block is classic-private and should
+   eventually move to a co-located classic module. Deferred so the contrast
+   retune isn't tangled with a move. */
 .fz-deck {
     /* Divider between compartments + the field/border tints, scoped here so
        the JSX can reference them as border-[color:var(--fz-line)] etc. */
-    --fz-line: color-mix(in oklab, var(--ink) 22%, transparent);
-    --fz-dim: color-mix(in oklab, var(--ink) 45%, transparent);
+    --fz-line: color-mix(in oklab, var(--ink) 30%, transparent);
+    --fz-dim: color-mix(in oklab, var(--ink) 55%, transparent);
     /* Top edge of the bar — lighter than full ink so it reads as a soft rule. */
-    --fz-edge: color-mix(in oklab, var(--ink) 55%, transparent);
+    --fz-edge: color-mix(in oklab, var(--ink) 70%, transparent);
     /* Console-shelf fill for the whole deck + the recessed well behind each
        dial, so the bar reads as a control shelf and the instruments sit in
        matching wells on every theme instead of floating on the page colour. */
-    --fz-panel: color-mix(in oklab, var(--ink) 6%, var(--bg));
-    --fz-well: color-mix(in oklab, var(--ink) 12%, var(--bg));
+    --fz-panel: color-mix(in oklab, var(--ink) 10%, var(--bg));
+    --fz-well: color-mix(in oklab, var(--ink) 18%, var(--bg));
 }
 
 /* Power — circular button, open ring + stem (the power glyph). The ring sits
@@ -1044,6 +1074,7 @@ html.lite .sw-ripple-circle {
     border-radius: 50%;
     border: 1px solid var(--ink);
     background: var(--fz-well);
+    box-shadow: inset 2px 2px 0 color-mix(in oklab, var(--ink) 10%, transparent);
     cursor: pointer;
     display: flex;
     align-items: center;
@@ -1052,7 +1083,7 @@ html.lite .sw-ripple-circle {
     transition: background 0.15s;
 }
 .fz-power:hover {
-    background: color-mix(in oklab, var(--ink) 17%, var(--bg));
+    background: color-mix(in oklab, var(--ink) 24%, var(--bg));
 }
 .fz-power:disabled {
     cursor: not-allowed;
@@ -1095,6 +1126,8 @@ html.lite .sw-ripple-circle {
     position: relative;
     border: 1px solid var(--fz-line);
     background: var(--fz-well);
+    /* Pressed-in cousin of the print plate — hard offset, no blur. */
+    box-shadow: inset 2px 2px 0 color-mix(in oklab, var(--ink) 10%, transparent);
     overflow: hidden;
     flex: none;
     min-width: 0;
@@ -1128,7 +1161,7 @@ html.lite .sw-ripple-circle {
     padding: 0 4px;
     font-size: 9px;
     letter-spacing: 0.08em;
-    color: color-mix(in oklab, var(--ink) 40%, transparent);
+    color: color-mix(in oklab, var(--ink) 55%, transparent);
 }
 .fz-scale .fz-needle {
     position: absolute;
@@ -1222,6 +1255,7 @@ html.lite .sw-ripple-circle {
 .fz-grille {
     flex: none;
     border: 1px solid var(--fz-line);
+    box-shadow: inset 2px 2px 0 color-mix(in oklab, var(--ink) 10%, transparent);
     background-color: transparent;
     background-image: radial-gradient(
         color-mix(in oklab, var(--ink) 18%, transparent) 1.3px,
