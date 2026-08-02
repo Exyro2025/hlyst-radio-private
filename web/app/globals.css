@@ -1974,8 +1974,8 @@ html.lite .sw-ripple-circle {
 /* ── Section tempo + band modifiers ─────────────────────────────────────────
    The landing scroll alternates density instead of a uniform march: --tight
    compresses a quiet section, --band breaks a section out to the full
-   viewport width, --tinted prints it on the accent tint, --inverted prints
-   it paper-on-ink like a reversed plate. */
+   viewport width, --tinted prints it on the accent tint. (An --inverted
+   paper-on-ink variant was tried and cut — the broadsheet stays paper.) */
 .bs-section--tight {
     padding: clamp(28px, 4vw, 48px) 0;
 }
@@ -1996,46 +1996,6 @@ html.lite .sw-ripple-circle {
     background: var(--accent-soft);
     border-block: 1px solid var(--ink);
     padding-block: clamp(48px, 6vw, 80px);
-}
-.bs-section--inverted {
-    /* Stashes ONLY on the section — they reference the inherited tokens,
-       which this element does NOT redefine, so they resolve cleanly. The
-       actual remap lives one level down (> *). Stash + remap on the SAME
-       element would be a dependency cycle (--inv-plate → --ink →
-       --inv-paper → --bg → --inv-plate): custom properties on one element
-       resolve as a graph, not in declaration order, and a cycle makes every
-       participant guaranteed-invalid for the whole subtree — the "vanishing
-       vinyl glyph" failure mode. */
-    --inv-plate: var(--ink);
-    --inv-paper: var(--bg);
-    --inv-accent: var(--accent);
-    background: var(--inv-plate);
-    color: var(--inv-paper);
-    border-top: 0;
-    padding-block: clamp(48px, 7vw, 88px);
-}
-.bs-section--inverted > * {
-    /* Children inherit the section's resolved --inv-* stashes and remap the
-       primitives from them — no cycle, since the stashes aren't redefined
-       here. Derived tokens are re-declared too: they were already resolved
-       at :root, so remapping --bg/--ink alone would not re-derive them. */
-    --ink: var(--inv-paper);
-    --bg: var(--inv-plate);
-    --muted: color-mix(in oklab, var(--inv-paper) 78%, var(--inv-plate));
-    --ink-soft: color-mix(in oklab, var(--inv-paper) 8%, transparent);
-    --ink-faint: color-mix(in oklab, var(--inv-paper) 55%, var(--inv-plate));
-    --separator-strong: color-mix(in oklab, var(--inv-paper) 25%, transparent);
-    --separator-soft: color-mix(in oklab, var(--inv-paper) 15%, transparent);
-    --line: color-mix(in oklab, var(--inv-paper) 40%, transparent);
-    --soft-border: color-mix(in oklab, var(--inv-paper) 15%, transparent);
-    --surface: color-mix(in oklab, var(--inv-plate) 92%, var(--inv-paper));
-    --field: color-mix(in oklab, var(--inv-plate) 88%, var(--inv-paper));
-    --overlay: color-mix(in oklab, var(--inv-paper) 8%, transparent);
-    /* Legibility guard: flare's accent ≈ its ink, which is now the plate —
-       pull the accent toward paper so it always clears the plate. */
-    --accent: color-mix(in oklab, var(--inv-accent) 55%, var(--inv-paper));
-    --accent-2: color-mix(in oklab, var(--inv-accent) 40%, var(--inv-paper));
-    --accent-soft: color-mix(in oklab, var(--inv-accent) 20%, var(--inv-plate));
 }
 
 .bs-whatis-grid {
