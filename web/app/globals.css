@@ -1769,6 +1769,10 @@ html.lite .sw-ripple-circle {
     background: color-mix(in oklab, var(--bg) 80%, var(--ink));
     border-bottom: 1px solid var(--ink);
     overflow-x: auto;
+    /* overflow-x: auto alone forces overflow-y to auto as well, and the tabs'
+       -1px fuse margin leaves 1px of vertical overflow — enough for the strip
+       to scroll up/down under a trackpad. Sideways scroll only. */
+    overflow-y: hidden;
     scrollbar-width: none;
     position: relative;
     z-index: 2;
