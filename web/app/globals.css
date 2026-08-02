@@ -1919,8 +1919,9 @@ html.lite .sw-ripple-circle {
     display: flex;
     flex-direction: column;
     gap: clamp(24px, 4vw, 48px);
-    /* A taller opening beat than the sections below — the front page leads. */
-    padding: clamp(16px, 2.5vw, 32px) 0 clamp(24px, 3vw, 40px);
+    /* Taller opening beat on top only — the bottom stays tight so the feature
+       strip sits evenly between its own top rule and the rule below it. */
+    padding: clamp(16px, 2.5vw, 32px) 0 clamp(8px, 1.5vw, 16px);
 }
 .bs-hero-head {
     display: flex;
