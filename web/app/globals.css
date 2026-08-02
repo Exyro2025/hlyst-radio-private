@@ -1993,7 +1993,9 @@ html.lite .sw-ripple-circle {
     border-top: 0;
 }
 .bs-section--tinted {
-    background: var(--accent-soft);
+    /* Softened tint — the raw accent-soft read too strong as a full band;
+       walking it 40% back toward the paper keeps the color moment quiet. */
+    background: color-mix(in oklab, var(--accent-soft) 60%, var(--bg));
     border-block: 1px solid var(--ink);
     padding-block: clamp(48px, 6vw, 80px);
 }
