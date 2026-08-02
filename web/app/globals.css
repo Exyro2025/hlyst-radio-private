@@ -2173,28 +2173,101 @@ html.lite .sw-ripple-circle {
     }
 }
 
-/* The DJ's three habits — a broadsheet lead-plus-pair, deliberately NOT an
-   even three-up. The primary habit (picking tracks) runs as a wider lead
-   column; the two supporting habits stack in a narrower right rail, so the
-   row reads as an asymmetric feature rather than a templated feature grid. */
-.bs-dj-habits {
-    display: grid;
-    grid-template-columns: minmax(0, 1.12fr) minmax(0, 0.88fr);
-    gap: clamp(24px, 4vw, 52px);
-    align-items: start;
+/* Air log — Part Two's DJ habits printed as one small hour of broadcast,
+   the way the dash booth log prints it (the screenshot directly above this
+   block shows the real thing): mono timestamp + kind chip on a right-aligned
+   left rail, the habit beside it, one hairline spine running down the hour
+   with a small ink tick per entry. Not a card grid on purpose. */
+.bs-airlog-cap {
+    margin: 0 0 2px;
+    font-family: var(--mono-font), monospace;
+    font-size: 11px;
+    letter-spacing: 0.2em;
+    text-transform: uppercase;
+    color: var(--muted);
 }
-.bs-dj-habits__rest {
+.bs-airlog-entry {
+    display: grid;
+    grid-template-columns: 108px minmax(0, 1fr);
+    gap: 0 26px;
+}
+.bs-airlog-when {
     display: flex;
     flex-direction: column;
-    gap: clamp(20px, 2.4vw, 28px);
+    align-items: flex-end;
+    gap: 7px;
+    padding-top: 24px;
+    font-family: var(--mono-font), monospace;
+    font-size: 13px;
+    font-weight: 700;
+    font-variant-numeric: tabular-nums;
+    color: var(--ink);
 }
-@media (max-width: 780px) {
-    .bs-dj-habits {
+.bs-airlog-tag {
+    display: inline-block;
+    padding: 2px 8px;
+    border: 1px solid currentColor;
+    font-size: 9px;
+    font-weight: 700;
+    letter-spacing: 0.2em;
+    text-transform: uppercase;
+}
+.bs-airlog-tag[data-kind="pick"] {
+    color: var(--accent);
+}
+.bs-airlog-tag[data-kind="link"] {
+    color: var(--accent-2);
+}
+.bs-airlog-tag[data-kind="handoff"] {
+    color: var(--ink);
+}
+.bs-airlog-body {
+    position: relative;
+    border-left: 1px solid var(--separator-strong);
+    padding: 24px 0 26px 26px;
+}
+.bs-airlog-body::before {
+    content: "";
+    position: absolute;
+    left: -3px;
+    top: 31px;
+    width: 5px;
+    height: 5px;
+    background: var(--ink);
+}
+.bs-airlog-entry:last-child .bs-airlog-body {
+    padding-bottom: 6px;
+}
+.bs-airlog-body h3 {
+    margin: 0 0 8px;
+    font-size: clamp(19px, 2vw, 24px);
+    line-height: 1.15;
+    font-weight: 800;
+    letter-spacing: -0.015em;
+}
+.bs-airlog-body p {
+    margin: 0;
+    max-width: 62ch;
+    font-size: 14px;
+    line-height: 1.6;
+    color: var(--muted);
+}
+@media (max-width: 640px) {
+    .bs-airlog-entry {
         grid-template-columns: 1fr;
-        gap: 28px;
     }
-    .bs-dj-habits__rest {
-        gap: 28px;
+    .bs-airlog-when {
+        flex-direction: row;
+        align-items: center;
+        gap: 10px;
+        padding-top: 22px;
+    }
+    .bs-airlog-body {
+        border-left: 0;
+        padding: 10px 0 8px;
+    }
+    .bs-airlog-body::before {
+        display: none;
     }
 }
 
