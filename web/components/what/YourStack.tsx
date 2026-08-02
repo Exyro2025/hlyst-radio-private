@@ -41,7 +41,7 @@ const VOICES = [
 
 export default function YourStack() {
   return (
-    <EditorialReveal className="bs-section">
+    <EditorialReveal className="bs-section bs-section--tight">
       <p className="bs-eyebrow">PART THREE · THE STACK</p>
       <h2>Bring your own brain. Bring your own voice.</h2>
       <p className="text-muted">

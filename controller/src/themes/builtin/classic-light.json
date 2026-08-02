@@ -9,7 +9,7 @@
     "--surface-border": "rgba(22, 20, 18, 0.12)",
     "--field": "color-mix(in oklab, #f3efe6 92%, #161412)",
     "--ink": "#161412",
-    "--muted": "#7a736a",
+    "--muted": "#6d675e",
     "--ink-faint": "#a8a096",
     "--accent": "oklch(0.62 0.22 25)",
     "--accent-2": "oklch(0.5 0.09 235)",

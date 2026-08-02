@@ -49,6 +49,8 @@ export default function Coda() {
           Desktop <span aria-hidden="true">↗</span>
         </a>
       </p>
+
+      <div className="bs-rule-double mt-6 w-full" aria-hidden="true" />
     </EditorialReveal>
   );
 }

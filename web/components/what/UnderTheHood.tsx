@@ -10,7 +10,7 @@ const BOXES = [
 
 export default function UnderTheHood() {
   return (
-    <EditorialReveal className="bs-section">
+    <EditorialReveal className="bs-section bs-section--inverted bs-section--band">
       <p className="bs-eyebrow">PART SIX · UNDER THE HOOD</p>
       <h2>Four processes, one box, one stream out.</h2>
 

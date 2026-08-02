@@ -44,7 +44,7 @@ export default function Figure({
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
           transition={{ duration: 0.28, ease: [0.2, 0.7, 0.2, 1] }}
-          className="block h-auto w-full border border-ink object-contain"
+          className="block h-auto w-full border border-ink object-contain shadow-plate-lg"
         />
       ) : (
         <m.div
