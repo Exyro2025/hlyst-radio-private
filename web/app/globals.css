@@ -2035,12 +2035,12 @@ html.lite .sw-ripple-circle {
     grid-template-columns: repeat(2, minmax(0, 1fr));
     gap: clamp(20px, 3vw, 36px);
 }
-/* Raised card — surface fill + full ink border on the paper, no shadow.
-   (Was a borderless text block with a faint top hairline.) */
+/* Unboxed editorial card — a text block under a hairline rule, sitting
+   directly on the paper. Deliberately NOT a bordered/filled box: the
+   broadsheet items read as columns of print, not UI cards. */
 .bs-whatis-card {
-    padding: 20px 22px 24px;
-    background: var(--surface);
-    border: 1px solid var(--ink);
+    padding: 24px 0 0;
+    border-top: 1px solid var(--separator-strong);
 }
 @media (max-width: 720px) {
     .bs-whatis-grid {
