@@ -202,7 +202,7 @@
     :root:not([data-theme="light"]) {
         --bg: #100e0c;
         --ink: #ece6dc;
-        --muted: #8a8278;
+        --muted: #c1c0bd;
         --soft-border: rgba(255, 255, 255, 0.1);
         --separator-soft: rgba(255, 255, 255, 0.08);
         --separator-strong: rgba(255, 255, 255, 0.12);
