@@ -1998,12 +1998,14 @@ html.lite .sw-ripple-circle {
     padding-block: clamp(48px, 6vw, 80px);
 }
 .bs-section--inverted {
-    /* Stash before remapping — a custom property must never reference itself
-       (self-reference is invalid at computed-value time and silently kills
-       the var for the whole subtree), so every remap below reads an --inv-*
-       copy. Derived tokens (--surface, --field, --accent-soft, the plate
-       shadows…) are re-declared too: they were already resolved at :root, so
-       remapping --bg/--ink alone would not re-derive them here. */
+    /* Stashes ONLY on the section — they reference the inherited tokens,
+       which this element does NOT redefine, so they resolve cleanly. The
+       actual remap lives one level down (> *). Stash + remap on the SAME
+       element would be a dependency cycle (--inv-plate → --ink →
+       --inv-paper → --bg → --inv-plate): custom properties on one element
+       resolve as a graph, not in declaration order, and a cycle makes every
+       participant guaranteed-invalid for the whole subtree — the "vanishing
+       vinyl glyph" failure mode. */
     --inv-plate: var(--ink);
     --inv-paper: var(--bg);
     --inv-accent: var(--accent);
@@ -2011,9 +2013,15 @@ html.lite .sw-ripple-circle {
     color: var(--inv-paper);
     border-top: 0;
     padding-block: clamp(48px, 7vw, 88px);
+}
+.bs-section--inverted > * {
+    /* Children inherit the section's resolved --inv-* stashes and remap the
+       primitives from them — no cycle, since the stashes aren't redefined
+       here. Derived tokens are re-declared too: they were already resolved
+       at :root, so remapping --bg/--ink alone would not re-derive them. */
     --ink: var(--inv-paper);
     --bg: var(--inv-plate);
-    --muted: color-mix(in oklab, var(--inv-paper) 72%, var(--inv-plate));
+    --muted: color-mix(in oklab, var(--inv-paper) 78%, var(--inv-plate));
     --ink-soft: color-mix(in oklab, var(--inv-paper) 8%, transparent);
     --ink-faint: color-mix(in oklab, var(--inv-paper) 55%, var(--inv-plate));
     --separator-strong: color-mix(in oklab, var(--inv-paper) 25%, transparent);
