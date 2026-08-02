@@ -71,7 +71,7 @@ export default function MeetTheVoices() {
         <h3 className="m-0 mb-[10px] text-[clamp(22px,2.6vw,30px)] leading-[1.15] font-extrabold tracking-[-0.02em]">
           See the shape of the music.
         </h3>
-        <p className="m-0 mb-4 max-w-[64ch] text-[14px] leading-[1.6] text-muted">
+        <p className="m-0 mb-7 max-w-[64ch] text-[14px] leading-[1.6] text-muted">
           Every track the DJ knows, mapped by how it sounds — clustered by genre,
           lit by energy. This is the library it reaches into when it chooses what
           comes next. Hover a star to read it; click one to see what it would mix
