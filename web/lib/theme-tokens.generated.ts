@@ -95,6 +95,12 @@ export const THEME_TOKENS: readonly TokenDescriptor[] = [
     "type": "color"
   },
   {
+    "key": "--shadow-ink",
+    "label": "plate shadow",
+    "group": "structure",
+    "type": "color"
+  },
+  {
     "key": "--display-font",
     "label": "display font",
     "group": "type",
@@ -116,7 +122,7 @@ export const THEME_TOKENS: readonly TokenDescriptor[] = [
   }
 ];
 
-export const THEME_TOKEN_KEYS: readonly string[] = ["--bg","--surface","--surface-border","--field","--ink","--muted","--ink-faint","--accent","--accent-2","--accent-soft","--line","--soft-border","--overlay","--display-font","--mono-font","--grain"];
+export const THEME_TOKEN_KEYS: readonly string[] = ["--bg","--surface","--surface-border","--field","--ink","--muted","--ink-faint","--accent","--accent-2","--accent-soft","--line","--soft-border","--overlay","--shadow-ink","--display-font","--mono-font","--grain"];
 
 export const SWATCH_KEYS = ["--bg","--ink","--accent","--overlay"] as const;
 

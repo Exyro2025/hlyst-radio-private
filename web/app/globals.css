@@ -81,6 +81,11 @@
   /* Drawer / dialog shadow used by the right-side drawer + modal-pop. */
   --shadow-drawer: var(--drawer-shadow);
 
+  /* Hard-offset print-plate shadow (shadow-plate / shadow-plate-lg utilities)
+     — cards, framed figures, pressed buttons. Colour rides --shadow-ink. */
+  --shadow-plate: var(--plate-shadow);
+  --shadow-plate-lg: var(--plate-shadow-lg);
+
   /* Uppercase-label letterspacing, exposed as the `tracking-eyebrow` utility. */
   --tracking-eyebrow: 0.2em;
 
@@ -158,6 +163,13 @@
     --line: color-mix(in oklab, var(--ink) 70%, var(--bg));
     --accent-2: var(--accent);
     --accent-soft: color-mix(in oklab, var(--accent) 14%, var(--bg));
+    /* Hard-offset print shadow — the one sanctioned elevation device (besides
+       the drawer shadow). Themes set --shadow-ink (the plate's ink); the
+       offsets are house constants and never themeable. The fallback tempers
+       toward --bg so custom themes that omit it still read on dark stock. */
+    --shadow-ink: color-mix(in oklab, var(--ink) 85%, var(--bg));
+    --plate-shadow: 2px 2px 0 0 var(--shadow-ink);
+    --plate-shadow-lg: 4px 4px 0 0 var(--shadow-ink);
     /* Admin surface + sidebar tokens — promoted to :root (not .admin-root) so
        the @theme `--color-sidebar` bridge, which resolves var(--sidebar) at
        :root, gets a real value, and so the admin sidebar's mobile drawer

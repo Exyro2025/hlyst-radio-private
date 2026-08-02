@@ -1,6 +1,6 @@
 # SUB/WAVE UI — build conventions
 
-**Look**: "newsprint broadsheet meets hi-fi gear" — cream paper (`--bg: #f3efe6`), near-black ink, one hot-vermilion accent, **sharp corners everywhere** (radius is pinned to 0 — never use `rounded-*` classes), 1px ink borders instead of shadows, uppercase letter-spaced mono labels.
+**Look**: "newsprint broadsheet meets hi-fi gear" — cream paper (`--bg: #f3efe6`), near-black ink, one hot-vermilion accent, **sharp corners everywhere** (radius is pinned to 0 — never use `rounded-*` classes), 1px ink borders plus the hard-offset print-plate shadow (`shadow-plate`, `2px 2px 0 var(--shadow-ink)`) as the one elevation device — never soft/diffuse shadows — uppercase letter-spaced mono labels.
 
 ## Setup
 
@@ -19,7 +19,7 @@ Semantic classes (all verified in `_ds_bundle.css`):
 | Borders | `border-ink` (strong 1px), `border-separator-soft`, `border-separator-strong` |
 | Accent | `bg-primary` (vermilion fill), `text-vermilion` |
 | Type | `font-mono` (JetBrains Mono — data/labels), `uppercase`, `font-bold`, `tracking-eyebrow` (0.2em) |
-| Effects | `shadow-drawer` (the one sanctioned shadow — drawers/dialogs only) |
+| Effects | `shadow-plate` / `shadow-plate-lg` (hard-offset print shadow — raised cards, framed figures), `shadow-drawer` (drawers/dialogs only) |
 
 CSS variables (defined in `:root`, dark-mode aware): `--bg`, `--ink`, `--ink-soft` (hover wash), `--muted`, `--accent` (vermilion), `--field`, `--separator-soft`, `--separator-strong`, `--destructive`, `--drawer-shadow`, `--font-display` (Fraunces serif — headlines), `--font-sans` (Plus Jakarta Sans — body), `--font-mono`.
 
