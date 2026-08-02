@@ -2024,6 +2024,62 @@ html.lite .sw-ripple-circle {
     }
 }
 
+/* Console directory — Part Five's ledger. The admin console presented as a
+   numbered index of its real departments (the same names as the console nav),
+   not another headline+blurb card grid: a ghosted mono numeral + second-ink
+   department slug on the left rail, the editorial headline + note beside it,
+   ruled rows under one strong opening rule. */
+.bs-desk-ledger {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    column-gap: clamp(28px, 4vw, 64px);
+    border-top: 1px solid var(--ink);
+}
+.bs-desk-row {
+    display: grid;
+    grid-template-columns: 76px minmax(0, 1fr);
+    gap: 18px;
+    align-items: start;
+    padding: 22px 0;
+    border-bottom: 1px solid var(--separator-strong);
+}
+.bs-desk-no {
+    font-family: var(--mono-font), monospace;
+    font-size: 32px;
+    font-weight: 800;
+    line-height: 0.9;
+    letter-spacing: -0.02em;
+    font-variant-numeric: tabular-nums;
+    color: color-mix(in oklab, var(--ink) 22%, var(--bg));
+}
+.bs-desk-dept {
+    margin-top: 7px;
+    font-family: var(--mono-font), monospace;
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 0.2em;
+    text-transform: uppercase;
+    color: var(--accent-2);
+}
+.bs-desk-row h3 {
+    margin: 0 0 6px;
+    font-size: 17px;
+    line-height: 1.25;
+    font-weight: 800;
+    letter-spacing: -0.01em;
+}
+.bs-desk-row p {
+    margin: 0;
+    font-size: 14px;
+    line-height: 1.55;
+    color: var(--muted);
+}
+@media (max-width: 860px) {
+    .bs-desk-ledger {
+        grid-template-columns: 1fr;
+    }
+}
+
 /* ─────────────────────────────────────────────────────────────────────────
    MEET THE VOICES — spinning vinyl glyph and persona card grid.
    ───────────────────────────────────────────────────────────────────────── */
