@@ -57,11 +57,10 @@
   box-shadow: inset 2px 2px 0 color-mix(in oklab, var(--ink) 10%, transparent);
 }
 
-/* Raised window plate — crisp line border + the hard print-plate shadow, so
-   each window sits on the desk instead of floating in the same plane. */
+/* Window frame — crisp line border (the old soft-border was an 8%-opacity
+   whisper); the ink-tinted desk underneath is what makes windows read raised. */
 .plate {
   border: 1px solid var(--line);
-  box-shadow: var(--plate-shadow);
 }
 
 /* 1998 active-titlebar gradient — accent tint into the field fill. Both ends

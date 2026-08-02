@@ -17,7 +17,6 @@
     "--line": "rgba(42, 26, 16, 0.22)",
     "--soft-border": "rgba(42, 26, 16, 0.12)",
     "--overlay": "rgba(42, 26, 16, 0.06)",
-    "--shadow-ink": "#2a1a10",
     "--display-font": "instrument-serif",
     "--mono-font": "courier-prime"
   }

@@ -83,10 +83,6 @@ export const THEME_TOKENS: readonly TokenDescriptor[] = [
   { key: '--line', label: 'hairline', group: 'structure', type: 'color' },
   { key: '--soft-border', label: 'soft border', group: 'structure', type: 'color' },
   { key: '--overlay', label: 'overlay', group: 'structure', type: 'color' },
-  // The ink the hard-offset print-plate shadow prints in (the offsets are house
-  // constants web-side — see --plate-shadow in globals.css). Dark themes temper
-  // it toward --bg so raised cards don't glow.
-  { key: '--shadow-ink', label: 'plate shadow', group: 'structure', type: 'color' },
   // Type
   { key: '--display-font', label: 'display font', group: 'type', type: 'font', fontSet: 'display' },
   { key: '--mono-font', label: 'mono font', group: 'type', type: 'font', fontSet: 'mono' },

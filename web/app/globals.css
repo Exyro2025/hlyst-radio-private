@@ -81,11 +81,6 @@
   /* Drawer / dialog shadow used by the right-side drawer + modal-pop. */
   --shadow-drawer: var(--drawer-shadow);
 
-  /* Hard-offset print-plate shadow (shadow-plate / shadow-plate-lg utilities)
-     — cards, framed figures, pressed buttons. Colour rides --shadow-ink. */
-  --shadow-plate: var(--plate-shadow);
-  --shadow-plate-lg: var(--plate-shadow-lg);
-
   /* Uppercase-label letterspacing, exposed as the `tracking-eyebrow` utility. */
   --tracking-eyebrow: 0.2em;
 
@@ -163,13 +158,6 @@
     --line: color-mix(in oklab, var(--ink) 70%, var(--bg));
     --accent-2: var(--accent);
     --accent-soft: color-mix(in oklab, var(--accent) 14%, var(--bg));
-    /* Hard-offset print shadow — the one sanctioned elevation device (besides
-       the drawer shadow). Themes set --shadow-ink (the plate's ink); the
-       offsets are house constants and never themeable. The fallback tempers
-       toward --bg so custom themes that omit it still read on dark stock. */
-    --shadow-ink: color-mix(in oklab, var(--ink) 85%, var(--bg));
-    --plate-shadow: 2px 2px 0 0 var(--shadow-ink);
-    --plate-shadow-lg: 4px 4px 0 0 var(--shadow-ink);
     /* Admin surface + sidebar tokens — promoted to :root (not .admin-root) so
        the @theme `--color-sidebar` bridge, which resolves var(--sidebar) at
        :root, gets a real value, and so the admin sidebar's mobile drawer
@@ -709,11 +697,9 @@ body::after {
 .v3-cover-frame:focus-visible {
     outline: none;
 }
-/* Frame wakes from muted to ink on engage; the print-plate shadow gives the
-   art the same raised-plate footing as the landing figures. */
+/* Frame wakes from muted to ink on engage. */
 .v3-cover-frame .v3-cover-glitch {
     transition: border-color 0.25s ease;
-    box-shadow: var(--plate-shadow);
 }
 .v3-cover-frame:is(:hover, :focus-visible, .v3-cover-live) .v3-cover-glitch {
     border-color: var(--ink);
@@ -1633,28 +1619,17 @@ html.lite .sw-ripple-circle {
     font-weight: 700;
     border: 1px solid var(--ink);
     cursor: pointer;
-    box-shadow: var(--plate-shadow);
     transition:
         transform 80ms cubic-bezier(0.2, 0.7, 0.2, 1),
-        box-shadow 80ms cubic-bezier(0.2, 0.7, 0.2, 1),
         background 120ms cubic-bezier(0.2, 0.7, 0.2, 1);
 }
 .bs-tune:hover {
     background: var(--accent);
     border-color: var(--accent);
     color: var(--bg);
-    transform: translate(-1px, -1px);
-    box-shadow: 3px 3px 0 0 var(--shadow-ink);
 }
 .bs-tune:active {
-    transform: translate(1px, 1px);
-    box-shadow: none;
-}
-@media (prefers-reduced-motion: reduce) {
-    .bs-tune:hover,
-    .bs-tune:active {
-        transform: none;
-    }
+    transform: translateY(1px);
 }
 .bs-tune[data-tuned="true"] {
     background: var(--bg);
@@ -2053,9 +2028,6 @@ html.lite .sw-ripple-circle {
     --accent: color-mix(in oklab, var(--inv-accent) 55%, var(--inv-paper));
     --accent-2: color-mix(in oklab, var(--inv-accent) 40%, var(--inv-paper));
     --accent-soft: color-mix(in oklab, var(--inv-accent) 20%, var(--inv-plate));
-    --shadow-ink: var(--inv-paper);
-    --plate-shadow: 2px 2px 0 0 var(--shadow-ink);
-    --plate-shadow-lg: 4px 4px 0 0 var(--shadow-ink);
 }
 
 .bs-whatis-grid {
@@ -2063,13 +2035,12 @@ html.lite .sw-ripple-circle {
     grid-template-columns: repeat(2, minmax(0, 1fr));
     gap: clamp(20px, 3vw, 36px);
 }
-/* Raised plate card — surface fill, full ink border, hard print shadow.
+/* Raised card — surface fill + full ink border on the paper, no shadow.
    (Was a borderless text block with a faint top hairline.) */
 .bs-whatis-card {
     padding: 20px 22px 24px;
     background: var(--surface);
     border: 1px solid var(--ink);
-    box-shadow: var(--plate-shadow);
 }
 @media (max-width: 720px) {
     .bs-whatis-grid {
@@ -3464,19 +3435,11 @@ html:has(.admin-root.paper) {
    on the producer's read before the raw findings. */
 .admin-root .card.is-spotlight {
     border-color: var(--accent);
-    box-shadow:
-        inset 3px 0 0 0 var(--accent),
-        var(--plate-shadow);
+    box-shadow: inset 3px 0 0 0 var(--accent);
     background: color-mix(in srgb, var(--accent) 4%, var(--card-bg));
 }
 .admin-root .card.is-spotlight > .card-head {
     border-bottom-color: color-mix(in srgb, var(--accent) 30%, transparent);
-}
-/* Raised — the hard print-plate shadow for the few cards that anchor a page
-   (dash now-playing, stats, the station header strip). Not the default: a
-   settings stack where every card shouts is no hierarchy at all. */
-.admin-root .card.is-raised {
-    box-shadow: var(--plate-shadow);
 }
 
 /* Buttons, inputs, the segmented control and the toggle are now shadcn/ui
@@ -4284,7 +4247,7 @@ html:has(.admin-root.paper) {
 }
 
 /* Lead story — the newest dispatch, set large across the fold as the page's
-   one raised plate; the archive grid below stays a hairline newspaper run. */
+   one boxed card; the archive grid below stays a hairline newspaper run. */
 .bs-news-lead {
     display: flex;
     flex-direction: column;
@@ -4292,7 +4255,6 @@ html:has(.admin-root.paper) {
     padding: clamp(20px, 3vw, 32px);
     background: var(--surface);
     border: 1px solid var(--ink);
-    box-shadow: var(--plate-shadow-lg);
     color: inherit;
     text-decoration: none;
 }

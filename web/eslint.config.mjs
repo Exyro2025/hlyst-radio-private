@@ -139,9 +139,6 @@ export default defineConfig([
             // .is-spotlight — accent-rail card modifier (.admin-root
             // .card.is-spotlight) used by DJ Doc's verdict card.
             '^is-spotlight$',
-            // .is-raised — print-plate-shadow card modifier (.admin-root
-            // .card.is-raised) for the few cards that anchor a page.
-            '^is-raised$',
             // .is-flat — flat-section card modifier (.admin-root .card.is-flat)
             // used inside EditorDialog so sections read as divider-separated.
             '^is-flat$',

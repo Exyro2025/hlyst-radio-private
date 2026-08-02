@@ -748,7 +748,6 @@ export default function StatsPanel() {
         title="Audience"
         sub={`listeners over the last ${rangeLabel}`}
         right={<Seg value={range} options={RANGE_OPTIONS} onChange={setRange} />}
-        className="is-raised"
       >
         <div className="grid gap-0">
           <MetricStrip>

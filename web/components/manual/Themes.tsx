@@ -213,7 +213,7 @@ export default function Themes() {
 
       <section className="bs-section">
         <p className="bs-eyebrow">THE TOKEN MAP</p>
-        <h2>Seventeen knobs, no surprises.</h2>
+        <h2>Sixteen knobs, no surprises.</h2>
         <p>
           A theme writes a fixed set of CSS variables onto <code className="bs-code-inline">&lt;html&gt;</code>.
           Any other key in your JSON is silently dropped, so a malformed theme can&rsquo;t
@@ -226,7 +226,7 @@ export default function Themes() {
           <li><strong>Surface</strong> &mdash; <code className="bs-code-inline">--bg</code> page background (&ldquo;paper&rdquo;), <code className="bs-code-inline">--surface</code> raised card fill, <code className="bs-code-inline">--surface-border</code> its border, <code className="bs-code-inline">--field</code> input/textarea fill.</li>
           <li><strong>Text</strong> &mdash; <code className="bs-code-inline">--ink</code> main text, <code className="bs-code-inline">--muted</code> secondary text, <code className="bs-code-inline">--ink-faint</code> the third, faintest rung.</li>
           <li><strong>Accent</strong> &mdash; <code className="bs-code-inline">--accent</code> the station&rsquo;s accent (active states, on-air pill, focus rings), <code className="bs-code-inline">--accent-2</code> a genuinely different second ink (charts, secondary marks), <code className="bs-code-inline">--accent-soft</code> the accent tinted well into the paper.</li>
-          <li><strong>Structure</strong> &mdash; <code className="bs-code-inline">--line</code> crisp hairline, <code className="bs-code-inline">--soft-border</code> the softer hairline between sections, <code className="bs-code-inline">--overlay</code> translucent wash for hover and modal scrims, <code className="bs-code-inline">--shadow-ink</code> the colour of the hard print-plate shadow under raised cards.</li>
+          <li><strong>Structure</strong> &mdash; <code className="bs-code-inline">--line</code> crisp hairline, <code className="bs-code-inline">--soft-border</code> the softer hairline between sections, <code className="bs-code-inline">--overlay</code> translucent wash for hover and modal scrims.</li>
           <li><strong>Type</strong> &mdash; <code className="bs-code-inline">--display-font</code> / <code className="bs-code-inline">--mono-font</code>, each a curated id (not a free font string).</li>
           <li><strong>Texture</strong> &mdash; <code className="bs-code-inline">--grain</code>, the paper-grain strength, 0&ndash;1.</li>
         </ul>

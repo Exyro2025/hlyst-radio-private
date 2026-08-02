@@ -64,7 +64,6 @@ test('colour tokens accept real values, reject breakout payloads', () => {
   assert.ok(isValidTokenValue('--bg', '#ff4d00'));
   assert.ok(isValidTokenValue('--surface', 'color-mix(in oklab, #fff 90%, #000)'));
   assert.ok(isValidTokenValue('--accent', 'oklch(0.62 0.22 25)'));
-  assert.ok(isValidTokenValue('--shadow-ink', '#161412'));
   assert.ok(!isValidTokenValue('--bg', 'red; background:url(x)'), 'semicolon must be rejected');
   assert.ok(!isValidTokenValue('--bg', '<script>'), 'angle brackets rejected');
   assert.ok(!isValidTokenValue('--bg', '}'), 'brace rejected');

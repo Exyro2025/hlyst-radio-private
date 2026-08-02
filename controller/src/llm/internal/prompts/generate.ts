@@ -135,11 +135,10 @@ const THEME_SCHEMA = z.object({
     '--accent-2': COLOR.optional().describe('a genuinely different second accent ink — not a shade of --accent'),
     '--accent-soft': COLOR.optional().describe('accent tint surface — --accent mixed well into --bg'),
     '--line': COLOR.optional().describe('crisp hairline rule, stronger than --soft-border'),
-    '--shadow-ink': COLOR.optional().describe('hard print-shadow color, usually at or near --ink'),
   }).describe('the CSS custom-property color values for the theme'),
 });
 
-const THEME_SYSTEM = `You are a UI color designer. Given a free-text vibe and a light/dark mode, produce a coherent, accessible color theme as CSS custom properties. Use hex (#rrggbb) or rgb()/rgba() values only — never named colors, gradients, or anything with semicolons or braces. Ensure --ink reads clearly against --bg (strong contrast); --muted is a softer but still legible version; --accent stands out; --overlay is a low-alpha rgba wash; --soft-border and --field sit close to --bg. Surface ladder: --surface sits slightly lifted from --bg (a card on the page), --field slightly inset. --accent-2 is a second ink in a different hue from --accent (think two-color print); --accent-soft is --accent mixed well into --bg; --line is a crisper hairline than --soft-border; --shadow-ink is the hard print-shadow color, usually at or near --ink (temper it toward --bg on dark themes). Respect the requested mode: a dark theme has a dark --bg and light text, a light theme the reverse.`;
+const THEME_SYSTEM = `You are a UI color designer. Given a free-text vibe and a light/dark mode, produce a coherent, accessible color theme as CSS custom properties. Use hex (#rrggbb) or rgb()/rgba() values only — never named colors, gradients, or anything with semicolons or braces. Ensure --ink reads clearly against --bg (strong contrast); --muted is a softer but still legible version; --accent stands out; --overlay is a low-alpha rgba wash; --soft-border and --field sit close to --bg. Surface ladder: --surface sits slightly lifted from --bg (a card on the page), --field slightly inset. --accent-2 is a second ink in a different hue from --accent (think two-color print); --accent-soft is --accent mixed well into --bg; --line is a crisper hairline than --soft-border. Respect the requested mode: a dark theme has a dark --bg and light text, a light theme the reverse.`;
 
 // Only the color tokens — fonts + grain stay operator-set in the builder.
 const THEME_COLOR_KEYS = THEME_TOKENS.filter((t) => t.type === 'color').map((t) => t.key);

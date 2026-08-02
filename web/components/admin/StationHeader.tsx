@@ -291,7 +291,7 @@ export default function StationHeader({
   const offline = metrics.online === false;
 
   return (
-    <section className="card is-raised border-ink">
+    <section className="card border-ink">
       {/* now-playing header row */}
       <div className="stack-mobile grid grid-cols-[1fr_auto] items-center gap-6 border-b border-ink p-[18px]">
         <div>

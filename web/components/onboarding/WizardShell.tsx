@@ -88,7 +88,7 @@ export default function WizardShell() {
         ))}
       </ol>
 
-      <div className="border border-ink bg-surface p-6 shadow-plate">{body}</div>
+      <div className="border border-ink bg-surface p-6">{body}</div>
 
       <div className="mt-6 flex items-center justify-between">
         <div className="flex items-center gap-3">
