@@ -20,8 +20,13 @@ export function stemsRoot(): string {
 
 export function dirFor(trackId: string): string {
   // Track ids are Navidrome UUID-ish tokens; guard the join anyway so a
-  // hostile id can never escape the cache root.
-  return path.join(stemsRoot(), path.basename(String(trackId)));
+  // hostile id can never escape the cache root. basename() strips path
+  // separators but returns "." / ".." verbatim, and path.join(root, "..")
+  // would resolve to the PARENT of the cache root — so neutralise any
+  // empty or dot-only name to a safe in-root token first.
+  let safe = path.basename(String(trackId));
+  if (safe === '' || /^\.+$/.test(safe)) safe = '_';
+  return path.join(stemsRoot(), safe);
 }
 
 export function stemPath(trackId: string, window: StemWindow, stem: string): string {
