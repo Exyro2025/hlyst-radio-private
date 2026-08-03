@@ -38,10 +38,9 @@ export async function fetchCommunityCatalog(): Promise<CommunityCatalog> {
       personas: arr(data.personas),
       shows: arr(data.shows),
       stations: arr(data.stations),
-      // `apps` is newer than the other four. arr() maps a missing key to [], so
-      // a catalog published before the apps type existed is an empty directory
-      // rather than a crash — which is what lets the web and community repos
-      // ship in either order.
+      // `apps` postdates the other four; arr() maps a missing key to [], so an
+      // older catalog is an empty directory rather than a crash, which lets the
+      // web and community repos ship in either order.
       apps: arr(data.apps),
     };
   } catch {

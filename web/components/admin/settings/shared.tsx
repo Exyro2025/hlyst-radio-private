@@ -81,11 +81,9 @@ export interface TtsForm {
   // (jingleRatio owns those) and manual segment triggers still fire.
   enabled: boolean;
   defaultEngine: string;
-  // Operator-chosen rescue voice — the TTS analogue of llm.fallback. When on,
-  // this engine AND voice speaks in place of a persona whose own engine is
-  // unavailable or fails mid-render, ahead of the hardcoded
-  // defaultEngine → piper → kokoro floor behind it. Same {engine, voice,
-  // cloudProvider} shape as a persona's tts block.
+  // Operator-chosen rescue voice. When on, this engine AND voice speaks for a
+  // persona whose own engine is unavailable or fails mid-render, ahead of the
+  // hardcoded defaultEngine → piper → kokoro floor behind it.
   fallback: TtsFallbackForm;
   kokoro: { voice: string };
   chatterbox: { referenceVoice: string };

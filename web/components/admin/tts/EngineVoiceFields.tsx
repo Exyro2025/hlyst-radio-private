@@ -1,20 +1,8 @@
 'use client';
-// Engine picker + the engine-specific voice selector + a "Play sample" button,
-// for any place the operator configures a `{engine, voice, cloudProvider}` voice
-// slot. Two call sites today, and they are the same shape by design — a persona
-// (`personas[].tts`) and the station-wide TTS fallback (`settings.tts.fallback`,
-// which the controller hands to speakWith() as a synthetic persona).
-//
-// Extracted from PersonaVoiceCard so the per-engine voice lists and the
-// engine-change voice normalization live once. That normalization is the subtle
-// part: `voice` is one field shared across engines but each engine validates it
-// differently, so a leftover value from the old engine (say a Kokoro id like
-// "bm_george" under pocket-tts) fails the new engine's check on save.
-//
-// Presentation the two call sites disagree on is passed in rather than branched
-// on here: the hint under the engine grid, the wording of the red
-// engine-unavailable notice (a persona "falls back to X"; the fallback slot has
-// nothing behind it to name), and the hint under the sample player.
+// Engine picker + engine-specific voice selector + sample button, for any
+// `{engine, voice, cloudProvider}` voice slot: a persona (`personas[].tts`) and
+// the station-wide TTS fallback (`settings.tts.fallback`, which the controller
+// hands to speakWith() as a synthetic persona).
 import type { ChangeEvent, ReactNode } from 'react';
 import Link from 'next/link';
 import type { VoiceOption } from '../personas/types';
@@ -41,19 +29,16 @@ import { cn } from '../../../lib/cn';
 
 const ENGINE_IDS = ENGINES.map(e => e.id);
 
-// The three fields every voice slot carries. Matches the controller's shared
-// voice-slot shape (settings/validate.ts validateTtsBlock).
+// Matches the controller's shared voice-slot shape (settings/validate.ts
+// validateTtsBlock).
 export interface VoiceSlot {
   engine: string;
   voice: string;
   cloudProvider: string;
 }
 
-// Why an engine can't speak right now, and how to bring it up — the shared
-// first half of the red notice. Each call site appends its own consequence
-// ("this persona falls back to X", "the fallback can't rescue anything"), which
-// is the only part that differs. JSX, so it lives here rather than in the
-// deliberately React-free engineMeta.ts.
+// Shared first half of the red notice; each call site appends its own
+// consequence. JSX, so it can't live in the React-free engineMeta.ts.
 export const ENGINE_UNAVAILABLE: Record<string, ReactNode> = {
   chatterbox: (
     <>
@@ -79,10 +64,8 @@ export const ENGINE_UNAVAILABLE: Record<string, ReactNode> = {
   ),
 };
 
-// Just the slice of GET /settings this component reads. Deliberately structural
-// rather than either page's own response type: the Personas page and the
-// Settings page model the rest of that payload differently, and neither
-// difference is any of this component's business.
+// The slice of GET /settings this component reads. Structural on purpose — the
+// Personas and Settings pages model the rest of that payload differently.
 export interface EngineVoiceData {
   tts?: {
     kokoroVoices?: string[];
@@ -101,13 +84,11 @@ interface EngineVoiceFieldsProps {
   onChange: (patch: Partial<VoiceSlot>) => void;
   data: EngineVoiceData | null;
   adminFetch: AdminAuth['adminFetch'];
-  // Preview context. `speed` auditions the slot's own rate where the slot has
-  // one (personas); the fallback slot has no speed of its own, so it previews
-  // at the engine's pace.
+  // Omitted where the slot has no rate of its own (the fallback slot), which
+  // previews at the engine's pace.
   previewSpeed?: number;
   previewLanguage?: string;
-  // Rendered in place of the red notice body when `engine` can't currently
-  // speak — the caller supplies the wording and the consequence.
+  // Body of the red notice when `engine` can't speak; wording is caller-supplied.
   unavailableNote: (engine: string) => ReactNode;
   // Cloud-specific "this won't play" notice (missing key, disabled engine).
   cloudIssue?: ReactNode;
@@ -125,10 +106,9 @@ export function EngineVoiceFields({
   const pocketTtsVoices = data?.tts?.pocketTtsVoices || [];
   const cloudProviders = data?.tts?.cloudProviders || ['openai', 'elevenlabs'];
 
-  // Voices offered by this slot's cloud provider. The server falls back to the
-  // saved base URL when we don't send one, which is right here: every slot uses
-  // the station-wide openai-compatible server. ElevenLabs and Fish are gated on
-  // a key actually being set, so we don't fire a request we know will fail.
+  // Every slot uses the station-wide server, so sending no base URL is right —
+  // the server falls back to the saved one. ElevenLabs and Fish are gated on a
+  // key being set, so we don't fire a request we know will fail.
   const cloudProvider = value.cloudProvider;
   const elevenLabsReady = data?.tts?.available?.cloudByProvider?.elevenlabs !== false;
   const fishReady = data?.tts?.available?.cloudByProvider?.['fish-audio'] !== false;
@@ -142,15 +122,15 @@ export function EngineVoiceFields({
   });
   const discoveredVoices = voiceDiscovery.voices;
 
-  // Engine change: normalize `voice` to something the target engine accepts,
-  // otherwise a leftover from the previous engine fails validation on save.
+  // `voice` is one field shared across engines but each validates it
+  // differently, so normalize on engine change — a leftover value (a Kokoro id
+  // like "bm_george" under pocket-tts) fails the new engine's check on save.
   const selectEngine = (v: string) => {
     const patch: Partial<VoiceSlot> = { engine: v };
     const cur = value.voice.trim();
     if (v === 'cloud') {
-      // A discovered voice counts as valid too — otherwise toggling the engine
-      // away and back silently destroys a voice the operator picked from the
-      // server's own list.
+      // A discovered voice counts as valid too, or toggling the engine away and
+      // back destroys a voice the operator picked from the server's own list.
       if (!isKnownCloudVoice(cloudProvider, discoveredVoices, cur)) {
         const provVoices = CLOUD_VOICES[cloudProvider as keyof typeof CLOUD_VOICES] || [];
         patch.voice = provVoices[0]?.id || cur;
@@ -169,7 +149,7 @@ export function EngineVoiceFields({
 
   // Resolve Cloud against this slot's saved provider even before the Cloud card
   // is selected. openai-compatible has no key-based availability entry and is
-  // trusted by the server, while unknown providers retain the global status.
+  // trusted; unknown providers keep the global status.
   const globalAvail = data?.tts?.available as EngineAvailability | undefined;
   let selectorAvailable = globalAvail;
   if (globalAvail) {
@@ -189,7 +169,6 @@ export function EngineVoiceFields({
 
   return (
     <>
-      {/* Engine — radio-card grid, full width above the voice selector. */}
       <div className="field mb-4">
         <Label>Engine</Label>
         <EngineSelector
@@ -358,9 +337,8 @@ export function EngineVoiceFields({
                     voices: customVoices.map(v => ({ id: v, label: v })),
                   }]
                   : []),
-                // The slot references a voice that isn't currently present —
-                // keep the value visible so a save round-trips without
-                // rewriting, but flag it so the operator notices.
+                // Voice not currently present: keep it visible so a save
+                // round-trips without rewriting, but flag it.
                 ...(!isBuiltin && !isCustom && value.voice
                   ? [{
                     label: 'Unknown',
@@ -409,8 +387,8 @@ export function EngineVoiceFields({
         const isCompat = cloudProvider === 'openai-compatible';
         const voice = value.voice.trim();
         const isPreset = isKnownCloudVoice(cloudProvider, discoveredVoices, voice);
-        // A compat server that advertised nothing leaves us with no list to
-        // show, so keep the plain text box it had before discovery existed.
+        // A compat server that advertised nothing leaves no list to show, so
+        // fall back to a plain text box.
         const hasList = discoveredVoices.length > 0 || !isCompat;
         const voiceGroups = buildCloudVoiceGroups(cloudProvider, discoveredVoices);
         return (
@@ -437,9 +415,8 @@ export function EngineVoiceFields({
                   }))}
                   onChange={v => {
                     // Switching provider invalidates the old voice id.
-                    // openai-compatible has no curated voices — leave the field
-                    // blank so the operator picks from the new server's
-                    // discovered list (or the server's default).
+                    // openai-compatible has no curated voices, so blank lets
+                    // the operator pick from the new server's discovered list.
                     const next = CLOUD_VOICES[v as keyof typeof CLOUD_VOICES]?.[0]?.id || '';
                     onChange({ cloudProvider: v, voice: next });
                   }}
@@ -473,8 +450,8 @@ export function EngineVoiceFields({
                     <VoicePicker
                       value={isPreset ? voice : CUSTOM_VOICE_ID}
                       onChange={val => {
-                        // "Custom voice id…" clears the preset so isPreset flips
-                        // false and the free-text input below appears for entry.
+                        // Clearing the preset flips isPreset false, which is
+                        // what reveals the free-text input below.
                         onChange({ voice: val === CUSTOM_VOICE_ID ? '' : val });
                       }}
                       groups={voiceGroups}
@@ -514,7 +491,6 @@ export function EngineVoiceFields({
         );
       })()}
 
-      {/* Audition this engine + voice before saving. */}
       <div className="mt-4">
         <VoicePreviewButton
           engine={value.engine}

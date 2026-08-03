@@ -1,25 +1,15 @@
-// Community apps directory loader. Sources entries from the community catalog
-// index (catalog.json, published by the community repo), same as the stations
-// directory — the catalog fetch is ISR-revalidated (see communityCatalog.ts), so
-// the directory refreshes without a web redeploy, and degrades to an empty list
-// when the catalog is unreachable.
-//
-// An "app" is anything third-party that talks to a SUB/WAVE station: a player, a
-// bot, a TUI, an MCP server, an integration. Unlike skills/personas/shows there
-// is nothing to install — this is a browse-and-link directory like /stations.
+// Community apps directory: anything third-party that talks to a station (a
+// player, a bot, a TUI, an MCP server). Nothing to install — a browse-and-link
+// directory like /stations. Entries come from the community catalog.json, an
+// ISR-revalidated fetch (see communityCatalog.ts) that degrades to an empty
+// list when unreachable.
 import { fetchCommunityCatalog } from './communityCatalog';
 
-/** The buckets. `integration` is deliberately a catch-all (MCP servers, Home
- *  Assistant, hardware, libraries) rather than several chips holding one entry
- *  each, and stays last for that reason. Mirrors APP_TYPES in the community
- *  repo's build-catalog.mjs.
- *
- *  `skin` is the odd one: a player face, not a standalone app. Skins are a
- *  COMPILE-TIME registry of in-repo components (components/skins/index.ts) with
- *  no runtime install path, so a listed skin is source an operator builds into
- *  their own deployment — a pointer, which is all this directory ever offers.
- *  If skins ever become loadable at runtime this should move to its own surface
- *  with an install button, the way skills and personas have one. */
+/** Mirrors APP_TYPES in the community repo's build-catalog.mjs. `integration`
+ *  is a catch-all (MCP servers, Home Assistant, hardware, libraries) and stays
+ *  last for that reason. `skin` is a player face from the COMPILE-TIME registry
+ *  (components/skins/index.ts) with no runtime install path, so a listed skin
+ *  is source an operator builds into their own deployment. */
 export const APP_TYPES = [
   'mobile',
   'web',
@@ -31,7 +21,6 @@ export const APP_TYPES = [
 ] as const;
 export type AppType = (typeof APP_TYPES)[number];
 
-/** Chip / card labels for each bucket. */
 export const APP_TYPE_LABELS: Record<AppType, string> = {
   mobile: 'Mobile',
   web: 'Web',
@@ -42,25 +31,23 @@ export const APP_TYPE_LABELS: Record<AppType, string> = {
   integration: 'Integration',
 };
 
-// Icons and screenshots are submitter-hosted URLs, so the host is a trust
-// boundary. The community repo's catalog builder rejects anything off this list,
-// but catalog.json is a LIVE remote fetch — we can't assume the builder that
-// validated it produced what we just received. next/image is the real
-// enforcement (it refuses any host outside images.remotePatterns and throws at
-// render); re-checking here means an off-list URL costs one image, not the whole
-// page. Keep in lockstep with web/next.config.js and the community repo.
+// Icons and screenshots are submitter-hosted, so the host is a trust boundary.
+// The community repo's catalog builder rejects off-list hosts, but catalog.json
+// is a LIVE remote fetch — we can't assume the response came from that builder.
+// next/image is the real enforcement (it refuses any host outside
+// images.remotePatterns and throws at render); re-checking here means an
+// off-list URL costs one image, not the whole page. Keep in lockstep with
+// web/next.config.js and the community repo.
 const IMAGE_HOSTS = ['raw.githubusercontent.com', 'user-images.githubusercontent.com', 'github.com'];
 
 export interface CommunityApp {
   /** Derived from the entry's filename in the community repo; stable react key. */
   slug: string;
-  /** Display name. */
   name: string;
   /** Where you get it — store listing, site, or repo. */
   url: string;
-  /** Which bucket it lands in; drives the filter chips. */
   type: AppType;
-  /** One or two sentences, ≤280 chars. */
+  /** ≤280 chars. */
   description?: string;
   /** Name or @handle. A leading @ renders as a GitHub profile link. */
   author?: string;
@@ -106,10 +93,9 @@ function safeLink(v: unknown): string | undefined {
   }
 }
 
-// Coerce a catalog entry into a clean CommunityApp. name, url and a known type
-// are the floor — anything else returns null and that one entry is skipped, so a
-// single malformed submission can't empty the directory. Bad image URLs drop the
-// field and keep the app.
+// name, url and a known type are the floor; anything else returns null and that
+// one entry is skipped, so a single malformed submission can't empty the
+// directory. Bad image URLs drop the field and keep the app.
 function parseApp(data: Record<string, unknown>): CommunityApp | null {
   const name = String(data.name ?? '').trim();
   const url = safeLink(data.url);
@@ -139,7 +125,6 @@ function parseApp(data: Record<string, unknown>): CommunityApp | null {
   };
 }
 
-/** Every app. Featured first, then alphabetical by name. */
 export async function getAllApps(): Promise<CommunityApp[]> {
   const { apps } = await fetchCommunityCatalog();
   return apps
@@ -151,23 +136,17 @@ export async function getAllApps(): Promise<CommunityApp[]> {
     });
 }
 
-/** Header tallies: total apps + how many buckets are represented. Pure, over an
- *  already-loaded list — /apps streams the directory into several Suspense
- *  boundaries, so a tally helper that re-entered getAllApps() would mean a
- *  second catalog fetch per render (same reason as stationStats). */
+/** Takes an already-loaded list: /apps streams the directory into several
+ *  Suspense boundaries, so re-entering getAllApps() here would mean a second
+ *  catalog fetch per render (same reason as stationStats). */
 export function appStats(all: CommunityApp[]): { count: number; types: number } {
   return { count: all.length, types: new Set(all.map((a) => a.type)).size };
 }
 
 /** The types actually present, in APP_TYPES order. The filter chips render from
- *  this rather than the full vocabulary, so selecting a chip can never produce
- *  an empty grid — which is what lets the filter stay CSS-only with no
- *  "nothing matched" branch to render. */
+ *  this rather than the full vocabulary, so selecting one can never produce an
+ *  empty grid — which is what lets the filter stay CSS-only. */
 export function presentTypes(all: CommunityApp[]): AppType[] {
   const seen = new Set(all.map((a) => a.type));
   return APP_TYPES.filter((t) => seen.has(t));
 }
-
-// There is deliberately no landing-page teaser helper here. The directory is
-// reached from the Back Pages footer and /apps, not from a section in the
-// landing article.

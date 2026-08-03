@@ -1,7 +1,5 @@
 'use client';
-// Per-persona voice card: the shared engine + voice fields on the left, and the
-// persona's own voice-level + speech-speed trims on the right. The engine
-// picker and every engine's voice selector live in the shared
+// The engine picker and every engine's voice selector live in the shared
 // tts/EngineVoiceFields, which the station-wide TTS fallback slot uses too.
 import type { ChangeEvent } from 'react';
 import type { Persona, PersonaTts, SettingsResponse } from './types';
@@ -28,14 +26,13 @@ export function PersonaVoiceCard({ persona, data, defaultEngine, cloudIssueText,
     : `${gain > 0 ? '+' : '−'}${Math.abs(gain).toFixed(1)} dB`;
 
   const speed = persona.tts.speed ?? 1;
-  // Only Piper/Kokoro/cloud honour speed; chatterbox/pocket-tts workers ignore
-  // it, so the control is shown but disabled with a hint for those engines.
+  // Only Piper/Kokoro/cloud honour speed; the other workers ignore it, so the
+  // control is shown but disabled with a hint.
   const speedSupported = persona.tts.engine !== 'chatterbox' && persona.tts.engine !== 'pocket-tts' && persona.tts.engine !== 'remote';
 
   return (
     <Card flat title="Voice" sub="text-to-speech engine">
       <div className="lg:grid lg:grid-cols-2 lg:items-start lg:gap-x-8">
-        {/* LEFT — engine, the engine-specific voice selector, a sample player */}
         <div className="min-w-0">
           <EngineVoiceFields
             value={persona.tts}
@@ -66,7 +63,6 @@ export function PersonaVoiceCard({ persona, data, defaultEngine, cloudIssueText,
           />
         </div>
 
-        {/* RIGHT — voice level */}
         <div className="field mt-3.5 max-w-[360px] lg:mt-0 lg:max-w-[460px]">
           <div className="flex items-baseline justify-between gap-3">
             <Label>Voice level (dB)</Label>
@@ -86,7 +82,6 @@ export function PersonaVoiceCard({ persona, data, defaultEngine, cloudIssueText,
             Drag the meter or use the arrow keys.
           </div>
 
-          {/* Speech speed — per-persona rate multiplier (0.5–2.0×). */}
           <div className="field mt-4">
             <div className="flex items-baseline justify-between gap-3">
               <Label>Speech speed</Label>

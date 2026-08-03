@@ -19,15 +19,13 @@ export const metadata = pageMeta({
 // options win over the force-dynamic no-store default).
 export const dynamic = 'force-dynamic';
 
-// Submission opens a GitHub Issue Form in the community catalog repo (no fork,
-// no JSON). A workflow there turns the issue into a one-file PR. Mirrors the
-// /stations add flow.
+// GitHub Issue Forms in the community catalog repo; a workflow there turns the
+// issue into a one-file PR.
 const SUBMIT_URL = appSubmitUrl();
 const REPORT_URL = reportAppUrl();
 
-// The catalog-backed regions. Each takes the in-flight promise rather than
-// calling getAllApps() itself, so one render issues one catalog fetch
-// regardless of how many boundaries read it.
+// These take the in-flight promise rather than calling getAllApps() themselves,
+// so one render issues one catalog fetch however many boundaries read it.
 
 async function AppsStat({ apps }: { apps: Promise<CommunityApp[]> }) {
   const { count, types } = appStats(await apps);
@@ -65,10 +63,8 @@ async function AppsGrid({ apps }: { apps: Promise<CommunityApp[]> }) {
           ))}
         </ul>
       </AppTypeFilter>
-      {/* Only when a skin is actually listed. Skins are a compile-time registry
-          (components/skins/index.ts) with no runtime install, so a reader who
-          finds one here needs telling how it gets onto their station — but a
-          directory with no skins in it shouldn't carry the caveat. */}
+      {/* Only when a skin is actually listed — a skins-free directory shouldn't
+          carry the caveat. */}
       {all.some((a) => a.type === 'skin') && (
         <p className="bs-stations-report">
           Skins are player faces built into the web app, not add-ons a running station can

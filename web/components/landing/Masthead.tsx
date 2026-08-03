@@ -11,15 +11,9 @@ function issueNo(d: Date): number {
   return Math.max(1, Math.floor((d.getTime() - LAUNCH_DATE.getTime()) / 86400000));
 }
 
-// The volume number is the running SUB/WAVE version, which reads naturally in a
-// masthead ("VOL. 1.2.0 · NO. 214") and means the page states what it is.
-//
-// next.config.js resolves NEXT_PUBLIC_APP_VERSION from the build arg, then
-// `git describe`, then package.json — so on a working checkout it arrives as
-// something like "1.2.0-33-geae57592". Only the semver head belongs here; the
-// commit count and hash are build detail, and the admin console already shows
-// the full string. Falls back to the original roman numeral if the env is
-// absent, so the masthead never renders "VOL. ".
+// NEXT_PUBLIC_APP_VERSION can arrive as `git describe` output
+// ("1.2.0-33-geae57592"), so keep only the semver head. Falls back to the roman
+// numeral so the masthead never renders a bare "VOL. ".
 const VERSION = (process.env.NEXT_PUBLIC_APP_VERSION || '').split('-')[0] || 'I';
 
 // Broadsheet-style header with proper landing-page navigation. Keeps the
@@ -35,10 +29,10 @@ export default function Masthead() {
 
   return (
     // bs-masthead-lift: the Community panel hangs out of the header, and
-    // .bs-paper gives BOTH this header and <main> `position:relative;z-index:1`,
-    // so main wins on DOM order and paints over the open dropdown. The lift has
-    // to be a bs- rule rather than a Tailwind z-* utility — globals.css is
-    // unlayered and therefore always beats Tailwind's @layer utilities.
+    // .bs-paper gives both this header and <main> position:relative;z-index:1,
+    // so main wins on DOM order and paints over the open dropdown. Must be a
+    // bs- rule, not a Tailwind z-* utility — globals.css is unlayered and so
+    // always beats Tailwind's @layer utilities.
     <header className="bs-paper bs-masthead-lift pt-7 !pb-4">
       <div className="bs-rule-double" />
 
@@ -78,16 +72,12 @@ export default function Masthead() {
         <span aria-hidden="true">✦</span>
       </div>
 
-      {/* Each item carries its own trailing "·" via .bs-masthead-item::after
-          rather than the dots being siblings in the flex row. As siblings they
-          were independent flex items, so a wrapped row could START with a dot —
-          which is exactly what the six-item nav does on a phone. Owning the dot
-          means it can never outlive the word it follows, and the separators
-          survive at every width instead of being dropped on mobile.
-
-          The dot sits on the wrapper, not the <a>: AnimatedLink draws its hover
-          underline with a ::before sized to the full element, so a dot inside
-          the link would get underlined along with the word. */}
+      {/* Each item carries its own trailing "·" via .bs-masthead-item::after.
+          As sibling flex items the dots were independent, so a wrapped row
+          could START with one — which is what the six-item nav does on a phone.
+          The dot sits on the wrapper, not the <a>: AnimatedLink's hover
+          underline is a ::before sized to the full element, so a dot inside the
+          link would get underlined with the word. */}
       <nav aria-label="Primary" className="bs-masthead-nav">
         <span className="bs-masthead-item">
           <AnimatedLink href="/listen" className="bs-masthead-link">
@@ -104,11 +94,9 @@ export default function Masthead() {
             Setup
           </AnimatedLink>
         </span>
-        {/* Hidden on phones so the row stays on one line — six letterspaced
-            items can't fit, and a dropdown is the worst of the six to operate
-            on a touch screen anyway. Nothing is stranded: every destination
-            behind it (Skills, Personas, Shows, Apps) has its own panel in the
-            Back Pages footer, which is where a phone reader ends up. */}
+        {/* Hidden on phones — six letterspaced items can't fit on one line.
+            Nothing is stranded: Skills, Personas, Shows and Apps each have a
+            panel in the Back Pages footer. */}
         <span className="bs-masthead-item bs-masthead-community">
           <CommunityMenu />
         </span>
