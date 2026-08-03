@@ -29,7 +29,8 @@ import { resolveShowPlaylistPool, resolveExcludedPlaylistIds } from '../music/sh
 import * as library from '../music/library.js';
 import * as subsonic from '../music/subsonic.js';
 import * as dj from '../llm/dj.js';
-import { energyForDaypart } from '../context.js';
+import { energyForDaypart, getClockContext, getDateContext, getTimeContext } from '../context.js';
+import { linkAirDate } from './queue/pure.js';
 import { djObject, nearestId, modelTolerant } from '../llm/sdk.js';
 import * as budget from './dj-budget.js';
 import { withTrace, logEvent } from '../observability/events.js';
@@ -449,6 +450,24 @@ async function pickViaAgent(queue, ctx, { wantLink, audioWaypoint = null, curren
   return true;
 }
 
+// The link's context, with the clock stepped back from `showAt` to the moment
+// the link actually AIRS (showAt minus the show-attribution padding — see
+// linkAirDate). ctx resolved at showAt is right for show identity but its
+// clock runs PICK_SHOW_LOOKAHEAD_SEC fast, and every pick-attached link spoke
+// that padded time on air — "Local time eight fifty" logged at 08:48 (#1282).
+// The same identity/clock split runPickCycle's handoff already makes with its
+// live-clock override: show/mood/festival stay on showAt, only the
+// clock-derived fields (at/date/clock/time) move to air time. `isDark` rides
+// over from ctx — it comes from the weather fetch, not the clock, and a
+// two-minute shift can't flip it.
+function linkAirContext(ctx: any, showAt: Date | null) {
+  if (!showAt || !ctx) return ctx;
+  const airAt = linkAirDate(showAt);
+  const clock: any = getClockContext(airAt);
+  if (typeof ctx.clock?.isDark === 'boolean') clock.isDark = ctx.clock.isDark;
+  return { ...ctx, at: airAt.toISOString(), date: getDateContext(airAt), clock, time: getTimeContext(airAt) };
+}
+
 // Returns 'queued' when a pick was actually enqueued, 'empty' when the pool
 // produced none, 'collision' when its pick deduped against something already
 // queued. The final fallback ignores the answer (nothing is left to try), but
@@ -474,10 +493,12 @@ async function pickViaPool(queue, ctx, { wantLink, current, showAt = null }: { w
   if (wantLink && current) {
     try {
       link = await dj.generateLink({
-        previous: current, current: result.song, context: ctx,
-        // ctx is the queue watcher's look-ahead snapshot exactly when showAt is
-        // set, so its clock is the link's air time — the only case the link may
-        // speak it (issue #864: generation-time clocks aired a track late).
+        // ctx with the clock stepped back to the link's air moment — showAt's
+        // own clock carries the show-attribution padding and ran two minutes
+        // fast on air (#1282). Only with the look-ahead resolved may the link
+        // speak the clock at all (issue #864: generation-time clocks aired a
+        // track late).
+        previous: current, current: result.song, context: linkAirContext(ctx, showAt),
         clockIsAirTime: !!showAt,
         // Name the speaker explicitly. Left unset, scripts.generateLink falls
         // back to getEffectivePersona() on the wall clock, which disagrees with
@@ -619,12 +640,16 @@ export async function runTrackEvent(queue, ctx, { wantLink, showAt = null, prede
     // clock at all — the model extrapolates one from stale stamped lines in
     // its session window, then the link airs a further full track after it's
     // written, so spoken times ran 10-20 minutes behind. When the queue
-    // watcher resolved the look-ahead (showAt), ctx's clock IS the link's air
-    // time — hand it over as the only time the link may speak; without the
-    // look-ahead (unknown duration), ban the clock outright.
+    // watcher resolved the look-ahead (showAt), the link's air moment is
+    // knowable — but showAt's own clock carries the show-attribution padding
+    // and ran two minutes FAST on air (#1282), so step it back to air time
+    // (linkAirDate) before handing it over as the only time the link may
+    // speak; without the look-ahead (unknown duration), ban the clock
+    // outright.
+    const airClock = showAt && ctx?.clock?.hhmm ? getClockContext(linkAirDate(showAt)) : null;
     const clockClause = wantLink
-      ? (showAt && ctx?.clock?.hhmm
-          ? ` The link airs at about ${ctx.clock.display || ctx.clock.hhmm} — if you mention the clock, that is the time to use, never an earlier one.`
+      ? (airClock
+          ? ` The link airs at about ${airClock.display || airClock.hhmm} — if you mention the clock, that is the time to use, never an earlier one.`
           : ` Never state the clock time in the link — you can't know exactly when it airs.`)
       : '';
     const varietyClause = wantLink
