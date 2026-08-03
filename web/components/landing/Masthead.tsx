@@ -78,42 +78,54 @@ export default function Masthead() {
         <span aria-hidden="true">✦</span>
       </div>
 
+      {/* Each item carries its own trailing "·" via .bs-masthead-item::after
+          rather than the dots being siblings in the flex row. As siblings they
+          were independent flex items, so a wrapped row could START with a dot —
+          which is exactly what the six-item nav does on a phone. Owning the dot
+          means it can never outlive the word it follows, and the separators
+          survive at every width instead of being dropped on mobile.
+
+          The dot sits on the wrapper, not the <a>: AnimatedLink draws its hover
+          underline with a ::before sized to the full element, so a dot inside
+          the link would get underlined along with the word. */}
       <nav aria-label="Primary" className="bs-masthead-nav">
-        <AnimatedLink href="/listen" className="bs-masthead-link">
-          Listen
-        </AnimatedLink>
-        <span aria-hidden="true" className="bs-masthead-sep">
-          ·
+        <span className="bs-masthead-item">
+          <AnimatedLink href="/listen" className="bs-masthead-link">
+            Listen
+          </AnimatedLink>
         </span>
-        <AnimatedLink href="/manual" className="bs-masthead-link">
-          Manual
-        </AnimatedLink>
-        <span aria-hidden="true" className="bs-masthead-sep">
-          ·
+        <span className="bs-masthead-item">
+          <AnimatedLink href="/manual" className="bs-masthead-link">
+            Manual
+          </AnimatedLink>
         </span>
-        <AnimatedLink href="/setup" className="bs-masthead-link">
-          Setup
-        </AnimatedLink>
-        <span aria-hidden="true" className="bs-masthead-sep">
-          ·
+        <span className="bs-masthead-item">
+          <AnimatedLink href="/setup" className="bs-masthead-link">
+            Setup
+          </AnimatedLink>
         </span>
-        <CommunityMenu />
-        <span aria-hidden="true" className="bs-masthead-sep">
-          ·
+        {/* Forces the phone-width wrap to land here rather than wherever the
+            text happens to run out — three and three, instead of a ragged 4+2
+            whose first row trails a dot into nothing. Zero-height full-basis
+            flex item: the classic row break, inert above the breakpoint. */}
+        <span aria-hidden="true" className="bs-masthead-break" />
+        <span className="bs-masthead-item">
+          <CommunityMenu />
         </span>
-        <AnimatedLink href="/news" className="bs-masthead-link">
-          News
-        </AnimatedLink>
-        <span aria-hidden="true" className="bs-masthead-sep">
-          ·
+        <span className="bs-masthead-item">
+          <AnimatedLink href="/news" className="bs-masthead-link">
+            News
+          </AnimatedLink>
         </span>
-        <AnimatedLink
-          href="https://github.com/perminder-klair/subwave"
-          variant="arrow"
-          className="bs-masthead-link"
-        >
-          GitHub
-        </AnimatedLink>
+        <span className="bs-masthead-item">
+          <AnimatedLink
+            href="https://github.com/perminder-klair/subwave"
+            variant="arrow"
+            className="bs-masthead-link"
+          >
+            GitHub
+          </AnimatedLink>
+        </span>
       </nav>
 
       <div className="bs-rule-double" />
