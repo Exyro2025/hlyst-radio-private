@@ -46,8 +46,8 @@ Four cooperating processes with **file-based IPC** through a shared `state/` dir
 
 - **Controller → Liquidsoap**:
   - `next.txt` — controller writes one annotated track URI; Liquidsoap polls every 1.0s, drains, and `request.queue.push`es it.
-  - `say.txt` — WAV path; polled every 0.5s, fed through `voice_queue`, **heavy-ducked** (`smooth_add p=0.25`). Station IDs, hourly time, weather, request intros.
-  - `intro.txt` — between-track auto-DJ links; polled every 0.5s, fed through `intro_queue`, **light-ducked** (`smooth_add p=0.40`) so the song that just started stays audible under the voice.
+  - `say.txt` — WAV path; polled every 0.5s, fed through `voice_queue`, **heavy-ducked** (`smooth_add p=0.22`). Station IDs, hourly time, weather, request intros.
+  - `intro.txt` — between-track auto-DJ links; polled every 0.5s, fed through `intro_queue`, **light-ducked** (`smooth_add p=0.30`) so the song that just started stays audible under the voice.
   - `auto.m3u` — fallback playlist the controller rewrites every `AUTO_QUEUE_REFRESH_MINUTES` (default 60) for the current mood; Liquidsoap reloads on file change (`reload_mode="watch"`).
   - `liquidsoap_*.txt` (jingle_ratio, crossfade, opus_enabled, opus_bitrate, flac_enabled, aac_enabled, aac_bitrate, …) — tiny files written by `settings.update()`, read once at `radio.liq` startup. Changes need a Liquidsoap restart (controller triggers via `/restart-mixer` → telnet).
 - **Liquidsoap → Controller / UI**:
