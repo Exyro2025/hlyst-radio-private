@@ -2,19 +2,26 @@
 @import 'tw-animate-css';
 
 /* Manual dark-mode override — listener can pin light/dark via [data-theme=…];
-   absent or "system" lets the @media block in :root drive it. The variant
-   target mirrors shadcn/ui v4's recipe so `dark:` utilities still resolve. */
-@custom-variant dark (&:where([data-theme='dark'], [data-theme='dark'] *));
+   absent or "system" lets the @media block in :root drive it.
 
-/* `dark:` above is attribute-only on purpose (shadcn's recipe), which is fine
-   for utilities that ride a token — the token itself already flips under the
-   prefers-dark @media block in :root. It is NOT enough for a utility carrying a
-   raw value (an opacity, a filter): a listener on a dark OS who never touched
-   the switcher has no [data-theme] at all, so they get the dark palette and the
-   light-tuned raw value. `dark-any:` covers both routes — explicit dark, or
-   system dark with no explicit light pin — and mirrors the attribute+media pair
-   the .v3-cover-ambient rules below already spell out by hand. */
-@custom-variant dark-any {
+   BOTH routes have to be in the variant. shadcn's stock recipe matches the
+   attribute alone, which is safe there because next-themes always writes one.
+   This app deliberately does not: `clearMode()` and THEME_INIT_SCRIPT REMOVE
+   [data-theme] to hand the document back to prefers-color-scheme
+   (lib/theme.ts). So a listener on a dark OS who never touched the switcher
+   carries no attribute at all — the :root @media block below still flips their
+   tokens, but an attribute-only variant left every `dark:` utility unapplied,
+   i.e. light-tuned raw values (an opacity, a filter, a shiki palette) on a
+   fully dark page. The media arm mirrors that block's condition exactly,
+   :not([data-theme='light']) guard included, so a listener who pinned LIGHT on
+   a dark OS still reads light. Keep the two conditions in step.
+
+   Not the `.dark` class `syncDarkClass` maintains, tempting as it looks: no CSS
+   targets it, and its prefers-color-scheme listener only feeds React state — a
+   live OS flip repaints the tokens (pure CSS) while the class goes stale, which
+   is the same styles-disagree-with-palette bug in a new coat. Staying on the
+   media query keeps this variant true by construction. */
+@custom-variant dark {
   &:where([data-theme='dark'], [data-theme='dark'] *) {
     @slot;
   }

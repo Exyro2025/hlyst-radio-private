@@ -300,7 +300,7 @@ export default memo(function Waveform({ audioRef, tunedIn, trackStartedAt, durat
       // slide under, and a shorter 80px strip); tall/wide (the full 160px
       // band). The two wide variants use mutually exclusive height queries so
       // neither depends on class order to win.
-      className="pointer-events-none absolute inset-x-3 bottom-24 h-[110px] px-1 opacity-[0.34] sm:right-24 sm:left-0 sm:px-8 dark-any:opacity-[0.45] [@media(min-width:640px)_and_(max-height:759px)]:bottom-32 [@media(min-width:640px)_and_(max-height:759px)]:h-20 [@media(min-width:640px)_and_(min-height:760px)]:bottom-[128px] [@media(min-width:640px)_and_(min-height:760px)]:h-40"
+      className="pointer-events-none absolute inset-x-3 bottom-24 h-[110px] px-1 opacity-[0.34] sm:right-24 sm:left-0 sm:px-8 dark:opacity-[0.45] [@media(min-width:640px)_and_(max-height:759px)]:bottom-32 [@media(min-width:640px)_and_(max-height:759px)]:h-20 [@media(min-width:640px)_and_(min-height:760px)]:bottom-[128px] [@media(min-width:640px)_and_(min-height:760px)]:h-40"
       aria-hidden="true"
     >
       <canvas ref={canvasRef} className="h-full w-full" />
