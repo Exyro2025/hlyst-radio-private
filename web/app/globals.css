@@ -1325,10 +1325,6 @@ html.lite .sw-ripple-circle {
     display: inline-flex;
     align-items: center;
 }
-/* Inert until the phone breakpoint turns it into a row break. */
-.bs-masthead-break {
-    display: none;
-}
 .bs-masthead-item:not(:last-child)::after {
     content: '·';
     /* Reproduces the old layout exactly: the row's 14px gap sat on both sides of
@@ -1460,57 +1456,31 @@ header.bs-masthead-lift {
     color: var(--muted);
 }
 
-/* On a phone the nav wraps and "Community" can sit far enough left that a
-   panel centred on the TRIGGER hangs off the screen edge (measured: -4px at
-   390px wide). There's no pure-CSS way to clamp a translateX(-50%) against the
-   viewport, so below this breakpoint the panel anchors to the nav ROW instead:
-   drop the positioning context down to .bs-masthead-nav by making the menu and
-   its item static, then pin the panel to both edges. `top: calc(100% + 10px)`
-   from the base rule then resolves against the nav row, which is where it
-   should hang from anyway. */
+/* Six letterspaced nav items only fit one line from ~640px up (measured).
+   Below that the Community dropdown is dropped rather than letting the row
+   wrap: it is the one item needing a second tap, and every destination behind
+   it (Skills, Personas, Shows, Apps) has its own Back Pages panel, which is
+   where a phone reader ends up anyway. `display:none` takes its ::after dot
+   with it, so the separators stay correct with no renumbering.
+
+   This also means the panel never opens below 640px, so none of the
+   narrow-screen panel anchoring that used to live here is needed. */
+@media (max-width: 639px) {
+    .bs-masthead-community {
+        display: none;
+    }
+}
+
+/* Phone: tighten type and gap so the remaining five hold one line down to
+   ~360px. Verified at 360/375/390/430. */
 @media (max-width: 560px) {
     .bs-masthead-nav {
-        position: relative;
-        /* Six items can't fit one line on a phone, so the row wraps — that's
-           fine now the dots ride with their words (.bs-masthead-item). Tighten
-           the tracking a little so the two rows sit closer to even. */
-        gap: 8px 12px;
+        gap: 8px 10px;
     }
     .bs-masthead-link,
     .bs-masthead-trigger {
-        letter-spacing: 0.2em;
-    }
-    /* Break the row after Setup — see the note in Masthead.tsx. */
-    .bs-masthead-break {
-        display: block;
-        flex-basis: 100%;
-        height: 0;
-    }
-    /* Setup now ends its row, so its trailing dot would hang off the end. */
-    .bs-masthead-nav > .bs-masthead-item:nth-child(3)::after {
-        display: none;
-    }
-    /* Beats the Radix Root's Tailwind `relative` — globals.css is unlayered. */
-    .bs-masthead-menu,
-    .bs-masthead-menu li {
-        position: static;
-    }
-    /* Radix's Root renders an unclassed <div style="position:relative"> around
-       the list, and THAT is the panel's containing block — neutralising the
-       menu and the li isn't enough. An inline style can only be beaten with
-       !important, hence the blunt instrument. Scoped to this menu and to the
-       narrow breakpoint so it can't leak. */
-    .bs-masthead-menu > div[style] {
-        position: static !important;
-    }
-    .bs-masthead-panel {
-        left: 0;
-        right: 0;
-        transform: none;
-        max-width: none;
-    }
-    .bs-masthead-panel-list {
-        width: auto;
+        font-size: 10px;
+        letter-spacing: 0.14em;
     }
 }
 

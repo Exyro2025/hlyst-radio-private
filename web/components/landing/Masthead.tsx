@@ -104,12 +104,12 @@ export default function Masthead() {
             Setup
           </AnimatedLink>
         </span>
-        {/* Forces the phone-width wrap to land here rather than wherever the
-            text happens to run out — three and three, instead of a ragged 4+2
-            whose first row trails a dot into nothing. Zero-height full-basis
-            flex item: the classic row break, inert above the breakpoint. */}
-        <span aria-hidden="true" className="bs-masthead-break" />
-        <span className="bs-masthead-item">
+        {/* Hidden on phones so the row stays on one line — six letterspaced
+            items can't fit, and a dropdown is the worst of the six to operate
+            on a touch screen anyway. Nothing is stranded: every destination
+            behind it (Skills, Personas, Shows, Apps) has its own panel in the
+            Back Pages footer, which is where a phone reader ends up. */}
+        <span className="bs-masthead-item bs-masthead-community">
           <CommunityMenu />
         </span>
         <span className="bs-masthead-item">
