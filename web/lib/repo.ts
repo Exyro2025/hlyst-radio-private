@@ -33,3 +33,9 @@ export function stationSubmitUrl(params: Record<string, string | undefined> = {}
 export function reportStationUrl(params: Record<string, string | undefined> = {}): string {
   return communitySubmitUrl('report-station.yml', params);
 }
+export function appSubmitUrl(params: Record<string, string | undefined> = {}): string {
+  return communitySubmitUrl('add-app.yml', params);
+}
+export function reportAppUrl(params: Record<string, string | undefined> = {}): string {
+  return communitySubmitUrl('report-app.yml', params);
+}

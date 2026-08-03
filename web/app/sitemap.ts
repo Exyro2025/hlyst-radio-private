@@ -9,6 +9,7 @@ const ROUTES = [
   '/listen',
   '/landing',
   '/stations',
+  '/apps',
   '/personas',
   '/shows',
   '/skills',

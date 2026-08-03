@@ -163,6 +163,13 @@ export default function SettingsPanel() {
         // controller's own coercion in settings.load().
         enabled: v.tts?.enabled !== false,
         defaultEngine: v.tts?.defaultEngine ?? 'piper',
+        // Absent block = off, matching the controller's normalizeTtsFallback().
+        fallback: {
+          enabled: v.tts?.fallback?.enabled === true,
+          engine: v.tts?.fallback?.engine ?? 'piper',
+          voice: v.tts?.fallback?.voice ?? '',
+          cloudProvider: v.tts?.fallback?.cloudProvider ?? 'openai',
+        },
         kokoro: { voice: v.tts?.kokoro?.voice ?? 'bf_isabella' },
         chatterbox: { referenceVoice: v.tts?.chatterbox?.referenceVoice ?? '' },
         pocketTts: { voice: v.tts?.pocketTts?.voice ?? 'alba' },

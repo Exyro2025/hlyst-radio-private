@@ -1,21 +1,26 @@
 @import 'tailwindcss';
 @import 'tw-animate-css';
 
-/* Manual dark-mode override: listeners pin light/dark via [data-theme=…];
+/* Manual dark-mode override — listener can pin light/dark via [data-theme=…];
    absent or "system" lets the @media block in :root drive it.
 
-   BOTH routes must stay in the variant. shadcn's stock recipe matches the
-   attribute alone, safe only because next-themes always writes one — here
-   `clearMode()` and THEME_INIT_SCRIPT REMOVE [data-theme] (lib/theme.ts), so a
-   listener on a dark OS who never touched the switcher carries no attribute and
-   an attribute-only variant left every `dark:` utility unapplied (light-tuned
-   opacities/filters/shiki palette on a fully dark page). The media arm mirrors
-   the :root block's condition exactly, :not([data-theme='light']) included, so
-   pinning LIGHT on a dark OS still reads light. Keep the two in step.
+   BOTH routes have to be in the variant. shadcn's stock recipe matches the
+   attribute alone, which is safe there because next-themes always writes one.
+   This app deliberately does not: `clearMode()` and THEME_INIT_SCRIPT REMOVE
+   [data-theme] to hand the document back to prefers-color-scheme
+   (lib/theme.ts). So a listener on a dark OS who never touched the switcher
+   carries no attribute at all — the :root @media block below still flips their
+   tokens, but an attribute-only variant left every `dark:` utility unapplied,
+   i.e. light-tuned raw values (an opacity, a filter, a shiki palette) on a
+   fully dark page. The media arm mirrors that block's condition exactly,
+   :not([data-theme='light']) guard included, so a listener who pinned LIGHT on
+   a dark OS still reads light. Keep the two conditions in step.
 
-   Do NOT switch this to the `.dark` class `syncDarkClass` maintains: no CSS
-   targets it and its prefers-color-scheme listener only feeds React state, so a
-   live OS flip repaints the tokens while the class goes stale. */
+   Not the `.dark` class `syncDarkClass` maintains, tempting as it looks: no CSS
+   targets it, and its prefers-color-scheme listener only feeds React state — a
+   live OS flip repaints the tokens (pure CSS) while the class goes stale, which
+   is the same styles-disagree-with-palette bug in a new coat. Staying on the
+   media query keeps this variant true by construction. */
 @custom-variant dark {
   &:where([data-theme='dark'], [data-theme='dark'] *) {
     @slot;
@@ -28,9 +33,10 @@
 }
 
 /* Theme tokens — bridge every :root CSS variable into Tailwind's v4 namespaces
-   so utilities (bg-bg, text-ink, border-separator-soft, …) resolve to the same
-   vars the rest of the stylesheet reads. Values live in :root below, so
-   light/dark flips reach Tailwind utilities for free. */
+   so utilities (bg-bg, text-ink, border-separator-soft, shadow-drawer, …)
+   resolve to the same vars the rest of the stylesheet reads. The actual color
+   values live in :root below, so light/dark flips driven by data-theme or
+   prefers-color-scheme reach Tailwind utilities for free. */
 @theme {
   /* Newsprint palette */
   --color-bg: var(--bg);
@@ -46,11 +52,12 @@
   --color-scrollbar-hover: var(--scrollbar-hover);
   --color-field: var(--field);
 
-  /* Depth + hierarchy tokens (theme foundation): bg-surface /
-     border-surface-border, text-ink-faint (3rd ink rung under ink → muted),
-     border-line (crisp hairline vs the soft border), bg-accent-2 /
-     bg-accent-soft. Derived from the base palette in :root, so themes inherit
-     them unless they set their own. */
+  /* Depth + hierarchy tokens (theme foundation). Utilities: bg-surface /
+     border-surface-border (cards lift off the page), text-ink-faint (3rd ink
+     rung under ink → muted), border-line (crisp hairline vs the soft border),
+     bg-accent-2 / bg-accent-soft (a real second colour + accent tint). Values
+     derive from the base palette in :root, so themes inherit them unless they
+     set their own. */
   --color-surface: var(--surface);
   --color-surface-border: var(--surface-border);
   --color-ink-faint: var(--ink-faint);
@@ -58,9 +65,9 @@
   --color-accent-2: var(--accent-2);
   --color-accent-soft: var(--accent-soft);
 
-  /* shadcn/ui semantic bridge. `accent` here is the muted hover overlay shadcn
-     expects (Button hover, Toggle on-state), NOT the raw vermilion. Light/dark
-     flips reach these via the :root redeclarations below. */
+  /* shadcn/ui semantic bridge — `accent` here is the muted hover overlay
+     shadcn expects (Button hover, Toggle on-state), not the raw vermilion.
+     Light/dark flips reach these via :root redeclarations below. */
   --color-background: var(--background);
   --color-foreground: var(--foreground);
   --color-card: var(--card);
@@ -80,9 +87,9 @@
   --color-input: var(--input);
   --color-ring: var(--ring);
 
-  /* shadcn Sidebar token family (admin console). Values live under
-     `.admin-root` below, so every theme palette + dark mode flows through with
-     no per-theme cases. */
+  /* shadcn Sidebar token family (admin console). Values are newsprint-derived
+     and live under `.admin-root` below, so every theme palette + dark mode
+     flow through with no per-theme cases. */
   --color-sidebar: var(--sidebar);
   --color-sidebar-foreground: var(--sidebar-foreground);
   --color-sidebar-primary: var(--sidebar-primary);
@@ -103,17 +110,20 @@
   /* Uppercase-label letterspacing, exposed as the `tracking-eyebrow` utility. */
   --tracking-eyebrow: 0.2em;
 
-  /* Type families, so `font-sans` / `font-display` / `font-mono` resolve to the
-     next/font variables set on <html>. `font-display` follows the themeable
-     --display-font token (default Fraunces, see :root), so an operator-picked
-     headline face applies app-wide. */
+  /* Type families — promoted so `font-sans` / `font-display` / `font-mono`
+     utilities resolve to the next/font variables set on <html>. Plus Jakarta
+     Sans is the UI/body default, JetBrains Mono the data face. `font-display`
+     now follows the themeable --display-font token (default: Fraunces via the
+     :root fallback below), so an operator-picked headline face applies to every
+     `font-display` headline app-wide. */
   --font-sans: var(--font-sans);
   --font-display: var(--display-font);
   --font-mono: var(--mono-font);
 }
 
-/* V3 / Frequency palette. Dark mode flips bg/ink to deep-charcoal + off-white
-   and inverts the paper-grain blend so the texture still reads. */
+/* V3 / Frequency — newsprint cream, near-black ink, hot vermilion.
+   Dark mode flips bg/ink to a warm deep-charcoal + off-white pairing and
+   inverts the paper-grain blend so the texture still reads. */
 :root {
     --bg: #f3efe6;
     --ink: #161412;
@@ -131,9 +141,10 @@
     --grain-blend: multiply;
     color-scheme: light;
 
-    /* shadcn/ui token bridge onto the palette above. --bg/--ink/--muted/--overlay
-     already flip in dark mode, so bridge vars referencing them inherit the flip
-     and need no dark-mode redeclaration. Radius is pinned to 0. */
+    /* shadcn/ui token bridge — maps shadcn's semantic tokens onto the newsprint
+     palette above. --bg/--ink/--muted/--overlay already flip in dark mode, so
+     bridge vars referencing them inherit the flip; no dark-mode redeclaration
+     needed. Radius is pinned to 0 to keep the brutalist sharp-corner look. */
     --background: var(--bg);
     --foreground: var(--ink);
     --card: var(--surface);
@@ -153,32 +164,38 @@
     --input: var(--ink);
     --ring: var(--accent);
     --radius: 0px;
-    /* Hover wash, at :root so shadcn Button hover works app-wide and not only
-     inside .admin-root (which re-declares it identically below). */
+    /* hover wash — promoted to :root so shadcn Button hover works app-wide,
+     not just inside .admin-root (which re-declares it identically below). */
     --ink-soft: color-mix(in oklab, var(--ink) 6%, transparent);
-    /* Form-field fill, nudged off --bg so inputs read as inset against their
-     card. Auto-flips because both --bg and --ink flip in dark mode. */
+    /* form-field fill — nudged off --bg so inputs read as inset against the
+     card they sit on: darker on light, lighter on dark. Auto-flips because
+     both --bg and --ink flip in dark mode. */
     --field: color-mix(in oklab, var(--bg) 92%, var(--ink));
 
-    /* Theme-foundation derived tokens. A theme that omits these inherits a value
-     mixed from its own --bg / --ink / --accent; a theme map may override any of
-     them. Mode-agnostic (they mix toward --bg / --ink, which already flip), so
-     no dark-block redeclaration is needed. */
+    /* Theme-foundation derived tokens. A theme that omits these inherits a
+     value mixed from its own --bg / --ink / --accent, so every existing theme
+     (and every user theme) gains depth, an ink ladder, hairlines and a second
+     accent for free. All are mode-agnostic — they mix toward --bg / --ink,
+     which already flip in dark mode, so no dark-block redeclaration is needed.
+     A theme overrides any of them via its token map. */
     --surface: color-mix(in oklab, var(--bg) 93%, var(--ink));
     --surface-border: var(--soft-border);
     --ink-faint: color-mix(in oklab, var(--ink) 45%, var(--bg));
     --line: color-mix(in oklab, var(--ink) 70%, var(--bg));
     --accent-2: var(--accent);
     --accent-soft: color-mix(in oklab, var(--accent) 14%, var(--bg));
-    /* Admin surface + sidebar tokens live at :root, not .admin-root, so the
-       @theme `--color-sidebar` bridge (which resolves var(--sidebar) at :root)
-       gets a real value and the sidebar's mobile drawer resolves its fills even
-       though Radix portals it to <body>, outside .admin-root. --page-bg deepens
-       slightly in dark mode below. */
+    /* Admin surface + sidebar tokens — promoted to :root (not .admin-root) so
+       the @theme `--color-sidebar` bridge, which resolves var(--sidebar) at
+       :root, gets a real value, and so the admin sidebar's mobile drawer
+       resolves its fills even though Radix portals it to <body>, outside
+       .admin-root. --page-bg deepens slightly in dark mode below. */
+    /* Cards lift off the page on the theme's raised surface tier (was
+       var(--bg), which left card and page in one plane). */
     --card-bg: var(--surface);
     --page-bg: color-mix(in oklab, var(--bg) 90%, var(--ink));
-    /* The sidebar rail sits ~6% darker than the admin page. "Darker" flips
-       direction: toward --ink in light, toward black in the dark overrides below
+    /* The sidebar rail sits ~6% darker than the admin page so it reads as its
+       own chrome. "Darker" flips direction per theme: toward --ink in light
+       (preserves the paper warmth), toward black in the dark overrides below
        (where --ink is light and mixing toward it would lighten instead). */
     --sidebar: color-mix(in oklab, var(--page-bg), var(--ink) 6%);
     --sidebar-foreground: var(--ink);
@@ -188,8 +205,9 @@
     --sidebar-accent-foreground: var(--ink);
     --sidebar-border: var(--line);
     --sidebar-ring: var(--accent);
-    /* Default display + mono faces. The --display-font / --mono-font tokens (a
-     curated id resolved to a family stack in lib/theme) override them. */
+    /* Default display + mono faces; the --display-font / --mono-font tokens (a
+     curated id resolved to a family stack in lib/theme) override them, and the
+     font-display / font-mono utilities follow them. */
     --display-font: var(--font-fraunces);
     --mono-font: var(--font-jetbrains);
 }
@@ -244,26 +262,34 @@ html,
 body {
     background: var(--bg);
     color: var(--ink);
-    /* Body/UI default. Headings take --font-display and data (timestamps, code,
-       kbd) takes --font-mono, both re-asserted in the type-roles block. */
+    /* Plus Jakarta Sans is the body/UI default now. Fraunces (--font-display) is
+       applied to headings + the masthead, JetBrains Mono (--font-mono) is
+       re-asserted on data (timestamps, code, kbd) in the type-roles block. */
     font-family:
         var(--font-sans), ui-sans-serif, system-ui, -apple-system,
         "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
     font-feature-settings: "calt" 1; /* contextual alternates */
     -webkit-font-smoothing: antialiased;
     text-rendering: optimizeLegibility;
-    /* `clip`, not `hidden`: keeps vertical page scroll intact and still lets
-       inner areas scroll horizontally in their own `overflow-x: auto` wrappers. */
+    /* Catch-all against accidental horizontal overflow on mobile. `clip`
+       (not `hidden`) keeps vertical page scroll intact and still lets inner
+       scrollable areas (e.g. the weekly-schedule grid) scroll horizontally
+       inside their own `overflow-x: auto` wrappers. */
     overflow-x: clip;
 }
 
-/* TYPE ROLES. Body is Plus Jakarta Sans (set on html,body); headlines are
-   promoted to Fraunces and data (timestamps, durations, code, terminal,
-   keycaps) pulled back to JetBrains Mono so numbers stay tabular. Keep the two
-   selector lists below in sync when adding headings or numeric/code surfaces. */
+/* ─────────────────────────────────────────────────────────────────────────
+   TYPE ROLES — the premium editorial split layered over the cascade above.
+   Body defaults to Plus Jakarta Sans (set on <html,body>). Here we promote headlines to
+   Fraunces (the soft display serif) and pull data — timestamps, durations,
+   code, terminal, keycaps — back to JetBrains Mono so numbers stay tabular and
+   read like hi-fi gear. Keep these two lists in sync when adding headings or
+   numeric/code surfaces.
+   ───────────────────────────────────────────────────────────────────────── */
 
-/* Display serif. font-optical-sizing:auto lets Fraunces' opsz axis tune
-   contrast to the rendered size. */
+/* Display serif — every headline + the masthead wordmark + the now-playing
+   title. font-optical-sizing:auto lets Fraunces' opsz axis tune contrast to the
+   rendered size (delicate at body, dramatic at the masthead). */
 .bs-wordmark,
 .bs-hero-title,
 .bs-section h2,
@@ -281,12 +307,13 @@ body {
     font-optical-sizing: auto;
 }
 
-/* The masthead wordmark + news-hero H1 relax their letter-spacing at their own
-   definitions below (those win the cascade): mono-era tracking crowds the
-   serifs. */
+/* Note: the masthead wordmark + news-hero H1 relax their letter-spacing at
+   their own definitions below (those rules win the cascade), since the tight
+   tracking tuned for mono crowds Fraunces' serifs. */
 
-/* Data face — anything wanting tabular, fixed-advance glyphs: clocks,
-   durations, indices, version strings, code, terminal output, keycaps. */
+/* Data face — JetBrains Mono kept for anything that benefits from tabular,
+   fixed-advance glyphs: clocks, durations, indices, version strings, code,
+   terminal output and keycaps. */
 .v3-tab-num,
 .admin-root .mono-num,
 .admin-root .metric .n,
@@ -310,15 +337,16 @@ body {
         "ss01" 1; /* contextual + slashed zero */
 }
 
-/* Paper grain — fixed full-viewport SVG turbulence. The blend mode swaps
-   between multiply (light) and screen (dark) so the texture darkens cream and
-   lightens charcoal instead of disappearing. */
+/* Paper grain — fixed full-viewport SVG turbulence at low opacity.
+   The blend mode swaps between multiply (light) and screen (dark) so the
+   texture darkens cream and lightens charcoal instead of disappearing. */
 body::after {
     content: "";
     position: fixed;
     inset: 0;
-    /* --grain (themeable 0–1) overrides the per-mode default; 0 kills the grain.
-       Omitted, --grain-alpha applies unchanged. */
+    /* --grain (a themeable 0–1 token) overrides the per-mode paper default when
+       a theme sets it — dial grain up for a heavy VOLT/LAB look or to 0 to kill
+       it. Omitted → the newsprint paper grain (--grain-alpha) is unchanged. */
     opacity: var(--grain, var(--grain-alpha));
     mix-blend-mode: var(--grain-blend);
     pointer-events: none;
@@ -326,8 +354,8 @@ body::after {
     z-index: 100;
 }
 
-/* Dark mode swaps the SVG noise tint to a warm off-white so screen-blend lifts
-   the charcoal background instead of muddying it. */
+/* In dark mode swap the SVG noise tint to a warm off-white so screen-blend
+   lifts the charcoal background instead of muddying it. */
 @media (prefers-color-scheme: dark) {
     :root:not([data-theme="light"]) body::after {
         background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='200' height='200'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='2'/><feColorMatrix values='0 0 0 0 0.55  0 0 0 0 0.5  0 0 0 0 0.45  0 0 0 0.4 0'/></filter><rect width='100%25' height='100%25' filter='url(%23n)'/></svg>");
@@ -392,7 +420,8 @@ body::after {
     }
 }
 
-/* Booth Sprite. Only the keyframes live here; geometry/colour is inline in
+/* Booth Sprite ("the buddy") — the pure-CSS mascot leading the DJ thinking
+   line. Only the keyframes live here; all geometry/colour is inline in
    components/BoothBuddy.tsx. Collapsed under reduced motion below. */
 @keyframes buddy-breathe {
     0%,
@@ -437,8 +466,8 @@ body::after {
     }
 }
 
-/* Ripple rings behind the now-playing artwork. Each circle inherits its own
-   --i so the breathing is staggered. */
+/* Magic UI ripple — concentric ink rings expanding behind the now-playing
+   artwork. Each circle inherits its own --i so the breathing is staggered. */
 @keyframes sw-ripple {
     0%,
     100% {
@@ -478,11 +507,12 @@ body::after {
     animation: sw-pulse 1.4s ease-in-out infinite;
 }
 
-/* Scale + fade only — NO translate. Both consumers (admin Modal,
-   ShortcutsDialog) centre with Tailwind's `-translate-x/y-1/2`, which in v4
-   emits the separate CSS `translate:` property; a `transform: translate(...)`
-   here stacks on it and double-shifts the dialog up-left for the animation's
-   160ms before snapping back (the open "glitch"). */
+/* Scale + fade only — NO translate. Both consumers (admin Modal, ShortcutsDialog)
+   are centered with Tailwind's `-translate-x/y-1/2`, which in Tailwind v4 emits
+   the separate CSS `translate:` property. A `transform: translate(...)` here would
+   stack on top of that and double-shift the dialog up-left for the 160ms of the
+   animation before snapping back to center (the open "glitch"). Scaling alone
+   composes cleanly with the `translate:` property, popping in at the center. */
 @keyframes v3-modal-pop {
     from {
         transform: scale(0.97);
@@ -504,9 +534,10 @@ body::after {
     animation: v3-modal-pop 160ms cubic-bezier(0.2, 0.7, 0.2, 1);
 }
 
-/* V3 AlertDialog — fade + zoom on open AND close, keyed on Radix's data-state.
-   Centring is the static -translate-* (CSS `translate`), so the keyframe's
-   `transform: scale()` composes with it. Radix's Presence waits for the
+/* V3 AlertDialog — smooth fade + zoom on open AND close, keyed on Radix's
+   data-state (the shadcn pattern). Centering is the static -translate-* (CSS
+   `translate` property), so the keyframe's `transform: scale()` composes with
+   it and the box zooms from its own centre. Radix's Presence waits for the
    `closed` animation before unmounting. */
 @keyframes v3-alert-overlay-in { from { opacity: 0; } to { opacity: 1; } }
 @keyframes v3-alert-overlay-out { from { opacity: 1; } to { opacity: 0; } }
@@ -526,7 +557,8 @@ body::after {
     animation: v3-blink 1s steps(1) infinite;
 }
 
-/* Tune-in gate — expanding ink ring on the play disc. */
+/* Tune-in gate — the play disc emits an expanding ink ring so the overlay's
+   call-to-action keeps drawing the eye until the listener taps. */
 @keyframes v3-tunein-pulse {
     0% {
         box-shadow: 0 0 0 0 color-mix(in oklab, var(--ink) 35%, transparent);
@@ -540,9 +572,9 @@ body::after {
     animation: v3-tunein-pulse 2s ease-out infinite;
 }
 
-/* Connecting state for the transport-bar status dot. A plain opacity pulse so
-   it reads on the dark Tune In button, where v3-tunein-pulse's expanding ring
-   would be ink-on-ink. */
+/* Connecting state — the transport-bar status dot breathes while the stream
+   buffers. A plain opacity pulse so it reads on the dark Tune In button,
+   where the expanding-ring v3-tunein-pulse would be ink-on-ink. */
 @keyframes v3-connecting-pulse {
     0%,
     100% {
@@ -557,8 +589,10 @@ body::after {
 }
 
 /* Skin-gallery preview motion (admin → Settings → Skin & Themes). Only the
-   @keyframes live here; the cards drive them through Tailwind `animate-[…]`
-   utilities and gate play-state on `group-hover` / active. */
+   @keyframes live here; the skin cards drive them through Tailwind arbitrary
+   `animate-[…]` utilities and gate play-state on `group-hover` / active, so a
+   card idles as a still contact-sheet print until it is the live station skin
+   or under the cursor. */
 @keyframes skin-eq    { 0%, 100% { transform: scaleY(0.28); } 50% { transform: scaleY(1); } }
 @keyframes skin-blink { 0%, 49% { opacity: 1; } 50%, 100% { opacity: 0; } }
 @keyframes skin-reel  { to { transform: rotate(360deg); } }
@@ -582,10 +616,13 @@ body::after {
     color: #c5302a;
 }
 
-/* Art-derived ambient wash — two radial pools tinted from the cover art (see
-   hooks/useCoverColors.ts), above --bg and below all content. Registering the
-   tint vars as <color> @properties is what lets them cross-fade on track change
-   instead of snapping. */
+/* Art-derived ambient wash — a soft tint pulled from the current cover art
+   (see hooks/useCoverColors.ts) bled behind the whole player. Two faint radial
+   pools, one per extracted colour, sitting just above --bg and below all
+   content. Registering the tint vars as <color> @properties lets them
+   cross-fade on track change instead of snapping; opacity fades the layer in
+   once a colour is available. Tuned low so it tints the cream/charcoal base
+   without fighting the broadsheet ink. */
 @property --cover-tint {
     syntax: "<color>";
     inherits: false;
@@ -623,9 +660,10 @@ body::after {
 .v3-cover-ambient.v3-cover-ambient-on {
     opacity: 1;
 }
-/* soft-light compresses on charcoal, so the dark pools run richer mixes to
-   lift the base. The [data-theme="dark"] rule plus the
-   prefers-dark-without-explicit-light query mirror the paper-grain pattern. */
+/* Dark theme leans on the tint harder — soft-light compresses on charcoal, so
+   the pools run richer mixes there to actually lift the base. The explicit
+   [data-theme="dark"] and the prefers-dark-without-explicit-light media query
+   mirror the same dark-mode pattern used by the paper-grain rules. */
 :root[data-theme="dark"] .v3-cover-ambient {
     mix-blend-mode: soft-light;
     background-image:
@@ -663,12 +701,15 @@ body::after {
     }
 }
 
-/* Now-playing cover glitch. The two channel ghosts are background copies of the
-   same art (fed in via the --cover custom property on .v3-cover-frame), tinted
-   and offset with a screen blend. "Engaged" = hover/focus OR .v3-cover-live,
-   the latter toggled by CenterStage while the ripple waves are active. The
-   hover-only lift is kept off .v3-cover-live so the art doesn't jump every time
-   the DJ talks. */
+/* Now-playing cover — calm at rest, a CRT/broadcast glitch when engaged.
+   The two channel ghosts are background copies of the same art (fed in via the
+   --cover custom property on .v3-cover-frame), tinted vermilion + teal and offset
+   with a screen blend so they read as chromatic-aberration fringes. A faint
+   scanline sweep and four printer's registration ticks finish the broadcast feel.
+   "Engaged" = hover/focus OR .v3-cover-live, the latter toggled by CenterStage while
+   the ripple waves are active (track change / the DJ speaking), so the artwork
+   glitches in sync with the on-air transmission. The hover-only lift is kept off
+   .v3-cover-live so the art doesn't jump every time the DJ talks. */
 .v3-cover-frame {
     cursor: pointer;
     transition:
@@ -791,9 +832,10 @@ body::after {
     transform: scale(1);
 }
 
-/* Artwork placeholder, shown when the track has no artwork, the image failed,
-   or the stage is off air. It sits UNDER the art img inside .v3-cover-glitch so
-   the slot never collapses and the text column never jumps (CenterStage). */
+/* Artwork placeholder — the station disc mark at cover scale (the .player-mark
+   vocabulary), shown when the track has no artwork, the image failed to load,
+   or the stage is off air. It sits UNDER the art img inside .v3-cover-glitch,
+   so the slot never collapses and the text column never jumps (CenterStage). */
 .v3-cover-placeholder {
     position: absolute;
     inset: 0;
@@ -882,8 +924,10 @@ body::after {
 
 /* Reduced motion — collapse anything that animates. */
 @media (prefers-reduced-motion: reduce) {
-    /* The frosted backdrop blur is the biggest GPU cost on weak devices, and
-       reduced-motion listeners are often on those devices, so drop it too. */
+    /* Low-power concession: the frosted backdrop blur is the single biggest GPU
+       cost on weak devices, and listeners who ask for reduced motion are often
+       on exactly those devices — drop it too. (Lite mode does the same wholesale
+       via html.lite below.) */
     *,
     *::before,
     *::after {
@@ -903,8 +947,9 @@ body::after {
     .v3-buddy * {
         animation: none !important;
     }
-    /* No channel ghosts, scanlines, jitter or lift; just frame-to-ink +
-       registration ticks as a static engaged state. */
+    /* Keep the cover calm: no channel ghosts, scanlines, jitter or lift —
+       just the quiet frame-to-ink + registration ticks as a static engaged
+       state, whether that's hover/focus or the .v3-cover-live transmission cue. */
     .v3-cover-frame:hover,
     .v3-cover-frame:focus-visible {
         transform: none;
@@ -919,7 +964,8 @@ body::after {
     .v3-cover-frame:is(:hover, :focus-visible, .v3-cover-live) .v3-cover-scan {
         opacity: 0;
     }
-    /* A frozen ring stack reads as broken, so hide the rings outright. */
+    /* The ripple rings behind the artwork are pure decoration, and a frozen
+       ring stack reads as broken — hide them outright. */
     .sw-ripple-circle {
         animation: none !important;
         opacity: 0 !important;
@@ -928,19 +974,20 @@ body::after {
     .v3-cover-ambient {
         transition: none;
     }
-    /* The volume pointer and signal needle glide on a transition; snap them so
-       nothing sweeps under reduced motion. */
+    /* Console-deck footer: the volume knob pointer and the signal needle glide
+       on a transition — snap them instead so nothing sweeps under reduced motion. */
     .fz-knob,
     .fz-scale .fz-needle {
         transition: none;
     }
 }
 
-/* Lite (low-power) mode, from the player theme menu or ?lite=1 (lib/lite.ts).
-   Drops every backdrop-filter blur and disables animations so weak GPUs stop
-   re-compositing every frame — measured Pi 4 win is ~170% → ~40% Chromium CPU.
-   Transitions are deliberately left alone: they fire only on interaction and
-   aren't the continuous repaint cost. */
+/* Lite (low-power) mode — toggled from the player theme menu or pinned with
+   ?lite=1 (see lib/lite.ts). Drops every backdrop-filter blur and disables
+   animations so weak GPUs (kiosks, Raspberry Pi) stop re-compositing frosted
+   layers and looping effects every frame — the measured Pi 4 win is ~170% →
+   ~40% Chromium CPU. Transitions are intentionally left alone: they only fire
+   on interaction and aren't the continuous repaint cost. */
 html.lite *,
 html.lite *::before,
 html.lite *::after {
@@ -948,13 +995,14 @@ html.lite *::after {
     -webkit-backdrop-filter: none !important;
     animation: none !important;
 }
-/* The animation kill above would leave the ripple a static ring stack for its
-   3s burst, so hide the rings, matching reduced-motion. */
+/* The animation kill above would leave the artwork ripple as a static ring
+   stack for its 3s burst — hide the rings, matching reduced-motion. */
 html.lite .sw-ripple-circle {
     opacity: 0 !important;
 }
 
-/* Player title — display serif (see the type-roles block up top). */
+/* Player title — Fraunces display serif (see the type-roles block up top).
+   A hair of negative tracking tightens the big serif; opsz handles contrast. */
 .v3-title {
     font-size: clamp(22px, 4.6vw, 56px);
     line-height: 1;
@@ -985,8 +1033,11 @@ html.lite .sw-ripple-circle {
     font-variant-numeric: tabular-nums;
 }
 
-/* Player header runs a touch larger than the shared v3 scale, and the wordmark
-   swaps to the display serif while the other header labels stay tracked sans. */
+/* Player header runs a touch larger than the shared v3 scale — the masthead
+   reads better at arm's length without disturbing the landing broadsheet.
+   The wordmark also swaps to Fraunces (the display serif) so the station name
+   carries the same editorial face as the broadsheet masthead, while the other
+   header labels stay in the tracked sans. */
 .player-topbar .v3-eyebrow {
     font-family: var(--font-display), Georgia, "Times New Roman", serif;
     font-optical-sizing: auto;
@@ -995,35 +1046,41 @@ html.lite .sw-ripple-circle {
 .player-topbar .v3-caption {
     font-size: 12px;
 }
-/* Mobile second line (context tagline) as supporting text. */
+/* Mobile second line (context tagline) reads as supporting text — a notch
+   smaller than the masthead caption and a lighter, more faded ink. */
 .player-topbar .v3-caption.player-topbar-subline {
     font-size: 10px;
     color: color-mix(in srgb, var(--muted) 85%, transparent);
 }
 
-/* CONSOLE DECK — the player footer's hardware controls (TransportBar).
-   Coloured entirely from tokens (--accent, --ink, --field, color-mix) so it
-   tracks light/dark. Layout + responsive behaviour live in Tailwind on the JSX;
-   only the analog part internals (rings, ticks, needle, conic knob scale,
-   grille dots) live here, where utilities can't reach. */
+/* ─────────────────────────────────────────────────────────────────────────
+   CONSOLE DECK — the player footer's hardware controls (TransportBar).
+   Ported from docs/footer-options (design A) but recoloured to the app's
+   tokens so it tracks light/dark: --accent (vermilion), --ink, --field, and
+   translucent inks via color-mix. Layout + responsive behaviour live in
+   Tailwind on the JSX; only the analog part internals (rings, ticks, needle,
+   conic knob scale, grille dots) live here where utilities can't reach.
+   ───────────────────────────────────────────────────────────────────────── */
 /* TODO(skins-colocation): the .fz-* block is classic-private and should
    eventually move to a co-located classic module. Deferred so the contrast
    retune isn't tangled with a move. */
 .fz-deck {
-    /* Divider + field/border tints, scoped here so the JSX can reference them
-       as border-[color:var(--fz-line)] etc. */
+    /* Divider between compartments + the field/border tints, scoped here so
+       the JSX can reference them as border-[color:var(--fz-line)] etc. */
     --fz-line: color-mix(in oklab, var(--ink) 30%, transparent);
     --fz-dim: color-mix(in oklab, var(--ink) 55%, transparent);
     /* Top edge of the bar — lighter than full ink so it reads as a soft rule. */
     --fz-edge: color-mix(in oklab, var(--ink) 70%, transparent);
-    /* Deck fill + the recessed well behind each dial, so the instruments sit in
+    /* Console-shelf fill for the whole deck + the recessed well behind each
+       dial, so the bar reads as a control shelf and the instruments sit in
        matching wells on every theme instead of floating on the page colour. */
     --fz-panel: color-mix(in oklab, var(--ink) 10%, var(--bg));
     --fz-well: color-mix(in oklab, var(--ink) 18%, var(--bg));
 }
 
-/* Power glyph. The ring is dim until tuned in, accent when on air, and pulses
-   while connecting via the shared .v3-connecting-pulse. */
+/* Power — circular button, open ring + stem (the power glyph). The ring sits
+   dim until tuned in, lights to vermilion when on air, and pulses while
+   connecting (shared .v3-connecting-pulse on the ring element). */
 .fz-power {
     position: relative;
     border-radius: 50%;
@@ -1073,9 +1130,10 @@ html.lite .sw-ripple-circle {
     background: var(--accent);
 }
 
-/* Signal — analog scale: tick rule masked to the top band, needle positioned
-   by inline left:%, 0–250 numerals along the bottom. Decorative; the value is
-   announced via a label on the section in the JSX. */
+/* Signal — analog scale: faint tick rule masked to the top band, a vermilion
+   needle (triangle head + square grip) positioned by inline left:%, and the
+   0–250 numerals along the bottom. Decorative; the value is read aloud via a
+   label on the section in the JSX. */
 .fz-scale {
     position: relative;
     border: 1px solid var(--fz-line);
@@ -1149,8 +1207,9 @@ html.lite .sw-ripple-circle {
     background: var(--accent);
 }
 
-/* Volume knob. The conic tick ring starts at -135deg, matching the pointer
-   angle the JSX sets as -135 + volume*270. */
+/* Volume knob — open ring + inner cap + vermilion pointer; the conic ring of
+   ticks behind it reads as a level scale (starts from -135deg, matching the
+   pointer angle the JSX sets inline as -135 + volume*270). */
 .fz-knob-wrap {
     position: relative;
     flex: none;
@@ -1203,7 +1262,8 @@ html.lite .sw-ripple-circle {
     transform: translateX(-50%);
 }
 
-/* Mute grille — dots take the accent and the border lights when muted. */
+/* Mute grille — dotted speaker grille; dots go vermilion + the border lights
+   when muted, so the engaged (silenced) state reads at a glance. */
 .fz-grille {
     flex: none;
     border: 1px solid var(--fz-line);
@@ -1229,7 +1289,9 @@ html.lite .sw-ripple-circle {
     background-image: radial-gradient(var(--accent) 1.3px, transparent 1.5px);
 }
 
-/* MASTHEAD NAV — sits inside the broadsheet header, between the rules. */
+/* ─────────────────────────────────────────────────────────────────────────
+   MASTHEAD NAV — sits inside the broadsheet header, between the rules.
+   ───────────────────────────────────────────────────────────────────────── */
 .bs-masthead-nav {
     display: flex;
     align-items: center;
@@ -1256,10 +1318,179 @@ html.lite .sw-ripple-circle {
     font-size: 11px;
 }
 
-/* BROADSHEET — landing-page newspaper utilities, all prefixed `.bs-` so they
-   can't collide with the V3 player utilities. */
+/* One nav entry, dot included. The separator is a ::after on this wrapper so it
+   travels with its own word — as a sibling flex item it could wrap to the start
+   of the next line, which is what the six-item nav does on a phone. */
+.bs-masthead-item {
+    display: inline-flex;
+    align-items: center;
+}
+.bs-masthead-item:not(:last-child)::after {
+    content: '·';
+    /* Reproduces the old layout exactly: the row's 14px gap sat on both sides of
+       a standalone dot, so the dot needs that same 14px in front of it and the
+       row gap supplies the space after. */
+    margin-left: 14px;
+    color: var(--muted);
+    font-size: 11px;
+    line-height: 1;
+}
 
-/* Outer landing page container. */
+/* Lifts the masthead above the article so the Community panel can hang out of
+   it. .bs-paper puts BOTH this header and <main> at position:relative/z-index:1,
+   so <main> wins on DOM order and paints over the open dropdown.
+   Two traps this rule is shaped around:
+     - a Tailwind z-* utility can't do it: globals.css is unlayered and always
+       beats Tailwind's @layer utilities, whatever the value;
+     - a bare .bs-masthead-lift can't either, because .bs-paper is declared
+       LATER in this file and would win the same-specificity tie.
+   Hence the element qualifier — header.x outranks .bs-paper wherever it sits. */
+header.bs-masthead-lift {
+    z-index: 40;
+}
+
+/* Masthead "Community" dropdown (components/landing/CommunityMenu.tsx, on the
+   shadcn/Radix NavigationMenu). The primitive contributes structure only —
+   everything visible here is the newsprint vocabulary, so the trigger is
+   indistinguishable from the plain links either side of it. */
+.bs-masthead-menu {
+    /* The Root is `flex-1` by default, which in the masthead's flex row makes
+       the trigger claim the leftover width and shove the other links off
+       centre. Size it to its content instead. */
+    flex: 0 0 auto;
+}
+.bs-masthead-trigger {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    background: none;
+    border: 0;
+    cursor: pointer;
+    /* Inherits the rest from .bs-masthead-link, which it also carries. */
+    font: inherit;
+    font-size: 11px;
+    letter-spacing: 0.3em;
+    text-transform: uppercase;
+    font-weight: 700;
+}
+.bs-masthead-trigger[data-state='open'] {
+    color: var(--accent);
+}
+.bs-masthead-caret {
+    /* Nudge left: the 0.3em tracking puts a full letter-space after the final
+       "y", so the caret otherwise reads as detached from the word. */
+    margin-left: -3px;
+    font-size: 9px;
+    line-height: 1;
+    transition: transform 200ms ease;
+}
+.bs-masthead-trigger[data-state='open'] .bs-masthead-caret {
+    transform: rotate(180deg);
+}
+
+/* The panel hangs off the Item rather than a shared viewport (see the note in
+   components/ui/navigation-menu.tsx), so the Item is the positioning context. */
+.bs-masthead-menu li {
+    position: relative;
+}
+.bs-masthead-panel {
+    position: absolute;
+    top: calc(100% + 10px);
+    /* Centred on the trigger, then clamped into the viewport on narrow screens
+       so the panel can't hang off the edge of a phone. */
+    left: 50%;
+    transform: translateX(-50%);
+    z-index: 30;
+    max-width: calc(100vw - 24px);
+}
+.bs-masthead-panel-list {
+    list-style: none;
+    margin: 0;
+    padding: 6px;
+    display: grid;
+    gap: 2px;
+    width: 272px;
+    max-width: 100%;
+    /* --surface is color-mix(bg 93%, ink) — near-identical to the page on every
+       theme, which left the panel looking like unstyled text floating over the
+       article. The border and the hard shadow are what separate it, so the fill
+       is the plain page colour and opaque. */
+    background: var(--bg);
+    border: 1px solid var(--ink);
+    /* Hard offset shadow rather than a soft blur — print, not material. */
+    box-shadow: 4px 4px 0 rgba(0, 0, 0, 0.18);
+}
+.bs-masthead-panel-item {
+    display: grid;
+    gap: 1px;
+    padding: 9px 11px;
+    text-decoration: none;
+    color: var(--ink);
+    transition: background-color 160ms ease;
+}
+.bs-masthead-panel-item:hover,
+.bs-masthead-panel-item:focus-visible {
+    background: rgba(0, 0, 0, 0.05);
+    outline: none;
+}
+.bs-masthead-panel-tag {
+    font-family: var(--font-mono);
+    font-size: 9px;
+    letter-spacing: 0.22em;
+    text-transform: uppercase;
+    color: var(--muted);
+}
+.bs-masthead-panel-item:hover .bs-masthead-panel-tag {
+    color: var(--accent);
+}
+.bs-masthead-panel-title {
+    font-family: var(--font-display), Georgia, serif;
+    font-size: 19px;
+    font-weight: 800;
+    line-height: 1.1;
+    letter-spacing: -0.01em;
+}
+.bs-masthead-panel-blurb {
+    font-size: 12px;
+    line-height: 1.45;
+    color: var(--muted);
+}
+
+/* Six letterspaced nav items only fit one line from ~640px up (measured).
+   Below that the Community dropdown is dropped rather than letting the row
+   wrap: it is the one item needing a second tap, and every destination behind
+   it (Skills, Personas, Shows, Apps) has its own Back Pages panel, which is
+   where a phone reader ends up anyway. `display:none` takes its ::after dot
+   with it, so the separators stay correct with no renumbering.
+
+   This also means the panel never opens below 640px, so none of the
+   narrow-screen panel anchoring that used to live here is needed. */
+@media (max-width: 639px) {
+    .bs-masthead-community {
+        display: none;
+    }
+}
+
+/* Phone: tighten type and gap so the remaining five hold one line down to
+   ~360px. Verified at 360/375/390/430. */
+@media (max-width: 560px) {
+    .bs-masthead-nav {
+        gap: 8px 10px;
+    }
+    .bs-masthead-link,
+    .bs-masthead-trigger {
+        font-size: 10px;
+        letter-spacing: 0.14em;
+    }
+}
+
+/* ─────────────────────────────────────────────────────────────────────────
+   BROADSHEET — landing-page newspaper utilities.
+   All prefixed `.bs-` so they don't collide with the V3 player utilities.
+   ───────────────────────────────────────────────────────────────────────── */
+
+/* Outer landing page container — like a single broadsheet page. Centered,
+   max-width like a newspaper, with internal padding that breathes on mobile. */
 .bs-paper {
     max-width: 1280px;
     margin: 0 auto;
@@ -1268,9 +1499,10 @@ html.lite .sw-ripple-circle {
     z-index: 1;
 }
 
-/* Masthead head row. The 3-column grid keeps the wordmark optically centred;
-   below 560px the side blocks share one row and the wordmark drops to its own
-   line so it never wraps against them. */
+/* Masthead head row — 3-column grid keeps the wordmark optically centred
+   between the VOL dateline and the ON AIR status. Below 560px the side
+   blocks share one row and the wordmark drops to its own centred line, so
+   it never wraps awkwardly against the side blocks. */
 .bs-masthead-head {
     display: grid;
     grid-template-columns: 1fr auto 1fr;
@@ -1293,8 +1525,9 @@ html.lite .sw-ripple-circle {
         gap: 10px;
         padding: 16px 0 4px;
     }
-    /* The VOL/NO dateline and ON AIR status drop on mobile so the theme toggle
-       and wordmark share one row. */
+    /* The VOL/NO dateline is dropped on mobile so the theme toggle and
+       the wordmark sit together on a single row. The ON AIR status is
+       hidden on mobile to keep the wordmark uncluttered. */
     .bs-masthead-issue {
         display: none;
     }
@@ -1304,8 +1537,9 @@ html.lite .sw-ripple-circle {
     .bs-wordmark {
         font-size: clamp(38px, 13vw, 64px);
     }
-    /* Tightened so all five items stay on one row on narrow phones; the ·
-       separators already carry the visual break. */
+    /* Tighten the nav so all five items stay on one row on narrow phones —
+       the · separators already carry the visual break, so the flex gap and
+       the wide tracking can both relax without the row reading as cramped. */
     .bs-masthead-nav {
         gap: 7px;
     }
@@ -1325,7 +1559,8 @@ html.lite .sw-ripple-circle {
     }
 }
 
-/* Masthead wordmark. Tracking is relaxed from the mono-era -0.04em so the
+/* Masthead wordmark — outsized Fraunces nameplate. Black weight for the
+   broadsheet-masthead punch; tracking relaxed from the old mono -0.04em so the
    serifs don't collide at display size. */
 .bs-wordmark {
     font-size: clamp(48px, 9vw, 128px);
@@ -1335,9 +1570,11 @@ html.lite .sw-ripple-circle {
     text-transform: uppercase;
 }
 
-/* Off-register ink plate behind the nameplate. Em offsets so the drift scales
-   with the clamp()ed wordmark; hover pulls it into register, and reduced-motion
-   readers get the settled plate outright. */
+/* Off-register ink plate behind the nameplate — the vermilion plate printed a
+   hair off-register, the way cheap newsprint presses actually drifted. Em
+   offsets so the drift scales with the clamp()ed wordmark. Hovering the
+   nameplate pulls the plate into perfect register — the press operator's
+   micro-adjust — and reduced-motion readers get the settled plate outright. */
 .bs-wordmark-plate {
     text-shadow: 0.032em 0.026em 0 color-mix(in oklab, var(--accent) 42%, transparent);
     transition: text-shadow 280ms ease;
@@ -1353,15 +1590,18 @@ html.lite .sw-ripple-circle {
     }
 }
 
-/* Slash → disc morph on nameplate hover. The slash keeps its box (opacity
-   only) so the nameplate never reflows; the disc is absolutely centred and
-   em-sized so the morph scales with the clamp()ed wordmark. The face spins on
-   its own inner element while the outer owns the scale/fade transition, so the
-   two transforms never fight. */
+/* Slash → disc morph — hovering the nameplate spins the slash away and the
+   station's disc mark (the .bs-dj-glyph / .player-mark vocabulary) drops
+   into the gap already turning. The slash glyph keeps its box (opacity only)
+   so the nameplate never reflows; the disc is absolutely centred over it and
+   em-sized, so the morph scales with the clamp()ed wordmark. The face spins
+   on its own inner element — the outer element owns the scale/fade
+   transition, so the two transforms never fight. */
 .bs-wordmark-slash {
     position: relative;
     display: inline-block;
-    /* Symmetric padding keeps the mark optically centred as it spreads. */
+    /* Hover eases SUB and WAVE apart a touch so the disc gets clear air —
+       symmetric padding keeps the mark optically centred while it spreads. */
     transition: padding 420ms cubic-bezier(0.34, 1.3, 0.4, 1);
 }
 .bs-wordmark-plate:hover .bs-wordmark-slash {
@@ -1439,8 +1679,10 @@ html.lite .sw-ripple-circle {
     }
 }
 
-/* Motto rule — replaces the plain .bs-rule in the masthead, so it must keep
-   reading as a rule at a glance. */
+/* Motto rule — the line under the nameplate carries the paper's motto (the
+   system's one load-bearing promise) between full-width hairlines, flanked
+   by the ✦ used in the footer's press credit. Replaces the plain .bs-rule
+   in the masthead, so it must keep reading as a rule at a glance. */
 .bs-masthead-motto {
     display: flex;
     align-items: center;
@@ -1497,7 +1739,8 @@ html.lite .sw-ripple-circle {
     min-width: 24px;
 }
 
-/* Rules — single, double (two stacked 1px lines with a gap), thick. */
+/* Rules — single, double, thick. The double rule is two stacked 1px lines
+   with a gap, evoking a real broadsheet ornament. */
 .bs-rule {
     height: 1px;
     background: var(--ink);
@@ -1517,7 +1760,8 @@ html.lite .sw-ripple-circle {
     align-self: stretch;
 }
 
-/* Drop cap on the first letter of a body paragraph, three lines tall. */
+/* Drop cap on the first letter of a body paragraph — vermilion, oversized,
+   sits on the baseline of the first three lines. */
 .bs-drop-cap::first-letter {
     font-size: 3.6em;
     line-height: 0.85;
@@ -1552,7 +1796,8 @@ html.lite .sw-ripple-circle {
     }
 }
 
-/* TUNE IN action button. */
+/* TUNE IN action button — black box, cream type. The negative-space anchor
+   of the whole landing. */
 .bs-tune {
     display: inline-flex;
     align-items: center;
@@ -1583,8 +1828,9 @@ html.lite .sw-ripple-circle {
     color: var(--ink);
 }
 
-/* Ghost variant of .bs-tune for a secondary CTA. Defined after .bs-tune:hover
-   so its hover wins the equal-specificity match. */
+/* Ghost variant — outlined twin of .bs-tune for a secondary CTA sitting next
+   to the filled primary (e.g. "Source" beside "Setup" in the article hero).
+   Defined after .bs-tune:hover so its hover wins the equal-specificity match. */
 .bs-tune--ghost {
     background: transparent;
     color: var(--ink);
@@ -1680,7 +1926,9 @@ html.lite .sw-ripple-circle {
     }
 }
 
-/* FRAME — browser-window mock around the embedded /listen iframe. */
+/* ─────────────────────────────────────────────────────────────────────────
+   FRAME — browser-window mock around the embedded /listen iframe.
+   ───────────────────────────────────────────────────────────────────────── */
 .bs-frame {
     width: 100%;
     border: 1px solid var(--ink);
@@ -1860,7 +2108,9 @@ html.lite .sw-ripple-circle {
     }
 }
 
-/* HERO — tagline above, live frame in the middle, caption beneath. */
+/* ─────────────────────────────────────────────────────────────────────────
+   HERO — tagline above, live frame in the middle, caption beneath.
+   ───────────────────────────────────────────────────────────────────────── */
 .bs-hero {
     display: flex;
     flex-direction: column;
@@ -1889,7 +2139,9 @@ html.lite .sw-ripple-circle {
     color: var(--muted);
     max-width: 64ch;
 }
-/* SECTION — vertical content blocks between hero and footer. */
+/* ─────────────────────────────────────────────────────────────────────────
+   SECTION — vertical content blocks between hero and footer.
+   ───────────────────────────────────────────────────────────────────────── */
 .bs-section {
     display: flex;
     flex-direction: column;
@@ -1916,9 +2168,11 @@ html.lite .sw-ripple-circle {
     color: var(--muted);
 }
 
-/* Section tempo + band modifiers: --tight compresses a quiet section, --band
-   breaks it out to the full viewport width, --tinted prints it on the accent
-   tint. */
+/* ── Section tempo + band modifiers ─────────────────────────────────────────
+   The landing scroll alternates density instead of a uniform march: --tight
+   compresses a quiet section, --band breaks a section out to the full
+   viewport width, --tinted prints it on the accent tint. (An --inverted
+   paper-on-ink variant was tried and cut — the broadsheet stays paper.) */
 .bs-section--tight {
     padding: clamp(28px, 4vw, 48px) 0;
 }
@@ -1948,8 +2202,9 @@ html.lite .sw-ripple-circle {
     grid-template-columns: repeat(2, minmax(0, 1fr));
     gap: clamp(20px, 3vw, 36px);
 }
-/* Unboxed editorial card — a text block under a hairline rule, deliberately
-   not a bordered/filled box. */
+/* Unboxed editorial card — a text block under a hairline rule, sitting
+   directly on the paper. Deliberately NOT a bordered/filled box: the
+   broadsheet items read as columns of print, not UI cards. */
 .bs-whatis-card {
     padding: 24px 0 0;
     border-top: 1px solid var(--separator-strong);
@@ -1961,9 +2216,11 @@ html.lite .sw-ripple-circle {
     }
 }
 
-/* Seam sheet — each swappable seam opens with a dotted patch leader (mono tag
-   left, leader dots, name right in the second ink), then copy at full measure
-   with a vertical FITS rail beside it. */
+/* Seam sheet — Part Three's stack as a hi-fi wiring manual. Each swappable
+   seam opens with a dotted patch leader (contents-page style: mono tag left,
+   leader dots, the seam's name right in the second ink), then the copy at
+   full measure with a vertical FITS rail of compatible engines beside it.
+   Not a card grid; the dotted leader is this section's device. */
 .bs-seam {
     display: grid;
     grid-template-columns: minmax(0, 1fr) 220px;
@@ -2038,9 +2295,11 @@ html.lite .sw-ripple-circle {
     }
 }
 
-/* Console directory — a numbered index of the console's departments (same
-   names as the console nav): ghosted mono numeral + second-ink slug on the left
-   rail, headline + note beside it, ruled rows under one opening rule. */
+/* Console directory — Part Five's ledger. The admin console presented as a
+   numbered index of its real departments (the same names as the console nav),
+   not another headline+blurb card grid: a ghosted mono numeral + second-ink
+   department slug on the left rail, the editorial headline + note beside it,
+   ruled rows under one strong opening rule. */
 .bs-desk-ledger {
     display: grid;
     grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -2092,7 +2351,9 @@ html.lite .sw-ripple-circle {
     }
 }
 
-/* MEET THE VOICES — spinning vinyl glyph and persona card grid. */
+/* ─────────────────────────────────────────────────────────────────────────
+   MEET THE VOICES — spinning vinyl glyph and persona card grid.
+   ───────────────────────────────────────────────────────────────────────── */
 @media (max-width: 720px) {
     .bs-dj-glyph {
         justify-self: start;
@@ -2149,8 +2410,9 @@ html.lite .sw-ripple-circle {
     border: 1px solid var(--ink);
 }
 
-/* Miniature spinning record for the player header. Spins only while tuned in,
-   so the mark doubles as a play indicator. */
+/* Miniature spinning record for the player header — same vocabulary as
+   .bs-dj-glyph on the landing page, sized for an inline wordmark. Spins
+   only while tuned in, so the mark doubles as a play indicator. */
 .player-mark {
     width: 16px;
     height: 16px;
@@ -2182,8 +2444,11 @@ html.lite .sw-ripple-circle {
     }
 }
 
-/* Air log — mono timestamp + kind chip on a right-aligned left rail, the entry
-   beside it, one hairline spine down the hour with an ink tick per entry. */
+/* Air log — Part Two's DJ habits printed as one small hour of broadcast,
+   the way the dash booth log prints it (the screenshot directly above this
+   block shows the real thing): mono timestamp + kind chip on a right-aligned
+   left rail, the habit beside it, one hairline spine running down the hour
+   with a small ink tick per entry. Not a card grid on purpose. */
 .bs-airlog-cap {
     margin: 0 0 2px;
     font-family: var(--mono-font), monospace;
@@ -2277,7 +2542,9 @@ html.lite .sw-ripple-circle {
     }
 }
 
-/* SETUP — quickstart walkthrough page styles. */
+/* ─────────────────────────────────────────────────────────────────────────
+   SETUP — quickstart walkthrough page styles.
+   ───────────────────────────────────────────────────────────────────────── */
 .bs-setup-hero {
     display: flex;
     flex-direction: column;
@@ -2420,9 +2687,11 @@ html.lite .sw-ripple-circle {
     color: var(--ink);
 }
 
-/* MANUAL · LLM — the model-results table (LlmBenchTable.tsx). Bars are
-   single-hue (ink) magnitude marks on a recessive track; identity lives in the
-   row header, verdicts in labelled chips, values also as text. */
+/* ─────────────────────────────────────────────────────────────────────────
+   MANUAL · LLM — the living model-results table (LlmBenchTable.tsx).
+   Bars are single-hue (ink) magnitude marks on a recessive track; identity
+   lives in the row header, verdicts in labelled chips, values also as text.
+   ───────────────────────────────────────────────────────────────────────── */
 .bs-bench {
     margin: 8px 0 0;
 }
@@ -2574,10 +2843,14 @@ html.lite .sw-ripple-circle {
     color: var(--muted);
 }
 
-/* SETUP POLISH — fast-path box, prerequisites checklist, dev/prod split,
-   code-block language label, hero aside. All within the broadsheet token set. */
+/* ─────────────────────────────────────────────────────────────────────────
+   SETUP POLISH — fast-path box, prerequisites checklist, dev/prod split,
+   code-block language label, and the hero aside that carries the spinning
+   record glyph. All within the broadsheet token set.
+   ───────────────────────────────────────────────────────────────────────── */
 
-/* Hero with an optional aside column; with no aside it renders single-column. */
+/* Hero with an optional aside column (the spinning glyph). When no aside is
+   present the hero renders as the plain single column it always was. */
 .bs-setup-hero[data-aside] {
     display: grid;
     grid-template-columns: minmax(0, 1fr) 160px;
@@ -2641,7 +2914,8 @@ html.lite .sw-ripple-circle {
     color: var(--muted);
 }
 
-/* Command reference — one copy box per command. */
+/* Command reference — each command gets its own copy box, with a one-line
+   description grouped tighter than the surrounding section rhythm. */
 .bs-cmd-list {
     display: flex;
     flex-direction: column;
@@ -2660,7 +2934,8 @@ html.lite .sw-ripple-circle {
     max-width: 64ch;
 }
 
-/* Prerequisites checklist — items with a hollow accent square marker. */
+/* Prerequisites checklist — three scannable items with a hollow accent
+   square marker, replacing three stacked sections. */
 .bs-checklist {
     list-style: none;
     margin: 0;
@@ -2697,8 +2972,9 @@ html.lite .sw-ripple-circle {
     color: var(--muted);
 }
 
-/* Dev / production side-by-side. Auto-fit so 2-up and 3-up both work; columns
-   stack below the narrow breakpoint regardless of count. */
+/* Dev / production side-by-side — replaces a long bullet list. Auto-fit
+   so 2-up and 3-up variants both look right; the columns stack below the
+   narrow breakpoint regardless of count. */
 .bs-devprod {
     display: grid;
     grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
@@ -2743,8 +3019,10 @@ html.lite .sw-ripple-circle {
     color: var(--muted);
 }
 
-/* KBD + DOC TABLE — key caps and the reference tables on the Keyboard
-   Shortcuts and Agent Access manual pages. */
+/* ─────────────────────────────────────────────────────────────────────────
+   KBD + DOC TABLE — keyboard-key caps and the generic reference tables used
+   on the Keyboard Shortcuts and Agent Access manual pages.
+   ───────────────────────────────────────────────────────────────────────── */
 .bs-kbd {
     display: inline-block;
     min-width: 24px;
@@ -2798,7 +3076,9 @@ html.lite .sw-ripple-circle {
     font-size: 0.92em;
 }
 
-/* MANUAL — two-column docs layout: sticky sidebar contents + content pages. */
+/* ─────────────────────────────────────────────────────────────────────────
+   MANUAL — two-column docs layout: sticky sidebar contents + content pages.
+   ───────────────────────────────────────────────────────────────────────── */
 .bs-manual-layout {
     display: grid;
     grid-template-columns: 220px minmax(0, 1fr);
@@ -2968,7 +3248,9 @@ html.lite .sw-ripple-circle {
     }
 }
 
-/* NAVIDROME — "works with your library" integration section. */
+/* ─────────────────────────────────────────────────────────────────────────
+   NAVIDROME — "works with your library" integration section.
+   ───────────────────────────────────────────────────────────────────────── */
 .bs-navidrome {
     gap: clamp(28px, 4vw, 44px);
 }
@@ -3163,10 +3445,13 @@ html.lite .sw-ripple-circle {
     color: var(--ink);
 }
 
-/* ADMIN. Every selector is scoped under `.admin-root` so the generic class
-   names (.card / .btn / .tag / .input …) can't collide with Tailwind, the
-   player (v3-) or the landing (bs-) layers. Inherits the dark-mode-aware vars
-   from :root. */
+/* ─────────────────────────────────────────────────────────────────────────
+   ADMIN — newsprint admin panel redesign.
+   Every selector is scoped under `.admin-root` so the generic class names
+   (.card / .btn / .tag / .input …) can't collide with Tailwind, the player
+   (v3-) or the landing (bs-) layers. Mirrors the design bundle's styles.css
+   but inherits the dark-mode-aware vars from :root.
+   ───────────────────────────────────────────────────────────────────────── */
 .admin-root {
     --accent-soft: color-mix(in oklab, var(--accent) 12%, transparent);
     --danger: #c5302a;
@@ -3322,8 +3607,11 @@ html:has(.admin-root.paper) {
 .admin-root .card-body.loose {
     padding: 18px;
 }
-/* DJ segment fire pads (dash). States: hover = armed, .is-firing = on air,
-   disabled (another pad firing) = dimmed. */
+/* ── DJ segment fire pads (dash) ─────────────────────────────────────────
+   Styled after studio cart-machine pads: a notched corner, a per-segment
+   glyph, and an LED that arms on hover and blinks while the segment is on
+   air (with a sweep along the base). States: hover = armed, .is-firing =
+   on air, disabled (another pad firing) = dimmed. */
 .admin-root .seg-pad {
     --seg-line: color-mix(in oklab, var(--accent) 45%, transparent);
     --seg-glow: color-mix(in oklab, var(--accent) 60%, transparent);
@@ -3470,8 +3758,9 @@ html:has(.admin-root.paper) {
         animation: none;
     }
 }
-/* Slim variant (skills "Run now"): row layout, LED centred right, smaller
-   notch. Hover arm / firing blink+sweep come from the base .seg-pad rules. */
+/* Slim variant — the same cart-pad language compressed into a one-line button
+   (skills "Run now"): row layout, LED centred on the right, smaller notch.
+   Hover arm / firing blink+sweep come from the base .seg-pad rules. */
 .admin-root .seg-pad.seg-pad--slim {
     flex-direction: row;
     align-items: center;
@@ -3495,9 +3784,10 @@ html:has(.admin-root.paper) {
     height: 5px;
     transform: translateY(-50%);
 }
-/* Flat — inside EditorDialog, so stacked sections read as one continuous form.
-   No border/bg, no side padding (the dialog supplies the gutter); a top rule
-   divides each section from the previous, and the first in a group has none. */
+/* Flat — used inside EditorDialog so stacked sections read as one continuous
+   modal form separated by hairline dividers, not boxed cards. No border/bg, no
+   side padding (the dialog supplies the gutter); a top rule divides each section
+   from the previous one. The first section in a group has no rule. */
 .admin-root .card.is-flat {
     border: 0;
     background: transparent;
@@ -3515,8 +3805,9 @@ html:has(.admin-root.paper) {
 .admin-root .card.is-flat > .card-body {
     padding: 0;
 }
-/* Spotlight — accent rail + faint wash to lift a card above the plain stack
-   (DJ Doc's verdict). */
+/* Spotlight — lifts a card above the plain stack with an accent rail + faint
+   wash. Used for DJ Doc's verdict ("DJ Doc says") so the operator's eye lands
+   on the producer's read before the raw findings. */
 .admin-root .card.is-spotlight {
     border-color: var(--accent);
     box-shadow: inset 3px 0 0 0 var(--accent);
@@ -3526,9 +3817,9 @@ html:has(.admin-root.paper) {
     border-bottom-color: color-mix(in srgb, var(--accent) 30%, transparent);
 }
 
-/* Buttons, inputs, the segmented control and the toggle are shadcn/ui
-   components (components/ui/*); there are no .btn / .input / .seg / .toggle
-   rules here. */
+/* Buttons, inputs, the segmented control and the toggle are now shadcn/ui
+   components (components/ui/*), retuned to this newsprint look — the legacy
+   .btn / .input / .seg / .toggle / .field-label rules have been removed. */
 
 /* ── Field layout ── */
 /* .field / .field-hint are layout helpers still used by the admin panels;
@@ -3679,9 +3970,12 @@ html:has(.admin-root.paper) {
     color: var(--danger);
 }
 
-/* Station Health Strip (admin dash header band). All colour comes from theme
-   tokens, so it tracks light + dark. Motion is driven imperatively by
-   StationHealthStrip's rAF loop; this is structure + state styling only. */
+/* ── Station Health Strip (admin dash header band) ──
+   Five glanceable instruments — a mixed-meter console read through a Braun /
+   Dieter Rams lens. Instrument type follows data shape (needle / LED ladder /
+   linear bar / pilot lamp). All colour comes from existing theme tokens, so it
+   tracks light + dark automatically. Motion is driven imperatively by the
+   StationHealthStrip component's rAF loop; this is structure + state styling. */
 .admin-root .hs-strip {
     display: flex;
     overflow-x: auto;
@@ -3982,8 +4276,9 @@ html:has(.admin-root.paper) {
     overflow: auto;
 }
 
-/* CRT modifier for the live tagging-log drawer: fixed scanlines (they must not
-   scroll with content), accent text glow, inset vignette. Theme-aware. */
+/* CRT modifier — a minimal phosphor look for the live tagging-log drawer:
+   fixed scanlines (don't scroll with content), a faint accent glow on the
+   text, and a soft inset vignette. Theme-aware via tokens. */
 .admin-root .term-crt {
     background-image: repeating-linear-gradient(
         color-mix(in srgb, var(--ink) 9%, transparent) 0px,
@@ -3995,8 +4290,11 @@ html:has(.admin-root.paper) {
     box-shadow: inset 0 0 36px color-mix(in srgb, var(--ink) 55%, transparent);
 }
 
-/* LIBRARY — /admin/library. Every value is a token (or token-derived
-   color-mix) so it follows the operator's theme — no literal hex. */
+/* ─────────────────────────────────────────────────────────────────────────
+   LIBRARY — redesigned /admin/library. One merged tagging panel + clearer
+   browse/search/untagged. Every value is a token (or token-derived color-mix)
+   so it follows whichever theme the operator picked — no literal hex.
+   ───────────────────────────────────────────────────────────────────────── */
 
 /* tagging hero */
 .admin-root .lib-hero-title {
@@ -4263,8 +4561,10 @@ html:has(.admin-root.paper) {
     .admin-root .lib-row.flash { animation: none; }
 }
 
-/* NEWS — "Dispatches": broadsheet front page (index) plus article prose.
-   Stays entirely within the bs- token vocabulary; no new colors. */
+/* ─────────────────────────────────────────────────────────────────────────
+   NEWS — "Dispatches" wire: a broadsheet front page (index) and the article
+   body prose. Stays entirely within the bs- token vocabulary; no new colors.
+   ───────────────────────────────────────────────────────────────────────── */
 
 /* Index hero — mirrors .bs-setup-hero rhythm. */
 .bs-news-hero {
@@ -4321,7 +4621,8 @@ html:has(.admin-root.paper) {
     color: var(--muted);
 }
 
-/* Lead story — the newest dispatch, the page's one boxed card. */
+/* Lead story — the newest dispatch, set large across the fold as the page's
+   one boxed card; the archive grid below stays a hairline newspaper run. */
 .bs-news-lead {
     display: flex;
     flex-direction: column;
@@ -4363,7 +4664,8 @@ html:has(.admin-root.paper) {
     transition: gap 120ms;
 }
 
-/* Archive grid — remaining dispatches, each under a top hairline. */
+/* Archive grid — remaining dispatches as a multi-column newspaper run. Each
+   item carries a top hairline so they read as stacked stories. */
 .bs-news-grid {
     list-style: none;
     margin: 0;
@@ -4638,9 +4940,12 @@ html:has(.admin-root.paper) {
     vertical-align: top;
 }
 
-/* STATIONS — the community directory: stat strip, equirectangular world chart,
-   submit CTA, and a grid of cards that probe each station's now-playing API.
-   Reuses the bs- token vocabulary; no new colors. */
+/* ─────────────────────────────────────────────────────────────────────────
+   STATIONS — the community directory: a stat strip, an equirectangular world
+   chart (graticule + plotted dots), a submit call-to-action, and a grid of
+   station cards that probe each station's live now-playing API. Reuses the
+   bs- token vocabulary; no new colors.
+   ───────────────────────────────────────────────────────────────────────── */
 
 /* Stat strip — "12 stations · 7 countries". Display numerals, accent figures. */
 .bs-stat-strip {
@@ -4762,10 +5067,11 @@ html:has(.admin-root.paper) {
     min-width: 0;
 }
 
-/* Suspense fallbacks for the catalog-backed regions of /stations and /shows.
-   Both pages are force-dynamic and await a remote catalog, so without a boundary
-   the hero and CTA wait on the network too. These reserve the real footprint so
-   nothing jumps when the data streams in. */
+/* Streaming placeholders — the Suspense fallbacks for the catalog-backed
+   regions of /stations and /shows. Both pages are force-dynamic and await a
+   remote catalog before rendering, so without a boundary the hero and the CTA
+   wait on the network too. These reserve the same footprint as the real thing
+   so nothing jumps when the data streams in. Ink-toned, no new colors. */
 .bs-skeleton {
     display: block;
     border-radius: 2px;
@@ -4837,7 +5143,8 @@ html:has(.admin-root.paper) {
     gap: 14px;
 }
 
-/* Community-skill card — title + cadence, DJ brief, context tags, credit line.
+/* Community-skill card — same newspaper-run column as the station grid, but a
+   text-first entry: title + cadence, the DJ brief, context tags, credit line.
    Reuses .bs-stations-grid for layout. */
 .bs-skill-card {
     display: flex;
@@ -4953,6 +5260,146 @@ html:has(.admin-root.paper) {
     text-underline-offset: 2px;
 }
 
+/* Community-app card (/apps) — the station-grid column again, but with optional
+   submitter-supplied art: a wide screenshot plate on top, a square icon beside
+   the name. Both are optional and the card is laid out so neither leaves a gap.
+   Reuses .bs-stations-grid for layout and .bs-skill-tag / .bs-skill-credit for
+   the platform tags and the credit line. */
+.bs-app-card {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    padding-top: 20px;
+    border-top: 1px solid var(--separator-strong);
+    min-width: 0;
+}
+/* Fixed ratio so a run of cards keeps a straight baseline whatever the
+   submitter uploaded — and so a slow or dead image host can't reflow the grid
+   under the reader (next/image fills this box). */
+.bs-app-plate {
+    position: relative;
+    width: 100%;
+    aspect-ratio: 16 / 10;
+    overflow: hidden;
+    border: 1px solid var(--separator-strong);
+    background: var(--separator-strong);
+}
+.bs-app-plate-img {
+    object-fit: cover;
+}
+.bs-app-head {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    min-width: 0;
+}
+.bs-app-icon {
+    flex: none;
+    width: 44px;
+    height: 44px;
+    object-fit: cover;
+    border: 1px solid var(--separator-strong);
+}
+.bs-app-headtext {
+    min-width: 0;
+}
+.bs-app-name {
+    margin: 0;
+    font-family: var(--font-display);
+    font-size: clamp(19px, 2vw, 24px);
+    font-weight: 800;
+    letter-spacing: -0.01em;
+    line-height: 1.05;
+}
+.bs-app-name-link {
+    color: inherit;
+    text-decoration: none;
+    transition: color 120ms;
+}
+.bs-app-name-link:hover,
+.bs-app-name-link:focus-visible {
+    color: var(--accent);
+    text-decoration: underline;
+    text-decoration-thickness: 2px;
+    text-underline-offset: 3px;
+}
+.bs-app-type {
+    display: block;
+    font-family: var(--font-mono);
+    font-size: 10px;
+    letter-spacing: 0.16em;
+    text-transform: uppercase;
+    color: var(--muted);
+}
+.bs-app-links {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 14px;
+    margin: 2px 0 0;
+    font-family: var(--font-mono);
+    font-size: 11px;
+    letter-spacing: 0.18em;
+    text-transform: uppercase;
+}
+.bs-app-get {
+    font-weight: 700;
+    color: var(--accent);
+}
+.bs-app-source {
+    color: var(--muted);
+}
+.bs-app-get:hover,
+.bs-app-source:hover {
+    text-decoration: underline;
+    text-underline-offset: 3px;
+}
+
+/* Type filter (/apps). components/apps/AppTypeFilter.tsx sets data-filter on
+   this wrapper and the rules below hide the cards that don't match, so the
+   cards themselves stay server components with no client JS. One rule per type
+   because CSS can't compare one attribute against another; the vocabulary is
+   closed and small, so that's cheaper than making every card interactive.
+   Chips only render for types present in the catalog, so a selection can never
+   empty the grid and there is no "nothing matched" state to style. */
+.bs-apps-filter {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    padding: 0 0 clamp(18px, 3vw, 28px);
+}
+.bs-apps-chip {
+    font-family: var(--font-mono);
+    font-size: 10px;
+    letter-spacing: 0.16em;
+    text-transform: uppercase;
+    color: var(--muted);
+    border: 1px solid var(--separator-strong);
+    padding: 6px 12px;
+    background: none;
+    cursor: pointer;
+    transition:
+        color 0.2s,
+        border-color 0.2s;
+}
+.bs-apps-chip:hover {
+    color: var(--ink);
+    border-color: var(--ink);
+}
+.bs-apps-chip[aria-pressed='true'] {
+    color: var(--bg);
+    background: var(--ink);
+    border-color: var(--ink);
+}
+.bs-apps-filterwrap[data-filter='mobile'] .bs-app-card:not([data-type='mobile']),
+.bs-apps-filterwrap[data-filter='web'] .bs-app-card:not([data-type='web']),
+.bs-apps-filterwrap[data-filter='desktop'] .bs-app-card:not([data-type='desktop']),
+.bs-apps-filterwrap[data-filter='terminal'] .bs-app-card:not([data-type='terminal']),
+.bs-apps-filterwrap[data-filter='bot'] .bs-app-card:not([data-type='bot']),
+.bs-apps-filterwrap[data-filter='skin'] .bs-app-card:not([data-type='skin']),
+.bs-apps-filterwrap[data-filter='integration'] .bs-app-card:not([data-type='integration']) {
+    display: none;
+}
+
 /* Live strip — ON AIR + current track, or Offline / Checking. */
 .bs-station-live {
     display: flex;
@@ -5010,12 +5457,14 @@ html:has(.admin-root.paper) {
     color: var(--muted);
 }
 
-/* LIBRARY OBSERVATORY — full-bleed data-art view (web/app/observatory). Scoped
-   under .observatory-root and built entirely on the newsprint tokens
-   (--bg/--ink/--muted/--accent/--field/--separator-*), so it auto-flips
-   light/dark and inherits the global paper grain. It deliberately declares no
-   :root tokens, font import or body grain of its own — the app supplies all
-   three. */
+/* ============================================================================
+   LIBRARY OBSERVATORY — full-bleed data-art view (web/app/observatory).
+   Ported from the Claude Design prototype. Scoped under .observatory-root and
+   built entirely on the existing newsprint tokens (--bg/--ink/--muted/--accent
+   /--field/--separator-*), so it auto-flips light/dark and inherits the global
+   paper grain. The prototype's own :root tokens, font import and body grain are
+   intentionally dropped — the app supplies all three.
+   ============================================================================ */
 .observatory-root {
     --obs-page: color-mix(in oklab, var(--bg) 96%, var(--ink));
     height: 100vh;
@@ -5029,9 +5478,11 @@ html:has(.admin-root.paper) {
 }
 .observatory-root button { font-family: inherit; }
 
-/* Landing-page Observatory embed. The box owns the aspect ratio; the
-   observatory-root fills it as two columns — the constellation (.cmap flexes to
-   fill the stage) and the right rail (.obs-side). On phones the two stack. */
+/* Landing-page embed — the Observatory dropped into the DJ section as a plain
+   bordered figure (no browser-window chrome). The box owns the aspect ratio;
+   the observatory-root fills it as two columns: the constellation (.cmap flexes
+   to fill the stage) and the right rail (.obs-side) showing the open track's
+   dossier / the library stats. On phones the two stack. */
 .obs-embed-box {
     position: relative;
     width: 100%;
@@ -5282,9 +5733,10 @@ html:has(.admin-root.paper) {
 @media (max-width: 1180px) {
     .observatory-root .obs-main { grid-template-columns: 210px minmax(0, 1fr) 330px; }
 }
-/* Galaxy stage (WebGL renderer). Bloom needs a dark ground in both site
-   themes, so the stage re-declares the theme vars locally and everything inside
-   inherits a coherent dark palette. */
+/* ---- galaxy stage (WebGL renderer) ----
+   The map is always night — bloom needs a dark ground in both site themes —
+   so the stage re-declares the theme vars locally; legend, zoom controls and
+   anything else inside inherit a coherent dark palette for free. */
 .observatory-root .cmap-galaxy {
     --bg: #0d0b09;
     --ink: #ece6dc;
@@ -5307,8 +5759,8 @@ html:has(.admin-root.paper) {
 @keyframes obs-glabel-in { from { opacity: 0; } }
 @keyframes obs-tlabel-in { from { opacity: 0; } }
 
-/* Load-error banner. The map still renders from sample / last good data, but a
-   failed load must never masquerade as a fresh install. */
+/* ---- load-error banner — the map still renders (sample / last good data),
+   but a failed load must never masquerade as a fresh install ---- */
 .observatory-root .obs-error { display: flex; align-items: center; gap: 14px; padding: 8px 22px; border-bottom: 1px solid var(--accent); background: color-mix(in oklab, var(--accent) 9%, var(--bg)); font-size: 10px; letter-spacing: 0.14em; text-transform: uppercase; font-weight: 700; flex: none; z-index: 4; }
 .observatory-root .obs-error button { margin-left: auto; flex: none; border: 1px solid var(--accent); background: transparent; color: var(--accent); font-size: 9px; letter-spacing: 0.18em; text-transform: uppercase; font-weight: 700; padding: 4px 10px; cursor: pointer; transition: background 0.12s, color 0.12s; }
 .observatory-root .obs-error button:hover:not(:disabled) { background: var(--accent); color: #fff; }
@@ -5338,8 +5790,9 @@ html:has(.admin-root.paper) {
 /* keyboard focus on the map (tabIndex=0 — arrows pan, +/- zoom) */
 .observatory-root .cmap-galaxy:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
 
-/* Small screens: stack header → map → filters → panels and let the page
-   scroll. Scoped away from the landing embed, which has its own phone layout. */
+/* ---- small screens: stack header → map → filters → panels and let the page
+   scroll. Scoped away from the landing-page embed, which has its own two-row
+   phone layout. ---- */
 @media (max-width: 900px) {
     .observatory-root:not(.obs-embed) { height: auto; min-height: 100vh; min-height: 100dvh; overflow: visible; }
     .observatory-root:not(.obs-embed) .obs-top { flex-wrap: wrap; row-gap: 8px; }
@@ -5361,10 +5814,14 @@ html:has(.admin-root.paper) {
     .observatory-root .cmap-tlabel { animation: none !important; }
 }
 
-/* Skill Edit Card typography — /admin/skills. SkillEditModal renders inside the
-   shared EditorDialog, which carries the `sw-seg` class so these descendant
-   rules resolve. Scoped to .sw-seg so they can't leak into the rest of the
-   admin; the flash uses the shared `v3-blink`. */
+/* ───────────────────────────────────────────────────────────────────────────
+   Skill Edit Card ("segment sheet") typography — /admin/skills. The SkillEditModal
+   body now renders inside the shared full-screen EditorDialog, which carries the
+   `sw-seg` class so these descendant rules still resolve (focus accents, muted
+   placeholders, the brief drop-cap). Scoped to .sw-seg so they can't leak into
+   the rest of the admin. The old sheet's spin/ring/blink keyframes went with the
+   bespoke overlay — the flash now uses the shared `v3-blink`.
+   ─────────────────────────────────────────────────────────────────────────── */
 .sw-seg textarea:focus, .sw-seg input:focus { border-color: var(--accent) !important; }
 .sw-seg ::placeholder { color: var(--muted); opacity: 0.75; }
 .sw-seg .sw-ghost:hover { background: var(--ink-soft); }
@@ -5373,6 +5830,7 @@ html:has(.admin-root.paper) {
     font-size: 2.7em; font-weight: 800; float: left; line-height: 0.74;
     color: var(--accent); padding: 4px 9px 0 0;
 }
-/* Body sections — hairline dividers, matching .card.is-flat. */
+/* Body sections — hairline dividers between them, matching .card.is-flat, so the
+   skills editor reads as one continuous modal form rather than spaced blocks. */
 .sw-seg .sw-section { border-top: 1px solid var(--soft-border); padding: 26px 0; }
 .sw-seg .sw-section:first-child { border-top: 0; padding-top: 0; }
