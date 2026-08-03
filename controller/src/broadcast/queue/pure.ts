@@ -48,6 +48,18 @@ export const BACKFILL_DEDUP_MAX_GAP_MS = 15 * 60_000;
 // two early — is how real radio tees up a changeover anyway.
 export const PICK_SHOW_LOOKAHEAD_SEC = 120;
 
+// The moment the pick — and its attached link — actually starts AIRING:
+// `showAt` minus the attribution padding above. `showAt` deliberately probes
+// past the start so show identity resolves right (#1205), but a link's spoken
+// clock must not inherit that padding: ctx resolved at `showAt` put "Local
+// time" exactly two minutes ahead of air on every pick-attached link (#1282,
+// a regression from #864's own fix). Exact inverse of runPickCycle's
+// `showAt = now + leadSec + PICK_SHOW_LOOKAHEAD_SEC`, kept here beside the
+// constant so the two can't drift apart.
+export function linkAirDate(showAt: Date): Date {
+  return new Date(showAt.getTime() - PICK_SHOW_LOOKAHEAD_SEC * 1000);
+}
+
 // Seconds from NOW until the pick being made will start airing — the lead the
 // show look-ahead adds to the wall clock (see runPickCycle).
 //

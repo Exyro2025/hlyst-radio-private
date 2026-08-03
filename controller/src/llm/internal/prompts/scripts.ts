@@ -231,14 +231,21 @@ export async function generateLink({ previous, current, context, clockIsAirTime 
 
 export async function generateHourlyTime({ recap = null, context = null, recentOpeners = null, persona = null }: any = {}) {
   const ctxLines = buildContextLines(context, { contextFields: SCRIPT_CONTEXT_FIELDS });
-  // The hour is converted to words in code (context.clock.spokenHour) rather
+  // The time is converted to words in code (context.clock.spokenTime) rather
   // than asking the model to read the clock line itself — small models get
   // the 24-hour conversion wrong at the edges ("00:03" announced as "one in
-  // the morning"). The fallback keeps the old behaviour for a bare context.
+  // the morning"). The minute-aware phrase replaces the old hour-only one,
+  // which hardcoded "just gone X" whatever the minute — right on the :00 cron
+  // this normally rides, but a manual trigger at 18:31 still said "just gone
+  // six in the evening" (#1282). The fallbacks keep the old behaviour for
+  // contexts that predate spokenTime, then for a bare context.
+  const spokenTime = context?.clock?.spokenTime;
   const spoken = context?.clock?.spokenHour;
-  const timeClause = spoken
-    ? `The hour to announce is ${spoken} — say exactly that hour, in natural spoken words ("just gone ${spoken}", or similar) — never digits or 24-hour form, never a different hour.`
-    : `Say the time in natural spoken words ("two in the afternoon", "just gone eight") — never digits or 24-hour form.`;
+  const timeClause = spokenTime
+    ? `The time to announce is "${spokenTime}" — say exactly that time, in natural spoken words — never digits or 24-hour form, never a different time.`
+    : spoken
+      ? `The hour to announce is ${spoken} — say exactly that hour, in natural spoken words ("just gone ${spoken}", or similar) — never digits or 24-hour form, never a different hour.`
+      : `Say the time in natural spoken words ("two in the afternoon", "just gone eight") — never digits or 24-hour form.`;
   ctxLines.push(`Task: a brief top-of-the-hour time check, in character. ${lengthPhrase('hourly', persona || undefined)}. ${timeClause}`);
   return djText({
     system: djSystem(persona || undefined),
