@@ -357,6 +357,24 @@ export async function migrate(embeddingDim: number, reseed = false, adoptStoredD
     d.pragma('user_version = 18');
   }
 
+  if (userVersion < 19) {
+    // Per-client lyric timing corrections. These are listener/player
+    // preferences keyed by an opaque client id, not edits to the music files or
+    // station-wide lyric data. That lets a player remember "this song needs
+    // +2.9s" without letting any public listener retime lyrics for everyone.
+    runDdl(d, `
+      CREATE TABLE IF NOT EXISTS lyric_offsets (
+        client_id  TEXT NOT NULL,
+        track_id   TEXT NOT NULL,
+        offset_ms  INTEGER NOT NULL,
+        updated_at TEXT NOT NULL,
+        PRIMARY KEY (client_id, track_id)
+      );
+      CREATE INDEX IF NOT EXISTS idx_lyric_offsets_track ON lyric_offsets(track_id);
+    `);
+    d.pragma('user_version = 19');
+  }
+
   // Reconcile the requested embedding dim against what physically exists.
   //
   // The vec0 table's `FLOAT[N]` schema is the authority for what inserts accept —
@@ -472,5 +490,4 @@ function vecTableDim(d: Database.Database): number | null {
 function vecCount(d: Database.Database): number {
   return (d.prepare('SELECT COUNT(*) AS n FROM track_vectors').get() as { n: number }).n;
 }
-
 
