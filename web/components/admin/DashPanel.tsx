@@ -66,6 +66,16 @@ import {
   maskIp,
   sortConnections,
 } from './dash/types';
+
+// Header cells of the capped Listeners table. `sticky top-0` resolves against
+// the ScrollArea viewport (the nearest scrollport), and the opaque card-bg is
+// what stops rows showing through as they scroll under the header. The rule
+// under the header is an inset shadow rather than `border-b`: the table is
+// border-collapse (Tailwind preflight), and a collapsed border belongs to the
+// table rather than the cell, so it stays behind while the cell scrolls away.
+const STICKY_TH =
+  'sticky top-0 z-[1] bg-[var(--card-bg)] shadow-[inset_0_-1px_0_var(--separator-strong)]';
+
 export default function DashPanel() {
   const { adminFetch, needsAuth, hydrated } = useAdminAuth();
   const [status, setStatus] = useState<DashStatus | null>(null);
@@ -732,11 +742,23 @@ export default function DashPanel() {
         ) : conns.connections.length === 0 ? (
           <div className="text-muted italic">nobody listening right now</div>
         ) : (
-          <ScrollArea>
+          /* Capped like the other admin lists (requests, stats breakdowns) so a
+             busy station's connection list scrolls inside the card instead of
+             stretching the dash down the page. */
+          <ScrollArea className="max-h-[360px]">
             <table className="w-full text-[12px]">
               <thead>
                 <tr className="text-left text-[9px] tracking-[0.2em] text-muted uppercase">
-                  <SortableTh label="IP" col="ip" sort={sort} onSort={setSort} className="pr-3" />
+                  {/* Sticky against the ScrollArea viewport so the sort controls
+                      stay reachable once the list scrolls; card-bg masks the rows
+                      passing underneath. */}
+                  <SortableTh
+                    label="IP"
+                    col="ip"
+                    sort={sort}
+                    onSort={setSort}
+                    className={STICKY_TH + ' pr-3'}
+                  />
                   {/* Mount is the least useful of the four on a phone — the
                       remaining three fit 390px without a sideways scroll. */}
                   <SortableTh
@@ -744,23 +766,31 @@ export default function DashPanel() {
                     col="mount"
                     sort={sort}
                     onSort={setSort}
-                    className="hidden pr-3 sm:table-cell"
+                    className={STICKY_TH + ' hidden pr-3 sm:table-cell'}
                   />
                   <SortableTh
                     label="Connected"
                     col="connectedSeconds"
                     sort={sort}
                     onSort={setSort}
-                    className="pr-3"
+                    className={STICKY_TH + ' pr-3'}
                   />
-                  <SortableTh label="Client" col="client" sort={sort} onSort={setSort} />
+                  <SortableTh
+                    label="Client"
+                    col="client"
+                    sort={sort}
+                    onSort={setSort}
+                    className={STICKY_TH}
+                  />
                 </tr>
               </thead>
               <tbody>
                 {sortConnections(conns.connections, sort).map((c, i) => (
                   <tr
                     key={`${c.ip}:${c.mount}:${i}`}
-                    className="border-t border-dashed border-separator-strong"
+                    // first:border-t-0 — the sticky header already draws a solid
+                    // rule, so the top row's dashed border would double it.
+                    className="border-t border-dashed border-separator-strong first:border-t-0"
                   >
                     <td className="py-1.5 pr-3 font-mono whitespace-nowrap" title={c.ip}>
                       {revealIps ? c.ip || '—' : maskIp(c.ip)}
