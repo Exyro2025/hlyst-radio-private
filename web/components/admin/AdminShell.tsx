@@ -355,7 +355,7 @@ export default function AdminShell({ children, defaultOpen = true }: AdminShellP
             className={
               fullBleed
                 ? 'flex w-full min-w-0 flex-1 flex-col'
-                : 'mx-auto w-full max-w-[1440px] min-w-0 px-5 py-4'
+                : 'mx-auto w-full max-w-[1440px] min-w-0 px-6 py-6'
             }
           >
             {/* Panel route transitions — 120 ms cross-fade between admin pages
@@ -777,7 +777,7 @@ function TopBar({ pathname }: { pathname: string | null }) {
   }, [onAir]);
 
   return (
-    <header className="sticky top-0 z-20 flex flex-wrap items-center gap-x-3 gap-y-2 border-b border-ink bg-[var(--card-bg)] px-4 py-2.5 sm:px-6">
+    <header className="sticky top-0 z-20 flex flex-wrap items-center gap-x-3 gap-y-2 border-b border-[var(--line)] bg-[var(--sidebar)] px-4 py-2.5 sm:px-6">
       {/* Roomier hit box on a phone, where this is the only way back to the
           nav; the dense desktop button returns at sm. */}
       <SidebarTrigger className="-ml-1 size-9 shrink-0 sm:size-7" />
