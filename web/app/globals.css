@@ -5094,6 +5094,133 @@ html:has(.admin-root.paper) {
     text-underline-offset: 2px;
 }
 
+/* Community-app card (/apps) — the station-grid column again, but with optional
+   submitter-supplied art: a wide screenshot plate on top, a square icon beside
+   the name. Both are optional and the card is laid out so neither leaves a gap.
+   Reuses .bs-stations-grid for layout and .bs-skill-tag / .bs-skill-credit for
+   the platform tags and the credit line. */
+.bs-app-card {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    padding-top: 20px;
+    border-top: 1px solid var(--separator-strong);
+    min-width: 0;
+}
+/* Fixed ratio so a run of cards keeps a straight baseline whatever the
+   submitter uploaded — and so a slow or dead image host can't reflow the grid
+   under the reader (next/image fills this box). */
+.bs-app-plate {
+    position: relative;
+    width: 100%;
+    aspect-ratio: 16 / 10;
+    overflow: hidden;
+    border: 1px solid var(--separator-strong);
+    background: var(--separator-strong);
+}
+.bs-app-plate-img {
+    object-fit: cover;
+}
+.bs-app-head {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    min-width: 0;
+}
+.bs-app-icon {
+    flex: none;
+    width: 44px;
+    height: 44px;
+    object-fit: cover;
+    border: 1px solid var(--separator-strong);
+}
+.bs-app-headtext {
+    min-width: 0;
+}
+.bs-app-name {
+    margin: 0;
+    font-family: var(--font-display);
+    font-size: clamp(19px, 2vw, 24px);
+    font-weight: 800;
+    letter-spacing: -0.01em;
+    line-height: 1.05;
+}
+.bs-app-type {
+    display: block;
+    font-family: var(--font-mono);
+    font-size: 10px;
+    letter-spacing: 0.16em;
+    text-transform: uppercase;
+    color: var(--muted);
+}
+.bs-app-links {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 14px;
+    margin: 2px 0 0;
+    font-family: var(--font-mono);
+    font-size: 11px;
+    letter-spacing: 0.18em;
+    text-transform: uppercase;
+}
+.bs-app-get {
+    font-weight: 700;
+    color: var(--accent);
+}
+.bs-app-source {
+    color: var(--muted);
+}
+.bs-app-get:hover,
+.bs-app-source:hover {
+    text-decoration: underline;
+    text-underline-offset: 3px;
+}
+
+/* Type filter (/apps). components/apps/AppTypeFilter.tsx sets data-filter on
+   this wrapper and the rules below hide the cards that don't match, so the
+   cards themselves stay server components with no client JS. One rule per type
+   because CSS can't compare one attribute against another; the vocabulary is
+   closed and small, so that's cheaper than making every card interactive.
+   Chips only render for types present in the catalog, so a selection can never
+   empty the grid and there is no "nothing matched" state to style. */
+.bs-apps-filter {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    padding: 0 0 clamp(18px, 3vw, 28px);
+}
+.bs-apps-chip {
+    font-family: var(--font-mono);
+    font-size: 10px;
+    letter-spacing: 0.16em;
+    text-transform: uppercase;
+    color: var(--muted);
+    border: 1px solid var(--separator-strong);
+    padding: 6px 12px;
+    background: none;
+    cursor: pointer;
+    transition:
+        color 0.2s,
+        border-color 0.2s;
+}
+.bs-apps-chip:hover {
+    color: var(--ink);
+    border-color: var(--ink);
+}
+.bs-apps-chip[aria-pressed='true'] {
+    color: var(--bg);
+    background: var(--ink);
+    border-color: var(--ink);
+}
+.bs-apps-filterwrap[data-filter='mobile'] .bs-app-card:not([data-type='mobile']),
+.bs-apps-filterwrap[data-filter='web'] .bs-app-card:not([data-type='web']),
+.bs-apps-filterwrap[data-filter='desktop'] .bs-app-card:not([data-type='desktop']),
+.bs-apps-filterwrap[data-filter='terminal'] .bs-app-card:not([data-type='terminal']),
+.bs-apps-filterwrap[data-filter='bot'] .bs-app-card:not([data-type='bot']),
+.bs-apps-filterwrap[data-filter='integration'] .bs-app-card:not([data-type='integration']) {
+    display: none;
+}
+
 /* Live strip — ON AIR + current track, or Offline / Checking. */
 .bs-station-live {
     display: flex;
