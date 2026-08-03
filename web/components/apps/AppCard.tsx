@@ -46,7 +46,21 @@ export default function AppCard({ app }: { app: CommunityApp }) {
           />
         )}
         <div className="bs-app-headtext">
-          <h3 className="bs-app-name">{app.name}</h3>
+          {/* The title is a link to the same place as "Get it" below — a reader's
+              instinct is to click the name, but the explicit verb is what makes
+              it obvious the card leads off-site, so both stay. They read as two
+              distinct accessible names ("Night Owl" / "Get it — Night Owl")
+              rather than a repeated one. */}
+          <h3 className="bs-app-name">
+            <a
+              href={app.url}
+              target="_blank"
+              rel="noreferrer noopener"
+              className="bs-app-name-link"
+            >
+              {app.name}
+            </a>
+          </h3>
           <span className="bs-app-type">{APP_TYPE_LABELS[app.type]}</span>
         </div>
       </div>

@@ -1318,6 +1318,170 @@ html.lite .sw-ripple-circle {
     font-size: 11px;
 }
 
+/* Lifts the masthead above the article so the Community panel can hang out of
+   it. .bs-paper puts BOTH this header and <main> at position:relative/z-index:1,
+   so <main> wins on DOM order and paints over the open dropdown.
+   Two traps this rule is shaped around:
+     - a Tailwind z-* utility can't do it: globals.css is unlayered and always
+       beats Tailwind's @layer utilities, whatever the value;
+     - a bare .bs-masthead-lift can't either, because .bs-paper is declared
+       LATER in this file and would win the same-specificity tie.
+   Hence the element qualifier — header.x outranks .bs-paper wherever it sits. */
+header.bs-masthead-lift {
+    z-index: 40;
+}
+
+/* Masthead "Community" dropdown (components/landing/CommunityMenu.tsx, on the
+   shadcn/Radix NavigationMenu). The primitive contributes structure only —
+   everything visible here is the newsprint vocabulary, so the trigger is
+   indistinguishable from the plain links either side of it. */
+.bs-masthead-menu {
+    /* The Root is `flex-1` by default, which in the masthead's flex row makes
+       the trigger claim the leftover width and shove the other links off
+       centre. Size it to its content instead. */
+    flex: 0 0 auto;
+}
+.bs-masthead-trigger {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    background: none;
+    border: 0;
+    cursor: pointer;
+    /* Inherits the rest from .bs-masthead-link, which it also carries. */
+    font: inherit;
+    font-size: 11px;
+    letter-spacing: 0.3em;
+    text-transform: uppercase;
+    font-weight: 700;
+}
+.bs-masthead-trigger[data-state='open'] {
+    color: var(--accent);
+}
+.bs-masthead-caret {
+    /* Nudge left: the 0.3em tracking puts a full letter-space after the final
+       "y", so the caret otherwise reads as detached from the word. */
+    margin-left: -3px;
+    font-size: 9px;
+    line-height: 1;
+    transition: transform 200ms ease;
+}
+.bs-masthead-trigger[data-state='open'] .bs-masthead-caret {
+    transform: rotate(180deg);
+}
+
+/* The panel hangs off the Item rather than a shared viewport (see the note in
+   components/ui/navigation-menu.tsx), so the Item is the positioning context. */
+.bs-masthead-menu li {
+    position: relative;
+}
+.bs-masthead-panel {
+    position: absolute;
+    top: calc(100% + 10px);
+    /* Centred on the trigger, then clamped into the viewport on narrow screens
+       so the panel can't hang off the edge of a phone. */
+    left: 50%;
+    transform: translateX(-50%);
+    z-index: 30;
+    max-width: calc(100vw - 24px);
+}
+.bs-masthead-panel-list {
+    list-style: none;
+    margin: 0;
+    padding: 6px;
+    display: grid;
+    gap: 2px;
+    width: 272px;
+    max-width: 100%;
+    /* --surface is color-mix(bg 93%, ink) — near-identical to the page on every
+       theme, which left the panel looking like unstyled text floating over the
+       article. The border and the hard shadow are what separate it, so the fill
+       is the plain page colour and opaque. */
+    background: var(--bg);
+    border: 1px solid var(--ink);
+    /* Hard offset shadow rather than a soft blur — print, not material. */
+    box-shadow: 4px 4px 0 rgba(0, 0, 0, 0.18);
+}
+.bs-masthead-panel-item {
+    display: grid;
+    gap: 1px;
+    padding: 9px 11px;
+    text-decoration: none;
+    color: var(--ink);
+    transition: background-color 160ms ease;
+}
+.bs-masthead-panel-item:hover,
+.bs-masthead-panel-item:focus-visible {
+    background: rgba(0, 0, 0, 0.05);
+    outline: none;
+}
+.bs-masthead-panel-tag {
+    font-family: var(--font-mono);
+    font-size: 9px;
+    letter-spacing: 0.22em;
+    text-transform: uppercase;
+    color: var(--muted);
+}
+.bs-masthead-panel-item:hover .bs-masthead-panel-tag {
+    color: var(--accent);
+}
+.bs-masthead-panel-title {
+    font-family: var(--font-display), Georgia, serif;
+    font-size: 19px;
+    font-weight: 800;
+    line-height: 1.1;
+    letter-spacing: -0.01em;
+}
+.bs-masthead-panel-blurb {
+    font-size: 12px;
+    line-height: 1.45;
+    color: var(--muted);
+}
+
+/* On a phone the nav wraps and "Community" can sit far enough left that a
+   panel centred on the TRIGGER hangs off the screen edge (measured: -4px at
+   390px wide). There's no pure-CSS way to clamp a translateX(-50%) against the
+   viewport, so below this breakpoint the panel anchors to the nav ROW instead:
+   drop the positioning context down to .bs-masthead-nav by making the menu and
+   its item static, then pin the panel to both edges. `top: calc(100% + 10px)`
+   from the base rule then resolves against the nav row, which is where it
+   should hang from anyway. */
+@media (max-width: 560px) {
+    .bs-masthead-nav {
+        position: relative;
+        /* Six items don't fit one line on a phone, and the "·" separators are
+           inline text — so a wrapped row starts with a dangling dot. Drop them
+           and let the gap separate the links instead. The gap has to clear the
+           links' own 0.3em tracking or adjacent items read as one word. */
+        gap: 10px 22px;
+    }
+    .bs-masthead-sep {
+        display: none;
+    }
+    /* Beats the Radix Root's Tailwind `relative` — globals.css is unlayered. */
+    .bs-masthead-menu,
+    .bs-masthead-menu li {
+        position: static;
+    }
+    /* Radix's Root renders an unclassed <div style="position:relative"> around
+       the list, and THAT is the panel's containing block — neutralising the
+       menu and the li isn't enough. An inline style can only be beaten with
+       !important, hence the blunt instrument. Scoped to this menu and to the
+       narrow breakpoint so it can't leak. */
+    .bs-masthead-menu > div[style] {
+        position: static !important;
+    }
+    .bs-masthead-panel {
+        left: 0;
+        right: 0;
+        transform: none;
+        max-width: none;
+    }
+    .bs-masthead-panel-list {
+        width: auto;
+    }
+}
+
 /* ─────────────────────────────────────────────────────────────────────────
    BROADSHEET — landing-page newspaper utilities.
    All prefixed `.bs-` so they don't collide with the V3 player utilities.
@@ -5144,6 +5308,18 @@ html:has(.admin-root.paper) {
     font-weight: 800;
     letter-spacing: -0.01em;
     line-height: 1.05;
+}
+.bs-app-name-link {
+    color: inherit;
+    text-decoration: none;
+    transition: color 120ms;
+}
+.bs-app-name-link:hover,
+.bs-app-name-link:focus-visible {
+    color: var(--accent);
+    text-decoration: underline;
+    text-decoration-thickness: 2px;
+    text-underline-offset: 3px;
 }
 .bs-app-type {
     display: block;

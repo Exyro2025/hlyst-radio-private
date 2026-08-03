@@ -2,6 +2,7 @@
 
 import Link from 'next/link';
 import { AnimatedLink } from '@/components/ui/animated-link';
+import CommunityMenu from './CommunityMenu';
 import { useClock } from '../../lib/hooks';
 
 const LAUNCH_DATE = new Date('2026-01-01T00:00:00Z');
@@ -9,6 +10,17 @@ const LAUNCH_DATE = new Date('2026-01-01T00:00:00Z');
 function issueNo(d: Date): number {
   return Math.max(1, Math.floor((d.getTime() - LAUNCH_DATE.getTime()) / 86400000));
 }
+
+// The volume number is the running SUB/WAVE version, which reads naturally in a
+// masthead ("VOL. 1.2.0 · NO. 214") and means the page states what it is.
+//
+// next.config.js resolves NEXT_PUBLIC_APP_VERSION from the build arg, then
+// `git describe`, then package.json — so on a working checkout it arrives as
+// something like "1.2.0-33-geae57592". Only the semver head belongs here; the
+// commit count and hash are build detail, and the admin console already shows
+// the full string. Falls back to the original roman numeral if the env is
+// absent, so the masthead never renders "VOL. ".
+const VERSION = (process.env.NEXT_PUBLIC_APP_VERSION || '').split('-')[0] || 'I';
 
 // Broadsheet-style header with proper landing-page navigation. Keeps the
 // big SUB/WAVE wordmark and the double rules, drops the dateline/location/
@@ -22,13 +34,18 @@ export default function Masthead() {
   const now = useClock();
 
   return (
-    <header className="bs-paper pt-7 !pb-4">
+    // bs-masthead-lift: the Community panel hangs out of the header, and
+    // .bs-paper gives BOTH this header and <main> `position:relative;z-index:1`,
+    // so main wins on DOM order and paints over the open dropdown. The lift has
+    // to be a bs- rule rather than a Tailwind z-* utility — globals.css is
+    // unlayered and therefore always beats Tailwind's @layer utilities.
+    <header className="bs-paper bs-masthead-lift pt-7 !pb-4">
       <div className="bs-rule-double" />
 
       <div className="bs-masthead-head">
         <div className="bs-caption bs-masthead-meta flex items-center gap-[10px] text-muted">
           <span className="bs-masthead-issue text-[10px] tracking-[0.3em] uppercase">
-            VOL. I &nbsp;·&nbsp; NO.&nbsp;{now ? issueNo(now) : '—'}
+            VOL.&nbsp;{VERSION} &nbsp;·&nbsp; NO.&nbsp;{now ? issueNo(now) : '—'}
           </span>
         </div>
 
@@ -77,6 +94,10 @@ export default function Masthead() {
         <AnimatedLink href="/setup" className="bs-masthead-link">
           Setup
         </AnimatedLink>
+        <span aria-hidden="true" className="bs-masthead-sep">
+          ·
+        </span>
+        <CommunityMenu />
         <span aria-hidden="true" className="bs-masthead-sep">
           ·
         </span>
