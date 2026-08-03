@@ -50,6 +50,7 @@ import { dropEchoedLink, enqueuePick, trackFields, trimLinkToIntro } from './dj-
 import { advanceRun, runActive } from './dj-agent/runs.js';
 import { pickSchemaBase, pickSystem, requestSystem } from './dj-agent/schemas.js';
 import { guardIntro, screenAck } from '../util/request-guard.js';
+import * as likes from './likes.js';
 import { classifyPickFailure, type PickFailure } from '../util/pick-seed.js';
 
 // Re-exported so every existing `from './dj-agent.js'` import keeps working —
@@ -91,6 +92,12 @@ async function repickFromSeen({ seen, badId, wantLink, showAt = null, playlistRe
       // showPlaylistTracks first / every pick MUST come from the playlist" when
       // the anchor never resolved (no such tool exists here) or resolve a
       // different show than the run whose candidates we're re-picking from.
+      // Two knowing mismatches with the real pick call: pickSystem's discovery
+      // paragraph talks tools this tool-less call doesn't have (the "only ids
+      // from the candidates" framing below overrides it), and the listener
+      // favourites clause is absent (it rides the pick EVENT turn, not this
+      // system prompt) — acceptable because `seen` was discovered under the
+      // favourites-aware run this salvages.
       system: pickSystem(showAt, playlistResolved),
       prompt: JSON.stringify({ candidates: [...seen.values()] }, null, 2)
         + `\n\n${why}`
@@ -658,10 +665,15 @@ export async function runTrackEvent(queue, ctx, { wantLink, showAt = null, prede
             ? ` You opened recent lines with ${recentOpeners.slice(0, 6).map(o => `"${o}…"`).join(', ')} — start this one differently.`
             : '')
       : '';
+    // The full link contract (introduce the pick, no back-announce, vary the
+    // opener) lives in the "say" schema description (pickSchemaBase), which
+    // travels on every call — this clause only TRIGGERS the link and carries
+    // the per-pick extras the schema can't know (the intro_ms budget, the
+    // opener blocklist). Restating the contract here doubled it per pick.
     const linkClause = wantLink
       ? (djMode
-          ? ` Also write a short link that airs as your pick starts: introduce what's coming — name the artist or capture the feel of the track you pick so listeners know what's next. Do not back-announce or name the track that just played. If the track you pick shows an intro_ms, keep the link short enough to finish before then, so you land just as the vocals come in.${varietyClause}`
-          : ` Also write a short link that airs as your pick starts: lead into the track you pick. Do not back-announce or name the track that just played.${varietyClause}`)
+          ? ` Also write the "say" link — it airs as your pick starts. If the track you pick shows an intro_ms, keep the link short enough to finish before then, so you land just as the vocals come in.${varietyClause}`
+          : ` Also write the "say" link — it airs as your pick starts.${varietyClause}`)
       : ' Stay silent — no link this time.';
     // Surface the current track's real Subsonic id so similarSongs /
     // tracksLikeThis ("pass the currently-playing song id") actually have one
@@ -676,8 +688,13 @@ export async function runTrackEvent(queue, ctx, { wantLink, showAt = null, prede
     const historyNote = recentT.length
       ? ` Your recent transition choices, oldest first: ${recentT.join(', ')} — the station strips a third repeat, so vary deliberately.`
       : '';
+    // Compact on purpose: the full per-effect coaching is effectsGuidance()
+    // in the system prompt — this nudge only keeps the vocabulary and the
+    // deliberate-choice reminder fresh in the newest turn. Re-describing all
+    // seven effects here tripled the coaching per pick (system + event +
+    // schema description).
     const effectClause = settings.effectsActive()
-      ? ` Set "transition" by what THIS moment needs — "washout" to dissolve out as it ends, "loop" to catch this pick's last bar in a repeating loop as it ends, "sweep" for a gear-change entry, "dissolve" to melt a clash into ambience, "chop" to cut a beat-driven track out on the beat for an energy jump, "blend" ONLY for an exceptionally locked pair (a plain crossfade already handles ordinary same-lane picks), "normal" for a plain hand-off. Vary your craft: never the same transition three picks running, and if your last pick used an effect, lean "normal" now unless the moment clearly calls again.${historyNote}`
+      ? ` Set "transition" by what THIS moment needs, per the TRANSITION EFFECTS guidance — "washout"/"loop" end your pick, "sweep"/"dissolve"/"chop" resolve a clash, "blend" only for an exceptionally locked pair, "normal" otherwise. Vary your craft: never the same transition three picks running, and if your last pick used an effect, lean "normal" now unless the moment clearly calls again.${historyNote}`
       : '';
     // The turn is split in two: `text` is the factual event (what the booth
     // log on /admin/dash shows the operator), `meta.promptSuffix` carries the
@@ -685,12 +702,20 @@ export async function runTrackEvent(queue, ctx, { wantLink, showAt = null, prede
     // steering). windowMessages() re-joins them for the agent, so the model
     // sees the same message as before — the operator just stops reading
     // prompt engineering in the booth log.
+    // Listener favourites (#991) ride the event turn, not the system prompt:
+    // they change as likes land, and a system prompt that re-renders per call
+    // breaks the byte-stable prefix that automatic prompt caching
+    // (DeepSeek/OpenAI/OpenRouter) keys on. windowMessages keeps only the
+    // latest pick event, so the list never multiplies across the window.
+    // Mirrored by the pool picker's listener-liked candidate source, so both
+    // paths lean the same way. A lean, never a lock: VARIETY still applies.
+    const favClause = likes.favouritesClause(settings.get()?.likes);
     const eventText = `Now playing "${current?.title}" by ${current?.artist}`
       + (current?.id ? ` [id: ${current.id}]` : '')
       + (previous ? ` (after "${previous.title}" by ${previous.artist})` : '')
       + '. Pick the track to play next.'
       + linkClause;
-    const promptSuffix = `${clockClause}${effectClause}${runClause}${journeyClause}`;
+    const promptSuffix = `${clockClause}${favClause}${effectClause}${runClause}${journeyClause}`;
     session.appendTurn({
       role: 'event', kind: 'pick', text: eventText,
       meta: promptSuffix ? { promptSuffix } : {},

@@ -302,9 +302,9 @@ export interface TopLikedEntry {
   lastLikedAt: string;
 }
 
-// Most-liked songs inside the window. Sync on purpose: pickSystem (a sync
-// prompt builder) and the pool picker both read this after load() has run at
-// boot; before that it just returns [].
+// Most-liked songs inside the window. Sync on purpose: favouritesClause (a
+// sync prompt builder) and the pool picker both read this after load() has run
+// at boot; before that it just returns [].
 export function topLiked({ windowDays = 30, limit = 10 }: { windowDays?: number; limit?: number } = {}): TopLikedEntry[] {
   const cutoff = windowDays > 0 ? Date.now() - windowDays * 86_400_000 : 0;
   const bySong = new Map<string, TopLikedEntry>();
@@ -324,6 +324,22 @@ export function topLiked({ windowDays = 30, limit = 10 }: { windowDays?: number;
   return [...bySong.values()]
     .sort((a, b) => b.count - a.count || b.lastLikedAt.localeCompare(a.lastLikedAt))
     .slice(0, Math.max(1, limit));
+}
+
+// The listener-favourites clause for the pick EVENT turn (#991). Lives here —
+// next to the store it reads — so dj-agent renders it and the placement test
+// can pin it without importing the agent. Deliberately NOT part of pickSystem:
+// the list changes as likes land, and re-rendering it inside the system prompt
+// breaks the byte-stable prefix automatic prompt caching keys on. Returns ''
+// when the operator hasn't opted in or nothing is liked, so the event turn is
+// byte-identical to a likes-free station.
+export function favouritesClause(cfg: { enabled?: boolean; influenceDj?: boolean; windowDays?: number; maxTracks?: number } | null | undefined): string {
+  if (!cfg?.enabled || !cfg?.influenceDj) return '';
+  const favs = topLiked({ windowDays: cfg.windowDays, limit: cfg.maxTracks });
+  if (!favs.length) return '';
+  return ` Listener favourites — the most-liked tracks on this station recently: ${favs
+    .map((f) => `"${f.track.title}" by ${f.track.artist || 'unknown'} (${f.count})`)
+    .join('; ')}. Treat these as a strong preference signal when they fit the moment — but keep variety, never loop the same favourites back-to-back.`;
 }
 
 // Recent likes for the admin card — listener key truncated to a short handle
