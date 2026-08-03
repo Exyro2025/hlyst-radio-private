@@ -6,6 +6,25 @@
    target mirrors shadcn/ui v4's recipe so `dark:` utilities still resolve. */
 @custom-variant dark (&:where([data-theme='dark'], [data-theme='dark'] *));
 
+/* `dark:` above is attribute-only on purpose (shadcn's recipe), which is fine
+   for utilities that ride a token — the token itself already flips under the
+   prefers-dark @media block in :root. It is NOT enough for a utility carrying a
+   raw value (an opacity, a filter): a listener on a dark OS who never touched
+   the switcher has no [data-theme] at all, so they get the dark palette and the
+   light-tuned raw value. `dark-any:` covers both routes — explicit dark, or
+   system dark with no explicit light pin — and mirrors the attribute+media pair
+   the .v3-cover-ambient rules below already spell out by hand. */
+@custom-variant dark-any {
+  &:where([data-theme='dark'], [data-theme='dark'] *) {
+    @slot;
+  }
+  @media (prefers-color-scheme: dark) {
+    &:where(:root:not([data-theme='light']), :root:not([data-theme='light']) *) {
+      @slot;
+    }
+  }
+}
+
 /* Theme tokens — bridge every :root CSS variable into Tailwind's v4 namespaces
    so utilities (bg-bg, text-ink, border-separator-soft, shadow-drawer, …)
    resolve to the same vars the rest of the stylesheet reads. The actual color
