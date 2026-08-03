@@ -16,8 +16,11 @@ import type { ShowcaseStation } from '@/lib/stations';
 // SUB/WAVE — the listener player (a live embedded mount), the AI DJ, song
 // requests, the admin console, the architecture, and the music-library
 // integration. Section components live under `what/` and `landing/`.
-// `stations` (from the content/stations directory, resolved server-side)
-// feeds the showcase's station tabs; omit and the demo pins to this station.
+// `stations` (from the community catalog, resolved server-side) feeds the
+// showcase's station tabs; omit and the demo pins to this station.
+//
+// The apps directory is deliberately NOT a section here — it lives at /apps and
+// is reached from the Back Pages footer, so the article keeps its arc.
 export default function Landing({ stations = [] }: { stations?: ShowcaseStation[] }) {
   return (
     <div className="min-h-screen overflow-x-clip bg-bg text-ink">

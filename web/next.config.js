@@ -36,6 +36,23 @@ const version = resolveAppVersion();
 const nextConfig = {
   output: 'standalone',
   reactStrictMode: true,
+  // The /apps directory renders submitter-supplied icons + screenshots from the
+  // community catalog. Those URLs are a trust boundary: an arbitrary host would
+  // mean listener browsers fetching from anywhere, and an image that can be
+  // swapped to anything after review. This allowlist is the REAL enforcement —
+  // next/image refuses any host not listed here — so images are proxied and
+  // optimised by the site rather than hot-linked, and a visitor's browser never
+  // contacts the submitter's host. The community repo's catalog builder rejects
+  // off-list URLs at submission time and web/lib/apps.ts re-checks them (the
+  // catalog is a live remote fetch), but this is the backstop. Keep all three in
+  // lockstep; widening it here without widening them is the dangerous direction.
+  images: {
+    remotePatterns: [
+      { protocol: 'https', hostname: 'raw.githubusercontent.com' },
+      { protocol: 'https', hostname: 'user-images.githubusercontent.com' },
+      { protocol: 'https', hostname: 'github.com' },
+    ],
+  },
   env: {
     NEXT_PUBLIC_APP_VERSION: version,
   },

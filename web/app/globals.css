@@ -1318,6 +1318,172 @@ html.lite .sw-ripple-circle {
     font-size: 11px;
 }
 
+/* One nav entry, dot included. The separator is a ::after on this wrapper so it
+   travels with its own word — as a sibling flex item it could wrap to the start
+   of the next line, which is what the six-item nav does on a phone. */
+.bs-masthead-item {
+    display: inline-flex;
+    align-items: center;
+}
+.bs-masthead-item:not(:last-child)::after {
+    content: '·';
+    /* Reproduces the old layout exactly: the row's 14px gap sat on both sides of
+       a standalone dot, so the dot needs that same 14px in front of it and the
+       row gap supplies the space after. */
+    margin-left: 14px;
+    color: var(--muted);
+    font-size: 11px;
+    line-height: 1;
+}
+
+/* Lifts the masthead above the article so the Community panel can hang out of
+   it. .bs-paper puts BOTH this header and <main> at position:relative/z-index:1,
+   so <main> wins on DOM order and paints over the open dropdown.
+   Two traps this rule is shaped around:
+     - a Tailwind z-* utility can't do it: globals.css is unlayered and always
+       beats Tailwind's @layer utilities, whatever the value;
+     - a bare .bs-masthead-lift can't either, because .bs-paper is declared
+       LATER in this file and would win the same-specificity tie.
+   Hence the element qualifier — header.x outranks .bs-paper wherever it sits. */
+header.bs-masthead-lift {
+    z-index: 40;
+}
+
+/* Masthead "Community" dropdown (components/landing/CommunityMenu.tsx, on the
+   shadcn/Radix NavigationMenu). The primitive contributes structure only —
+   everything visible here is the newsprint vocabulary, so the trigger is
+   indistinguishable from the plain links either side of it. */
+.bs-masthead-menu {
+    /* The Root is `flex-1` by default, which in the masthead's flex row makes
+       the trigger claim the leftover width and shove the other links off
+       centre. Size it to its content instead. */
+    flex: 0 0 auto;
+}
+.bs-masthead-trigger {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    background: none;
+    border: 0;
+    cursor: pointer;
+    /* Inherits the rest from .bs-masthead-link, which it also carries. */
+    font: inherit;
+    font-size: 11px;
+    letter-spacing: 0.3em;
+    text-transform: uppercase;
+    font-weight: 700;
+}
+.bs-masthead-trigger[data-state='open'] {
+    color: var(--accent);
+}
+.bs-masthead-caret {
+    /* Nudge left: the 0.3em tracking puts a full letter-space after the final
+       "y", so the caret otherwise reads as detached from the word. */
+    margin-left: -3px;
+    font-size: 9px;
+    line-height: 1;
+    transition: transform 200ms ease;
+}
+.bs-masthead-trigger[data-state='open'] .bs-masthead-caret {
+    transform: rotate(180deg);
+}
+
+/* The panel hangs off the Item rather than a shared viewport (see the note in
+   components/ui/navigation-menu.tsx), so the Item is the positioning context. */
+.bs-masthead-menu li {
+    position: relative;
+}
+.bs-masthead-panel {
+    position: absolute;
+    top: calc(100% + 10px);
+    /* Centred on the trigger, then clamped into the viewport on narrow screens
+       so the panel can't hang off the edge of a phone. */
+    left: 50%;
+    transform: translateX(-50%);
+    z-index: 30;
+    max-width: calc(100vw - 24px);
+}
+.bs-masthead-panel-list {
+    list-style: none;
+    margin: 0;
+    padding: 6px;
+    display: grid;
+    gap: 2px;
+    width: 272px;
+    max-width: 100%;
+    /* --surface is color-mix(bg 93%, ink) — near-identical to the page on every
+       theme, which left the panel looking like unstyled text floating over the
+       article. The border and the hard shadow are what separate it, so the fill
+       is the plain page colour and opaque. */
+    background: var(--bg);
+    border: 1px solid var(--ink);
+    /* Hard offset shadow rather than a soft blur — print, not material. */
+    box-shadow: 4px 4px 0 rgba(0, 0, 0, 0.18);
+}
+.bs-masthead-panel-item {
+    display: grid;
+    gap: 1px;
+    padding: 9px 11px;
+    text-decoration: none;
+    color: var(--ink);
+    transition: background-color 160ms ease;
+}
+.bs-masthead-panel-item:hover,
+.bs-masthead-panel-item:focus-visible {
+    background: rgba(0, 0, 0, 0.05);
+    outline: none;
+}
+.bs-masthead-panel-tag {
+    font-family: var(--font-mono);
+    font-size: 9px;
+    letter-spacing: 0.22em;
+    text-transform: uppercase;
+    color: var(--muted);
+}
+.bs-masthead-panel-item:hover .bs-masthead-panel-tag {
+    color: var(--accent);
+}
+.bs-masthead-panel-title {
+    font-family: var(--font-display), Georgia, serif;
+    font-size: 19px;
+    font-weight: 800;
+    line-height: 1.1;
+    letter-spacing: -0.01em;
+}
+.bs-masthead-panel-blurb {
+    font-size: 12px;
+    line-height: 1.45;
+    color: var(--muted);
+}
+
+/* Six letterspaced nav items only fit one line from ~640px up (measured).
+   Below that the Community dropdown is dropped rather than letting the row
+   wrap: it is the one item needing a second tap, and every destination behind
+   it (Skills, Personas, Shows, Apps) has its own Back Pages panel, which is
+   where a phone reader ends up anyway. `display:none` takes its ::after dot
+   with it, so the separators stay correct with no renumbering.
+
+   This also means the panel never opens below 640px, so none of the
+   narrow-screen panel anchoring that used to live here is needed. */
+@media (max-width: 639px) {
+    .bs-masthead-community {
+        display: none;
+    }
+}
+
+/* Phone: tighten type and gap so the remaining five hold one line down to
+   ~360px. Verified at 360/375/390/430. */
+@media (max-width: 560px) {
+    .bs-masthead-nav {
+        gap: 8px 10px;
+    }
+    .bs-masthead-link,
+    .bs-masthead-trigger {
+        font-size: 10px;
+        letter-spacing: 0.14em;
+    }
+}
+
 /* ─────────────────────────────────────────────────────────────────────────
    BROADSHEET — landing-page newspaper utilities.
    All prefixed `.bs-` so they don't collide with the V3 player utilities.
@@ -5092,6 +5258,146 @@ html:has(.admin-root.paper) {
     text-decoration: underline;
     text-decoration-thickness: 1.5px;
     text-underline-offset: 2px;
+}
+
+/* Community-app card (/apps) — the station-grid column again, but with optional
+   submitter-supplied art: a wide screenshot plate on top, a square icon beside
+   the name. Both are optional and the card is laid out so neither leaves a gap.
+   Reuses .bs-stations-grid for layout and .bs-skill-tag / .bs-skill-credit for
+   the platform tags and the credit line. */
+.bs-app-card {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    padding-top: 20px;
+    border-top: 1px solid var(--separator-strong);
+    min-width: 0;
+}
+/* Fixed ratio so a run of cards keeps a straight baseline whatever the
+   submitter uploaded — and so a slow or dead image host can't reflow the grid
+   under the reader (next/image fills this box). */
+.bs-app-plate {
+    position: relative;
+    width: 100%;
+    aspect-ratio: 16 / 10;
+    overflow: hidden;
+    border: 1px solid var(--separator-strong);
+    background: var(--separator-strong);
+}
+.bs-app-plate-img {
+    object-fit: cover;
+}
+.bs-app-head {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    min-width: 0;
+}
+.bs-app-icon {
+    flex: none;
+    width: 44px;
+    height: 44px;
+    object-fit: cover;
+    border: 1px solid var(--separator-strong);
+}
+.bs-app-headtext {
+    min-width: 0;
+}
+.bs-app-name {
+    margin: 0;
+    font-family: var(--font-display);
+    font-size: clamp(19px, 2vw, 24px);
+    font-weight: 800;
+    letter-spacing: -0.01em;
+    line-height: 1.05;
+}
+.bs-app-name-link {
+    color: inherit;
+    text-decoration: none;
+    transition: color 120ms;
+}
+.bs-app-name-link:hover,
+.bs-app-name-link:focus-visible {
+    color: var(--accent);
+    text-decoration: underline;
+    text-decoration-thickness: 2px;
+    text-underline-offset: 3px;
+}
+.bs-app-type {
+    display: block;
+    font-family: var(--font-mono);
+    font-size: 10px;
+    letter-spacing: 0.16em;
+    text-transform: uppercase;
+    color: var(--muted);
+}
+.bs-app-links {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 14px;
+    margin: 2px 0 0;
+    font-family: var(--font-mono);
+    font-size: 11px;
+    letter-spacing: 0.18em;
+    text-transform: uppercase;
+}
+.bs-app-get {
+    font-weight: 700;
+    color: var(--accent);
+}
+.bs-app-source {
+    color: var(--muted);
+}
+.bs-app-get:hover,
+.bs-app-source:hover {
+    text-decoration: underline;
+    text-underline-offset: 3px;
+}
+
+/* Type filter (/apps). components/apps/AppTypeFilter.tsx sets data-filter on
+   this wrapper and the rules below hide the cards that don't match, so the
+   cards themselves stay server components with no client JS. One rule per type
+   because CSS can't compare one attribute against another; the vocabulary is
+   closed and small, so that's cheaper than making every card interactive.
+   Chips only render for types present in the catalog, so a selection can never
+   empty the grid and there is no "nothing matched" state to style. */
+.bs-apps-filter {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    padding: 0 0 clamp(18px, 3vw, 28px);
+}
+.bs-apps-chip {
+    font-family: var(--font-mono);
+    font-size: 10px;
+    letter-spacing: 0.16em;
+    text-transform: uppercase;
+    color: var(--muted);
+    border: 1px solid var(--separator-strong);
+    padding: 6px 12px;
+    background: none;
+    cursor: pointer;
+    transition:
+        color 0.2s,
+        border-color 0.2s;
+}
+.bs-apps-chip:hover {
+    color: var(--ink);
+    border-color: var(--ink);
+}
+.bs-apps-chip[aria-pressed='true'] {
+    color: var(--bg);
+    background: var(--ink);
+    border-color: var(--ink);
+}
+.bs-apps-filterwrap[data-filter='mobile'] .bs-app-card:not([data-type='mobile']),
+.bs-apps-filterwrap[data-filter='web'] .bs-app-card:not([data-type='web']),
+.bs-apps-filterwrap[data-filter='desktop'] .bs-app-card:not([data-type='desktop']),
+.bs-apps-filterwrap[data-filter='terminal'] .bs-app-card:not([data-type='terminal']),
+.bs-apps-filterwrap[data-filter='bot'] .bs-app-card:not([data-type='bot']),
+.bs-apps-filterwrap[data-filter='skin'] .bs-app-card:not([data-type='skin']),
+.bs-apps-filterwrap[data-filter='integration'] .bs-app-card:not([data-type='integration']) {
+    display: none;
 }
 
 /* Live strip — ON AIR + current track, or Offline / Checking. */
