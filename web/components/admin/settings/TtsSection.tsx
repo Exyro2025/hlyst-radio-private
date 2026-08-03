@@ -17,6 +17,7 @@ import {
 } from '../../ui/select';
 import { Card, Btn, Pill, Seg } from '../ui';
 import { EngineSelector } from '../tts/EngineSelector';
+import { EngineVoiceFields, ENGINE_UNAVAILABLE } from '../tts/EngineVoiceFields';
 import { VoicePreviewButton } from '../tts/VoicePreviewButton';
 import { VoicePicker } from '../tts/VoicePicker';
 import { ModelCombobox } from '../llm/ModelCombobox';
@@ -25,6 +26,7 @@ import {
   SectionHeader, SaveBar, KeyStatus, KeyTestResult, KEY_HINTS, ELEVENLABS_VS_DEFAULTS,
   FISH_TTS_DEFAULTS,
   type SectionProps, type FormState, type FormUpdater, type CloudTtsCfg,
+  type TtsFallbackForm,
 } from './shared';
 
 // Labels for Kokoro phonemizer language override options. Keyed by the lang
@@ -388,6 +390,14 @@ export function TtsSection({ data, form, setForm, busy, saveSettings, adminFetch
   useEffect(() => { setCloudKeyInput(''); setCompatKeyInput(''); }, [form.tts.cloud.provider]);
   useEffect(() => { setCloudKeyTest(null); }, [form.tts.cloud.provider]);
 
+  // A cloud fallback is only usable if ITS provider has a key — which can
+  // differ from the default engine's provider, so this is checked per-provider
+  // rather than off the global `available.cloud` flag. `openai-compatible` has
+  // no key-based entry and is trusted by the server, matching engineUsable().
+  const fallbackCloudUnconfigured = form.tts.fallback.engine === 'cloud'
+    && form.tts.fallback.cloudProvider !== 'openai-compatible'
+    && data.tts?.available?.cloudByProvider?.[form.tts.fallback.cloudProvider] === false;
+
   const isCloudEngine = form.tts.defaultEngine === 'cloud';
   const isCompat = form.tts.cloud.provider === 'openai-compatible';
   const isFish = form.tts.cloud.provider === 'fish-audio';
@@ -501,6 +511,7 @@ export function TtsSection({ data, form, setForm, busy, saveSettings, adminFetch
       tts: {
         enabled: form.tts.enabled,
         defaultEngine: form.tts.defaultEngine,
+        fallback: form.tts.fallback,
         kokoro: { voice: form.tts.kokoro?.voice, lang: form.kokoroLang },
         chatterbox: { referenceVoice: form.tts.chatterbox?.referenceVoice ?? '' },
         pocketTts: { voice: form.tts.pocketTts?.voice ?? 'alba' },
@@ -1285,6 +1296,70 @@ export function TtsSection({ data, form, setForm, busy, saveSettings, adminFetch
             );
           })()}
         </div>
+      </Card>
+
+      {/* Fallback voice — the operator's explicit rescue, ahead of the
+          hardcoded default-engine → Piper → Kokoro floor. Its own card because
+          it configures a whole second voice, not a knob on the default one. */}
+      <Card
+        title="Fallback voice"
+        sub="what speaks when a persona's engine fails"
+      >
+        <div className="field">
+          <Label>Fallback</Label>
+          <Seg
+            value={form.tts.fallback.enabled ? 'on' : 'off'}
+            options={[{ id: 'off', label: 'Off' }, { id: 'on', label: 'On' }]}
+            onChange={v => setForm(f => ({
+              ...f,
+              tts: { ...f.tts, fallback: { ...f.tts.fallback, enabled: v === 'on' } },
+            }))}
+          />
+          <div className="field-hint max-w-[70ch]">
+            When a persona’s engine can’t speak — a sidecar that’s down, a cloud
+            provider with no key, or a call that fails mid-render — the station
+            rescues the segment so the DJ never goes silent. Off, it rescues onto
+            the default engine above and whatever voice that engine happens to
+            carry. On, it uses the engine <em>and voice</em> you pick here first,
+            and only falls through to Piper if that can’t speak either.
+          </div>
+        </div>
+
+        {form.tts.fallback.enabled && (
+          <div className="mt-4 max-w-[560px]">
+            <EngineVoiceFields
+              value={form.tts.fallback}
+              onChange={(patch: Partial<TtsFallbackForm>) => setForm(f => ({
+                ...f,
+                tts: { ...f.tts, fallback: { ...f.tts.fallback, ...patch } },
+              }))}
+              data={data}
+              adminFetch={adminFetch}
+              engineHint={<>
+                Pick something that’s reliably up — a local engine is the safest
+                rescue, since the usual reason to need one is a sidecar or cloud
+                provider being unreachable.
+              </>}
+              unavailableNote={(engine: string) => (
+                <>{ENGINE_UNAVAILABLE[engine]} A fallback that can’t speak is
+                  skipped, so the station would drop to <strong>Piper</strong> instead.</>
+              )}
+              cloudIssue={fallbackCloudUnconfigured && (
+                <>
+                  <strong>This fallback voice won’t play.</strong> No API key is
+                  configured for that cloud provider — add one above. Until then
+                  the fallback is skipped, and the station drops to{' '}
+                  <strong>Piper</strong> instead.
+                </>
+              )}
+              previewHint={<>
+                Plays a short sample in the fallback voice. Worth auditioning —
+                you’ll normally only hear it when something has already gone
+                wrong.
+              </>}
+            />
+          </div>
+        )}
       </Card>
 
       {/* Speech corrections moved to /admin/moods (MoodsPanel). */}
