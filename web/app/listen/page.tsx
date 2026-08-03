@@ -11,6 +11,8 @@ const GENERIC = pageMeta({
   description:
     'Tune in to the SUB/WAVE broadcast — one live stream, with an AI DJ picking tracks and talking between them. See what is on air right now.',
   path: '/listen',
+  // The player is this station's own page — self-canonical on every install.
+  scope: 'station',
 });
 
 // The other player route, so a branded station's link preview is not labelled
@@ -29,6 +31,7 @@ export async function generateMetadata(): Promise<Metadata> {
     description: meta.description,
     path: '/listen',
     siteName: meta.name,
+    scope: 'station',
   });
 }
 

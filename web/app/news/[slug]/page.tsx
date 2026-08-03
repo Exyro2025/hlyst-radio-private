@@ -4,7 +4,7 @@ import { notFound } from 'next/navigation';
 import { AnimatedLink } from '@/components/ui/animated-link';
 import { getAllNews, getNewsArticle, formatNewsDate } from '@/lib/news';
 import JsonLd from '@/components/JsonLd';
-import { absoluteUrl } from '@/lib/seo';
+import { absoluteUrl, canonicalUrl } from '@/lib/seo';
 
 // Render per-request like the rest of the news segment — generateStaticParams
 // would win over the layout's force-dynamic and prerender each article with
@@ -19,7 +19,9 @@ export async function generateMetadata({
   const { slug } = await params;
   const article = getNewsArticle(slug);
   if (!article) return { title: { absolute: 'SUB/WAVE — Dispatches' } };
-  const url = absoluteUrl(`/news/${article.slug}`);
+  // Dispatches are shared product content — on a non-official install the
+  // canonical/og:url point at getsubwave.com (see PageScope in lib/seo.ts).
+  const url = canonicalUrl(`/news/${article.slug}`);
   return {
     // `absolute` opts out of the root layout's `%s · SUB/WAVE` template —
     // the brand is already appended here.
@@ -76,7 +78,9 @@ export default async function NewsArticlePage({
       logo: { '@type': 'ImageObject', url: absoluteUrl('/icons/512') },
     },
     image: absoluteUrl('/og'),
-    mainEntityOfPage: absoluteUrl(`/news/${article.slug}`),
+    // Matches the <link rel="canonical"> above; the icon/og image URLs stay
+    // on this host because they are served from it.
+    mainEntityOfPage: canonicalUrl(`/news/${article.slug}`),
   };
 
   return (
