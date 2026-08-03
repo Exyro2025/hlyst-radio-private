@@ -9,29 +9,19 @@ import MakeARequest from './what/MakeARequest';
 import BehindTheDesk from './what/BehindTheDesk';
 import UnderTheHood from './what/UnderTheHood';
 import Navidrome from './landing/Navidrome';
-import TheReceivers from './what/TheReceivers';
 import Coda from './what/Coda';
 import type { ShowcaseStation } from '@/lib/stations';
-import type { CommunityApp } from '@/lib/apps';
 
 // The public landing page. A newsprint-broadsheet article introducing
 // SUB/WAVE — the listener player (a live embedded mount), the AI DJ, song
 // requests, the admin console, the architecture, and the music-library
 // integration. Section components live under `what/` and `landing/`.
 // `stations` (from the community catalog, resolved server-side) feeds the
-// showcase's station tabs; omit and the demo pins to this station. `apps` (the
-// capped shelf) and `appCount` (the full directory size) feed the TheReceivers
-// teaser, which renders nothing when the shelf is empty — so omitting both is a
-// landing page without that section, not a broken one.
-export default function Landing({
-  stations = [],
-  apps = [],
-  appCount = 0,
-}: {
-  stations?: ShowcaseStation[];
-  apps?: CommunityApp[];
-  appCount?: number;
-}) {
+// showcase's station tabs; omit and the demo pins to this station.
+//
+// The apps directory is deliberately NOT a section here — it lives at /apps and
+// is reached from the Back Pages footer, so the article keeps its arc.
+export default function Landing({ stations = [] }: { stations?: ShowcaseStation[] }) {
   return (
     <div className="min-h-screen overflow-x-clip bg-bg text-ink">
       <a
@@ -52,7 +42,6 @@ export default function Landing({
         <BehindTheDesk />
         <UnderTheHood />
         <Navidrome />
-        <TheReceivers apps={apps} total={appCount} />
         <Coda />
         <StationFooter />
       </main>

@@ -168,28 +168,6 @@ export function presentTypes(all: CommunityApp[]): AppType[] {
   return APP_TYPES.filter((t) => seen.has(t));
 }
 
-/** Apps shaped for the landing teaser: featured first, then most recently
- *  submitted, capped. Pure, over an already-loaded list. No separate
- *  ShowcaseApp type — ShowcaseStation exists because the landing player tabs
- *  cross a server→client boundary and carry local-station logic, and the
- *  teaser is a server component with neither. */
-export function getShowcaseApps(all: CommunityApp[], limit = 6): CommunityApp[] {
-  return [...all]
-    .sort((a, b) => {
-      if (a.featured !== b.featured) return a.featured ? -1 : 1;
-      return (b.submitted || '').localeCompare(a.submitted || '');
-    })
-    .slice(0, limit);
-}
-
-/** Everything <Landing> needs for the apps teaser, in one call.
- *
- *  TWO routes render the landing page — /landing always, and / when
- *  SUBWAVE_HOMEPAGE=landing — so the props have to be resolved twice. Wiring
- *  them by hand at each call site is how one of them silently loses the section:
- *  /landing would look correct while a landing-mode homepage quietly dropped it.
- *  Spreading one helper makes that divergence impossible. */
-export async function landingApps(): Promise<{ apps: CommunityApp[]; appCount: number }> {
-  const all = await getAllApps();
-  return { apps: getShowcaseApps(all), appCount: all.length };
-}
+// There is deliberately no landing-page teaser helper here. The directory is
+// reached from the Back Pages footer and /apps, not from a section in the
+// landing article.

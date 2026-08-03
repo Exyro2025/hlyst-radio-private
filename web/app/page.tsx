@@ -5,7 +5,6 @@ import Landing from '@/components/Landing';
 import { absoluteUrl } from '@/lib/seo';
 import { fetchStationMeta } from '@/lib/station';
 import { getShowcaseStations } from '@/lib/stations';
-import { landingApps } from '@/lib/apps';
 
 // Read at request time so a deployment can flip player ↔ landing by just
 // restarting the web container with a different env value, no rebuild.
@@ -65,8 +64,7 @@ export const viewport: Viewport = {
 export default async function HomePage() {
   const mode = (process.env.SUBWAVE_HOMEPAGE || 'player').toLowerCase();
   if (mode === 'landing') {
-    const [stations, apps] = await Promise.all([getShowcaseStations(), landingApps()]);
-    return <Landing stations={stations} {...apps} />;
+    return <Landing stations={await getShowcaseStations()} />;
   }
   return (
     <>

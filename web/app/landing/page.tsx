@@ -1,6 +1,5 @@
 import Landing from '../../components/Landing';
 import { getShowcaseStations } from '@/lib/stations';
-import { landingApps } from '@/lib/apps';
 import { pageMeta } from '@/lib/seo';
 
 export const metadata = pageMeta({
@@ -23,6 +22,5 @@ export const viewport = {
 };
 
 export default async function LandingPreviewPage() {
-  const [stations, apps] = await Promise.all([getShowcaseStations(), landingApps()]);
-  return <Landing stations={stations} {...apps} />;
+  return <Landing stations={await getShowcaseStations()} />;
 }
