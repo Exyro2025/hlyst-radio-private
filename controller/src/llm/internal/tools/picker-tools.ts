@@ -368,7 +368,7 @@ export function buildPickerTools({
     }),
 
     recentByArtist: tool({
-      description: 'A named artist\'s NEWEST releases in the library, latest first. Use this (not topSongsByArtist, which ranks by popularity) for "latest"/"newest"/"most recent" asks. Returns [] when the artist isn\'t in the library.',
+      description: 'A named artist\'s NEWEST releases in the library, latest first. Use this (not topSongsByArtist, which ranks by popularity) for "latest"/"newest"/"most recent" asks. Returns [] when the artist isn\'t in the library. Note: "latest in the library" — bounded by what has been added, not the artist\'s globally-newest release, so never present a result on air as their newest song outright.',
       inputSchema: z.object({ artist: z.string() }),
       execute: async ({ artist }) => {
         // Keep the source list tight (newest ~6 tracks): collect() shuffles, so

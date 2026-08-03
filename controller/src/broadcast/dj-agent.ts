@@ -91,6 +91,12 @@ async function repickFromSeen({ seen, badId, wantLink, showAt = null, playlistRe
       // showPlaylistTracks first / every pick MUST come from the playlist" when
       // the anchor never resolved (no such tool exists here) or resolve a
       // different show than the run whose candidates we're re-picking from.
+      // Two knowing mismatches with the real pick call: pickSystem's discovery
+      // paragraph talks tools this tool-less call doesn't have (the "only ids
+      // from the candidates" framing below overrides it), and the listener
+      // favourites clause is absent (it rides the pick EVENT turn, not this
+      // system prompt) — acceptable because `seen` was discovered under the
+      // favourites-aware run this salvages.
       system: pickSystem(showAt, playlistResolved),
       prompt: JSON.stringify({ candidates: [...seen.values()] }, null, 2)
         + `\n\n${why}`
@@ -678,15 +684,7 @@ export async function runTrackEvent(queue, ctx, { wantLink, showAt = null, prede
     // latest pick event, so the list never multiplies across the window.
     // Mirrored by the pool picker's listener-liked candidate source, so both
     // paths lean the same way. A lean, never a lock: VARIETY still applies.
-    const likeCfg = settings.get()?.likes;
-    const favs = likeCfg?.enabled && likeCfg?.influenceDj
-      ? likes.topLiked({ windowDays: likeCfg.windowDays, limit: likeCfg.maxTracks })
-      : [];
-    const favClause = favs.length
-      ? ` Listener favourites — the most-liked tracks on this station recently: ${favs
-          .map((f) => `"${f.track.title}" by ${f.track.artist || 'unknown'} (${f.count})`)
-          .join('; ')}. Treat these as a strong preference signal when they fit the moment — but keep variety, never loop the same favourites back-to-back.`
-      : '';
+    const favClause = likes.favouritesClause(settings.get()?.likes);
     const eventText = `Now playing "${current?.title}" by ${current?.artist}`
       + (current?.id ? ` [id: ${current.id}]` : '')
       + (previous ? ` (after "${previous.title}" by ${previous.artist})` : '')

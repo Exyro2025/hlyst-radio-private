@@ -277,11 +277,16 @@ export function renderDjPrompt(persona: unknown, ctx: unknown = {}) {
   const stored = peek();
   const tpl =
     stored?.djPrompt && stored.djPrompt.trim() ? stored.djPrompt : DEFAULT_DJ_PROMPT_TEMPLATE;
-  // The template supplies its own terminal punctuation ("{soul}." in the
-  // default), so trailing periods are stripped from the soul — an operator
-  // soul ending in "." otherwise renders "..". Other terminal marks (!/?)
-  // are kept: dropping them would change the voice.
-  const soulText = (((p?.soul as string) || DJ_SOULS[0])).trim().replace(/\.+$/, '').trim();
+  // When the template itself closes the soul (the default ends "{soul}."), a
+  // soul ending in "." would render ".." — strip that ONE lone period. Only
+  // that: an ellipsis ("..." or "…") is intentional trailing-off voice, and
+  // !/? change meaning, so all of those pass through untouched. A custom
+  // template without "{soul}." supplies no punctuation of its own, so the
+  // soul keeps whatever it ends with.
+  const rawSoulText = (((p?.soul as string) || DJ_SOULS[0])).trim();
+  const soulText = tpl.includes('{soul}.')
+    ? rawSoulText.replace(/(?<!\.)\.$/, '').trim()
+    : rawSoulText;
   const rendered = tpl
     .replaceAll('{name}', (p?.name as string) || 'your host')
     .replaceAll('{soul}', soulText)
