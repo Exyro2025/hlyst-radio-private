@@ -72,12 +72,25 @@ export const FISH_TTS_DEFAULTS = {
   latency: 'normal' as const,
 };
 
+export interface TtsFallbackForm {
+  enabled: boolean;
+  engine: string;
+  voice: string;
+  cloudProvider: string;
+}
+
 export interface TtsForm {
   // Station-wide voice switch. false = music only — the DJ never speaks and no
   // script is generated for it. Jingles are unaffected (jingleRatio owns those)
   // and manual segment triggers still fire. Mirrors DEFAULTS.tts.enabled.
   enabled: boolean;
   defaultEngine: string;
+  // Operator-chosen rescue voice — the TTS analogue of llm.fallback. When on,
+  // this engine AND voice speaks in place of a persona whose own engine is
+  // unavailable or fails mid-render, ahead of the hardcoded
+  // defaultEngine → piper → kokoro floor behind it. Same {engine, voice,
+  // cloudProvider} shape as a persona's tts block.
+  fallback: TtsFallbackForm;
   kokoro: { voice: string };
   chatterbox: { referenceVoice: string };
   pocketTts: { voice: string };
@@ -310,6 +323,7 @@ export interface SettingsData {
     tts?: {
       enabled?: boolean;
       defaultEngine?: string;
+      fallback?: Partial<TtsFallbackForm>;
       kokoro?: { voice?: string; lang?: string };
       chatterbox?: { referenceVoice?: string };
       pocketTts?: { voice?: string };
