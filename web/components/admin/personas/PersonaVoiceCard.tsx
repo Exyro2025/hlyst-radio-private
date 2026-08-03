@@ -1,9 +1,4 @@
 'use client';
-// Text-to-speech engine picker, the engine-specific voice selector, and the
-// per-persona voice-level + speed trims. The engine is chosen from a radio-card
-// grid (shared EngineSelector) that surfaces availability up front; below it,
-// two columns from lg up — the engine's voice selector + a "Play sample" button
-// on the left, the level meter + speed slider on the right.
 import type { ChangeEvent } from 'react';
 import Link from 'next/link';
 import type { Persona, PersonaTts, SettingsResponse } from './types';
@@ -44,10 +39,9 @@ export function PersonaVoiceCard({ persona, data, defaultEngine, cloudIssueText,
   const pocketTtsVoices = data?.tts?.pocketTtsVoices || [];
   const cloudProviders = data?.tts?.cloudProviders || ['openai', 'elevenlabs'];
 
-  // Voices offered by this persona's cloud provider. The server falls back to
-  // the saved base URL when we don't send one, which is right here: a persona
-  // always uses the station-wide openai-compatible server. ElevenLabs is gated
-  // on a key actually being set, so we don't fire a request we know will fail.
+  // No base URL is sent: the server falls back to the saved one, which is right —
+  // a persona always uses the station-wide openai-compatible server. ElevenLabs and
+  // Fish are gated on a key being set, so no request fires that is known to fail.
   const cloudProvider = persona.tts.cloudProvider;
   const elevenLabsReady = data?.tts?.available?.cloudByProvider?.elevenlabs !== false;
   const fishReady = data?.tts?.available?.cloudByProvider?.['fish-audio'] !== false;
@@ -67,21 +61,18 @@ export function PersonaVoiceCard({ persona, data, defaultEngine, cloudIssueText,
     : `${gain > 0 ? '+' : '−'}${Math.abs(gain).toFixed(1)} dB`;
 
   const speed = persona.tts.speed ?? 1;
-  // Only Piper/Kokoro/cloud honour speed; chatterbox/pocket-tts workers ignore
-  // it, so the control is shown but disabled with a hint for those engines.
+  // Only Piper/Kokoro/cloud honour speed; the others render disabled with a hint.
   const speedSupported = persona.tts.engine !== 'chatterbox' && persona.tts.engine !== 'pocket-tts' && persona.tts.engine !== 'remote';
 
-  // Engine change: the `voice` field is shared across engines but each engine
-  // validates it differently — a leftover value from the old engine (e.g. a
-  // Kokoro id like "bm_george") fails the new engine's check on save. Normalize
-  // voice to something the target engine accepts whenever the engine changes.
+  // `voice` is shared across engines but validated differently by each, so a
+  // leftover value (a Kokoro id like "bm_george") would fail the new engine's check
+  // on save. Normalize it on every engine change.
   const selectEngine = (v: string) => {
     const patch: Partial<PersonaTts> = { engine: v };
     const cur = persona.tts.voice.trim();
     if (v === 'cloud') {
-      // A discovered voice counts as valid too — otherwise toggling the engine
-      // away and back silently destroys a voice the operator picked from the
-      // server's own list.
+      // A discovered voice counts as valid too, or toggling the engine away and
+      // back would destroy a voice picked from the server's own list.
       if (!isKnownCloudVoice(cloudProvider, discoveredVoices, cur)) {
         const provVoices = CLOUD_VOICES[cloudProvider as keyof typeof CLOUD_VOICES] || [];
         patch.voice = provVoices[0]?.id || cur;
@@ -98,9 +89,9 @@ export function PersonaVoiceCard({ persona, data, defaultEngine, cloudIssueText,
     updateTts(patch);
   };
 
-  // Resolve Cloud against this persona's saved provider even before the Cloud
-  // card is selected. openai-compatible has no key-based availability entry and
-  // is trusted by the server, while unknown providers retain the global status.
+  // Cloud resolves against this persona's saved provider even before the Cloud card
+  // is selected. openai-compatible has no key-based availability entry and is
+  // trusted by the server; unknown providers keep the global status.
   const globalAvail = data?.tts?.available as EngineAvailability | undefined;
   let selectorAvailable = globalAvail;
   if (globalAvail) {
@@ -115,7 +106,6 @@ export function PersonaVoiceCard({ persona, data, defaultEngine, cloudIssueText,
 
   return (
     <Card flat title="Voice" sub="text-to-speech engine">
-      {/* Engine — radio-card grid, full width above the two-column body. */}
       <div className="field mb-4">
         <Label>Engine</Label>
         <EngineSelector
@@ -131,14 +121,13 @@ export function PersonaVoiceCard({ persona, data, defaultEngine, cloudIssueText,
       </div>
 
       <div className="lg:grid lg:grid-cols-2 lg:items-start lg:gap-x-8">
-        {/* LEFT — the engine-specific voice selector + a sample player */}
         <div className="min-w-0">
 
           {persona.tts.engine === 'piper' && (() => {
             const piperVoices: string[] = data?.tts?.piperVoices || [];
             const value = persona.tts.voice || CB_DEFAULT_VOICE;
-            // The default entry auditions with voice '' (the engine's built-in);
-            // the sentinel only exists because an empty select value is invalid.
+            // The sentinel exists only because an empty select value is invalid; the
+            // default entry auditions with voice '' (the engine's built-in).
             const groups: VoicePickerGroup[] = [{
               voices: [
                 { id: CB_DEFAULT_VOICE, label: 'Built-in default voice', previewVoice: '' },
@@ -223,8 +212,7 @@ export function PersonaVoiceCard({ persona, data, defaultEngine, cloudIssueText,
 
           {persona.tts.engine === 'chatterbox' && (() => {
             const cbVoices: string[] = data?.tts?.chatterboxVoices || [];
-            // Shared voice folder (issue #213). Default to state/voices/ when
-            // the controller advertises the new field.
+            // Shared voice folder (issue #213).
             const cbDir = 'state/voices/';
             const cbAvailable = data?.tts?.available?.chatterbox !== false;
             return (
@@ -310,9 +298,8 @@ export function PersonaVoiceCard({ persona, data, defaultEngine, cloudIssueText,
                         voices: customVoices.map(v => ({ id: v, label: v })),
                       }]
                       : []),
-                    // Persona references a voice that isn't currently present —
-                    // keep the value visible so a save round-trips without
-                    // rewriting, but flag it so the operator notices.
+                    // A voice that isn't present stays visible so a save round-trips
+                    // without rewriting it, but is flagged.
                     ...(!isBuiltin && !isCustom && persona.tts.voice
                       ? [{
                         label: 'Unknown',
@@ -367,8 +354,8 @@ export function PersonaVoiceCard({ persona, data, defaultEngine, cloudIssueText,
             const isCompat = cloudProvider === 'openai-compatible';
             const voice = persona.tts.voice.trim();
             const isPreset = isKnownCloudVoice(cloudProvider, discoveredVoices, voice);
-            // A compat server that advertised nothing leaves us with no list to
-            // show, so keep the plain text box it had before discovery existed.
+            // A compat server that advertised nothing leaves no list to show, so keep
+            // the plain text box.
             const hasList = discoveredVoices.length > 0 || !isCompat;
             const voiceGroups = buildCloudVoiceGroups(cloudProvider, discoveredVoices);
             return (
@@ -396,9 +383,8 @@ export function PersonaVoiceCard({ persona, data, defaultEngine, cloudIssueText,
                       }))}
                       onChange={v => {
                         // Switching provider invalidates the old voice id.
-                        // openai-compatible has no curated voices — leave the
-                        // field blank so the operator picks from the new
-                        // server's discovered list (or the server's default).
+                        // openai-compatible has no curated voices, so the field is
+                        // left blank for the discovered list or the server default.
                         const next = CLOUD_VOICES[v as keyof typeof CLOUD_VOICES]?.[0]?.id || '';
                         updateTts({ cloudProvider: v, voice: next });
                       }}
@@ -432,8 +418,8 @@ export function PersonaVoiceCard({ persona, data, defaultEngine, cloudIssueText,
                         <VoicePicker
                           value={isPreset ? voice : CUSTOM_VOICE_ID}
                           onChange={val => {
-                            // "Custom voice id…" clears the preset so isPreset flips
-                            // false and the free-text input below appears for entry.
+                            // Clearing the preset flips isPreset false, which is what
+                            // reveals the free-text input below.
                             updateTts({ voice: val === CUSTOM_VOICE_ID ? '' : val });
                           }}
                           groups={voiceGroups}
@@ -447,8 +433,8 @@ export function PersonaVoiceCard({ persona, data, defaultEngine, cloudIssueText,
                         />
                         {!isPreset && (
                           <Input
-                            // A blank compat voice is legitimate — the server
-                            // picks its own default — so don't flag it red.
+                            // A blank compat voice is legitimate (the server picks
+                            // its own default), so don't flag it red.
                             className={cn('mt-2', voice || isCompat ? 'border-ink' : 'border-[var(--danger)]')}
                             aria-label="Custom cloud voice id"
                             value={persona.tts.voice}
@@ -473,7 +459,6 @@ export function PersonaVoiceCard({ persona, data, defaultEngine, cloudIssueText,
             );
           })()}
 
-          {/* Audition this persona's engine + voice + speed before saving. */}
           <div className="mt-4">
             <VoicePreviewButton
               engine={persona.tts.engine}
@@ -491,7 +476,6 @@ export function PersonaVoiceCard({ persona, data, defaultEngine, cloudIssueText,
           </div>
         </div>
 
-        {/* RIGHT — voice level */}
         <div className="field mt-3.5 max-w-[360px] lg:mt-0 lg:max-w-[460px]">
           <div className="flex items-baseline justify-between gap-3">
             <Label>Voice level (dB)</Label>
@@ -511,7 +495,6 @@ export function PersonaVoiceCard({ persona, data, defaultEngine, cloudIssueText,
             Drag the meter or use the arrow keys.
           </div>
 
-          {/* Speech speed — per-persona rate multiplier (0.5–2.0×). */}
           <div className="field mt-4">
             <div className="flex items-baseline justify-between gap-3">
               <Label>Speech speed</Label>

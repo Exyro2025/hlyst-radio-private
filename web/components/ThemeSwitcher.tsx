@@ -15,9 +15,8 @@ interface SwatchProps {
   color: string | undefined;
 }
 
-// `useDynamicStyle` is how this codebase paints arbitrary per-element colours
-// without using the (lint-banned) inline `style` prop. The hook routes through
-// HTMLElement.style via the DOM API, which lint can't intercept.
+// `useDynamicStyle` paints arbitrary per-element colours without the
+// lint-banned inline `style` prop, by routing through HTMLElement.style.
 function Swatch({ color }: SwatchProps) {
   const ref = useRef<HTMLSpanElement>(null);
   useDynamicStyle(ref, { background: color || 'transparent' });
@@ -33,26 +32,19 @@ function SectionLabel({ children, className }: { children: ReactNode; className?
 }
 
 export interface ThemeSwitcherProps {
-  /** Visual variant — player chrome (TopBar) or admin header. Controls the
-   *  trigger button's text styling so it picks up the right cluster's font. */
+  /** Player chrome or admin header; picks the right cluster's font. */
   variant?: 'player' | 'admin';
 }
 
-// Per-listener theme + skin switcher. Drops into a header as a palette icon
-// and opens a centered modal listing every theme the controller exposes, the
-// player skins, and the lite-mode toggle. The listener's picks are persisted
-// in localStorage and beat the station-wide defaults until reset. Modal (not a
-// dropdown) so it reads the same on every skin regardless of where the icon
-// sits — an anchored popover collided with each skin's own chrome.
-//
-// The component renders nothing while the theme registry is still loading or
-// is empty — there's nothing useful to show, and bouncing a button in and out
-// would draw the eye more than just appearing once.
+// Per-listener theme + skin switcher. Picks persist in localStorage and beat
+// the station-wide defaults until reset. A modal, not a dropdown, so it reads
+// the same on every skin wherever the icon sits — an anchored popover collided
+// with each skin's own chrome. Renders nothing while the registry is loading or
+// empty, rather than bouncing a button in and out.
 export default function ThemeSwitcher({ variant = 'player' }: ThemeSwitcherProps) {
   const ctx = useThemeSwitcher();
-  // Skin selection is only available inside a PlayerShell; the admin header
-  // variant gets null and hides the section. With a single shipped skin
-  // there's nothing to switch, so the section also stays hidden then.
+  // Only available inside a PlayerShell; the admin header variant gets null.
+  // Also hidden when only one skin ships.
   const skinCtx = useSkinSelection();
   const showSkins = skinCtx != null && skinCtx.skins.length > 1;
   const [open, setOpen] = useState(false);
@@ -66,16 +58,13 @@ export default function ThemeSwitcher({ variant = 'player' }: ThemeSwitcherProps
     [ctx],
   );
 
-  // Bail out before the provider's first poll resolves — the trigger has
-  // nothing useful to open.
   if (!ctx || ctx.themes.length === 0) return null;
 
   const { themes, stationActiveId, overrideId, effectiveId, paintedId, mode, renderedMode, cycleMode } =
     ctx;
   const isDark = renderedMode === 'dark';
-  // A pinned mode the active palette wasn't authored for pauses that palette in
-  // favour of the built-in base (see resolveAppearance) — say so rather than
-  // leaving the picker highlighting a row that isn't on screen.
+  // A pinned mode the active palette wasn't authored for pauses that palette
+  // (see resolveAppearance); say so rather than highlighting an off-screen row.
   const palettePaused = mode !== null && paintedId === null;
 
   return (
@@ -87,9 +76,8 @@ export default function ThemeSwitcher({ variant = 'player' }: ThemeSwitcherProps
           title="Appearance"
           className={cn(
             'v3-focus inline-flex shrink-0 cursor-pointer items-center justify-center border-0 bg-transparent p-0 leading-none',
-            // The admin header packs this next to several other icon-only
-            // controls, so it needs a thumb-sized box on a phone; the dense
-            // desktop icon returns at sm. Player chrome is untouched.
+            // The admin header packs this next to other icon-only controls, so
+            // it needs a thumb-sized box on a phone; the dense icon returns at sm.
             variant === 'admin'
               ? 'caption min-h-9 min-w-9 text-muted sm:min-h-0 sm:min-w-0'
               : 'text-muted hover:text-ink',

@@ -1,6 +1,3 @@
-// Pure-ish helpers for the personas editor: id minting, initials, avatar
-// encoding, the settings→form mapping, and the validation/sanitisation used by
-// the container on save.
 import type { DjPromptPreset, FormState, Persona, SettingsResponse } from './types';
 import {
   AVATAR_TARGET_PX, DICEBEAR_STYLES, DIAL_NEUTRAL,
@@ -29,14 +26,10 @@ export function promptPresetValid(p: { name: string; text: string }): boolean {
   );
 }
 
-// ── settings → form ────────────────────────────────────────────────────────
-// One mapping, used by the initial load, by community install, and by Discard.
-// Discard reverts by re-deriving from the server response, so this MUST stay
-// the single defaulting path — a second, drifting copy is how "discard" ends up
-// reverting to something the server never said.
-
-// A stored persona → the fully-defaulted form shape. `allSkills` is the skill
-// catalog: a persona with no stored `skills` (legacy / code default) runs them all.
+// The single defaulting path — used by the initial load, community install and
+// Discard (which re-derives from the server response). A second, drifting copy is
+// how "discard" ends up reverting to something the server never said.
+// A persona with no stored `skills` (legacy / code default) runs them all.
 export function personaFromSettings(p: Partial<Persona> | undefined, allSkills: string[]): Persona {
   return {
     id: p?.id ?? clientMintId(),
@@ -92,8 +85,7 @@ export function promptLibraryFromSettings(
   return { djPrompts, activeDjPromptId, djHouseRules };
 }
 
-// The whole form, straight off a /settings response. null when the controller
-// returned no roster at all (nothing sane to edit).
+// null when the controller returned no roster at all.
 export function formFromSettings(j: SettingsResponse | null): FormState | null {
   if (!j?.values?.personas) return null;
   const allSkills = (j.skills?.catalog || []).map(s => s.name);
@@ -104,12 +96,9 @@ export function formFromSettings(j: SettingsResponse | null): FormState | null {
   };
 }
 
-// Do these two personas hold the same values? Used to decide whether closing
-// the editor needs a "discard changes?" confirm. Two normalisations:
-//   • skills are a set, not a list — toggling one off and back on reorders the
-//     array without changing meaning;
-//   • `avatar` is excluded — avatar mutations POST to their own endpoint and are
-//     already durable, so a fresh avatar is never a pending change.
+// Two normalisations: skills are a set, not a list (toggling one off and back on
+// reorders the array without changing meaning), and `avatar` is excluded because
+// avatar mutations POST to their own endpoint and are already durable.
 export function personasEqual(a: Persona | undefined, b: Persona | undefined): boolean {
   if (!a || !b) return a === b;
   const canonical = (p: Persona) =>
@@ -142,9 +131,8 @@ export async function fetchDicebearAvatar(): Promise<string> {
   });
 }
 
-// Resize + center-crop the operator-picked image to a square, returned as a
-// compressed (WebP, JPEG fallback) data URL ready for POSTing. Done entirely
-// client-side so we never need a server-side image library.
+// Resize + center-crop to a square client-side, so no server-side image library
+// is needed.
 export async function fileToAvatarDataUrl(file: File): Promise<string> {
   if (!/^image\/(png|jpe?g|webp)$/.test(file.type)) {
     throw new Error('please pick a PNG, JPEG, or WebP image');
@@ -165,12 +153,10 @@ export async function fileToAvatarDataUrl(file: File): Promise<string> {
     ctx.imageSmoothingEnabled = true;
     ctx.imageSmoothingQuality = 'high';
     ctx.drawImage(bitmap, sx, sy, side, side, 0, 0, AVATAR_TARGET_PX, AVATAR_TARGET_PX);
-    // Compressed export — an uncompressed 512×512 PNG is ~1 MB raw / ~1.33 MB
-    // base64, which blows past the controller's 600 KB JSON cap, so only tiny
-    // source images used to get through. WebP keeps a typical avatar in the
-    // tens-of-KB range and preserves transparency; JPEG is the universal
-    // fallback for the rare browser whose canvas can't emit WebP (it silently
-    // returns a data:image/png URL in that case).
+    // An uncompressed 512×512 PNG is ~1.33 MB base64, past the controller's 600 KB
+    // JSON cap. WebP keeps a typical avatar in the tens of KB and preserves
+    // transparency; a browser whose canvas can't emit WebP silently returns a
+    // data:image/png URL, hence the JPEG fallback.
     const webp = canvas.toDataURL('image/webp', 0.85);
     return webp.startsWith('data:image/webp')
       ? webp
@@ -209,11 +195,9 @@ export function personaValid(p: Persona): boolean {
   return true; // piper — voice ignored
 }
 
-// Coerce a persona's `voice` to a value the target engine's server-side
-// validator will accept. The `voice` field is shared across engines, so
-// switching engines can leave an incompatible value behind (e.g. a Kokoro id
-// after switching to Chatterbox). This is the last line of defence before the
-// POST — it runs regardless of UI state, so a stale form can't ship a bad save.
+// `voice` is shared across engines, so switching engines can leave an incompatible
+// value behind (a Kokoro id after switching to Chatterbox). Runs regardless of UI
+// state — the last line of defence before the POST.
 export function voiceForSave(engine: string, voice: string): string {
   if (engine === 'kokoro') return voice || 'bf_isabella';
   if (engine === 'chatterbox') return CHATTERBOX_VOICE_RE.test(voice) ? voice : '';
@@ -223,10 +207,9 @@ export function voiceForSave(engine: string, voice: string): string {
   return voice; // piper ignores voice; cloud carries its own
 }
 
-// For a cloud persona: why (if at all) its cloud voice won't actually play.
-// Prefer the controller's authoritative provider-aware readiness contract: it
-// includes both credentials and the station-wide Cloud enable switch. Fall
-// back to env presence only against an older controller without that contract.
+// Prefers the controller's provider-aware readiness contract (it covers both
+// credentials and the station-wide Cloud switch); env presence is the fallback for
+// an older controller without that contract.
 export function cloudIssue(persona: Persona | undefined, data: SettingsResponse | null): string | null {
   if (persona?.tts?.engine !== 'cloud') return null;
   const provider = persona.tts.cloudProvider;
@@ -258,7 +241,6 @@ export function cloudIssue(persona: Persona | undefined, data: SettingsResponse 
   return null;
 }
 
-// One-line voice summary for the active strip / roster cards.
 export function engineLabel(p: Persona): string {
   if (p.tts.engine === 'kokoro') return `kokoro / ${p.tts.voice.trim() || '—'}`;
   if (p.tts.engine === 'chatterbox') return `chatterbox / ${p.tts.voice.trim() || 'built-in'}`;
