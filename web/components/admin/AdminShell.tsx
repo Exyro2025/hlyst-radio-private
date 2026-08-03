@@ -38,6 +38,7 @@ import {
   Music,
   AudioLines,
   Waves,
+  Mic,
 } from 'lucide-react';
 import { useAdminAuth } from '../../lib/adminAuth';
 import type { SignInResult } from '../../lib/adminAuth';
@@ -185,6 +186,7 @@ const NAV_SECTIONS: NavSection[] = [
           { href: '/admin/imaging?tab=jingles', id: 'imaging-jingles', label: 'Jingles', icon: Music, tab: 'jingles', defaultTab: true },
           { href: '/admin/imaging?tab=sfx', id: 'imaging-sfx', label: 'SFX', icon: AudioLines, tab: 'sfx' },
           { href: '/admin/imaging?tab=beds', id: 'imaging-beds', label: 'Beds', icon: Waves, tab: 'beds' },
+          { href: '/admin/imaging?tab=voices', id: 'imaging-voices', label: 'Voices', icon: Mic, tab: 'voices' },
         ],
       },
       {

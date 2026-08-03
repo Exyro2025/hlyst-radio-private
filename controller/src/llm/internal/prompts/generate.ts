@@ -7,7 +7,7 @@
 // generated draft round-trips through Save without surprises.
 
 import { z } from 'zod';
-import { FREQUENCIES, SCRIPT_LENGTHS, moodVocab, SHOW_ENERGY, SOUL_MAX } from '../../../settings.js';
+import { FREQUENCIES, SCRIPT_LENGTHS, moodVocab, SHOW_ENERGY, SHOW_TOPIC_MAX, SOUL_MAX } from '../../../settings.js';
 import { THEME_TOKEN_KEYS } from '../../../themes.js';
 import { djObject } from '../strategy/object.js';
 import { buildContextLines } from './context.js';
@@ -65,7 +65,7 @@ interface ShowCtx {
 // (settings.moods is operator-editable), so a module-load z.enum can't bake it.
 const SHOW_SCHEMA_BASE = z.object({
   name: z.string().min(1).max(60).describe('the show name shown in the schedule — punchy, 1-4 words').catch('New show'),
-  topic: z.string().max(1000).describe('the brief the AI DJ reads before the slot: genres, eras, moods, artists, time of day, listener type, host tone. 1-4 sentences, max 1000 chars.').catch(''),
+  topic: z.string().max(SHOW_TOPIC_MAX).describe(`the brief the AI DJ reads before the slot: genres, eras, moods, artists, time of day, listener type, host tone. Aim for 1-4 sentences; max ${SHOW_TOPIC_MAX} chars.`).catch(''),
   genre: z.string().max(64).describe('a music genre lean if one fits (e.g. "jazz", "gospel", "lofi"); "" for no lean. Prefer a genre present in the supplied library list when relevant.').catch(''),
   filtersStrict: z.boolean().describe('true ONLY when the description demands exclusivity ("only plays hip-hop", "strictly 80s", "nothing but calm tracks") — hard-locks every pick to ALL the filters set (mood, genre, era, energy). false for normal soft leans. Requires at least one filter; leave false when none is set.').catch(false),
   fromYear: z.number().int().nullable().describe('start year of an era window if the show targets a decade (e.g. 1970), else null').catch(null),
