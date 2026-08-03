@@ -2,7 +2,7 @@
 
 import { useCallback, useRef, useState, type ReactNode } from 'react';
 import * as Dialog from '@radix-ui/react-dialog';
-import { LayoutTemplate, Moon, Palette, Sun, Zap } from 'lucide-react';
+import { LayoutTemplate, Palette, Zap } from 'lucide-react';
 import { cn } from '@/lib/cn';
 import { useDynamicStyle } from '../hooks/useDynamicStyle';
 import { useLiteMode } from '../hooks/useLiteMode';
@@ -24,9 +24,16 @@ function Swatch({ color }: SwatchProps) {
   return <span ref={ref} className="h-4 w-4 sm:h-5 sm:w-5" aria-hidden="true" />;
 }
 
+// Spans the full grid so a section heading always sits above its whole row of
+// cards, never beside the first one.
 function SectionLabel({ children, className }: { children: ReactNode; className?: string }) {
   return (
-    <span className={cn('v3-eyebrow border-b border-soft-border px-1 pb-1 text-[10px] tracking-[0.3em]', className)}>
+    <span
+      className={cn(
+        'v3-eyebrow col-span-full border-b border-soft-border px-1 pb-1 text-[10px] tracking-[0.3em]',
+        className,
+      )}
+    >
       {children}
     </span>
   );
@@ -70,13 +77,7 @@ export default function ThemeSwitcher({ variant = 'player' }: ThemeSwitcherProps
   // nothing useful to open.
   if (!ctx || ctx.themes.length === 0) return null;
 
-  const { themes, stationActiveId, overrideId, effectiveId, paintedId, mode, renderedMode, cycleMode } =
-    ctx;
-  const isDark = renderedMode === 'dark';
-  // A pinned mode the active palette wasn't authored for pauses that palette in
-  // favour of the built-in base (see resolveAppearance) — say so rather than
-  // leaving the picker highlighting a row that isn't on screen.
-  const palettePaused = mode !== null && paintedId === null;
+  const { themes, stationActiveId, overrideId, effectiveId } = ctx;
 
   return (
     <Dialog.Root open={open} onOpenChange={setOpen}>
@@ -106,7 +107,10 @@ export default function ThemeSwitcher({ variant = 'player' }: ThemeSwitcherProps
           className={cn(
             'v3-modal-pop fixed top-1/2 left-1/2 z-50 flex flex-col border border-ink bg-bg text-ink shadow-drawer outline-none',
             '-translate-x-1/2 -translate-y-1/2',
-            'max-h-[calc(100vh-3rem)] w-[min(360px,calc(100vw-2rem))]',
+            // Two columns of cards need roughly twice the old 360px; the modal
+            // still clamps to the viewport so a phone gets the single-column
+            // stack the grid falls back to below `sm`.
+            'max-h-[calc(100vh-3rem)] w-[min(620px,calc(100vw-2rem))]',
           )}
         >
           <div className="flex items-baseline justify-between gap-3 border-b border-ink px-5 py-3.5">
@@ -121,7 +125,7 @@ export default function ThemeSwitcher({ variant = 'player' }: ThemeSwitcherProps
             </Dialog.Close>
           </div>
 
-          <div className="v3-scroll grid flex-1 gap-1 overflow-auto px-3 py-3">
+          <div className="v3-scroll grid flex-1 grid-cols-1 gap-1 overflow-auto px-3 py-3 sm:grid-cols-2">
             <SectionLabel>Theme</SectionLabel>
             {themes.map(t => {
               const isActive = t.id === effectiveId;
@@ -162,7 +166,7 @@ export default function ThemeSwitcher({ variant = 'player' }: ThemeSwitcherProps
               onClick={() => onPickTheme(null)}
               disabled={!overrideId}
               className={cn(
-                'mt-1 w-full border-0 bg-transparent px-2 py-1 text-left text-[10px] tracking-[0.2em] text-muted uppercase',
+                'col-span-full mt-1 w-full border-0 bg-transparent px-2 py-1 text-left text-[10px] tracking-[0.2em] text-muted uppercase',
                 overrideId ? 'v3-focus cursor-pointer hover:text-ink' : 'cursor-default opacity-60',
               )}
             >
@@ -172,47 +176,6 @@ export default function ThemeSwitcher({ variant = 'player' }: ThemeSwitcherProps
                   ({themes.find(t => t.id === stationActiveId)?.name ?? stationActiveId})
                 </span>
               )}
-            </button>
-
-            {/* Light/dark control — independent of which palette is active, and
-                the on-screen twin of the `d` keyboard shortcut. Three states,
-                not two: AUTO follows the palette (and the system preference
-                when there is no palette), LIGHT/DARK pin it per-browser.
-                Flipping back off a pin returns to AUTO rather than pinning the
-                opposite, so a stray press can't detach the listener from the
-                operator's palette for good. Stays open so the flip is visible. */}
-            <button
-              type="button"
-              onClick={() => cycleMode()}
-              aria-label={`Appearance: ${mode ? `${mode} (pinned)` : `auto, currently ${renderedMode}`}. Activate to switch to ${isDark ? 'light' : 'dark'}.`}
-              className="v3-focus mt-2 flex w-full cursor-pointer items-center gap-2 border border-soft-border bg-bg px-2 py-1.5 text-left hover:bg-[var(--overlay)]"
-            >
-              {isDark ? (
-                <Moon className="h-4 w-4 shrink-0" aria-hidden="true" />
-              ) : (
-                <Sun className="h-4 w-4 shrink-0" aria-hidden="true" />
-              )}
-              <span className="grid min-w-0 flex-1 gap-0.5">
-                <span className="truncate text-[11px] font-bold tracking-[0.12em] uppercase">
-                  Light / dark
-                </span>
-                <span className="truncate text-[10px] leading-[1.3] text-muted">
-                  {palettePaused
-                    ? 'Palette paused while pinned — shortcut: D'
-                    : mode
-                      ? 'Pinned — press again for auto · shortcut: D'
-                      : 'Following the palette — shortcut: D'}
-                </span>
-              </span>
-              <span
-                className={cn(
-                  'shrink-0 text-[10px] font-bold tracking-[0.2em] uppercase',
-                  mode ? 'text-vermilion' : 'text-muted',
-                )}
-                aria-hidden="true"
-              >
-                {mode ?? 'Auto'}
-              </span>
             </button>
 
             {/* Player-skin picker — a different face for the whole player, not
@@ -259,7 +222,7 @@ export default function ThemeSwitcher({ variant = 'player' }: ThemeSwitcherProps
                   }}
                   disabled={!skinCtx.overrideId}
                   className={cn(
-                    'mt-1 w-full border-0 bg-transparent px-2 py-1 text-left text-[10px] tracking-[0.2em] text-muted uppercase',
+                    'col-span-full mt-1 w-full border-0 bg-transparent px-2 py-1 text-left text-[10px] tracking-[0.2em] text-muted uppercase',
                     skinCtx.overrideId ? 'v3-focus cursor-pointer hover:text-ink' : 'cursor-default opacity-60',
                   )}
                 >
@@ -280,7 +243,7 @@ export default function ThemeSwitcher({ variant = 'player' }: ThemeSwitcherProps
               aria-pressed={lite}
               onClick={() => setLite(!lite)}
               className={cn(
-                'v3-focus mt-2 flex w-full cursor-pointer items-center gap-2 border px-2 py-1.5 text-left',
+                'v3-focus col-span-full mt-2 flex w-full cursor-pointer items-center gap-2 border px-2 py-1.5 text-left',
                 lite
                   ? 'border-vermilion bg-[var(--ink-softer)]'
                   : 'border-soft-border bg-bg hover:bg-[var(--overlay)]',
