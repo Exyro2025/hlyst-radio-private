@@ -37,8 +37,11 @@ import { nextIdleState, type IdleState } from './stream-idle-pure.js';
 
 // One tick every 5s: while live it just reads the 15s monitor's cached count
 // (entering idle is not latency-sensitive); while idle it forces a fresh
-// Icecast poll, so a new listener waits ≤ ~5s of silence before the music
-// resumes.
+// Icecast poll, so a new listener waits ~5s of silence before the music
+// resumes — worst case one tick plus one status deadline (~8s), because the
+// forced poll is single-flighted and can join a monitor poll that started just
+// before the listener connected. Bounding that tighter would mean letting the
+// two pollers race again, which is what manufactured the #1256 failures.
 const TICK_MS = 5000;
 
 let state: IdleState = { idle: false, zeroSince: null };

@@ -70,6 +70,20 @@ let lastStatus: StreamStatus = {
 // should resume sooner, not later.
 const STALE_STATUS_LIMIT = 4;
 
+// Deadline on the Icecast status fetch. Raised from 1500ms once the poll became
+// single-flighted (below): the old figure was chosen when three cadences could
+// each have a request in flight at once, where a longer deadline meant a deeper
+// pile-up. Coalescing removes that objection, and 1500ms was measurably tight —
+// #1256's reporter logged hundreds of AbortErrors per empty-room hour against an
+// Icecast that direct curls never took near a second to answer, with the
+// analysis pass (which only runs when the room IS empty) the likeliest source of
+// the host pressure that reached it. Attacking the failure rate is strictly
+// better than widening STALE_STATUS_LIMIT to absorb more failures: the limit is
+// shared with the #461 offline-detection contract, which should NOT get slower.
+// Still comfortably inside the idle monitor's 5s tick, so the ~20s fail-open
+// budget while paused is unchanged.
+const STATUS_TIMEOUT_MS = 3000;
+
 // Next cached status after a status-fetch failure. Pure (no I/O) so the
 // transient-vs-sustained branching is unit-tested in isolation
 // (scripts/listeners-status.test.ts).
@@ -144,8 +158,9 @@ export function singleFlight<T>(run: () => Promise<T>): () => Promise<T> {
 // (lastCount/lastGoodCount/consecutiveStatusFailures/lastStatus) and is driven
 // from three cadences at once — the 15s monitor interval, the idle monitor's
 // forced 5s refresh (stream-idle.ts), and POST /request's on-demand refresh().
-// The two commit points are ~1.5s apart (the failure path waits out the fetch
-// timeout), so without the guard a slow doomed poll could land AFTER a younger
+// The two commit points are a whole STATUS_TIMEOUT_MS apart (the failure path
+// waits out the fetch timeout), so without the guard a slow doomed poll could
+// land AFTER a younger
 // successful one and overwrite its fresh state — a phantom blip on the raw
 // readers and a "consecutive" failure count that isn't. Joining the poll
 // already in flight keeps every caller's freshness contract (the answer is at
@@ -160,7 +175,7 @@ async function pollCount(persistHistory: boolean) {
   let channels: number | null = null;
   let rawCount = 0; // un-deduped status sum — the fallback when admin is unreachable
   try {
-    const r = await fetchWithTimeout(config.icecast.statusUrl, { timeoutMs: 1500 });
+    const r = await fetchWithTimeout(config.icecast.statusUrl, { timeoutMs: STATUS_TIMEOUT_MS });
     const ic = ((await r.json()) as any)?.icestats;
     const sources = Array.isArray(ic?.source) ? ic.source : ic?.source ? [ic.source] : [];
     // Only our two broadcast mounts count. Anything else (e.g. an /admin
@@ -292,8 +307,20 @@ export async function refresh() {
 // Calls pollCount directly, bypassing the single-flight guard: the child has
 // no concurrent pollers to coalesce with, and joining would silently drop the
 // skip-history flag.
+//
+// Returns the GATED count, not pollCount's raw result. The quiet gate
+// (music/analyze-quiet-pure.ts) is the THIRD fail-open-on-unknown reader in the
+// codebase, and it needs the same hysteresis as the other two for the same
+// reason (#1256) — its fail-open direction is the opposite one, so a single
+// blip here starts a heavy DSP pass while somebody is listening rather than
+// releasing a pause. The child's own module state carries the hysteresis: it
+// polls once per track (or every 30s while waiting out the window), so
+// consecutive failures accumulate across calls exactly as they do in the
+// monitor loop, and the first call still reads unknown because lastGoodCount
+// is null — boot behaviour is unchanged.
 export async function probeListenerCount(): Promise<number | null> {
-  return pollCount(false);
+  await pollCount(false);
+  return gatedListenerCount();
 }
 
 // Set by broadcast/stream-idle.ts (via setStreamIdle) while the programme is
@@ -333,8 +360,15 @@ export function djCallsAllowed() {
 
 // How long boot waits on the first poll before giving up and starting anyway.
 // Bounds the worst case (a wedged admin endpoint costs 2s per mount on top of
-// the 1.5s status fetch) — the reading is a nicety, never a boot dependency.
-const FIRST_POLL_WAIT_MS = 2000;
+// the status fetch) — the reading is a nicety, never a boot dependency.
+//
+// Derived from STATUS_TIMEOUT_MS rather than written as a flat number: the wait
+// only buys anything if it outlasts one failing status fetch, so a deadline
+// raised past a hardcoded wait would silently give up before every slow poll
+// and hand back the "never polled" fail-open this exists to close. A cold
+// `compose up` is unaffected either way — Icecast isn't listening yet, so the
+// connection is refused immediately rather than timing out.
+const FIRST_POLL_WAIT_MS = STATUS_TIMEOUT_MS + 500;
 
 // Starts the 15s monitor loop. The returned promise settles once the FIRST poll
 // has landed (or FIRST_POLL_WAIT_MS has passed), so boot can take one reading
