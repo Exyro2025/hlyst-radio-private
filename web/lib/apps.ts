@@ -9,10 +9,26 @@
 // is nothing to install — this is a browse-and-link directory like /stations.
 import { fetchCommunityCatalog } from './communityCatalog';
 
-/** The six buckets. `integration` is deliberately a catch-all (MCP servers,
- *  Home Assistant, hardware, libraries) rather than three chips holding one
- *  entry each. Mirrors APP_TYPES in the community repo's build-catalog.mjs. */
-export const APP_TYPES = ['mobile', 'web', 'desktop', 'terminal', 'bot', 'integration'] as const;
+/** The buckets. `integration` is deliberately a catch-all (MCP servers, Home
+ *  Assistant, hardware, libraries) rather than several chips holding one entry
+ *  each, and stays last for that reason. Mirrors APP_TYPES in the community
+ *  repo's build-catalog.mjs.
+ *
+ *  `skin` is the odd one: a player face, not a standalone app. Skins are a
+ *  COMPILE-TIME registry of in-repo components (components/skins/index.ts) with
+ *  no runtime install path, so a listed skin is source an operator builds into
+ *  their own deployment — a pointer, which is all this directory ever offers.
+ *  If skins ever become loadable at runtime this should move to its own surface
+ *  with an install button, the way skills and personas have one. */
+export const APP_TYPES = [
+  'mobile',
+  'web',
+  'desktop',
+  'terminal',
+  'bot',
+  'skin',
+  'integration',
+] as const;
 export type AppType = (typeof APP_TYPES)[number];
 
 /** Chip / card labels for each bucket. */
@@ -22,6 +38,7 @@ export const APP_TYPE_LABELS: Record<AppType, string> = {
   desktop: 'Desktop',
   terminal: 'Terminal',
   bot: 'Bot',
+  skin: 'Skin',
   integration: 'Integration',
 };
 

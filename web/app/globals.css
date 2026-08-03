@@ -5217,6 +5217,7 @@ html:has(.admin-root.paper) {
 .bs-apps-filterwrap[data-filter='desktop'] .bs-app-card:not([data-type='desktop']),
 .bs-apps-filterwrap[data-filter='terminal'] .bs-app-card:not([data-type='terminal']),
 .bs-apps-filterwrap[data-filter='bot'] .bs-app-card:not([data-type='bot']),
+.bs-apps-filterwrap[data-filter='skin'] .bs-app-card:not([data-type='skin']),
 .bs-apps-filterwrap[data-filter='integration'] .bs-app-card:not([data-type='integration']) {
     display: none;
 }

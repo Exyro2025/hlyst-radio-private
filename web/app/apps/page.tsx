@@ -57,13 +57,26 @@ async function AppsGrid({ apps }: { apps: Promise<CommunityApp[]> }) {
     );
   }
   return (
-    <AppTypeFilter types={presentTypes(all)}>
-      <ul className="bs-stations-grid">
-        {all.map((a) => (
-          <AppCard key={a.slug} app={a} />
-        ))}
-      </ul>
-    </AppTypeFilter>
+    <>
+      <AppTypeFilter types={presentTypes(all)}>
+        <ul className="bs-stations-grid">
+          {all.map((a) => (
+            <AppCard key={a.slug} app={a} />
+          ))}
+        </ul>
+      </AppTypeFilter>
+      {/* Only when a skin is actually listed. Skins are a compile-time registry
+          (components/skins/index.ts) with no runtime install, so a reader who
+          finds one here needs telling how it gets onto their station — but a
+          directory with no skins in it shouldn't carry the caveat. */}
+      {all.some((a) => a.type === 'skin') && (
+        <p className="bs-stations-report">
+          Skins are player faces built into the web app, not add-ons a running station can
+          install. Taking one home means copying its source into your own deployment and
+          registering it in <code className="bs-code-inline">components/skins</code>.
+        </p>
+      )}
+    </>
   );
 }
 
@@ -80,7 +93,8 @@ export default function AppsIndex() {
         <p>
           A station speaks a plain, open API, so anyone can build a way to listen to it —
           or a way to boss it around. Here&rsquo;s what people have made: players, bots,
-          terminal clients, integrations. Take one home, or add your own.
+          terminal clients, integrations, and skins for the player it already ships with.
+          Take one home, or add your own.
         </p>
       </header>
 
