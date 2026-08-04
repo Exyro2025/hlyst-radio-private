@@ -67,6 +67,9 @@ export default function ShowsPanel() {
   const [genres, setGenres] = useState<string[]>([]);
   // Admin-gated; failures are silent (the picker just offers no options).
   const [playlists, setPlaylists] = useState<{ id: string; name: string; songCount: number | null }[]>([]);
+  // A failed fetch leaves `playlists` empty too, so the editor needs to know the
+  // difference before it calls a show's pinned id missing.
+  const [playlistsLoaded, setPlaylistsLoaded] = useState(false);
   // Guarded by scrollToEditorRef so unrelated re-renders don't yank the page.
   useEffect(() => {
     if (!scrollToEditorRef.current) return;
@@ -157,7 +160,10 @@ export default function ShowsPanel() {
         const r = await adminFetch('/dj/playlists');
         if (!r.ok || cancelled) return;
         const j = (await r.json()) as { results?: { id: string; name: string; songCount: number | null }[] };
-        if (Array.isArray(j.results)) setPlaylists(j.results);
+        if (Array.isArray(j.results)) {
+          setPlaylists(j.results);
+          setPlaylistsLoaded(true);
+        }
       } catch {}
     })();
     return () => { cancelled = true; };
@@ -434,6 +440,7 @@ export default function ShowsPanel() {
           activeThemeId={activeThemeId}
           genres={genres}
           playlists={playlists}
+          playlistsLoaded={playlistsLoaded}
           apiBase={apiBase}
           adminFetch={adminFetch}
           minTrackSeconds={data?.values?.minTrackSeconds}

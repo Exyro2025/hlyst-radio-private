@@ -202,6 +202,101 @@ function ThemeCard({
   );
 }
 
+interface PlaylistOpt {
+  id: string;
+  name: string;
+  songCount: number | null;
+}
+
+// Checkbox list for the show's playlist anchor / exclusion sets.
+//
+// Ids pinned on the show that no longer resolve get a row of their own. A playlist
+// deleted (or deleted and recreated) in Navidrome leaves its old id behind on the
+// show, and rendering only the live index meant that id had no checkbox — invisible
+// and unremovable from the UI, while failing to resolve on every pick cycle. The
+// only way out was hand-editing settings.json.
+//
+// `loaded` gates the whole idea: a failed `/dj/playlists` fetch also leaves the
+// index empty, and flagging every working anchor as missing there would invite the
+// operator to delete good config. Unknown means "say nothing", not "say gone".
+export function PlaylistPicker({
+  playlists,
+  loaded,
+  selected,
+  max,
+  onChange,
+}: {
+  playlists: PlaylistOpt[];
+  loaded: boolean;
+  selected: string[];
+  max: number;
+  onChange: (next: string[]) => void;
+}) {
+  const missing = loaded
+    ? selected.filter((id) => !playlists.some((p) => p.id === id))
+    : [];
+
+  if (!playlists.length && !missing.length) {
+    return (
+      <span className="field-hint opacity-60">
+        No Navidrome playlists found yet. Create some in Navidrome, then reopen
+        this panel.
+      </span>
+    );
+  }
+
+  const atCap = selected.length >= max;
+  return (
+    <div className="grid max-h-44 gap-1 overflow-y-auto border border-ink bg-[var(--ink-softer)] p-2">
+      {playlists.map((pl) => {
+        const checked = selected.includes(pl.id);
+        const capped = !checked && atCap;
+        return (
+          <label
+            key={pl.id}
+            className={cn(
+              'flex items-center gap-2 text-sm',
+              capped ? 'opacity-40' : 'cursor-pointer',
+            )}
+          >
+            <input
+              type="checkbox"
+              checked={checked}
+              disabled={capped}
+              onChange={() =>
+                onChange(
+                  checked
+                    ? selected.filter((id) => id !== pl.id)
+                    : [...selected, pl.id],
+                )
+              }
+            />
+            <span className="truncate">{pl.name}</span>
+            {pl.songCount != null && (
+              <span className="field-hint">({pl.songCount})</span>
+            )}
+          </label>
+        );
+      })}
+      {missing.map((id) => (
+        <label
+          key={id}
+          className="flex cursor-pointer items-center gap-2 text-sm opacity-70"
+          title={`Playlist ${id} no longer exists in Navidrome. Uncheck to remove it from this show.`}
+        >
+          <input
+            type="checkbox"
+            checked
+            onChange={() => onChange(selected.filter((x) => x !== id))}
+          />
+          <span className="truncate">(missing) {id}</span>
+          <span className="field-hint">deleted in Navidrome</span>
+        </label>
+      ))}
+    </div>
+  );
+}
+
 export function ThemePicker({
   themes,
   activeThemeId,
