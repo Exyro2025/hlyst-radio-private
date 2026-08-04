@@ -183,8 +183,13 @@ export default function MacOs() {
         <p className="mt-3">
           The <code className="bs-code-inline">tts-heavy</code> service carries its
           own <code className="bs-code-inline">platform: linux/amd64</code> pin, so
-          it emulates without you doing anything. The heavy analyzer needs both
-          the opt-in and the platform default:
+          it needs no platform setting of its own — but it is profile-gated and
+          stays down until you ask for it by name with{' '}
+          <code className="bs-code-inline">docker compose --profile tts-heavy up -d</code>{' '}
+          (or <code className="bs-code-inline">COMPOSE_PROFILES=tts-heavy</code> in{' '}
+          <code className="bs-code-inline">.env</code>). The heavy analyzer is the
+          other way round — it replaces a service that is already running, so it
+          needs both the opt-in and the platform default:
         </p>
         <CodeBlock lang="env">{`# .env
 ANALYZER_HEAVY=1

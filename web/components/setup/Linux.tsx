@@ -90,17 +90,23 @@ newgrp docker`}</CodeBlock>
             <p>
               The default stack binds exactly one host port —{' '}
               <code className="bs-code-inline">7700</code>, Caddy. Let it through
-              whichever firewall you run:
+              whichever firewall you run. Debian and Ubuntu:
             </p>
-            <CodeBlock>{`sudo ufw allow 7700/tcp                       # Debian / Ubuntu
-sudo firewall-cmd --add-port=7700/tcp --permanent && sudo firewall-cmd --reload   # Fedora / RHEL`}</CodeBlock>
+            <CodeBlock>{`sudo ufw allow 7700/tcp`}</CodeBlock>
+            <p>Fedora and RHEL:</p>
+            <CodeBlock>{`sudo firewall-cmd --add-port=7700/tcp --permanent && sudo firewall-cmd --reload`}</CodeBlock>
             <p>
               Then <code className="bs-code-inline">http://SERVER-IP:7700</code>.
               If a Cloudflare Tunnel or a reverse proxy on this same host is the
-              only way in, leave the port closed and set{' '}
+              only way in, choose <strong>prod-byo</strong> at init time and set{' '}
               <code className="bs-code-inline">BIND_ADDRESS=127.0.0.1</code> in{' '}
-              <code className="bs-code-inline">.env</code> so nothing is exposed
-              to the LAN at all.
+              <code className="bs-code-inline">.env</code> — that shape publishes
+              each service on its own host port and honours the override. The
+              default stack ignores{' '}
+              <code className="bs-code-inline">BIND_ADDRESS</code> entirely: its
+              Caddy port is published on every interface, and Docker publishes
+              past <code className="bs-code-inline">ufw</code>, so simply
+              skipping the rule above does not close it.
             </p>
             <CodeBlock>{`subwave doctor`}</CodeBlock>
           </div>
@@ -188,7 +194,14 @@ sudo firewall-cmd --add-port=7700/tcp --permanent && sudo firewall-cmd --reload 
             <strong>8 GB+</strong> — only if you opt into{' '}
             <code className="bs-code-inline">ANALYZER_HEAVY=1</code> (CLAP +
             Demucs) or the <code className="bs-code-inline">tts-heavy</code>{' '}
-            voice-cloning sidecar.
+            voice-cloning sidecar. Note the two opt in differently: the analyzer
+            already runs and{' '}
+            <code className="bs-code-inline">ANALYZER_HEAVY=1</code> only swaps
+            its image, while <code className="bs-code-inline">tts-heavy</code> is
+            profile-gated and does not start at all until you run{' '}
+            <code className="bs-code-inline">docker compose --profile tts-heavy up -d</code>{' '}
+            (or set <code className="bs-code-inline">COMPOSE_PROFILES=tts-heavy</code>{' '}
+            in <code className="bs-code-inline">.env</code>).
           </li>
           <li>
             <strong>NVIDIA card?</strong> The heavy analysis stack has a CUDA

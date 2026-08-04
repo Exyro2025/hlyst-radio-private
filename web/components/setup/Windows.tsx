@@ -223,6 +223,12 @@ start http://localhost:7700/onboarding`}</CodeBlock>
               are amd64 images on an amd64 host — no emulation penalty, unlike
               Apple Silicon. An NVIDIA card can go further still: Docker Desktop
               exposes CUDA through WSL2, so the GPU analyzer overlay works.
+              Running native is not the same as running, though:{' '}
+              <code className="bs-code-inline">tts-heavy</code> is profile-gated,
+              so it only starts under{' '}
+              <code className="bs-code-inline">docker compose --profile tts-heavy up -d</code>{' '}
+              (or with <code className="bs-code-inline">COMPOSE_PROFILES=tts-heavy</code>{' '}
+              in <code className="bs-code-inline">.env</code>).
             </p>
           </li>
           <li>
