@@ -161,7 +161,7 @@ async function repickRequestFromSeen({ seen, badId, requester, text }:
 // (#1187) — the agent's own run needs neither. They're the same values
 // runTrackEvent hands the ordinary pool fallback, so a rescued pick is built
 // from exactly the pool a failed agent run would have produced.
-async function pickViaAgent(queue, ctx, { wantLink, audioWaypoint = null, current = null, showAt = null, rankTarget = null, linkClockAt = null }: { wantLink: boolean; audioWaypoint?: number[] | null; current?: any; showAt?: Date | null; rankTarget?: { bpm: number | null; key: string | null } | null; linkClockAt?: Date | null }): Promise<boolean> {
+async function pickViaAgent(queue, ctx, { wantLink, audioWaypoint = null, current = null, showAt = null, rankTarget = null, linkAirAt = null }: { wantLink: boolean; audioWaypoint?: number[] | null; current?: any; showAt?: Date | null; rankTarget?: { bpm: number | null; key: string | null } | null; linkAirAt?: Date | null }): Promise<boolean> {
   await library.load();
   const stats = library.stats();
   const windows = recencyWindowsForLibrary(stats.distinctArtists);
@@ -441,7 +441,7 @@ async function pickViaAgent(queue, ctx, { wantLink, audioWaypoint = null, curren
   // the track on-air now), instead of immediately over that on-air track (#189).
   // Stamp `current` as the link's back-announce target so the queue can drop the
   // link if a request jumps ahead of this pick before it airs.
-  const queued = await enqueuePick(queue, song, object.reason, 'agent', link, current, { sweep, washout, blend, dissolve, chop, loop }, { linkClockAt });
+  const queued = await enqueuePick(queue, song, object.reason, 'agent', link, current, { sweep, washout, blend, dissolve, chop, loop }, { linkClockAt: linkAirAt });
   // Pick was already queued/on-air and got deduped — don't record a session turn
   // for a track that never airs. Returning false lets runTrackEvent fall through
   // to the pool for a fresh pick.
@@ -738,12 +738,12 @@ export async function runTrackEvent(queue, ctx, { wantLink, showAt = null, prede
     // and go straight to the one-call pool picker below to stretch the budget.
     if (settings.get().llm?.pickerAgent && !cheap && !breakerOpen()) {
       try {
-        // `linkClockAt` mirrors the clause above: stamp the item with the air
+        // `linkAirAt` mirrors the clause above: stamp the item with the air
         // moment the model was TOLD to speak, and only when it was actually
         // told one — a run given no clock makes no claim to go stale (#1314).
         const queued = await pickViaAgent(queue, ctx, {
           wantLink, audioWaypoint, current, showAt, rankTarget,
-          linkClockAt: airClock ? airAt : null,
+          linkAirAt: airClock ? airAt : null,
         });
         breakerSuccess();
         if (queued) return;

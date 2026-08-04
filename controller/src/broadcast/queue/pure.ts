@@ -80,7 +80,11 @@ export function linkAirDate(showAt: Date): Date {
 // when the pick is being made AHEAD of the endgame window, never inside it. A
 // track-start pick on a normal 3-5 minute track clears it comfortably and keeps
 // its clock; below it the link simply doesn't state a time, which is the
-// pre-#864 behaviour for an unknowable air moment.
+// pre-#864 behaviour for an unknowable air moment. The flip side is accepted,
+// not accidental: a library whose tracks run under ~2 minutes (punk, hardcore)
+// never has this much runway even at track start, so its links simply never
+// speak the clock — that library's every seam sits inside the risk window the
+// floor exists to silence, and hourly checks still tell the time.
 export const LINK_CLOCK_MIN_RUNWAY_SEC = DRAIN_DEADLINE_SEC;
 
 // The instant a pick-attached link may claim to air at, or null when the
