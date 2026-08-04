@@ -40,10 +40,14 @@ export default function CustomSkills() {
     SKILL.md      # frontmatter (→ settings) + body (→ the DJ's brief)
     tool.mjs      # OPTIONAL: a data fetcher the DJ can call`}</CodeBlock>
         <p>
-          A ready-to-copy example ships in the repo at{' '}
-          <code className="bs-code-inline">docs/examples/skills/moon-phase</code>. Copy it
-          into <code className="bs-code-inline">state/skills/</code> and hit{' '}
-          <strong>Rescan</strong> on the admin Skills page.
+          Two ready-to-copy examples ship in the repo under{' '}
+          <code className="bs-code-inline">docs/examples/skills/</code>:{' '}
+          <code className="bs-code-inline">moon-phase</code>, the small end — no settings, no
+          network, it works the lunar phase out from the date — and{' '}
+          <code className="bs-code-inline">sunset</code>, which has operator settings, calls a
+          public API and remembers what it already said. Copy a folder into{' '}
+          <code className="bs-code-inline">state/skills/</code> and hit <strong>Rescan</strong>{' '}
+          on the admin Skills page.
         </p>
         <p>
           Prefer not to touch disk? The admin <strong>Skills</strong> page has a{' '}
@@ -178,12 +182,28 @@ export const ready = (services) => services.searchReady();
 
 // OPTIONAL: agent-steerable string params — the agent may pass a value or
 // null for each; without this the tool is zero-arg (best for small models).
-export const inputs = { query: 'what to search for; null for the default dig' };`}</CodeBlock>
+export const inputs = { query: 'what to search for; null for the default dig' };
+
+// OPTIONAL: operator knobs — each one becomes a field in this skill's edit
+// sheet. Values are saved to this skill's own SKILL.md and arrive as \`config\`.
+export const configFields = {
+  feed:         { type: 'url',    label: 'News feed · RSS 2.0' },
+  feedMaxItems: { type: 'number', label: 'Max items', min: 1, max: 50, integer: true },
+};`}</CodeBlock>
         <p>
           The call is timeout-guarded and any error degrades cleanly to &ldquo;no
           data&rdquo;; a slow or broken skill can never hang the station. With no{' '}
           <code className="bs-code-inline">tool.mjs</code>, the skill writes from its brief
           alone — no live data to look at.
+        </p>
+        <p>
+          <code className="bs-code-inline">configFields</code> is how a skill gets its own
+          settings without anyone touching the controller — <code className="bs-code-inline">text</code>,{' '}
+          <code className="bs-code-inline">url</code> or <code className="bs-code-inline">number</code>, up to
+          eight of them. Because they&rsquo;re declared in the code rather than keyed to the
+          skill&rsquo;s name, a <em>copy</em> of a skill keeps its settings: that&rsquo;s what
+          makes a second news source, on a second feed, a matter of export → rename →
+          import.
         </p>
         <div className="bs-callout">
           <div className="bs-eyebrow">IT RUNS YOUR CODE</div>

@@ -488,6 +488,16 @@ export function stats() {
   };
 }
 
+// How many tracks have had a vocal pass at all (vocal_ranges_json NOT NULL,
+// where a stored "[]" — analysed instrumental — counts as done). Deliberately
+// NOT folded into stats(): it's an extra COUNT that only the vocal show filter
+// needs, and only when a show actually pins one, so the callers that ask for it
+// pay for it. Zero here means the whole dimension has no coverage.
+export function vocalAnalyzedCount(): number {
+  if (!loaded) return 0;
+  try { return db.vocalAnalyzedCount(); } catch { return 0; }
+}
+
 // Re-export the filter contract — admin Library browse panel calls this.
 // Implementation is in library-db.ts as a SQL query (replaces the old ~50-line
 // in-memory loop).
