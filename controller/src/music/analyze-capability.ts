@@ -138,9 +138,16 @@ export const SYSTEMIC_FAILURE_RUN = 5;
 // `consecutive` is the number of failures since the last SUCCESS in this pass,
 // including the one being decided. Scattered bad files never build a run (a
 // good track between them resets it), so they still get stamped on the first
-// attempt; a systemic fault stops costing anything after the fifth track. Worst
-// case for a genuinely contiguous block of unanalysable files is that it takes
-// a few more passes to work through, which is the cheap direction to be wrong.
+// attempt. A true answer means "this MAY be about the file" — the caller
+// buffers the stamp and only writes it once a later success proves the pass
+// healthy, discarding the buffer if the run trips the threshold instead. That
+// deferral matters: written eagerly, the five failures in front of the guard
+// would land on every pass of a persistent outage, sentencing the scope in id
+// order five tracks per three passes — and an excluded track can't self-heal,
+// because the success that would clear its count is the thing exclusion
+// prevents. Worst case for a genuinely contiguous block of unanalysable files
+// is that it takes a few more passes to work through, which is the cheap
+// direction to be wrong.
 export function failureCountsAgainstTrack(consecutive: number): boolean {
   return consecutive <= SYSTEMIC_FAILURE_RUN;
 }

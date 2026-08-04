@@ -453,6 +453,27 @@ export async function runAnalysisPass(opts: AnalyzeOptions = {}): Promise<Analyz
   // Failures since the last success in THIS pass — the signal that separates a
   // bad file from a bad pass (see failureCountsAgainstTrack).
   let consecutiveFailures = 0;
+  // Failure stamps held back until the pass proves it deserves to hand them
+  // out. A throw inside the systemic window MIGHT be evidence about the file —
+  // it depends on how the run ends, which is only known later: the next
+  // success flushes the buffer (a scattered bad file still gets its stamp on
+  // the pass it failed), the guard tripping discards it. Stamping eagerly and
+  // revoking on the trip would also work, but the revoke would have to
+  // subtract exactly what this pass added on top of counts earlier passes
+  // earned; withholding the write is the version with nothing to un-do.
+  let pendingFailureStamps: Array<{ id: string; reason: string }> = [];
+  const flushFailureStamps = () => {
+    for (const f of pendingFailureStamps) {
+      try {
+        db.recordAnalysisFailure(f.id, f.reason);
+      } catch (stampErr: any) {
+        // Never let bookkeeping end the pass — the old behaviour (retry
+        // forever) is a better failure than stopping the run.
+        console.error(`[analyze] ${f.id} failure stamp failed: ${stampErr?.message || stampErr}`);
+      }
+    }
+    pendingFailureStamps = [];
+  };
   let audioEmbedded = 0;
   let vocalAnalyzed = 0;
   // Quiet-times gate (#1099). The toggle itself is re-read from disk on every
@@ -657,46 +678,49 @@ export async function runAnalysisPass(opts: AnalyzeOptions = {}): Promise<Analyz
         }
       }
       analyzed += 1;
-      // A success is the evidence that the pass itself is healthy, so the run
-      // of failures the systemic guard below counts starts again from here.
+      // A success is the evidence that the pass itself is healthy — so the
+      // failures buffered since the last one were about their FILES after all,
+      // and their stamps land now. The run the systemic guard counts starts
+      // again from here.
+      flushFailureStamps();
       consecutiveFailures = 0;
     } catch (err: any) {
       failed += 1;
       consecutiveFailures += 1;
-      // The analysis columns stay NULL so the next run retries — but stamp WHY,
-      // and count it. Without the stamp a permanently unanalysable track (a
-      // corrupt file, a library row whose file is gone) is indistinguishable
+      // The analysis columns stay NULL so the next run retries — but record
+      // WHY, and count it. Without the stamp a permanently unanalysable track
+      // (a corrupt file, a library row whose file is gone) is indistinguishable
       // from one that has never been attempted, so it re-enters the scope on
       // every pass forever and nothing anywhere can name it. After
       // MAX_ANALYSIS_FAILURES consecutive failures the exclusion in the scope
       // queries drops it, and the admin list is where it goes to be seen.
       //
-      // ...but ONLY while the throw is still evidence about the file. Past a
-      // run of SYSTEMIC_FAILURE_RUN with no success in between, the shared
-      // cause is the pass, not the track — Navidrome gone (isAvailable() gates
-      // the pass on the ANALYZER being up, never on the music backend), the
-      // sidecar dying mid-run, a mount that went away — and counting those
-      // would sentence up to a whole batch to the exclusion list over three
-      // such passes, recoverable only by hand.
+      // ...but ONLY while the throw is evidence about the file. Past a run of
+      // SYSTEMIC_FAILURE_RUN with no success in between, the shared cause is
+      // the pass, not the track — Navidrome gone (isAvailable() gates the pass
+      // on the ANALYZER being up, never on the music backend), the sidecar
+      // dying mid-run, a mount that went away — and counting those would
+      // sentence up to a whole batch to the exclusion list over three such
+      // passes, recoverable only by hand. Which is why stamps are BUFFERED
+      // (pendingFailureStamps) rather than written here: a persistent outage
+      // used to still stamp the five tracks in front of the guard on every
+      // pass, sentencing the scope in id order five tracks per three passes —
+      // and an excluded track can't self-heal, because the success that would
+      // clear its count is exactly what exclusion prevents.
       const reason = String(err?.message || err);
       console.error(`[analyze] ${id} failed: ${reason}`);
-      if (!failureCountsAgainstTrack(consecutiveFailures)) {
-        if (consecutiveFailures === SYSTEMIC_FAILURE_RUN + 1) {
-          logEvent(
-            'warning',
-            `${SYSTEMIC_FAILURE_RUN} tracks in a row failed to analyse — treating this as a fault in ` +
-              'the pass rather than the files (is the music backend reachable?), so further failures ' +
-              'are not counted against any track until one analyses successfully again',
-          );
-        }
-      } else {
-        try {
-          db.recordAnalysisFailure(id, reason);
-        } catch (stampErr: any) {
-          // Never let bookkeeping end the pass — the old behaviour (retry
-          // forever) is a better failure than stopping the run.
-          console.error(`[analyze] ${id} failure stamp failed: ${stampErr?.message || stampErr}`);
-        }
+      if (failureCountsAgainstTrack(consecutiveFailures)) {
+        pendingFailureStamps.push({ id, reason });
+      } else if (consecutiveFailures === SYSTEMIC_FAILURE_RUN + 1) {
+        logEvent(
+          'warning',
+          `${SYSTEMIC_FAILURE_RUN + 1} tracks in a row failed to analyse — treating this as a fault ` +
+            'in the pass rather than the files (is the music backend reachable?), so these failures ' +
+            'are not counted against any track until one analyses successfully again',
+        );
+        // The leading run's buffered stamps go with the verdict — the trip is
+        // the moment they stopped being evidence about the files.
+        pendingFailureStamps = [];
       }
     } finally {
       // Drop this track's temp file (best-effort) regardless of outcome.
@@ -713,6 +737,12 @@ export async function runAnalysisPass(opts: AnalyzeOptions = {}): Promise<Analyz
       });
     }
   }
+
+  // A trailing run of failures shorter than the systemic threshold never met
+  // the success that would have flushed it — but nothing proved the pass
+  // unhealthy either, so those stamps land (matching what an eager write would
+  // have done). A run that DID trip the guard already emptied the buffer.
+  flushFailureStamps();
 
   // Best-effort sweep of the staging dir in case a prefetch left an orphan
   // (e.g. a download that resolved after its analyze slot already errored).
