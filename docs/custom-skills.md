@@ -37,8 +37,15 @@ state/skills/
     tool.mjs      # OPTIONAL: a data fetcher, wrapped as a tool the DJ can call
 ```
 
-A copy-ready example lives in [`docs/examples/skills/moon-phase`](./examples/skills/moon-phase).
-Copy that folder into `state/skills/` and hit **Rescan** in the admin Skills page.
+Two copy-ready examples live in [`docs/examples/skills`](./examples/skills) — copy
+a folder into `state/skills/` and hit **Rescan** in the admin Skills page:
+
+- [`moon-phase`](./examples/skills/moon-phase) — the small end. No settings, no
+  network, no memory: it works out the lunar phase from the date and returns it.
+- [`sunset`](./examples/skills/sunset) — the other end. Operator settings
+  (`configFields`), a call out to a public API, and `state` so it marks the
+  sunset once a day rather than every time it fires. Fill in its coordinates in
+  the edit sheet before it will say anything.
 
 ## SKILL.md
 

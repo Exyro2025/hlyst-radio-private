@@ -40,10 +40,14 @@ export default function CustomSkills() {
     SKILL.md      # frontmatter (→ settings) + body (→ the DJ's brief)
     tool.mjs      # OPTIONAL: a data fetcher the DJ can call`}</CodeBlock>
         <p>
-          A ready-to-copy example ships in the repo at{' '}
-          <code className="bs-code-inline">docs/examples/skills/moon-phase</code>. Copy it
-          into <code className="bs-code-inline">state/skills/</code> and hit{' '}
-          <strong>Rescan</strong> on the admin Skills page.
+          Two ready-to-copy examples ship in the repo under{' '}
+          <code className="bs-code-inline">docs/examples/skills/</code>:{' '}
+          <code className="bs-code-inline">moon-phase</code>, the small end — no settings, no
+          network, it works the lunar phase out from the date — and{' '}
+          <code className="bs-code-inline">sunset</code>, which has operator settings, calls a
+          public API and remembers what it already said. Copy a folder into{' '}
+          <code className="bs-code-inline">state/skills/</code> and hit <strong>Rescan</strong>{' '}
+          on the admin Skills page.
         </p>
         <p>
           Prefer not to touch disk? The admin <strong>Skills</strong> page has a{' '}
