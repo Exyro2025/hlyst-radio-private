@@ -3,9 +3,10 @@
 // decisions and returned shape — not the schema in isolation, because
 // settings.update() is the caller that must not change behaviour.
 //
-// Thrown MESSAGE TEXT is deliberately not asserted: zod's wording differs from
-// the old hand-rolled strings. Only accept-vs-reject and the returned object
-// are contractual.
+// Thrown message WORDING is deliberately not asserted: zod's phrasing differs
+// from the old hand-rolled strings. Only accept-vs-reject and the returned
+// object are contractual — plus the message SHAPE (one readable line, never a
+// ZodError JSON blob), which is pinned at the bottom of this file.
 import assert from 'node:assert/strict';
 import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -128,4 +129,51 @@ test('rejects a non-string authHeader (old validator silently emptied it)', () =
 
 test('rejects a malformed id (old validator silently re-minted a fresh one)', () => {
   assert.throws(() => validateWebhooksStrict([hook({ id: 'BAD-ID!' })]));
+});
+
+// --- The thrown MESSAGE, not just the throw. update() is reached by callers
+// that never touch POST /webhooks — backup restore (routes/backup.ts) and
+// PUT /settings (routes/settings/core.ts) — and both answer with
+// res.status(400).json({ error: err.message }). A raw ZodError's .message is a
+// pretty-printed JSON array of issue objects, ~15 lines for one bad URL, which
+// would land verbatim in the operator's toast. ---
+
+const messageOf = (fn: () => unknown): string => {
+  try {
+    fn();
+  } catch (e) {
+    return (e as Error).message;
+  }
+  assert.fail('expected a throw');
+};
+
+test('throws a readable single line, not a ZodError JSON blob', () => {
+  const msg = messageOf(() => validateWebhooksStrict([hook({ url: 'ftp://x.com' })]));
+  assert.ok(!msg.includes('\n'), `expected one line, got:\n${msg}`);
+  assert.doesNotThrow(() => {
+    // A ZodError message parses as a JSON array of issues. A readable message
+    // must not.
+    assert.throws(() => JSON.parse(msg), 'message parsed as JSON — it is still a ZodError blob');
+  });
+  assert.match(msg, /http:\/\/ or https:\/\//);
+  // Named, so an operator restoring a backup knows WHICH setting is at fault.
+  assert.match(msg, /^webhooks: /);
+});
+
+test('a plain Error, not a ZodError instance', () => {
+  // Callers do `err.message`; anything relying on `.issues` would be reaching
+  // through the persistence chokepoint into zod's shape.
+  try {
+    validateWebhooksStrict([hook({ url: 'ftp://x.com' })]);
+    assert.fail('expected a throw');
+  } catch (e) {
+    assert.ok(e instanceof Error);
+    assert.equal((e as Error & { issues?: unknown }).issues, undefined);
+  }
+});
+
+test('a top-level type error names the field too', () => {
+  const msg = messageOf(() => validateWebhooksStrict('nope' as unknown));
+  assert.ok(!msg.includes('\n'), `expected one line, got:\n${msg}`);
+  assert.match(msg, /^webhooks: /);
 });

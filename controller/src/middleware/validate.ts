@@ -8,35 +8,12 @@
 //
 // The error contract is additive: `error` is the flat string every existing
 // client already reads from a 400; `fieldErrors` is new and optional.
+//
+// The ZodError → readable-string translation lives in util/zod-error.ts, shared
+// with settings/validate.ts — settings/ must not import middleware/.
 import type { NextFunction, Request, Response } from 'express';
-import type { ZodError, ZodType } from 'zod';
-
-// Dotted path — 'webhooks.1.url' — which is also react-hook-form's setError
-// field syntax, so the admin form can map these straight onto inputs.
-function pathOf(issue: ZodError['issues'][number]): string {
-  return issue.path.join('.');
-}
-
-export function flattenIssues(error: ZodError): Record<string, string> {
-  const out: Record<string, string> = {};
-  for (const issue of error.issues) {
-    const key = pathOf(issue);
-    // First error per field wins — a field with three problems should surface
-    // one message, not a stack of them.
-    if (!(key in out)) out[key] = issue.message;
-  }
-  return out;
-}
-
-export function firstMessage(error: ZodError): string {
-  const issue = error.issues[0];
-  if (!issue) return 'invalid request body';
-  const key = pathOf(issue);
-  // Zod's built-in type messages ("expected array, received string") don't name
-  // the field, so prefix the path when the message doesn't stand on its own.
-  const standalone = issue.code !== 'invalid_type';
-  return standalone || !key ? issue.message : `${key}: ${issue.message}`;
-}
+import type { ZodType } from 'zod';
+import { firstMessage, flattenIssues } from '../util/zod-error.js';
 
 export function validateBody(schema: ZodType) {
   return (req: Request, res: Response, next: NextFunction) => {

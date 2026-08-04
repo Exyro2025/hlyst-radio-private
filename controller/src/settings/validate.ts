@@ -59,6 +59,7 @@ import { BOUNDS, rawMaxTrackSec } from './defaults.js';
 import { minTrackSeconds } from './store.js';
 import { webhooksSchema } from '../schemas/webhook.js';
 import { mergeWebhookSecrets } from '../schemas/webhook-server.js';
+import { firstMessage } from '../util/zod-error.js';
 
 // Strict validator for a `{engine, voice, cloudProvider}` voice slot. Shared by
 // every persona's `tts` block AND the station-wide TTS fallback slot
@@ -544,9 +545,18 @@ export function validateScheduleOverrideStrict(raw, shows): ScheduleOverride | n
 // come from its server-only sibling. `existing` is the current list, so the
 // operator can keep a previously-set authHeader by sending the redacted
 // sentinel back unchanged.
+//
+// The failure path matters as much as the success path: update() is reached by
+// callers that never touch POST /webhooks (backup restore, PUT /settings), and
+// both do `res.status(400).json({ error: err.message })`. A raw ZodError's
+// .message is a pretty-printed JSON array of issue objects, so safeParse +
+// firstMessage is what keeps a bad restore reading as one readable line instead
+// of a JSON blob in the operator's toast. Every remaining validate*Strict
+// conversion should copy this shape.
 export function validateWebhooksStrict(raw: unknown, existing: Webhook[] = []) {
-  const parsed = webhooksSchema.parse(raw);
-  return mergeWebhookSecrets(parsed, existing);
+  const r = webhooksSchema.safeParse(raw);
+  if (!r.success) throw new Error(`webhooks: ${firstMessage(r.error)}`);
+  return mergeWebhookSecrets(r.data, existing);
 }
 
 // --- Strict update() validators for the mood system (the validateFestivalsStrict
