@@ -365,19 +365,21 @@ export default function TaggingPanel(p: TaggingPanelProps) {
   // wrong there, where this one is merely incomplete.
   const analyzerIsLocal = p.coverage?.analysisBackend === 'local';
   const heavyUpgradeShort = analyzerIsLocal
-    ? 'Needs the heavy image (subwave-aio-heavy).'
+    ? 'Needs the heavy build (subwave-aio-heavy, or heavy Python deps on a dev venv).'
     : 'Needs the heavy analyzer (ANALYZER_HEAVY=1).';
   const heavyUpgradeBox = analyzerIsLocal ? (
     <>
-      Switch this container&rsquo;s image to{' '}
+      On the all-in-one image, switch this container&rsquo;s image to{' '}
       <code>ghcr.io/perminder-klair/subwave-aio-heavy</code> (or{' '}
-      <code>-aio-cuda</code> on an NVIDIA host) and recreate it — analysis then
-      kicks in automatically, nothing to re-enable here.{' '}
+      <code>-aio-cuda</code> on an NVIDIA host) and recreate it; on a dev{' '}
+      <code>ANALYZE_PYTHON</code> venv, install the heavy Python deps. Analysis
+      then kicks in automatically, nothing to re-enable here.{' '}
       <b>
-        <code>ANALYZER_HEAVY</code> does nothing on this image
+        <code>ANALYZER_HEAVY</code> does nothing here
       </b>{' '}
-      — it is a docker-compose setting, and there is no analyzer service here to
-      point it at. The heavy image is amd64-only.
+      — it is a docker-compose setting that picks the analyzer service&rsquo;s
+      image, and there is no analyzer service on this backend. The heavy image is
+      amd64-only.
     </>
   ) : (
     <>
