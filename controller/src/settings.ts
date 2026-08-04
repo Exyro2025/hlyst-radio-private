@@ -84,6 +84,7 @@ import {
   coerceMaxTrackSeconds,
   rawMaxTrackSec,
 } from './settings/defaults.js';
+import { validateCompatParams } from './settings/compat-params.js';
 import { minTrackSeconds, peek, setCache } from './settings/store.js';
 import {
   SKILL_RENAMES,
@@ -697,6 +698,20 @@ export async function load() {
           ['low', 'normal', 'balanced'].includes(stored.tts?.cloud?.latency)
             ? stored.tts.cloud.latency
             : DEFAULTS.tts.cloud.latency,
+        // Extra openai-compatible body fields. This block composes tts.cloud
+        // field by field rather than spreading DEFAULTS, so a key missing here
+        // is a key that survives a save but vanishes on the next restart —
+        // params would quietly stop applying and nothing would say why.
+        // Lenient like the Fish knobs above: an invalid hand-edited list drops
+        // to none rather than throwing, because settings.load() failing means
+        // the controller doesn't boot at all.
+        compatParams: (() => {
+          try {
+            return validateCompatParams(stored.tts?.cloud?.compatParams);
+          } catch {
+            return [];
+          }
+        })(),
       },
       remote: {
         url:
@@ -1573,6 +1588,14 @@ export async function update(patch) {
           throw new Error('tts.cloud.latency must be one of: low, normal, balanced');
         }
         next.tts.cloud.latency = c.latency;
+      }
+      // Extra openai-compatible body fields (issue #1317). Rejected rather than
+      // clamped: unlike a slider, a bad param name or type is a request the
+      // server 4xxs, which mid-show means a silent drop to a local fallback
+      // voice. The rule is shared with the send path — see
+      // settings/compat-params.ts.
+      if (c.compatParams !== undefined) {
+        next.tts.cloud.compatParams = validateCompatParams(c.compatParams);
       }
       // Fish credentials live only in process env/state/secrets.env. Clear the
       // legacy inline compatibility slot on every Fish save so a later provider
