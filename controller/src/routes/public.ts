@@ -634,6 +634,9 @@ router.post(
 // default. ThemeBootstrap doesn't have to know about shows — it just applies
 // whatever id comes back.
 //
+// `activeSource` / `stationDefault` / `activeShow` carry WHY that id won, for
+// the admin UI. A client that only wants a palette can keep reading `active`.
+//
 // POST /themes/refresh — admin-gated. Clears the user-themes cache so files
 // freshly dropped into ${STATE_DIR}/themes/ appear in the next /themes read
 // without bouncing the controller.
@@ -647,11 +650,27 @@ router.get('/themes', async (req, res) => {
     // Show override wins only if it still resolves to a known theme. A stale
     // override (operator deleted the file under our feet) silently falls back
     // to the station default — same fallback strategy as getTheme().
-    const active =
-      activeShow?.themeId && themes.some(t => t.id === activeShow.themeId)
-        ? activeShow.themeId
-        : stationDefault;
-    res.json({ active, themes });
+    const showWins = !!(activeShow?.themeId && themes.some(t => t.id === activeShow.themeId));
+    const active = showWins ? activeShow!.themeId : stationDefault;
+    // Provenance, not just the answer (#1300 bug 12). Saving a station theme in
+    // admin and watching the whole UI flip back one poll later is the reported
+    // symptom, and it isn't a failed save: an on-air show pins its own theme and
+    // outranks the station default for as long as it's on air. Reporting only
+    // the resolved id made that indistinguishable from the setting not sticking,
+    // and left the admin UI unable to explain it even if it wanted to.
+    //
+    // The third level — the listener's own localStorage override — never reaches
+    // the server and is resolved client-side in ThemeProvider, which is where the
+    // UI reads it from.
+    res.json({
+      active,
+      activeSource: showWins ? 'show' : 'station',
+      stationDefault,
+      activeShow: showWins
+        ? { id: activeShow!.id, name: activeShow!.name || '', themeId: activeShow!.themeId }
+        : null,
+      themes,
+    });
   } catch (err) {
     publicError(res, '/themes', err);
   }
