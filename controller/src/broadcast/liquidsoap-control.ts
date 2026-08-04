@@ -165,6 +165,12 @@ export async function stopStream() {
 // (issue #1300, bug 16b). 10s keeps the badge honest (the operator's own on/off
 // toggle invalidates below, so a deliberate change is never stale) while making
 // the connect rate independent of how many admin tabs are watching.
+//
+// What the TTL does NOT cover: a mixer that goes off air OUTSIDE the controller
+// (`docker compose restart broadcast`, an OOM kill, the restart policy cycling
+// it) invalidates nothing, so the badge can lag the truth by up to the TTL. That
+// is bounded and self-correcting — and anything that needs the live answer
+// instead of the cheap one reads through streamStatusFresh() below.
 const STREAM_STATUS_TTL_MS = 10_000;
 
 const streamStatusCache = cachedAsync(
@@ -177,6 +183,20 @@ const streamStatusCache = cachedAsync(
 // (never cached, never served stale), so callers keep deciding what an
 // unreachable mixer means.
 export async function streamStatus() {
+  return streamStatusCache.get();
+}
+
+// The same reading, but guaranteed to be a real telnet round-trip: invalidating
+// first drops any in-flight take too, so this can't be handed a poll that was
+// already running. For callers whose whole point is proving the mixer is alive
+// RIGHT NOW — Doctor's mixer check reports "telnet reachable", and served from
+// a warm cache it would report that for a process that died seconds ago,
+// precisely when an operator is running diagnostics to find that out.
+//
+// Operator-triggered surfaces only. Putting this on a poll would reinstate the
+// per-request connection this cache exists to remove.
+export async function streamStatusFresh(): Promise<boolean> {
+  streamStatusCache.invalidate();
   return streamStatusCache.get();
 }
 

@@ -24,7 +24,10 @@
 export interface CachedAsync<T> {
   /** Cached value if fresh, else take a new one (coalescing concurrent calls). */
   get(): Promise<T>;
-  /** The cached entry without ever taking a new reading. null when empty. */
+  /** The cached entry as-is, without ever taking a new reading. null when
+   *  empty. NOT TTL-checked — an expired entry is still returned, so a caller
+   *  that cares about freshness must compare `at` itself. Only get() honours
+   *  the TTL. */
   peek(): { value: T; at: number } | null;
   /** Drop the cached value so the next get() takes a fresh reading. Call this
    *  after any action that CHANGES what the producer would report. */
@@ -48,7 +51,7 @@ export function cachedAsync<T>(fn: () => Promise<T>, { ttlMs, now = Date.now }: 
       entry = null;
       // A take already in flight is left alone: it was started before the
       // change and its result would be stale, so it must not become the cached
-      // entry. The `settled === inFlight` guard below is what drops it.
+      // entry. The `take === inFlight` guard below is what drops it.
       inFlight = null;
     },
 

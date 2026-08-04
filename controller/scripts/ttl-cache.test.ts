@@ -108,6 +108,34 @@ function fakeClock(start = 1_000_000) {
   assert.equal(takes, 2, 'the next reader takes a fresh reading');
 }
 
+// invalidate() + get() is a LIVE read — the guarantee streamStatusFresh() rests
+// on. Invalidating drops the in-flight slot as well as the entry, so the get()
+// that follows opens its own connection instead of being handed a poll that was
+// already running. Without that, Doctor could "prove the mixer is reachable"
+// off a take started before the operator hit Run diagnostics.
+{
+  const clock = fakeClock();
+  const releases: ((v: string) => void)[] = [];
+  let takes = 0;
+  const cache = cachedAsync(
+    () => { takes++; return new Promise<string>(res => { releases.push(res); }); },
+    { ttlMs: 10_000, now: clock.now },
+  );
+
+  const poll = cache.get();           // a /settings poll, still in flight
+  assert.equal(takes, 1);
+
+  cache.invalidate();                 // ...then Doctor asks for a live reading
+  const fresh = cache.get();
+  assert.equal(takes, 2, 'the fresh read opens its OWN take, not the in-flight one');
+  assert.notEqual(poll, fresh, 'and is not handed the in-flight promise');
+
+  releases[0]('on');                  // the older take answers first...
+  releases[1]('off');                 // ...but the mixer has since gone off air
+  assert.equal(await fresh, 'off', 'the live reading is the one the caller gets');
+  assert.deepEqual(cache.peek(), { value: 'off', at: clock.now() }, 'and the one that lands in the cache');
+}
+
 // ── failures are never cached, and never masked by a stale value ─────────────
 
 {
