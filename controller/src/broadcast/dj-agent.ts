@@ -36,7 +36,7 @@ import * as budget from './dj-budget.js';
 import { withTrace, logEvent } from '../observability/events.js';
 import { recencyWindowsForLibrary, effectiveNoRepeatWindow, artistRootKey } from '../music/recency.js';
 import { ARTIST_VARIETY_WINDOW, alternativeCandidates } from './dj-agent/artist-guard.js';
-import { hasEraBound, genreResolutionWarningOnce } from '../music/show-filter.js';
+import { hasEraBound, genreResolutionWarningOnce, type VocalMode } from '../music/show-filter.js';
 import { djCallsAllowed } from './listeners.js';
 import { autoVoiceAllowed } from './voice-policy.js';
 import { pickerAgent, requestAgent } from './dj-agent/agents.js';
@@ -232,6 +232,14 @@ async function pickViaAgent(queue, ctx, { wantLink, audioWaypoint = null, curren
   const hasEnergyCoverage = Object.keys(stats.byEnergy ?? {}).length > 0;
   const moodLock = strict && activeShow?.moods?.length && hasMoodCoverage ? activeShow.moods : null;
   const energyLock = strict && activeShow?.energies?.length && hasEnergyCoverage ? activeShow.energies : null;
+  // Same coverage gate, one dimension further out: vocal ranges come from the
+  // OPT-IN heavy analyzer, so "no track has been measured" is the norm rather
+  // than the exception, and a hard lock would empty every tool for the whole
+  // show. Counted lazily — only a show that actually pins vocal steering pays
+  // for the query.
+  const vocalLock = strict && activeShow?.vocals && library.vocalAnalyzedCount() > 0
+    ? (activeShow.vocals as VocalMode)
+    : null;
   // A pinned anchor that resolves to nothing (deleted/recreated playlist →
   // stale id, or a Navidrome error — resolveShowPlaylistPool swallows both)
   // silently un-anchors the show: no lock, no showPlaylistTracks tool. Say so,
@@ -255,6 +263,7 @@ async function pickViaAgent(queue, ctx, { wantLink, audioWaypoint = null, curren
     eraLock,
     moodLock,
     energyLock,
+    vocalLock,
     playlistLock,
     playlistTracks,
     excludedIds,

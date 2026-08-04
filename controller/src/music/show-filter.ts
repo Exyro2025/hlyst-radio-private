@@ -29,6 +29,9 @@ export interface FilterTrack {
   energy?: string | null;
   moods?: string[] | null;
   audioMoods?: string[] | null;
+  // Demucs vocal ranges. [] = instrumental, null/absent = never measured — the
+  // distinction trackInstrumental is built on.
+  vocalRanges?: unknown[] | null;
 }
 
 // ── Genre ──────────────────────────────────────────────────────────────────
@@ -362,6 +365,56 @@ export function onlyEnergy<T extends FilterTrack>(tracks: T[], energies?: string
   });
 }
 
+// ── Vocals (instrumental steering) ───────────────────────────────────────────
+
+// The show's vocal constraint. '' = no constraint, and is the default, so a
+// show saved before this field existed behaves byte-for-byte as it did.
+export type VocalMode = '' | 'instrumental' | 'vocal';
+
+// Is this track instrumental? Reads the same signal bed-policy.ts and
+// embeddings.formatTrackText already treat as canonical:
+//
+//   vocalRanges === []    → measured instrumental
+//   vocalRanges non-empty → measured vocal
+//   vocalRanges == null   → NOT MEASURED, which is not the same as "vocal"
+//
+// That third case is the whole reason this returns a tri-state instead of a
+// boolean. Vocal analysis is the opt-in heavy tier (Demucs), so on most
+// libraries every track is null — collapsing null to "has vocals" would make an
+// instrumental show reject its entire library while looking like it worked.
+export function trackInstrumental(t: FilterTrack | null | undefined): boolean | null {
+  const ranges = Array.isArray(t?.vocalRanges)
+    ? t.vocalRanges
+    : (t?.id ? library.get(t.id)?.vocalRanges : null);
+  if (!Array.isArray(ranges)) return null;
+  return ranges.length === 0;
+}
+
+// Soft lean: tracks matching the mode are preferred, un-measured tracks stay
+// eligible, and a pool with no match falls back whole (never-starve). Mirrors
+// preferEnergy exactly — the un-measured track is the unknown-energy track.
+export function preferVocals<T extends FilterTrack>(tracks: T[], mode?: VocalMode | null): T[] {
+  if (!mode) return tracks;
+  const wantInstrumental = mode === 'instrumental';
+  const match = tracks.filter((t) => {
+    const inst = trackInstrumental(t);
+    return inst == null || inst === wantInstrumental;
+  });
+  return match.length ? match : tracks;
+}
+
+// Hard filter — NO never-starve (see onlyGenre for the scoping contract), and
+// un-measured tracks drop, same as onlyEnergy drops unknown-energy ones: a
+// strict "instrumental only" show that admits tracks nobody has checked is not
+// strict. On a library with no vocal pass this empties the pool, which is
+// exactly what applyStrictLocks' starve:false step is there to catch — the
+// dimension is skipped and the show plays on unconstrained rather than silent.
+export function onlyVocals<T extends FilterTrack>(tracks: T[], mode?: VocalMode | null): T[] {
+  if (!mode) return tracks;
+  const wantInstrumental = mode === 'instrumental';
+  return tracks.filter((t) => trackInstrumental(t) === wantInstrumental);
+}
+
 // ── Strict lock composition ──────────────────────────────────────────────────
 
 // A show's strict music constraints, resolved to library-comparable values:
@@ -374,6 +427,7 @@ export type StrictLocks = {
   eras?: YearRange[] | null;
   moods?: string[] | null;
   energies?: string[] | null;
+  vocals?: VocalMode | null;
 };
 
 // Apply a show's strict music locks as a PER-DIMENSION cascade — the single
@@ -390,9 +444,11 @@ export type StrictLocks = {
 //     zero-coverage tag class (e.g. a mood on an un-tagged library) threw away
 //     an otherwise genre- and era-pure pool and leaked off-filter tracks back.
 //
-// Order is genre → era → mood → energy; with starve:false each step commits
-// only if it left something, so a starved late dimension can't undo an earlier
-// one's tightening.
+// Order is genre → era → mood → energy → vocals; with starve:false each step
+// commits only if it left something, so a starved late dimension can't undo an
+// earlier one's tightening. Vocals goes last deliberately: it's the dimension
+// most likely to have no coverage at all (Demucs is the opt-in heavy tier), and
+// last is where a skipped step costs the least.
 export function applyStrictLocks<T extends FilterTrack>(
   tracks: T[],
   locks: StrictLocks,
@@ -406,5 +462,6 @@ export function applyStrictLocks<T extends FilterTrack>(
   if (hasEraBound(locks.eras)) step(inYearRange(pool, locks.eras!));
   if (locks.moods?.length) step(onlyMood(pool, locks.moods));
   if (locks.energies?.length) step(onlyEnergy(pool, locks.energies));
+  if (locks.vocals) step(onlyVocals(pool, locks.vocals));
   return pool;
 }

@@ -33,6 +33,7 @@ import {
   GUESTS_MAX,
   NAME_MAX,
   TOPIC_MAX,
+  VOCAL_OPTIONS,
   eraLabelOf,
   sameEra,
 } from './types';
@@ -338,6 +339,26 @@ export function ShowEditor({
               })}
               cap={ENERGY_OPTIONS.length}
             />
+          </Field>
+
+          <Field>
+            <Label>vocals</Label>
+            {/* Single-valued, unlike the filters around it: instrumental and
+                vocal are mutually exclusive, and wanting both is wanting
+                neither. Picking one REPLACES the other rather than capping at
+                one selection, which would grey out the chip you're switching
+                to; clicking the selected chip clears back to any. */}
+            <ChipRow
+              options={VOCAL_OPTIONS}
+              selected={show.vocals ? [show.vocals] : []}
+              onToggle={v => update({ vocals: show.vocals === v ? '' : (v as Show['vocals']) })}
+              cap={VOCAL_OPTIONS.length}
+            />
+            <span className="field-hint">
+              None selected = any. Backed by vocal-activity analysis, so it only
+              steers tracks that have had a vocal pass — on a library without
+              one it simply doesn&apos;t apply, and the show plays as before.
+            </span>
           </Field>
 
           <Field>

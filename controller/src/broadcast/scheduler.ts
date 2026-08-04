@@ -13,7 +13,7 @@ import * as subsonic from '../music/subsonic.js';
 import * as dj from '../llm/dj.js';
 import * as library from '../music/library.js';
 import * as settings from '../settings.js';
-import { normGenre, genreMatches, genreResolutionWarningOnce, inYearRange, preferEnergy, preferEnergyStrict, preferMood, applyStrictLocks, hasEraBound, eraSpan } from '../music/show-filter.js';
+import { normGenre, genreMatches, genreResolutionWarningOnce, inYearRange, preferEnergy, preferEnergyStrict, preferMood, applyStrictLocks, hasEraBound, eraSpan, type VocalMode } from '../music/show-filter.js';
 import { resolveShowPlaylistPool, resolveExcludedPlaylistIds } from '../music/show-playlist.js';
 import { getFullContext } from '../context.js';
 import { queue } from './queue.js';
@@ -101,7 +101,8 @@ async function refreshAutoPlaylistInner() {
   // filter — mood, genre, era, energy — into a hard filter on the pool.
   const narrow = !!(show && (showGenres.length || hasEraBound(eras)));
   const showMoods: string[] = show?.moods ?? [];
-  const strict = !!(show?.filtersStrict && (showGenres.length || showMoods.length || showEnergies.length || hasEraBound(eras)));
+  const showVocals = (show?.vocals ?? '') as VocalMode;
+  const strict = !!(show?.filtersStrict && (showGenres.length || showMoods.length || showEnergies.length || showVocals || hasEraBound(eras)));
 
   // Show playlist anchor: resolve the union once. The fallback must honour it
   // too, so the LLM-free coast (LLM down, budget-hard, zero listeners) still
@@ -361,6 +362,7 @@ async function refreshAutoPlaylistInner() {
       eras,
       moods: showMoods,
       energies: showEnergies,
+      vocals: showVocals,
     }, { starve: false });
     pool.length = 0;
     pool.push(...filtered);

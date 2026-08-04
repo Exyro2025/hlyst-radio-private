@@ -30,6 +30,11 @@ export interface Show {
   genres: string[];
   eras: EraWindow[];
   energies: string[];
+  /** Single-valued, unlike the lists above: the two states are mutually
+   *  exclusive. '' = no constraint, and is what every show predating the field
+   *  carries. Backed by vocal-activity analysis, so it only steers tracks that
+   *  have had a vocal pass. */
+  vocals: '' | 'instrumental' | 'vocal';
   /** With ≥1 music filter set, EVERY set filter becomes HARD instead of a soft
    *  lean; off-filter tracks only play as a last resort. The controller does NOT
    *  auto-migrate legacy `genreStrict` shows — they load soft. */
@@ -89,6 +94,13 @@ export const DECADES: { key: string; label: string; from: number; to: number }[]
   { key: '1950', label: '50s', from: 1950, to: 1959 },
 ];
 export const ENERGY_OPTIONS = ['low', 'medium', 'high'];
+// Mirrors the controller's SHOW_VOCALS (settings/vocab.ts). '' is the absent
+// third state and deliberately has no chip — clearing the selection is how you
+// get back to it.
+export const VOCAL_OPTIONS = [
+  { key: 'instrumental', label: 'instrumental' },
+  { key: 'vocal', label: 'vocals' },
+];
 export const ANY_SENTINEL = '__any__';
 // Mirrors the controller's SHOW_FILTER_VALUES_MAX cap
 // (controller/src/settings/vocab.ts — read the comment there before changing
