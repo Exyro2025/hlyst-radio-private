@@ -54,6 +54,15 @@ export interface Coverage {
   currentTextFormat?: number | null;
   embeddedVectors?: number | null;
   labelOnlyVectors?: number | null;
+  // Why a capability is false when the model is INSTALLED and its load failed
+  // (no weights downloaded, broken checkpoint). null/absent in every other
+  // case — including a lean image, where nothing is wrong. Paired with the
+  // 'load-failed' status: same false, opposite advice.
+  audioAnalysisError?: string | null;
+  vocalAnalysisError?: string | null;
+  // Tracks dropped from every analysis scope after repeated failures. Non-zero
+  // means there are files the pass has given up on and can now name.
+  analysisFailed?: number;
   // Backend-computed (controller/src/music/coverage-status.ts) and the single
   // source of truth for the sounds-like + vocal rows.
   audioStatus?: DimensionStatus;
@@ -65,10 +74,22 @@ export type DimensionStatus =
   | 'off'
   | 'pending-engine'
   | 'pending-heavy'
+  | 'load-failed'
   | 'incapable'
   | 'ready'
   | 'partial'
   | 'complete';
+
+// One row of GET /library/analysis-failures.
+export interface AnalysisFailure {
+  id: string;
+  title: string | null;
+  artist: string | null;
+  error: string | null;
+  failedAt: string | null;
+  attempts: number;
+  excluded: boolean;
+}
 
 // Mirrors controller/src/music/tagger-progress.ts — the structured sentinel
 // the tagger child emits and /settings relays.
@@ -201,6 +222,12 @@ interface TaggingPanelProps {
   // (#1162). null until the settings poll lands.
   llmLabel: string | null;
   embedLabel: string | null;
+  // Per-track analysis failures (#1300 bug 3c). Fetched on demand rather than
+  // polled: the list is empty on a healthy station and the count in
+  // `coverage.analysisFailed` is enough to know whether to look.
+  failures: AnalysisFailure[] | null;
+  onLoadFailures: () => void;
+  onClearFailures: () => void;
 }
 
 const PHASE_HINT: Record<TaggerProgress['phase'], string> = {
@@ -256,7 +283,13 @@ function fmtDur(ms: number): string {
 // ANDs it with the optimistic enable prop so the button toggles the instant
 // Enable is clicked, ahead of the next /coverage poll.
 function canBackfill(s: DimensionStatus | undefined): boolean {
-  return s != null && s !== 'pending-heavy' && s !== 'pending-engine' && s !== 'complete';
+  return (
+    s != null &&
+    s !== 'pending-heavy' &&
+    s !== 'load-failed' &&
+    s !== 'pending-engine' &&
+    s !== 'complete'
+  );
 }
 
 // Coarser than fmtDur: a live ETA wobbles as the sampled rate drifts, so round
@@ -351,6 +384,20 @@ export default function TaggingPanel(p: TaggingPanelProps) {
   // capability branches simply don't fire.
   const audioStatus = p.coverage?.audioStatus;
   const vocalStatus = p.coverage?.vocalStatus;
+
+  // A model that IS installed and failed to load. Distinct from 'pending-heavy'
+  // on purpose: the advice there ("switch to the heavy image") is advice to do
+  // the thing already done, which is how this went unexplained. Audio first —
+  // one banner is enough, and CLAP is the dimension people enable.
+  const loadFailure = p.coverage?.audioAnalysisError
+    ? { model: 'CLAP', what: 'sounds-like fingerprinting', error: p.coverage.audioAnalysisError }
+    : p.coverage?.vocalAnalysisError
+      ? { model: 'Demucs', what: 'vocal separation', error: p.coverage.vocalAnalysisError }
+      : null;
+  // Tracks the analysis pass has given up on. Zero on a healthy station, so the
+  // list behind it is fetched only when the operator opens it.
+  const failureCount = p.coverage?.analysisFailed ?? 0;
+  const [failuresOpen, setFailuresOpen] = useState(false);
 
   // Forced open while an analyze/backfill run is in flight so progress and Pause
   // stay visible; reverts to the manual choice when the run finishes.
@@ -710,6 +757,8 @@ export default function TaggingPanel(p: TaggingPanelProps) {
           <span className="caption mono-num !tracking-[0.04em]">
             {analysisOff ? (
               'engine off'
+            ) : audioStatus === 'load-failed' ? (
+              'engine has CLAP but it failed to load'
             ) : audioStatus === 'pending-heavy' ? (
               p.audioEnabled ? 'waiting for the heavy analyzer' : 'off · needs the heavy analyzer'
             ) : audioOn ? (
@@ -783,6 +832,8 @@ export default function TaggingPanel(p: TaggingPanelProps) {
                 <span className="caption mono-num !tracking-[0.04em]">
                   {analysisOff ? (
                     'engine off'
+                  ) : vocalStatus === 'load-failed' ? (
+                    'engine has Demucs but it failed to load'
                   ) : vocalStatus === 'pending-heavy' ? (
                     'waiting for the heavy analyzer'
                   ) : vocalOn ? (
@@ -954,6 +1005,81 @@ export default function TaggingPanel(p: TaggingPanelProps) {
           >
             Dismiss
           </button>
+        </div>
+      )}
+
+      {loadFailure && (
+        <div className="mx-4 mt-6 border border-l-[3px] border-[var(--danger)] bg-[color-mix(in_oklab,var(--danger)_8%,transparent)] px-3 py-2 text-[11px] leading-[1.5] text-ink !normal-case sm:mx-6">
+          <b>
+            Your analyzer has {loadFailure.model}, but it failed to load — so{' '}
+            {loadFailure.what} can&rsquo;t run.
+          </b>{' '}
+          This is not the lean/heavy image split; switching images won&rsquo;t help. The usual cause
+          is the model weights, which the heavy analyzer downloads from huggingface.co the first time
+          it needs them — a host with no outbound reach fails there every time.
+          <div className="mt-1.5 font-mono text-[10px] break-words text-muted">{loadFailure.error}</div>
+          <div className="mt-1.5">
+            Fix the cause, then restart the analyzer to retry — the failure is remembered until you
+            do, which is what stops the pass re-analysing tracks it can&rsquo;t fill.{' '}
+            <a href="/manual/analysis" className="font-bold text-vermilion underline-offset-2 hover:underline">
+              Manual → Acoustic analysis
+            </a>
+          </div>
+        </div>
+      )}
+
+      {failureCount > 0 && (
+        <div className="mx-4 mt-6 border border-l-[3px] border-[var(--danger)] bg-[color-mix(in_oklab,var(--danger)_8%,transparent)] px-3 py-2 text-[11px] leading-[1.5] text-ink !normal-case sm:mx-6">
+          <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+            <span>
+              <b>
+                {num(failureCount)} track{failureCount === 1 ? '' : 's'} failed analysis too many
+                times
+              </b>{' '}
+              and {failureCount === 1 ? 'is' : 'are'} no longer being retried, so coverage will never
+              reach 100%.
+            </span>
+            <button
+              type="button"
+              className="font-bold text-vermilion underline-offset-2 hover:underline"
+              onClick={() => {
+                if (!failuresOpen) p.onLoadFailures();
+                setFailuresOpen(o => !o);
+              }}
+            >
+              {failuresOpen ? 'Hide' : 'Show which →'}
+            </button>
+            <button
+              type="button"
+              className="ml-auto text-muted hover:text-ink"
+              onClick={p.onClearFailures}
+              title="Forget the failure history so the next analysis run tries these tracks again."
+            >
+              Retry all
+            </button>
+          </div>
+          {failuresOpen && (
+            <div className="mt-2 max-h-64 overflow-y-auto border-t border-dashed border-separator-strong pt-2">
+              {p.failures == null ? (
+                <span className="text-muted">Loading&hellip;</span>
+              ) : p.failures.length === 0 ? (
+                <span className="text-muted">Nothing recorded.</span>
+              ) : (
+                p.failures.map(f => (
+                  <div key={f.id} className="border-b border-dashed border-separator-strong py-1.5 last:border-0">
+                    <div className="flex flex-wrap items-baseline gap-x-2">
+                      <b>{f.title || f.id}</b>
+                      {f.artist && <span className="text-muted">{f.artist}</span>}
+                      <span className="mono-num ml-auto text-[10px] text-muted">
+                        {f.attempts}x{f.excluded ? ' · given up' : ' · still retrying'}
+                      </span>
+                    </div>
+                    <div className="font-mono text-[10px] break-words text-muted">{f.error}</div>
+                  </div>
+                ))
+              )}
+            </div>
+          )}
         </div>
       )}
 

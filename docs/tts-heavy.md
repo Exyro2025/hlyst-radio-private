@@ -83,8 +83,53 @@ Then `docker compose up -d` (Compose re-pulls the `analyzer` service as
 
 The heavy image is **amd64-only** (the CPU-torch stack). On an arm64 host also
 set `DOCKER_DEFAULT_PLATFORM=linux/amd64` — it runs under emulation (slow, but
-analysis is a one-time per-track pass). Model weights download lazily into the
-analyzer's HF cache the first time you actually run a sounds-like/vocals rescan.
+analysis is a one-time per-track pass).
+
+### The heavy image needs to reach huggingface.co once
+
+**Model weights are not baked into the image.** The heavy analyzer downloads
+CLAP (and Demucs) from `huggingface.co` the first time it is actually asked for
+a sounds-like or vocals pass, into the `analyzer-cache` volume mounted at
+`/opt/analyzer/hf-cache`. That is a deliberate trade — baking them would add
+roughly a gigabyte to an image most people pull over a home connection — but it
+does mean the heavy tier has a **one-time outbound network dependency**, and
+that dependency is easy to miss because everything else about the station works
+offline.
+
+On a host with no outbound reach you'll see this in `docker logs
+sub-wave-analyzer`:
+
+```
+[analyze] '[Errno 111] Connection refused' thrown while requesting HEAD
+https://huggingface.co/laion/clap-htsat-unfused/resolve/main/model.safetensors
+[analyze-worker] CLAP load failed
+```
+
+The station keeps working — bpm, key, loudness and intros are pure librosa and
+need no download — but the sounds-like meter stays at zero. The admin Library
+panel says so directly, with the reason, rather than suggesting you switch
+image: you're already on the right one.
+
+Three ways out:
+
+- **Let it out once.** The download is a few hundred MB and happens once per
+  volume. Once the cache is warm the analyzer never calls out again.
+- **Pre-seed the cache from another machine.** The cache is a plain
+  [HF cache directory](https://huggingface.co/docs/huggingface_hub/guides/manage-cache).
+  On a box that *does* have reach:
+  ```bash
+  pip install huggingface_hub
+  HF_HOME=./hf-cache huggingface-cli download laion/clap-htsat-unfused
+  ```
+  then copy `hf-cache/` onto the analyzer's volume (`docker cp ./hf-cache/.
+  sub-wave-analyzer:/opt/analyzer/hf-cache/`) and restart the analyzer.
+- **Point at your own copy.** `CLAP_MODEL` accepts a local path as well as a hub
+  id, so a weights directory you already mirror can be used directly.
+
+Once the cause is fixed, **restart the analyzer** (`docker compose restart
+analyzer`). The failure is remembered until you do — deliberately, because that
+is what stops the analysis pass re-attempting the same tracks on every run and
+reporting the same "+N tracks missing an audio vector" count forever.
 
 ### Heavy analysis on an NVIDIA GPU (CUDA)
 
@@ -274,7 +319,17 @@ contributors on a dev machine; production should use a sidecar.
    report not-ready for a minute or two on a cold start. Give it time, then
    re-check the admin panel — the probe re-runs every ~30s, so it flips to
    available on its own. (Plain bpm/key/loudness needs no download.)
-4. **Lost your tags after a restart?** That's a *separate* issue from the engine
+   If it never warms up, the download itself is the usual reason — see
+   [the heavy image needs to reach huggingface.co once](#the-heavy-image-needs-to-reach-huggingfaceco-once).
+   `/health` reports it: `analyze_audio_capable: false` alongside an
+   `analyze_audio_error` naming the cause.
+4. **Same track count every run?** "audio backfill: +90 already-analysed tracks
+   missing an audio vector", the same 90, forever, means the pass is re-targeting
+   tracks it can't fill. Either the model isn't loading (step 3 — the admin panel
+   now names the reason), or those specific files fail to decode. The Library
+   panel lists the failing tracks with their errors once any track has failed
+   three times, and stops retrying them until you clear the list.
+5. **Lost your tags after a restart?** That's a *separate* issue from the engine
    being off — it means `state/` didn't come back on the same path, so the
    controller created a fresh empty `library.db`. See the data-persistence note
    in [`unraid.md`](unraid.md#dont-lose-your-library-on-reboot-pin-state_dir).
