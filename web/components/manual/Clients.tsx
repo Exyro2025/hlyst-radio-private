@@ -103,19 +103,23 @@ export default function Clients() {
         <div className="bs-callout">
           <div className="bs-eyebrow">STATION BEHIND A PASSWORD</div>
           <p>
-            If a station sits behind HTTP Basic Auth &mdash; a reverse proxy or Cloudflare
-            Access asking for a username and password &mdash; put the credentials in the
-            address you add:{' '}
+            If a station sits behind HTTP Basic Auth &mdash; a reverse proxy asking for a
+            username and password before anything reaches the controller &mdash; put the
+            credentials in the address you add:{' '}
             <code className="bs-code-inline">https://dj:secret@radio.example.com</code>.
-            The app strips them out and re-sends them as proper Basic Auth on every
-            request, the API and the audio stream included. That last part is why the
-            credentials can&rsquo;t simply be left in the URL: iOS&rsquo;s AVPlayer
-            silently drops <code className="bs-code-inline">user:pass@</code> from a media
-            URL, so the app converts it into an{' '}
-            <code className="bs-code-inline">Authorization</code> header for the stream.
-            The same form works for a station using SUB/WAVE&rsquo;s own{' '}
-            <strong>stream password</strong> &mdash; any username, the password is what
-            gets checked.
+            The API polls and the artwork authenticate straight off that URL; the audio
+            stream gets an explicit{' '}
+            <code className="bs-code-inline">Authorization</code> header instead, because
+            iOS&rsquo;s AVPlayer silently drops{' '}
+            <code className="bs-code-inline">user:pass@</code> from a media URL &mdash;
+            which is why such a station could fail in the app while the same address
+            played fine in a browser. The same form works for a station using
+            SUB/WAVE&rsquo;s own <strong>stream password</strong> &mdash; any username,
+            the password is what gets checked. Percent-encode an{' '}
+            <code className="bs-code-inline">@</code> in the password as{' '}
+            <code className="bs-code-inline">%40</code>, and note that casting to a
+            Chromecast isn&rsquo;t available for a station with credentials in its
+            address.
           </p>
         </div>
       </section>
