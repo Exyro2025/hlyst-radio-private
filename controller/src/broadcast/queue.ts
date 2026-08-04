@@ -44,6 +44,12 @@ import {
   shouldDeadlinePick,
   DEADLINE_PICK_COOLDOWN_SEC,
 } from './drain-policy.js';
+import {
+  commitSatisfied,
+  skipPrepAction,
+  SKIP_COMMIT_WAIT_MS,
+  SKIP_POLL_INTERVAL_MS,
+} from './skip-policy.js';
 import * as stemBlend from './stem-blend.js';
 import type {
   DjLogEntry,
@@ -1198,6 +1204,46 @@ class Queue {
         void this.drainToLiquidsoap(true);
       }
     }
+  }
+
+  // Commit the queued pick to Liquidsoap before an operator skip (#1300 bug
+  // 6). Under pair-aware drain the held pick isn't in dj_queue for most of
+  // each track's runtime — a bare telnet skip falls through to the randomized
+  // auto playlist while the admin queue shows a different "next". Force-drain
+  // whatever is held, then wait until the dj_queue_status probe reports a
+  // RESOLVED request waiting (a sent-but-still-downloading request loses the
+  // fallback race just the same), bounded by SKIP_COMMIT_WAIT_MS — past it
+  // the skip proceeds anyway (ending THIS track is the operator's intent) and
+  // the caller reports the miss honestly. Never throws: a skip must not fail
+  // on its safety net.
+  async commitBeforeSkip(): Promise<{ pending: boolean; committed: boolean; waitedMs: number }> {
+    if (skipPrepAction(this.upcoming.length) === 'skip-now') {
+      return { pending: false, committed: false, waitedMs: 0 };
+    }
+    const t0 = Date.now();
+    // One forced kick covers every held item; a busy sender re-runs it forced
+    // on release (pendingForceDrain), so the loop below only observes.
+    void this.drainToLiquidsoap(true);
+    let headSentAt: number | null = null;
+    const deadline = t0 + SKIP_COMMIT_WAIT_MS;
+    while (true) {
+      const head = this.upcoming[0];
+      if (!head) {
+        // Everything aired or was cancelled while waiting — nothing left to
+        // protect, the skip falls through honestly.
+        return { pending: false, committed: false, waitedMs: Date.now() - t0 };
+      }
+      if (head.sent) {
+        if (headSentAt == null) headSentAt = Date.now();
+        const status = await liquidsoapControl.djQueueStatus();
+        if (commitSatisfied({ headSent: true, queueStatus: status, sinceHeadSentMs: Date.now() - headSentAt })) {
+          return { pending: true, committed: true, waitedMs: Date.now() - t0 };
+        }
+      }
+      if (Date.now() + SKIP_POLL_INTERVAL_MS > deadline) break;
+      await sleep(SKIP_POLL_INTERVAL_MS);
+    }
+    return { pending: true, committed: false, waitedMs: Date.now() - t0 };
   }
 
   // Speak something without queueing a track — for hourly time checks,
