@@ -3,7 +3,9 @@
 // the Settings voice tab. The status badge makes availability visible before a
 // selection. Tailwind-only, no inline styles (issue #50).
 import { cn } from '../../../lib/cn';
-import { ENGINE_META, engineStatus, type EngineAvailability } from './engineMeta';
+import {
+  ENGINE_META, engineStatus, type EngineAvailability, type EngineStatusOpts,
+} from './engineMeta';
 
 interface EngineSelectorProps {
   value: string;
@@ -11,12 +13,20 @@ interface EngineSelectorProps {
   engineIds: string[];
   // SettingsResponse.tts.available — drives the per-card status badge.
   available?: EngineAvailability;
+  // Call-site wording for the "how to fix it" note; see EngineStatusOpts.
+  statusOpts?: EngineStatusOpts;
+  // Off where the call site already shows a more specific notice for the same
+  // fault — the generic "no key for the selected provider" line otherwise
+  // stacks under a red alert that has just said it with the provider named.
+  showStatusHint?: boolean;
   onChange: (id: string) => void;
   className?: string;
 }
 
-export function EngineSelector({ value, engineIds, available, onChange, className }: EngineSelectorProps) {
-  const hint = engineStatus(value, available).hint;
+export function EngineSelector({
+  value, engineIds, available, statusOpts, showStatusHint = true, onChange, className,
+}: EngineSelectorProps) {
+  const hint = showStatusHint ? engineStatus(value, available, statusOpts).hint : null;
   return (
     <div className={cn('grid gap-2.5', className)}>
       <div

@@ -15,8 +15,9 @@ import { useVoiceDiscovery } from '../../../hooks/useVoiceDiscovery';
 import {
   CB_DEFAULT_VOICE, KOKORO_RE, CHATTERBOX_VOICE_RE, POCKET_TTS_VOICE_RE,
 } from '../personas/constants';
-import { Seg } from '../ui';
 import { EngineSelector } from './EngineSelector';
+import { CloudProviderSelector } from './CloudProviderSelector';
+import { resolveKeyPresence } from './cloudProviderMeta';
 import { VoicePreviewButton } from './VoicePreviewButton';
 import { VoicePicker, type VoicePickerGroup } from './VoicePicker';
 import { ENGINES, type EngineAvailability } from './engineMeta';
@@ -67,6 +68,8 @@ export const ENGINE_UNAVAILABLE: Record<string, ReactNode> = {
 // The slice of GET /settings this component reads. Structural on purpose — the
 // Personas and Settings pages model the rest of that payload differently.
 export interface EngineVoiceData {
+  // Which provider keys the controller can see; feeds the Cloud provider badge.
+  env?: Record<string, unknown>;
   tts?: {
     kokoroVoices?: string[];
     kokoroVoiceLanguages?: Record<string, string>;
@@ -104,7 +107,10 @@ export function EngineVoiceFields({
   const kokoroVoices: string[] = data?.tts?.kokoroVoices || [];
   const kokoroLanguages = data?.tts?.kokoroVoiceLanguages || {};
   const pocketTtsVoices = data?.tts?.pocketTtsVoices || [];
-  const cloudProviders = data?.tts?.cloudProviders || ['openai', 'elevenlabs'];
+  // Mirrors the controller's TTS_CLOUD_PROVIDERS, so a payload that predates the
+  // field still offers every provider the server accepts.
+  const cloudProviders = data?.tts?.cloudProviders
+    || ['openai', 'elevenlabs', 'fish-audio', 'openai-compatible'];
 
   // Every slot uses the station-wide server, so sending no base URL is right —
   // the server falls back to the saved one. ElevenLabs and Fish are gated on a
@@ -161,6 +167,10 @@ export function EngineVoiceFields({
     }
   }
 
+  // The caller's cloud alert names the provider and says what speaks instead,
+  // so it stands in for both generic "not configured" hints below it.
+  const cloudAlerted = value.engine === 'cloud' && !!cloudIssue;
+
   const notice = (engine: string) => (
     <div className="mb-2.5 border border-[var(--danger)] px-3 py-2.5 text-[11px] leading-[1.6] text-[var(--danger)]">
       {unavailableNote(engine)}
@@ -175,6 +185,7 @@ export function EngineVoiceFields({
           value={value.engine}
           engineIds={ENGINE_IDS}
           available={selectorAvailable}
+          showStatusHint={!cloudAlerted}
           onChange={selectEngine}
         />
         {engineHint && <div className="field-hint max-w-[70ch]">{engineHint}</div>}
@@ -398,21 +409,20 @@ export function EngineVoiceFields({
                 {cloudIssue}
               </div>
             )}
-            <div className="stack-mobile grid grid-cols-[1fr_1fr] gap-4">
+            {/* Provider and voice each get their own row: the provider grid is
+                four cards wide, and a voice id picked before the provider is
+                settled is a voice id that gets thrown away. */}
+            <div className="grid gap-4">
               <div className="field">
                 <Label>Cloud provider</Label>
-                <Seg
+                <CloudProviderSelector
                   value={value.cloudProvider}
-                  options={cloudProviders.map(id => ({
-                    id,
-                    label: id === 'fish-audio'
-                      ? 'Fish Audio'
-                      : id === 'elevenlabs'
-                        ? 'ElevenLabs'
-                        : id === 'openai'
-                          ? 'OpenAI'
-                          : 'OpenAI-compatible',
-                  }))}
+                  providerIds={cloudProviders}
+                  availability={{
+                    cloudByProvider: resolveKeyPresence(
+                      cloudProviders, data?.tts?.available?.cloudByProvider, data?.env,
+                    ),
+                  }}
                   onChange={v => {
                     // Switching provider invalidates the old voice id.
                     // openai-compatible has no curated voices, so blank lets
@@ -420,14 +430,13 @@ export function EngineVoiceFields({
                     const next = CLOUD_VOICES[v as keyof typeof CLOUD_VOICES]?.[0]?.id || '';
                     onChange({ cloudProvider: v, voice: next });
                   }}
+                  enableHint={!cloudAlerted}
+                  hint={isCompat
+                    ? <>The base URL and model come from the station’s Cloud settings. Only the voice is set here.</>
+                    : <>The API key and model come from the station’s Cloud settings. Only the voice is set here.</>}
                 />
-                <div className="field-hint">
-                  {isCompat
-                    ? 'Uses the shared base URL + model from Settings.'
-                    : 'Uses the shared API key + model from Settings.'}
-                </div>
               </div>
-              <div className="field">
+              <div className="field max-w-[420px]">
                 <Label>Cloud voice</Label>
                 {!hasList ? (
                   <>
