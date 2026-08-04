@@ -352,6 +352,41 @@ export default function TaggingPanel(p: TaggingPanelProps) {
   const audioStatus = p.coverage?.audioStatus;
   const vocalStatus = p.coverage?.vocalStatus;
 
+  // How you actually GET the heavy analyzer depends on which backend is running,
+  // and the two answers don't overlap. 'local' is the in-process venv — the
+  // all-in-one image, or a dev ANALYZE_PYTHON venv — where ANALYZER_HEAVY is a
+  // docker-compose variable with no analyzer service to select, so setting it
+  // does precisely nothing (#1300 bug 9). This panel telling AIO operators to
+  // set it is a large part of why they set it, saw no change, and filed the
+  // feature as broken. Mirrors the doctor's split in doctor/checks-station.ts.
+  //
+  // Unknown backend (older controller, or still probing) keeps the compose
+  // wording: it's the majority install and the AIO advice would be actively
+  // wrong there, where this one is merely incomplete.
+  const analyzerIsLocal = p.coverage?.analysisBackend === 'local';
+  const heavyUpgradeShort = analyzerIsLocal
+    ? 'Needs the heavy image (subwave-aio-heavy).'
+    : 'Needs the heavy analyzer (ANALYZER_HEAVY=1).';
+  const heavyUpgradeBox = analyzerIsLocal ? (
+    <>
+      Switch this container&rsquo;s image to{' '}
+      <code>ghcr.io/perminder-klair/subwave-aio-heavy</code> (or{' '}
+      <code>-aio-cuda</code> on an NVIDIA host) and recreate it — analysis then
+      kicks in automatically, nothing to re-enable here.{' '}
+      <b>
+        <code>ANALYZER_HEAVY</code> does nothing on this image
+      </b>{' '}
+      — it is a docker-compose setting, and there is no analyzer service here to
+      point it at. The heavy image is amd64-only.
+    </>
+  ) : (
+    <>
+      Set <code>ANALYZER_HEAVY=1</code> in <code>.env</code> and recreate the
+      analyzer (<code>docker compose up -d analyzer</code>) — analysis then kicks
+      in automatically, nothing to re-enable here. The heavy image is amd64-only.
+    </>
+  );
+
   // Forced open while an analyze/backfill run is in flight so progress and Pause
   // stay visible; reverts to the manual choice when the run finishes.
   const [analysisOpen, setAnalysisOpen] = useState(false);
@@ -745,7 +780,7 @@ export default function TaggingPanel(p: TaggingPanelProps) {
                   p.audioEnabled
                     ? 'Pause fingerprinting newly-added tracks. Existing “sounds-like” data stays and keeps driving picks.'
                     : audioStatus === 'pending-heavy'
-                      ? 'Needs the heavy analyzer (ANALYZER_HEAVY=1). You can enable now — fingerprinting starts automatically once it’s up.'
+                      ? `${heavyUpgradeShort} You can enable now — fingerprinting starts automatically once it’s up.`
                       : 'Start fingerprinting new tracks for “sounds-like” picks (~1-2s each on the analysis engine).'
                 }
               >
@@ -837,7 +872,7 @@ export default function TaggingPanel(p: TaggingPanelProps) {
                     disabled={p.busy || running}
                     title={
                       vocalStatus === 'pending-heavy'
-                        ? 'Needs the heavy analyzer (ANALYZER_HEAVY=1). You can enable now — separation starts automatically once it’s up.'
+                        ? `${heavyUpgradeShort} You can enable now — separation starts automatically once it’s up.`
                         : 'Start Demucs vocal separation on new tracks (~10-30s each — CPU-heavy).'
                     }
                   >
@@ -847,7 +882,7 @@ export default function TaggingPanel(p: TaggingPanelProps) {
                 <span className="caption basis-full !tracking-[0.04em] !normal-case">
                   Separates vocals so the DJ can talk before lyrics (Demucs, ~10-30s/track —
                   CPU-heavy). Off by default.
-                  {vocalStatus === 'pending-heavy' && ' Needs the heavy analyzer (ANALYZER_HEAVY=1).'}
+                  {vocalStatus === 'pending-heavy' && ` ${heavyUpgradeShort}`}
                 </span>
               </>
             )}
@@ -911,10 +946,8 @@ export default function TaggingPanel(p: TaggingPanelProps) {
         {audioStatus === 'pending-heavy' && p.audioEnabled ? (
           <div className="border border-[color-mix(in_oklab,var(--accent)_35%,transparent)] bg-[var(--accent-soft)] px-3 py-2 text-[11px] leading-[1.5] text-ink !normal-case">
             <b>Sounds-like is enabled — fingerprinting starts once your analyzer can do it.</b> The
-            default analyzer is the lean image (bpm/key only); CLAP needs the heavy build. Set{' '}
-            <code>ANALYZER_HEAVY=1</code> in <code>.env</code> and recreate the analyzer
-            (<code>docker compose up -d analyzer</code>) — analysis then kicks in automatically,
-            nothing to re-enable here. The heavy image is amd64-only.{' '}
+            default analyzer is the lean image (bpm/key only); CLAP needs the heavy build.{' '}
+            {heavyUpgradeBox}{' '}
             <a href="/manual/analysis" className="font-bold text-vermilion underline-offset-2 hover:underline">
               Manual → Acoustic analysis
             </a>
@@ -923,9 +956,7 @@ export default function TaggingPanel(p: TaggingPanelProps) {
         {vocalStatus === 'pending-heavy' && p.vocalEnabled ? (
           <div className="border border-[color-mix(in_oklab,var(--accent)_35%,transparent)] bg-[var(--accent-soft)] px-3 py-2 text-[11px] leading-[1.5] text-ink !normal-case">
             <b>Vocal-activity is enabled — separation starts once your analyzer can do it.</b> Demucs
-            needs the heavy build. Set <code>ANALYZER_HEAVY=1</code> in <code>.env</code> and recreate
-            the analyzer (<code>docker compose up -d analyzer</code>) — analysis then kicks in
-            automatically, nothing to re-enable here. The heavy image is amd64-only.{' '}
+            needs the heavy build. {heavyUpgradeBox}{' '}
             <a href="/manual/analysis" className="font-bold text-vermilion underline-offset-2 hover:underline">
               Manual → Acoustic analysis
             </a>
