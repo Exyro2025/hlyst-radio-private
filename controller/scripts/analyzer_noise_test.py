@@ -59,7 +59,15 @@ KEPT = [
     "MemoryError",
     "ffmpeg pre-decode failed (Invalid data found when processing input)",
     "soundfile.LibsndfileError: Error opening 'x.mp3': File contains data in an unknown format.",
-    "[src/libmpg123/parse.c] this line is new to us",  # anchored ^ — not a prefix match
+    # The decisive cases: the filter keys on the MESSAGE, never on who emitted
+    # it. A libmpg123 line whose text nobody has catalogued is exactly the line
+    # the replay exists for — matching the `[src/libmpg123/...]` header alone
+    # would eat it, and every future libmpg123 error with it.
+    "[src/libmpg123/parse.c] this line is new to us",
+    "[src/libmpg123/readers.c:bad_read():99] error: Cannot read the whole file",
+    # A real librosa warning, from the same module as the benign ones. An n_fft
+    # wider than the signal is how a truncated file announces itself.
+    "librosa/core/spectrum.py:257: UserWarning: n_fft=2048 is too large for input signal of length=512",
 ]
 
 
@@ -70,7 +78,7 @@ def test_benign_lines_are_noise():
 
 
 def test_real_errors_survive():
-    for line in KEPT[:-1]:
+    for line in KEPT:
         assert not aw.is_decoder_noise(line), f"wrongly swallowed: {line!r}"
 
 

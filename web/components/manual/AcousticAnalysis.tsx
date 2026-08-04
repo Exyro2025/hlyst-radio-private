@@ -134,8 +134,10 @@ ANALYZER_HEAVY=1`}</CodeBlock>
             Library panel names the cause when this happens — it is <em>not</em> the lean/heavy
             image split, so switching images won&rsquo;t help. Let it out once, or pre-seed the
             cache offline; the recipe is in <code className="bs-code-inline">docs/tts-heavy.md</code>.
-            After fixing it, restart the analyzer — the failure is remembered until you do,
-            which is what stops the pass churning.
+            After fixing it, restart whatever holds the analyzer — the sidecar container on a
+            compose install, the controller itself on an AIO or local venv, where the worker is
+            a child of it. The failure is remembered until you do, which is what stops the pass
+            churning; the Library panel names the right process for your install.
           </p>
         </div>
       </section>

@@ -389,10 +389,23 @@ export default function TaggingPanel(p: TaggingPanelProps) {
   // on purpose: the advice there ("switch to the heavy image") is advice to do
   // the thing already done, which is how this went unexplained. Audio first —
   // one banner is enough, and CLAP is the dimension people enable.
+  // The latch is sticky by design, so the retry sentence is the operator's only
+  // exit — and the process to restart isn't the same on every install. A
+  // sidecar remembers the failure in the analyzer container; an AIO or local
+  // venv has no analyzer container at all (the worker is a child of the
+  // controller, and the latch is controller state), so pointing there is the
+  // same dead end as telling a heavy-image operator to switch to the heavy
+  // image. Mirrors retryHint() in controller/src/music/analyze-capability.ts.
+  const restartHint =
+    p.coverage?.analysisBackend === 'sidecar'
+      ? 'restart the analyzer'
+      : p.coverage?.analysisBackend === 'local'
+        ? 'restart the controller (this install runs the analyzer in-process — there is no separate analyzer to restart)'
+        : 'restart the analyzer, or the controller if it runs the analyzer in-process';
   const loadFailure = p.coverage?.audioAnalysisError
-    ? { model: 'CLAP', what: 'sounds-like fingerprinting', error: p.coverage.audioAnalysisError }
+    ? { model: 'CLAP', what: 'sounds-like fingerprinting', error: p.coverage.audioAnalysisError, restart: restartHint }
     : p.coverage?.vocalAnalysisError
-      ? { model: 'Demucs', what: 'vocal separation', error: p.coverage.vocalAnalysisError }
+      ? { model: 'Demucs', what: 'vocal separation', error: p.coverage.vocalAnalysisError, restart: restartHint }
       : null;
   // Tracks the analysis pass has given up on. Zero on a healthy station, so the
   // list behind it is fetched only when the operator opens it.
@@ -1019,7 +1032,7 @@ export default function TaggingPanel(p: TaggingPanelProps) {
           it needs them — a host with no outbound reach fails there every time.
           <div className="mt-1.5 font-mono text-[10px] break-words text-muted">{loadFailure.error}</div>
           <div className="mt-1.5">
-            Fix the cause, then restart the analyzer to retry — the failure is remembered until you
+            Fix the cause, then {loadFailure.restart} to retry — the failure is remembered until you
             do, which is what stops the pass re-analysing tracks it can&rsquo;t fill.{' '}
             <a href="/manual/analysis" className="font-bold text-vermilion underline-offset-2 hover:underline">
               Manual → Acoustic analysis

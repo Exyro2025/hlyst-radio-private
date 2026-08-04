@@ -126,10 +126,19 @@ Three ways out:
 - **Point at your own copy.** `CLAP_MODEL` accepts a local path as well as a hub
   id, so a weights directory you already mirror can be used directly.
 
-Once the cause is fixed, **restart the analyzer** (`docker compose restart
-analyzer`). The failure is remembered until you do — deliberately, because that
-is what stops the analysis pass re-attempting the same tracks on every run and
-reporting the same "+N tracks missing an audio vector" count forever.
+Once the cause is fixed, **restart whatever is holding the analyzer**. The
+failure is remembered until you do — deliberately, because that is what stops
+the analysis pass re-attempting the same tracks on every run and reporting the
+same "+N tracks missing an audio vector" count forever. Which process that is
+depends on your install, and the admin panel names the right one for yours:
+
+- **Sidecar** (the default compose stacks): `docker compose restart analyzer`.
+  The failure is remembered inside the analyzer container, across the idle
+  worker respawn that used to reset it.
+- **AIO, or a local librosa venv**: there is no separate analyzer — the worker
+  is a child of the controller and the failure is remembered in the controller
+  process, so restart *that* (on the AIO, the container). `docker compose
+  restart analyzer` has nothing to act on there.
 
 ### Heavy analysis on an NVIDIA GPU (CUDA)
 

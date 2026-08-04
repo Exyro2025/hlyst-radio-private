@@ -189,24 +189,44 @@ VERBOSE_DECODER = os.environ.get("ANALYZE_VERBOSE_DECODER", "").strip().lower() 
     "1", "true", "yes",
 )
 
-# Benign decoder chatter, anchored tightly enough that a real decode error
-# ("Giving up" mid-file is narration; "cannot open", "invalid data" is not)
-# still gets through. Matched case-insensitively against one whole line.
+# libmpg123 prefixes its lines with the C source position that emitted them:
+#
+#   [src/libmpg123/parse.c:wetwork():1349] error: Giving up resync after 1024 bytes
+#
+# That header says WHO is talking, never WHAT about — so it is stripped, not
+# matched. Keying on the header alone would drop every libmpg123 line including
+# the ones nobody has seen yet, which is precisely the discard this filter is
+# built to avoid: the point of replaying is that an unrecognised line survives.
+_LIBMPG123_HEADER_RE = re.compile(
+    r"^\[src/libmpg123/[^\]]*\]\s*(?:error|warning|note|debug)\s*:\s*", re.IGNORECASE
+)
+
+# Benign decoder chatter, matched against the MESSAGE (header already stripped)
+# and anchored tightly enough that a real decode error still gets through:
+# "giving up resync" mid-file is narration, "cannot open" / "invalid data" is
+# not. Matched case-insensitively against one whole line. The `note:`/`warning:`
+# prefixes are optional because libsndfile emits some of these bare.
+_LEVEL = r"(?:note|warning|error)\s*:\s*"
 _DECODER_NOISE_PATTERNS = [
-    r"^\[src/libmpg123/.*\]",               # libmpg123 file:line:func narration
-    r"^note: illegal audio-mpeg-header",    # junk bytes before the first frame
-    r"^warning: xing stream size off",      # VBR header vs actual size
-    r"^note: skipped \d+ bytes",            # ID3 / padding skip
-    r"^warning: junk at the beginning",     # ditto, older libmpg123 wording
+    rf"^(?:{_LEVEL})?giving up resync",        # resync over ID3 padding
+    rf"^(?:{_LEVEL})?no comment text",         # empty ID3 comment frame
+    rf"^(?:{_LEVEL})?illegal audio-mpeg-header",  # junk bytes before frame one
+    rf"^(?:{_LEVEL})?xing stream size off",    # VBR header vs actual size
+    rf"^(?:{_LEVEL})?skipped \d+ bytes",       # ID3 / padding skip
+    rf"^(?:{_LEVEL})?junk at the beginning",   # ditto, older libmpg123 wording
     r"pysoundfile failed\. trying audioread",
     r"deprecated as of librosa version",
     r"librosa will remove support for .*audioread",
-    # A Python warning header, but ONLY from the decode stack — deliberately not
-    # any `*.py:N: SomeWarning`, which would swallow warnings from code that has
-    # something to say. warnings.filterwarnings above normally stops these at
-    # source; this catches the ones raised before the filters are installed, or
-    # by a child that doesn't inherit them.
-    r"^\S*(librosa|soundfile|audioread)\S*\.py:\d+:\s+\w*warning",
+    # A Python warning header from the decode stack. Deliberately requires the
+    # MESSAGE to name the fallback too, not just the module: `librosa/....py:N:
+    # SomeWarning` on its own also carries things worth reading (an n_fft wider
+    # than the signal is how a truncated file announces itself), and swallowing
+    # those is the over-match that costs an operator their only evidence.
+    # warnings.filterwarnings below normally stops these at source; this catches
+    # the ones raised before the filters are installed, or by a child that
+    # doesn't inherit them.
+    r"^\S*(?:librosa|soundfile|audioread)\S*\.py:\d+:\s+\w*warning:.*"
+    r"(?:audioread|pysoundfile|soundfile)",
 ]
 _DECODER_NOISE_RE = re.compile("|".join(_DECODER_NOISE_PATTERNS), re.IGNORECASE)
 
@@ -216,11 +236,14 @@ def is_decoder_noise(line):
 
     Pure and unit-pinned (scripts/analyzer_noise_test.py) because the cost of
     getting it wrong is asymmetric: a missed pattern is cosmetic, a pattern that
-    over-matches swallows the decode error an operator needs to see.
+    over-matches swallows the decode error an operator needs to see. So the
+    match is always against the MESSAGE — a libmpg123 line whose text we don't
+    recognise is kept, header and all.
     """
     text = (line or "").strip()
     if not text:
         return True
+    text = _LIBMPG123_HEADER_RE.sub("", text, count=1)
     return _DECODER_NOISE_RE.search(text) is not None
 
 

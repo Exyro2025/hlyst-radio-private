@@ -19,7 +19,11 @@
 // Run: `tsx scripts/analyze-capability.test.ts` (folded into `npm run test`).
 
 import assert from 'node:assert/strict';
-import { backfillDecision } from '../src/music/analyze-capability.js';
+import {
+  backfillDecision,
+  failureCountsAgainstTrack,
+  SYSTEMIC_FAILURE_RUN,
+} from '../src/music/analyze-capability.js';
 
 let failures = 0;
 function test(name: string, fn: () => void) {
@@ -97,6 +101,65 @@ test('the vocal dimension names Demucs, not CLAP', () => {
   });
   assert.match(broken.notice!, /Demucs is installed but failed to load/);
   assert.match(broken.notice!, /checkpoint is corrupt/);
+});
+
+test('the stem dimension gets the same split, not the old dead-end advice', () => {
+  // The stem cache rides Demucs, so a failed Demucs load reaches it on the same
+  // `capable: false` a lean image does. It was the one widening still hard-coded
+  // to "use the heavy analyzer image" — advice to do the thing already done, in
+  // the widening the rest of this module exists to stop doing that in.
+  const lean = backfillDecision({ dimension: 'stem', wanted: true, capable: false, error: null });
+  assert.match(lean.notice!, /^stem backfill skipped/);
+  assert.match(lean.notice!, /built without Demucs/);
+  const broken = backfillDecision({
+    dimension: 'stem', wanted: true, capable: false, error: 'checkpoint is corrupt',
+  });
+  assert.match(broken.notice!, /Demucs is installed but failed to load/);
+  assert.match(broken.notice!, /checkpoint is corrupt/);
+  assert.ok(!/ANALYZER_HEAVY/.test(broken.notice!), 'stem load failure repeats the lean-image advice');
+});
+
+test('the retry names a process that exists on THIS deployment', () => {
+  // The latch is sticky on purpose, so the retry sentence is the whole exit
+  // route — and it is not the same process everywhere. A sidecar remembers the
+  // failure in the analyzer container. A local/AIO install has no analyzer
+  // container at all: the worker is a child of the controller and the latch is
+  // controller module state, so `docker compose restart analyzer` is a no-op or
+  // an error there. Sending an AIO operator to it is the same dead end as
+  // sending a heavy-image operator to the heavy image.
+  const args = { dimension: 'audio', wanted: true, capable: false, error: 'no weights' } as const;
+  const sidecar = backfillDecision({ ...args, backend: 'sidecar' });
+  assert.match(sidecar.notice!, /docker compose restart analyzer/);
+
+  const local = backfillDecision({ ...args, backend: 'local' });
+  assert.match(local.notice!, /restart the controller/);
+  assert.ok(
+    !/docker compose restart analyzer/.test(local.notice!),
+    'local backend told to restart a container it does not have',
+  );
+
+  // Unknown backend gets wording that covers both rather than guessing.
+  const unknown = backfillDecision(args);
+  assert.match(unknown.notice!, /restart the analyzer/);
+  assert.match(unknown.notice!, /controller/);
+});
+
+console.log('systemic failure guard:');
+
+test('a scattered bad file is counted on its first failure', () => {
+  // The whole point of the per-track stamp: one throw on a corrupt file, with
+  // healthy tracks either side, is evidence about that file.
+  assert.equal(failureCountsAgainstTrack(1), true);
+  assert.equal(failureCountsAgainstTrack(SYSTEMIC_FAILURE_RUN), true);
+});
+
+test('a run of failures stops counting — that is the pass, not the files', () => {
+  // Navidrome gone, or the sidecar dying at track 400 of 500. isAvailable()
+  // gates the pass on the ANALYZER being up and on nothing else, so every
+  // remaining track throws; counted naively, three such passes sentence a whole
+  // batch to the exclusion list with only a manual "Retry all" to undo it.
+  assert.equal(failureCountsAgainstTrack(SYSTEMIC_FAILURE_RUN + 1), false);
+  assert.equal(failureCountsAgainstTrack(500), false);
 });
 
 if (failures > 0) {
