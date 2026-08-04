@@ -14,23 +14,37 @@ import {
   type DefaultValues,
   type FieldValues,
   type Path,
-  type Resolver,
   type UseFormReturn,
 } from 'react-hook-form';
 import type { z } from 'zod';
 
+// All THREE generics are passed on purpose.
+//
+// react-hook-form is useForm<TFieldValues, TContext, TTransformedValues>, and
+// handleSubmit's callback receives TTransformedValues — which is what
+// zodResolver actually hands it at runtime, i.e. z.output<S>. Passing only
+// z.input<S> lets TTransformedValues silently default to the INPUT type. That
+// is harmless while a schema's output is a superset of its input (webhooks),
+// but the first type-CHANGING transform — z.coerce.number(),
+// z.string().transform(Number), an object-reshaping .transform() — would type
+// `values.x` as string while it is really a number, with no error anywhere.
+// The middle generic is TContext, which nothing here uses; `unknown` rather
+// than react-hook-form's `any` default.
 export function useZodForm<S extends z.ZodType<FieldValues, FieldValues>>(
   schema: S,
   defaultValues: DefaultValues<z.input<S>>,
-): UseFormReturn<z.input<S>> {
-  return useForm<z.input<S>>({
-    // zodResolver's generic inference doesn't propagate through the
-    // `S extends z.ZodType<FieldValues, FieldValues>` bound (Output/Input only
-    // appear inside T's constraint, not in a directly-inferable position), so
-    // it comes back widened to plain FieldValues. The cast pins it back to
-    // this schema's actual input shape without changing what runs at
-    // runtime — zodResolver(schema) is still exactly what's called.
-    resolver: zodResolver(schema) as unknown as Resolver<z.input<S>>,
+): UseFormReturn<z.input<S>, unknown, z.output<S>> {
+  return useForm<z.input<S>, unknown, z.output<S>>({
+    // A cast is unavoidable here: inside this function TS only knows S by its
+    // constraint, so it collapses z.input<S>/z.output<S> to plain FieldValues
+    // and zodResolver comes back as Resolver<FieldValues, unknown, FieldValues>.
+    // The assertion is deliberately on the SCHEMA, not on the resolver: it
+    // states only the tautology that S is a ZodType carrying S's own input and
+    // output types, and lets the Resolver type stay DERIVED from
+    // @hookform/resolvers' own signature — so if that signature changes, this
+    // follows it instead of overriding it. Nothing about runtime changes;
+    // zodResolver(schema) is still exactly what is called.
+    resolver: zodResolver(schema as unknown as z.ZodType<z.output<S>, z.input<S>>),
     defaultValues,
     // Validate as the operator types, so the Save button's disabled state
     // tracks validity without a submit attempt — matching the behaviour the
@@ -43,14 +57,22 @@ export function useZodForm<S extends z.ZodType<FieldValues, FieldValues>>(
 // The controller emits dotted paths ('webhooks.1.url'), which is exactly
 // react-hook-form's setError field syntax — so a rule only the server can
 // check still lands on the right input rather than in a toast.
-export function applyServerFieldErrors<T extends FieldValues>(
-  form: UseFormReturn<T>,
+//
+// Generic over all three of UseFormReturn's parameters so a form built by
+// useZodForm (whose transformed type differs from its field type) is accepted
+// without the call site restating anything.
+export function applyServerFieldErrors<
+  TFieldValues extends FieldValues,
+  TContext,
+  TTransformedValues,
+>(
+  form: UseFormReturn<TFieldValues, TContext, TTransformedValues>,
   fieldErrors: Record<string, string> | undefined,
 ): boolean {
   if (!fieldErrors) return false;
   const entries = Object.entries(fieldErrors);
   for (const [path, message] of entries) {
-    form.setError(path as Path<T>, { type: 'server', message });
+    form.setError(path as Path<TFieldValues>, { type: 'server', message });
   }
   return entries.length > 0;
 }
