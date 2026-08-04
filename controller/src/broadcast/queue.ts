@@ -60,6 +60,7 @@ import {
   boundaryCarriesTrackVoice,
   formatAgo,
   knownDurationSec,
+  linkClockDrifted,
   pickLeadSec,
   pickLinkInterval,
   playAlreadyRecorded,
@@ -386,7 +387,12 @@ class Queue {
   // more) older than what actually just played. airIntro() uses linkPrev to
   // detect that and drop the now-stale back-announce rather than air a wrong
   // name. Left null for request intros (they never back-announce).
-  async push({ track, requestedBy = null, intent = null, introScript = null, introKind = 'dj-speak', introPersona = null, aiPicked = false, allowDuplicate = false, linkPrev = null }: {
+  // `linkClockAt` is the air moment `introScript` was written against, present
+  // only when the generator gave the model a clock to speak (#1314). airIntro
+  // drops the line if the real seam lands too far from it — a forecast made
+  // from the on-air track's remaining play goes badly wrong when the pick
+  // misses that seam and auto.m3u fills the slot instead.
+  async push({ track, requestedBy = null, intent = null, introScript = null, introKind = 'dj-speak', introPersona = null, aiPicked = false, allowDuplicate = false, linkPrev = null, linkClockAt = null }: {
     track: Track;
     requestedBy?: string | null;
     intent?: string | null;
@@ -396,6 +402,7 @@ class Queue {
     aiPicked?: boolean;
     allowDuplicate?: boolean;
     linkPrev?: { id?: string | null; title?: string | null; artist?: string | null } | null;
+    linkClockAt?: Date | number | null;
   }) {
     // Dedup guard. Applies to AI picks AND listener requests: two listener
     // requests resolving to the same song over the 25-45s identify/match window
@@ -430,6 +437,11 @@ class Queue {
       // air against it; a bare track carries no claim about what preceded it.
       linkPrev: (introScript && linkPrev)
         ? { id: linkPrev.id ?? null, title: linkPrev.title ?? null, artist: linkPrev.artist ?? null }
+        : null,
+      // Same gate as linkPrev: a bare track makes no claim about the clock, so
+      // only a line that exists can carry the air moment it was written for.
+      linkClockAt: (introScript && linkClockAt != null)
+        ? (linkClockAt instanceof Date ? linkClockAt.getTime() : linkClockAt)
         : null,
       introWav: null as string | null,
       introAired: false,
@@ -1353,6 +1365,7 @@ class Queue {
     if (boundaryCarriesTrackVoice(incoming, this.current?.track || null, {
       voiceAllowed: autoVoiceAllowed(),
       wavExists: path => existsSync(path),
+      nowMs: Date.now(),
     })) {
       this.log('scheduler',
         `Holding ${p.kind} — the track's own ${KIND_LABEL[incoming!.introKind || 'dj-speak'] || 'intro'} takes this boundary`);
@@ -1396,6 +1409,20 @@ class Queue {
     if (shouldDropStaleLink(item, predecessor)) {
       this.log('link-skip',
         `Dropped stale link before "${item.track?.title}" — it named "${item.linkPrev!.title}" but "${predecessor?.title || 'another track'}" actually played first`);
+      this.persist();
+      return;
+    }
+    // Stale-CLOCK safety-net, the same trade one line up (#1314). A link is
+    // only stamped with linkClockAt when the generator handed the model a time
+    // to speak; if this seam lands far from that forecast — the pick missed the
+    // slot it was written for and aired at the end of an auto.m3u filler
+    // instead — the line names a time that has been and gone. The audio is
+    // already cut, so drop it.
+    if (linkClockDrifted(item.linkClockAt, Date.now())) {
+      const driftSec = Math.round((Date.now() - item.linkClockAt!) / 1000);
+      this.log('link-skip',
+        `Dropped link before "${item.track?.title}" — written to air at ${new Date(item.linkClockAt!).toISOString()}, `
+        + `but this seam is ${Math.abs(driftSec)}s ${driftSec > 0 ? 'later' : 'earlier'}, so any clock it states is wrong`);
       this.persist();
       return;
     }
