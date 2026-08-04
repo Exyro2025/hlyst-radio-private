@@ -59,12 +59,16 @@ export interface Player {
 
 export interface UsePlayerOptions {
   initialVolume?: number;
+  /** Whether the station advertises a live `/stream.opus` mount (from
+   *  /now-playing's `stream.opusEnabled`). null/undefined = not known yet —
+   *  the Opus upgrade waits rather than guessing. */
+  opusEnabled?: boolean | null;
 }
 
 // Owns the <audio> element + tune-in state. audioRef must be attached to an
 // <audio> tag rendered by the consumer, so the Waveform's Web Audio API can
 // also reach it.
-export function usePlayer({ initialVolume = 1 }: UsePlayerOptions = {}): Player {
+export function usePlayer({ initialVolume = 1, opusEnabled = null }: UsePlayerOptions = {}): Player {
   const { streams } = useStationOrigin();
   const audioRef = useRef<HTMLAudioElement | null>(null);
   // audioRef.current mirrored into state so the listener effect can depend on
@@ -159,7 +163,16 @@ export function usePlayer({ initialVolume = 1 }: UsePlayerOptions = {}): Player 
   // Hence three defences: require 'probably' (drops Safari's 'maybe'), skip
   // iOS-family devices (iPadOS 13+ reports the desktop Macintosh UA, so
   // maxTouchPoints is checked too), and skip Firefox by UA.
+  //
+  // FOURTH defence, and the one that isn't about codecs: the station must
+  // actually be serving the mount. `stream.opusEnabled` rides /now-playing and
+  // Opus is OFF by default, so on most installs the upgrade used to point
+  // Chrome at a 404 — playback sat on "acquiring" until the load failed and
+  // `onError` pinned MP3 back (issue #1300, bug 5). null means "not polled yet";
+  // only an explicit true upgrades, so an older controller that omits the key
+  // stays on MP3 rather than guessing.
   useEffect(() => {
+    if (opusEnabled !== true) return;
     if (!streams.opus || opusFailedRef.current) return;
     const ua = navigator.userAgent;
     // Desktop/Android Firefox + Gecko forks (LibreWolf, Waterfox) carry
@@ -172,7 +185,7 @@ export function usePlayer({ initialVolume = 1 }: UsePlayerOptions = {}): Player 
     if (opusOk === 'probably') {
       setStreamUrl(streams.opus);
     }
-  }, [streams.opus]);
+  }, [streams.opus, opusEnabled]);
 
   // Drive `status` from the <audio> element's own events, and reconnect when the
   // element wedges mid-broadcast (symptom: seconds of silence around a track

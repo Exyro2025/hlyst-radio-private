@@ -34,6 +34,11 @@ export interface StationFeed {
    *  the offset already added and can briefly sit in the future — useElapsed
    *  clamps at 0 rather than banking the buffer as elapsed (issue #1114). */
   trackStartedAt: number | null;
+  /** Whether the station is actually serving `/stream.opus`, or null before the
+   *  first poll. The player must not upgrade to the Opus mount on codec support
+   *  alone — Opus is off by default, so the mount 404s and playback sits on
+   *  "acquiring" until the error handler pins MP3 back (issue #1300, bug 5). */
+  opusEnabled: boolean | null;
   /** Station IANA timezone (e.g. "Europe/London"), or null before first poll.
    *  Render on-air timestamps in this zone so they match what the DJ speaks
    *  (issue #418). */
@@ -74,6 +79,7 @@ export function useStationFeed(): StationFeed {
   const [state, setState] = useState<StationState>(EMPTY_STATE);
   const [session, setSession] = useState<SessionPayload>(EMPTY_SESSION);
   const [trackStartedAt, setTrackStartedAt] = useState<number | null>(null);
+  const [opusEnabled, setOpusEnabled] = useState<boolean | null>(null);
   const [timezone, setTimezone] = useState<string | null>(null);
   const [locale, setLocale] = useState<StationLocale>('en-GB');
   const lastTrackKeyRef = useRef<string | null>(null);
@@ -164,6 +170,11 @@ export function useStationFeed(): StationFeed {
             if (offlinePollsRef.current >= OFFLINE_CONFIRM_POLLS) setStreamOnline(false);
           }
         }
+        // Which mounts are actually live. Only an explicit boolean counts — an
+        // older controller omits the key, and "unknown" must not read as "on".
+        if (typeof npRes.stream?.opusEnabled === 'boolean') {
+          setIfChanged<boolean | null>(setOpusEnabled, npRes.stream.opusEnabled);
+        }
         if (typeof npRes.llmTokens === 'number') setIfChanged<number | null>(setLlmTokens, npRes.llmTokens);
         if (typeof npRes.timezone === 'string' && npRes.timezone) setTimezone(npRes.timezone);
         if (npRes.locale === 'en-US' || npRes.locale === 'en-GB') setLocale(npRes.locale);
@@ -182,5 +193,5 @@ export function useStationFeed(): StationFeed {
     };
   }, [client]);
 
-  return { nowPlaying, context, dj, activeShow, listeners, streamOnline, llmTokens, state, session, trackStartedAt, timezone, locale };
+  return { nowPlaying, context, dj, activeShow, listeners, streamOnline, llmTokens, state, session, trackStartedAt, opusEnabled, timezone, locale };
 }
