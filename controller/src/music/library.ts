@@ -194,10 +194,6 @@ export function has(songId: string): boolean {
   return loaded ? db.hasTags(songId) : false;
 }
 
-export function allTaggedIds(): string[] {
-  return loaded ? db.allTaggedIds() : [];
-}
-
 // COUNT(*) of tagged tracks — for callers that only need the tally (e.g. the
 // coverage meter), not the id list. Avoids materialising a ~30k-element array
 // just to read its length (#723).
