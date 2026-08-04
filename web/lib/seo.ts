@@ -1,12 +1,42 @@
 import type { Metadata } from 'next';
-import { SITE_URL } from '@/lib/site';
+import { SITE_URL, OFFICIAL_SITE_URL, IS_OFFICIAL_SITE } from '@/lib/site';
+
+function urlOnBase(base: string, path = '/'): string {
+  if (!path || path === '/') return base;
+  return `${base}${path.startsWith('/') ? path : `/${path}`}`;
+}
 
 // Always emit ABSOLUTE strings: Next pins relative metadata URLs to
 // metadataBase, which it drops on force-dynamic routes, so a relative canonical
 // resolves to a localhost origin. Absolute strings are emitted verbatim.
 export function absoluteUrl(path = '/'): string {
-  if (!path || path === '/') return SITE_URL;
-  return `${SITE_URL}${path.startsWith('/') ? path : `/${path}`}`;
+  return urlOnBase(SITE_URL, path);
+}
+
+// Which install a page's content belongs to:
+// - 'shared'  — the product site: landing, /setup, /manual, /news, and the
+//   community catalogs. Byte-identical on every install (one shared image),
+//   so on a non-official install its canonical points at getsubwave.com —
+//   otherwise every public self-hosted station self-asserts canonical over
+//   the same content and Google picks one winner per duplicate cluster,
+//   which may not be the official site (see IS_OFFICIAL_SITE in lib/site.ts).
+// - 'station' — the operator's own surface (/, /listen) plus /privacy and
+//   /terms, which stay self-canonical everywhere: the player is genuinely
+//   this station's page, and the legal pages bind this operator even though
+//   the text is identical (search engines expect duplicated boilerplate).
+//
+// 'shared' is the default on purpose: nearly every pageMeta consumer is the
+// product site, and a forgotten flag on a new docs page should donate to the
+// official site rather than assert a fresh duplicate.
+export type PageScope = 'shared' | 'station';
+
+// The URL a page declares as its canonical (and og:url — crawlers treat a
+// mismatched og:url as a competing canonical hint, so they must agree).
+export function canonicalUrl(path: string, scope: PageScope = 'shared'): string {
+  if (scope === 'shared' && !IS_OFFICIAL_SITE) {
+    return urlOnBase(OFFICIAL_SITE_URL, path);
+  }
+  return absoluteUrl(path);
 }
 
 // Next does not deep-merge nested objects like `openGraph` across the
@@ -25,14 +55,16 @@ export function pageMeta({
   path,
   type = 'website',
   siteName = 'SUB/WAVE',
+  scope = 'shared',
 }: {
   title: string;
   description?: string;
   path: string;
   type?: 'website' | 'article';
   siteName?: string;
+  scope?: PageScope;
 }): Metadata {
-  const url = absoluteUrl(path);
+  const url = canonicalUrl(path, scope);
   return {
     title: { absolute: title },
     ...(description ? { description } : {}),

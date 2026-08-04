@@ -13,3 +13,30 @@ export const SITE_URL = (
   process.env.NEXT_PUBLIC_SITE_URL ||
   'http://localhost:7700'
 ).replace(/\/$/, '');
+
+// The project's own public site. Non-official installs point the canonicals
+// of SHARED pages (landing, docs, news, community catalogs) here — see
+// lib/seo.ts canonicalUrl().
+export const OFFICIAL_SITE_URL = 'https://getsubwave.com';
+
+function isOfficialHost(url: string): boolean {
+  try {
+    const host = new URL(url).hostname.toLowerCase();
+    return host === 'getsubwave.com' || host === 'www.getsubwave.com';
+  } catch {
+    return false;
+  }
+}
+
+// True when this install IS the official site, or the operator explicitly
+// opted into indexing everything with SUBWAVE_INDEX_ALL=1.
+//
+// Every install serves the same marketing/docs/news pages as getsubwave.com
+// (one shared image), and each used to self-assert canonical over them — so
+// Google folds the duplicates into ONE winner per cluster, and a public
+// self-hosted station could win a dispatch or setup guide away from the
+// official site. Non-official installs therefore donate those canonicals
+// back (and drop the pages from their sitemap) while keeping the pages
+// themselves fully served — nothing changes for their visitors.
+export const IS_OFFICIAL_SITE =
+  process.env.SUBWAVE_INDEX_ALL === '1' || isOfficialHost(SITE_URL);
