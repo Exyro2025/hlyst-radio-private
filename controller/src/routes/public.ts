@@ -24,6 +24,7 @@ import { lifetimeTokenCount } from '../llm/log.js';
 import { fetchWithTimeout } from '../util/fetch-timeout.js';
 import { listenerAuthDecision, stationAuthDecision } from '../util/listener-auth.js';
 import { publicGuestIds, publicPersonaShape, soulsArePublic } from '../util/public-persona.js';
+import { resolveThemeProvenance } from '../util/theme-provenance.js';
 import { checkAuthRateLimit, clientIp, listenerAuthFailureDelayMs } from '../middleware/ratelimit.js';
 import { STATE_ROOT } from '../config.js';
 import { activeStationId } from '../stations/resolve.js';
@@ -636,6 +637,8 @@ router.post(
 //
 // `activeSource` / `stationDefault` / `activeShow` carry WHY that id won, for
 // the admin UI. A client that only wants a palette can keep reading `active`.
+// The precedence rule + the published shape live in util/theme-provenance.ts
+// (never inline here), pinned by scripts/theme-provenance.test.ts.
 //
 // POST /themes/refresh — admin-gated. Clears the user-themes cache so files
 // freshly dropped into ${STATE_DIR}/themes/ appear in the next /themes read
@@ -645,13 +648,6 @@ router.get('/themes', async (req, res) => {
   try {
     const s = settings.get();
     const themes = await listThemesAnnotated();
-    const stationDefault = s?.theme?.active || DEFAULT_THEME_ID;
-    const activeShow = settings.resolveActiveShow();
-    // Show override wins only if it still resolves to a known theme. A stale
-    // override (operator deleted the file under our feet) silently falls back
-    // to the station default — same fallback strategy as getTheme().
-    const showWins = !!(activeShow?.themeId && themes.some(t => t.id === activeShow.themeId));
-    const active = showWins ? activeShow!.themeId : stationDefault;
     // Provenance, not just the answer (#1300 bug 12). Saving a station theme in
     // admin and watching the whole UI flip back one poll later is the reported
     // symptom, and it isn't a failed save: an on-air show pins its own theme and
@@ -662,15 +658,12 @@ router.get('/themes', async (req, res) => {
     // The third level — the listener's own localStorage override — never reaches
     // the server and is resolved client-side in ThemeProvider, which is where the
     // UI reads it from.
-    res.json({
-      active,
-      activeSource: showWins ? 'show' : 'station',
-      stationDefault,
-      activeShow: showWins
-        ? { id: activeShow!.id, name: activeShow!.name || '', themeId: activeShow!.themeId }
-        : null,
-      themes,
+    const provenance = resolveThemeProvenance({
+      stationDefault: s?.theme?.active || DEFAULT_THEME_ID,
+      activeShow: settings.resolveActiveShow(),
+      themeIds: themes.map(t => t.id),
     });
+    res.json({ ...provenance, themes });
   } catch (err) {
     publicError(res, '/themes', err);
   }
