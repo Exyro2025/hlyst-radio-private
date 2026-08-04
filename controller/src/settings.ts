@@ -483,8 +483,8 @@ export async function load() {
     theme: {
       // We only validate the *shape* here. The active id might reference a
       // theme file that's since been removed; the public /themes endpoint
-      // and getTheme() both fall back to the default id when that happens, so
-      // a stale id doesn't break the UI.
+      // falls back to the default id when that happens, so a stale id doesn't
+      // break the UI.
       active:
         typeof stored.theme?.active === 'string' && stored.theme.active.trim()
           ? stored.theme.active.trim()
@@ -1274,7 +1274,7 @@ export async function update(patch) {
       // A stale active theme (a retired built-in renamed in 58c3782b, or a
       // custom theme that isn't on disk) falls back to the built-in default
       // rather than failing the save — same tolerance as shows[].themeId above
-      // and the serve-time getTheme() fallback, and the same precedent as the
+      // and the serve-time fallback in GET /themes, and the same precedent as the
       // activeDjPromptId reset. Throwing here aborted the whole restore for any
       // install whose active theme id had since been retired (issue #917).
       next.theme.active = (await isValidThemeId(v)) ? v : DEFAULT_THEME_ID;

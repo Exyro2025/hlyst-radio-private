@@ -309,7 +309,7 @@ export function validateShowsStrict(raw, personas, allowedThemeIds: Set<string>,
     // A stale id (a retired built-in like the old "sunset"/"neon" palettes,
     // renamed in 58c3782b, or a custom theme file deleted under our feet) is
     // DROPPED to "" rather than throwing — same tolerance as the lenient load
-    // path and the serve-time getTheme() fallback. Throwing here bricked EVERY
+    // path and the serve-time fallback in GET /themes. Throwing here bricked EVERY
     // shows/schedule save and full restore for any install still carrying one
     // retired id on one show, because update() re-validates the whole array
     // (issue #917 is the theme.active twin of this). Self-heals: the dead id
