@@ -59,9 +59,10 @@ export interface Player {
 
 export interface UsePlayerOptions {
   initialVolume?: number;
-  /** Whether the station advertises a live `/stream.opus` mount (from
-   *  /now-playing's `stream.opusEnabled`). null/undefined = not known yet —
-   *  the Opus upgrade waits rather than guessing. */
+  /** Whether the station is configured to serve `/stream.opus` (from
+   *  /now-playing's `stream.opusEnabled` — the setting, not a live mount
+   *  probe). null/undefined = not known yet — the Opus upgrade waits rather
+   *  than guessing. */
   opusEnabled?: boolean | null;
 }
 
@@ -164,13 +165,27 @@ export function usePlayer({ initialVolume = 1, opusEnabled = null }: UsePlayerOp
   // iOS-family devices (iPadOS 13+ reports the desktop Macintosh UA, so
   // maxTouchPoints is checked too), and skip Firefox by UA.
   //
-  // FOURTH defence, and the one that isn't about codecs: the station must
-  // actually be serving the mount. `stream.opusEnabled` rides /now-playing and
-  // Opus is OFF by default, so on most installs the upgrade used to point
-  // Chrome at a 404 — playback sat on "acquiring" until the load failed and
-  // `onError` pinned MP3 back (issue #1300, bug 5). null means "not polled yet";
-  // only an explicit true upgrades, so an older controller that omits the key
-  // stays on MP3 rather than guessing.
+  // FOURTH defence, and the one that isn't about codecs: the station has to be
+  // configured to serve the mount at all. `stream.opusEnabled` rides
+  // /now-playing and Opus is OFF by default, so on most installs the upgrade
+  // used to point Chrome at a 404 — playback sat on "acquiring" until the load
+  // failed and `onError` pinned MP3 back (issue #1300, bug 5). null means "not
+  // polled yet"; only an explicit true upgrades, so an older controller that
+  // omits the key stays on MP3 rather than guessing.
+  //
+  // It reports the SETTING, not a live mount probe: the flag reaches Liquidsoap
+  // through `liquidsoap_opus_enabled.txt`, read once at mixer startup, so
+  // between an operator saving it and restarting the mixer this still points at
+  // a 404. That shrinks the bad window from "every install with Opus off" to
+  // "one operator action", which is why the `onError` self-heal below stays.
+  //
+  // No live retarget, deliberately: setStreamUrl only reaches the element on
+  // the next tune()/reconnect(), so a listener who taps play before the first
+  // poll lands rides MP3 for that session — any later reconnect picks Opus up,
+  // since reconnect() reads streamUrlRef. Swapping src under a playing element
+  // to upgrade a working stream would cut audio, and this hook's regressions
+  // have all come from extra src-assignment paths (#1232, #1234). MP3 is the
+  // universal floor, so losing that race costs quality, never playback.
   useEffect(() => {
     if (opusEnabled !== true) return;
     if (!streams.opus || opusFailedRef.current) return;

@@ -34,8 +34,10 @@ export interface StationFeed {
    *  the offset already added and can briefly sit in the future — useElapsed
    *  clamps at 0 rather than banking the buffer as elapsed (issue #1114). */
   trackStartedAt: number | null;
-  /** Whether the station is actually serving `/stream.opus`, or null before the
-   *  first poll. The player must not upgrade to the Opus mount on codec support
+  /** Whether the station is configured to serve `/stream.opus`, or null before
+   *  the first poll. This is the SETTING, not a live mount probe — it needs a
+   *  mixer restart to take effect, so it can read true while the mount is still
+   *  404ing. The player must not upgrade to the Opus mount on codec support
    *  alone — Opus is off by default, so the mount 404s and playback sits on
    *  "acquiring" until the error handler pins MP3 back (issue #1300, bug 5). */
   opusEnabled: boolean | null;
