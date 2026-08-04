@@ -73,14 +73,11 @@ export default function StationFooter({ djName }: { djName?: string }) {
 
       <div className="bs-rule" />
 
-      {/* Two rows at lg: Dispatches + Stations across the top (each spanning
-          half), the four community catalogs beneath. Six equal columns squeezed
-          the titles to two lines apiece and collided the №/tag row.
-
-          Rules are drawn per panel off the index rather than with divide-*,
-          which adds a left border to every child but the first — in a wrapping
-          grid that lands one on the panel starting row two, against the grid
-          edge. */}
+      {/* Two rows at lg: Dispatches + Stations across the top, the four
+          community catalogs beneath. Six equal columns squeezed the titles to
+          two lines apiece. Rules are drawn per panel off the index rather than
+          with divide-*, which adds a left border to every child but the first —
+          in a wrapping grid that lands one against the grid edge on row two. */}
       <nav aria-label="Back pages" className="grid lg:grid-cols-4">
         {BACK_PAGES.map((page, i) => (
           <Link
@@ -88,15 +85,12 @@ export default function StationFooter({ djName }: { djName?: string }) {
             href={page.href}
             className={cn(
               'group relative flex flex-col gap-[10px] overflow-hidden px-5 py-6 no-underline transition-colors duration-300 hover:bg-ink/[0.04]',
-              // Stacked below lg — one rule between every panel.
               i > 0 && 'border-t border-ink/20 lg:border-t-0',
-              // Top row spans two of the four columns each.
               i < 2 && 'lg:col-span-2',
-              // The community row sits under a rule of its own.
               i >= 2 && 'lg:border-t lg:border-ink/20',
               // Vertical rules everywhere except where a row begins.
               i !== 0 && i !== 2 && 'lg:border-l lg:border-ink/20',
-              // Keep the outer edges flush with the page gutter.
+              // Outer edges flush with the page gutter.
               (i === 0 || i === 2) && 'lg:pl-1',
               (i === 1 || i === 5) && 'lg:pr-1',
             )}

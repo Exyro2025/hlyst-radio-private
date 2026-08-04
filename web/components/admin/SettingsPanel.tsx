@@ -82,18 +82,11 @@ export default function SettingsPanel() {
     } catch (e) { setErr(e instanceof Error ? e.message : String(e)); }
   };
 
-  // Deep-link: /admin/settings?section=archives opens that rail directly. The
-  // old standalone /admin/{archives,backup} routes redirect here, so existing
-  // bookmarks keep working after the move into Settings. (Webhooks moved on to
-  // its own tab under /admin/connect?tab=webhooks.)
-  //
-  // Jingles / SFX / Beds left Settings for /admin/imaging — send their old
-  // ?section deep-links on to the matching tab so existing bookmarks survive.
-  //
-  // useSearchParams (not a one-shot window.location read) so client-side
-  // navigations to ?section=… land too — the NavidromeBanner links here from
-  // every admin page INCLUDING /admin/settings itself, where the panel is
-  // already mounted and only the query changes.
+  // Jingles / SFX / Beds now live on /admin/imaging; their old ?section
+  // deep-links are forwarded so existing bookmarks survive. Read through
+  // useSearchParams, not a one-shot window.location, so client-side navigations
+  // land too — NavidromeBanner links here from /admin/settings itself, where
+  // only the query changes.
   const searchParams = useSearchParams();
   useEffect(() => {
     const s = searchParams.get('section');
@@ -199,8 +192,7 @@ export default function SettingsPanel() {
               : FISH_TTS_DEFAULTS.latency,
         },
         remote: { url: v.tts?.remote?.url ?? '' },
-        // Per-engine voice level (dB). Zero default for all 6 engine ids, then
-        // overlay any saved values. Keyed by engine id — `pocket-tts` (hyphen).
+        // Per-engine voice level (dB), keyed by engine id — `pocket-tts` (hyphen).
         gainDb: {
           piper: 0,
           kokoro: 0,
@@ -210,8 +202,7 @@ export default function SettingsPanel() {
           remote: 0,
           ...(v.tts?.gainDb || {}),
         },
-        // Per-engine speech speed (×). Unity default for all 6, then overlay
-        // any saved values. Keyed by engine id — `pocket-tts` (hyphen).
+        // Per-engine speech speed (×), keyed by engine id — `pocket-tts` (hyphen).
         speed: {
           piper: 1,
           kokoro: 1,
@@ -221,7 +212,6 @@ export default function SettingsPanel() {
           remote: 1,
           ...(v.tts?.speed || {}),
         },
-        // Operator speech corrections — hydrate to clean {from, to} rows.
         corrections: (v.tts?.corrections || []).map(c => ({ from: c.from ?? '', to: c.to ?? '' })),
       },
       llm: {
@@ -230,9 +220,8 @@ export default function SettingsPanel() {
         ollamaUrl: v.llm?.ollamaUrl ?? '',
         numCtx: typeof v.llm?.numCtx === 'number' ? v.llm.numCtx : 16384,
         repeatPenalty: typeof v.llm?.repeatPenalty === 'number' ? v.llm.repeatPenalty : 1.15,
-        // Per-provider base URLs. Migrate from legacy single baseUrl on first load:
-        // if the server has already stored providerBaseUrls use that; otherwise seed
-        // the current provider's slot from the old baseUrl field so no URL is lost.
+        // Stored providerBaseUrls win; otherwise the legacy single baseUrl seeds
+        // the current provider's slot so no URL is lost.
         providerBaseUrls: (() => {
           const llmAny = v.llm as (Partial<LlmForm> & { baseUrl?: string; providerBaseUrls?: Record<string, string> }) | undefined;
           const stored = llmAny?.providerBaseUrls;
@@ -285,8 +274,7 @@ export default function SettingsPanel() {
           const stored = (v.embedding as { providerBaseUrls?: Record<string, string> })?.providerBaseUrls;
           if (stored && typeof stored === 'object') return { ...stored };
           // Legacy migration keys by the EFFECTIVE provider (own, else the chat
-          // provider — the embedding leg inherits it when its own is empty), the
-          // same key LibrarySection reads and writes.
+          // provider), the same key LibrarySection reads and writes.
           const legacy = v.embedding?.baseUrl ?? '';
           const prov = v.embedding?.provider || v.llm?.provider || '';
           return legacy && prov ? { [prov]: legacy } : {};
@@ -398,7 +386,6 @@ export default function SettingsPanel() {
 
   return (
     <div className="stack-mobile grid grid-cols-[240px_1fr] items-start gap-6">
-      {/* Section rail */}
       <aside className="grid gap-1 sm:sticky sm:top-6">
         <span className="caption pb-2">settings</span>
         {SECTIONS.map(s => {
@@ -427,7 +414,6 @@ export default function SettingsPanel() {
         })}
       </aside>
 
-      {/* Active section */}
       <div className="grid gap-4">
         {err && <ErrorState error={err} onRetry={refresh} />}
         {pendingRestart && (
@@ -851,9 +837,8 @@ export default function SettingsPanel() {
                       />
                       <span className="text-sm opacity-70">
                         GB &middot; holds ~
-                        {/* /25 mirrors the controller's stem-cache APPROX_TRACK_BYTES ceiling;
-                            /13 the field-measured average (#1257) — the real figure lands
-                            between, and the doctor sizes off the cache's own average. */}
+                        {/* /25 mirrors the controller's stem-cache APPROX_TRACK_BYTES
+                            ceiling, /13 the field-measured average (#1257). */}
                         {Math.floor(
                           ((Number(form.transitions.stemCacheGb) || 15) * 1024) / 25,
                         ).toLocaleString('en-GB')}
@@ -863,10 +848,8 @@ export default function SettingsPanel() {
                         ).toLocaleString('en-GB')}{' '}
                         tracks
                       </span>
-                      {/* Every editable field on this page carries its own save button;
-                          without one here operators edit the number, miss the card-level
-                          "Save transitions" two fields below, and the change silently
-                          reverts on the next visit. */}
+                      {/* Its own save button: without one, an edit here misses the
+                          card-level "Save transitions" and silently reverts. */}
                       <Btn
                         sm
                         onClick={() =>

@@ -2,20 +2,15 @@ import Image from 'next/image';
 import CatalogBrief from '@/components/ui/catalog-brief';
 import { APP_TYPE_LABELS, type CommunityApp } from '@/lib/apps';
 
-// One app in the /apps directory. A server component with no live probe —
-// unlike StationCard there is nothing to poll; an app is a pointer, not a
-// broadcast.
-//
-// Images are submitter-hosted and host-allowlisted upstream (community repo
-// builder → lib/apps.ts → next.config.js remotePatterns). They're optional and
-// the card is designed to read well with neither: no icon means the name simply
-// starts the card, no screenshot means no plate.
+// One app in the /apps directory. Images are submitter-hosted and
+// host-allowlisted upstream (community repo builder → lib/apps.ts →
+// next.config.js remotePatterns), and both are optional.
 //
 // data-type carries the bucket so AppTypeFilter can filter with CSS alone,
-// keeping this component server-rendered.
+// keeping this a server component.
 
-// Screenshots are decorative here — the name and description carry the meaning,
-// and a submitter-written alt would be another untrusted string on the page.
+// Screenshots are decorative — the name and description carry the meaning, and
+// a submitter-written alt would be another untrusted string on the page.
 const PLATE_SIZES = '(max-width: 640px) 100vw, (max-width: 1100px) 50vw, 360px';
 
 export default function AppCard({ app }: { app: CommunityApp }) {
@@ -46,9 +41,7 @@ export default function AppCard({ app }: { app: CommunityApp }) {
           />
         )}
         <div className="bs-app-headtext">
-          {/* The title is a link to the same place as "Get it" below — a reader's
-              instinct is to click the name, but the explicit verb is what makes
-              it obvious the card leads off-site, so both stay. They read as two
+          {/* Same destination as "Get it" below; both stay, and they read as two
               distinct accessible names ("Night Owl" / "Get it — Night Owl")
               rather than a repeated one. */}
           <h3 className="bs-app-name">
@@ -79,8 +72,8 @@ export default function AppCard({ app }: { app: CommunityApp }) {
 
       <p className="bs-app-links">
         <a href={app.url} target="_blank" rel="noreferrer noopener" className="bs-app-get">
-          {/* Named so a screen reader hitting a run of cards doesn't hear
-              "Get it" six times with no idea which app it belongs to. */}
+          {/* Named so a screen reader on a run of cards doesn't hear "Get it"
+              six times with no idea which app each belongs to. */}
           Get it<span className="sr-only"> — {app.name}</span>
         </a>
         {app.repo && (

@@ -17,9 +17,8 @@ import {
   resolveAppearance,
   type Theme,
 } from '@/lib/theme';
-// Install-level concern: the theme registry belongs to *this* deployment, so
-// this always goes through the same-origin default client — never a showcase
-// station's origin.
+// The theme registry belongs to *this* deployment, so it always goes through the
+// same-origin default client — never a showcase station's origin.
 import { defaultStationClient } from '@/lib/stationClient';
 
 interface ThemeContextValue {
@@ -29,8 +28,8 @@ interface ThemeContextValue {
   stationActiveId: string | null;
   /** Per-browser override id, or null when none is set. */
   overrideId: string | null;
-  /** Effective theme *selection* (override if set + still in registry, else
-   *  station). This is what the picker highlights and what `t` cycles from. */
+  /** Override if set and still in the registry, else the station's — what the
+   *  picker highlights. */
   effectiveId: string | null;
   /** Save or clear the override and re-apply immediately. null clears it. */
   setOverride: (id: string | null) => void;
@@ -38,52 +37,40 @@ interface ThemeContextValue {
 
 const ThemeContext = createContext<ThemeContextValue | null>(null);
 
-/** Read theme state from any client component. Returns null on the server
- *  and before the provider is mounted. */
+/** Null on the server and before the provider is mounted. */
 export function useThemeSwitcher(): ThemeContextValue | null {
   return useContext(ThemeContext);
 }
 
-// Single, app-wide theme syncer + provider. Mounted from the root layout so
-// every page (player, admin, landing, onboarding, setup-guide) gets the
-// station-wide theme without each one having to wire up a fetcher.
+// App-wide theme syncer, mounted from the root layout. The pre-paint <script> in
+// layout.tsx already applied the cached appearance, so this covers a first visit,
+// an operator switch since last visit, and the listener override (a stale id —
+// theme deleted — silently falls back to the station active).
 //
-// The pre-paint <script> in layout.tsx already applied the cached appearance,
-// so this only handles:
-//   1. First visit (no cache) — fetch + apply + populate cache.
-//   2. Operator changed the theme in admin since the last visit — refresh.
-//   3. A listener override beats the station — apply it whenever it exists in
-//      the live registry. Stale ids (theme deleted under our feet) silently
-//      fall back to the station active.
+// Light vs dark is a property of the palette, not a listener control: each theme
+// declares its own mode. There is no per-browser mode pin.
 //
-// Light vs dark is a property of the palette, not a separate listener control:
-// each theme declares its own mode and a listener who wants dark picks a dark
-// theme. There is no per-browser mode pin and no `d` hotkey.
-//
-// 30 s poll cadence is the upper bound on how long a listener sees the old
-// theme after an operator switch. Cheap call (returns a tiny JSON blob);
-// every-5s would be wasteful and every-N-minutes feels stale.
+// The 30s poll is the upper bound on how long a listener sees the old theme
+// after an operator switch.
 export default function ThemeProvider({ children }: { children?: ReactNode }) {
   const [themes, setThemes] = useState<Theme[]>([]);
   const [stationActiveId, setStationActiveId] = useState<string | null>(null);
   const [overrideId, setOverrideIdState] = useState<string | null>(null);
 
-  // Read the override on mount so SSR can render through cleanly — localStorage
-  // is only safe to touch in an effect. The pre-paint <script> already painted
-  // the right tokens, so a one-tick lag in state is invisible.
+  // localStorage is only safe to touch in an effect, so SSR renders through
+  // cleanly. The pre-paint <script> already painted, so the one-tick lag is invisible.
   useEffect(() => {
     setOverrideIdState(loadThemeOverride());
   }, []);
 
-  // Hold the latest themes + override in refs so the polling loop can resolve
-  // the effective appearance without re-creating itself on every state change.
+  // Refs so the polling loop resolves the effective appearance without
+  // re-creating itself on every state change.
   const themesRef = useRef<Theme[]>(themes);
   const overrideRef = useRef<string | null>(overrideId);
   themesRef.current = themes;
   overrideRef.current = overrideId;
 
-  // Resolve + paint + cache from the latest registry and the override. The
-  // single place appearance reaches the DOM.
+  // The single place appearance reaches the DOM.
   const applyEffective = useCallback(
     (registry: Theme[], stationId: string | null, override: string | null) => {
       const resolved = resolveAppearance(registry, stationId, override);
@@ -93,9 +80,8 @@ export default function ThemeProvider({ children }: { children?: ReactNode }) {
     [],
   );
 
-  // Poll /themes on mount + every 30s. The effect is parameterless so it
-  // doesn't restart on every override change — the overrides are read from
-  // refs inside the fetch.
+  // The effect is parameterless so it doesn't restart on every override change —
+  // the override is read from a ref inside the fetch.
   useEffect(() => {
     let cancelled = false;
 
@@ -107,8 +93,7 @@ export default function ThemeProvider({ children }: { children?: ReactNode }) {
         setStationActiveId(j.active);
         applyEffective(j.themes, j.active, overrideRef.current);
       } catch {
-        // Network blip — keep the existing CSS variables. The next poll will
-        // sort it out, and the pre-paint cache covers the meantime.
+        // Network blip — keep the existing CSS variables for the next poll.
       }
     };
 
@@ -120,8 +105,7 @@ export default function ThemeProvider({ children }: { children?: ReactNode }) {
     };
   }, [applyEffective]);
 
-  // Public setter the switcher buttons call. Persists to localStorage, updates
-  // local state, and applies the theme without waiting for the next poll.
+  // Applies without waiting for the next poll.
   const setOverride = useCallback(
     (id: string | null) => {
       saveThemeOverride(id);
@@ -132,9 +116,8 @@ export default function ThemeProvider({ children }: { children?: ReactNode }) {
     [applyEffective, stationActiveId],
   );
 
-  // The resolved effective id — what the picker highlights as "active".
-  // Mirrors resolveAppearance's palette precedence so context consumers don't
-  // need to re-implement it.
+  // Mirrors resolveAppearance's palette precedence so consumers don't
+  // re-implement it.
   const effectiveId =
     (overrideId && themes.some(t => t.id === overrideId) ? overrideId : stationActiveId) ?? null;
 

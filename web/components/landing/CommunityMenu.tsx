@@ -10,14 +10,11 @@ import {
   NavigationMenuTrigger,
 } from '@/components/ui/navigation-menu';
 
-// The masthead's "Community" item — the four community catalogs behind one
-// trigger, so the nav row doesn't grow to ten links.
-//
-// Tags mirror the Back Pages footer (StationFooter's BACK_PAGES) on purpose:
-// the same destination is called the same thing wherever a reader meets it.
-// Stations is deliberately absent — it's in the Back Pages, but it's the
-// station directory rather than something you install or take home, and five
-// items made the panel taller than the masthead it hangs from.
+// The masthead's "Community" item: four catalogs behind one trigger so the nav
+// row doesn't grow to ten links. Tags mirror StationFooter's BACK_PAGES so a
+// destination is named the same wherever a reader meets it. Stations is
+// deliberately absent — it's a directory rather than something you install, and
+// five items made the panel taller than the masthead it hangs from.
 const COMMUNITY = [
   { href: '/skills', tag: 'The Exchange', title: 'Skills', blurb: 'Segments for your DJ.' },
   { href: '/personas', tag: 'The Green Room', title: 'Personas', blurb: 'DJs for your booth.' },

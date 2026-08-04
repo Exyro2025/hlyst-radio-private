@@ -6,9 +6,9 @@ import { getAllNews, getNewsArticle, formatNewsDate } from '@/lib/news';
 import JsonLd from '@/components/JsonLd';
 import { absoluteUrl } from '@/lib/seo';
 
-// Render per-request like the rest of the news segment — generateStaticParams
-// would win over the layout's force-dynamic and prerender each article with
-// the build-time (localhost) SITE_URL baked into its canonical/og:url.
+// Per-request like the rest of the news segment. Do NOT add
+// generateStaticParams: it wins over the layout's force-dynamic and prerenders
+// each article with the build-time (localhost) SITE_URL in its canonical.
 export const dynamic = 'force-dynamic';
 
 export async function generateMetadata({
@@ -21,8 +21,8 @@ export async function generateMetadata({
   if (!article) return { title: { absolute: 'SUB/WAVE — Dispatches' } };
   const url = absoluteUrl(`/news/${article.slug}`);
   return {
-    // `absolute` opts out of the root layout's `%s · SUB/WAVE` template —
-    // the brand is already appended here.
+    // `absolute` opts out of the root layout's `%s · SUB/WAVE` template; the
+    // brand is already appended here.
     title: { absolute: `${article.title} — SUB/WAVE` },
     description: article.excerpt,
     alternates: { canonical: url },
@@ -36,8 +36,8 @@ export async function generateMetadata({
       modifiedTime: article.date || undefined,
       authors: article.author ? [article.author] : undefined,
     },
-    // Restated so X shows the article title/excerpt instead of the sitewide
-    // card inherited from the root layout (twitter:* wins over og:* there).
+    // Restated so X shows the article title/excerpt instead of the sitewide card
+    // inherited from the root layout (twitter:* wins over og:* there).
     twitter: {
       card: 'summary_large_image',
       title: article.title,

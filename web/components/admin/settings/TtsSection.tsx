@@ -29,8 +29,8 @@ import {
   type TtsFallbackForm,
 } from './shared';
 
-// Labels for Kokoro phonemizer language override options. Keyed by the lang
-// codes exposed by the controller (synced with KOKORO_LANGS in settings.ts).
+// Kokoro phonemizer language labels, keyed by the controller's lang codes —
+// keep in sync with KOKORO_LANGS in settings.ts.
 const KOKORO_LANG_LABELS: Record<string, string> = {
   'en-gb': 'English (UK)',
   'en-us': 'English (US)',
@@ -60,15 +60,14 @@ function cloudProviderLabel(provider: string): string {
   return 'OpenAI-compatible';
 }
 
-// Voice-level (dB) trim. Engine ids match the server contract exactly — note the
-// hyphen in `pocket-tts`. Range mirrors the server clamp (TTS_GAIN_CLAMP_DB=12).
+// Engine ids match the server contract exactly — note the hyphen in `pocket-tts`.
+// Range mirrors the server clamp (TTS_GAIN_CLAMP_DB=12).
 const TTS_GAIN_ENGINES = ['piper', 'kokoro', 'chatterbox', 'pocket-tts', 'cloud', 'remote'] as const;
 const TTS_GAIN_MIN = -12;
 const TTS_GAIN_MAX = 12;
 const TTS_GAIN_STEP = 0.5;
 
-// Pretty-print a gain: "0 dB" clean-neutral, otherwise a signed one-decimal value
-// with a real minus sign (e.g. "+3.0 dB", "−2.5 dB").
+// Signed one-decimal dB with a real minus sign; unity prints as a bare "0 dB".
 function formatGainDb(v: number): string {
   if (!v) return '0 dB';
   const sign = v > 0 ? '+' : '−';
@@ -76,8 +75,6 @@ function formatGainDb(v: number): string {
 }
 
 
-// Compact per-engine voice-level control: a labelled range slider + live readout,
-// writing into form.tts.gainDb[engineId]. Dropped into each engine's config panel.
 function TtsGainField({
   engineId,
   form,
@@ -117,8 +114,8 @@ function TtsGainField({
   );
 }
 
-// Speech-rate trim. Range mirrors the server clamp (clampTtsSpeed: 0.5–2.0×).
-// Only Piper/Kokoro/cloud honour speed — chatterbox/pocket-tts/remote ignore it.
+// Range mirrors the server clamp (clampTtsSpeed: 0.5–2.0×). Only Piper/Kokoro/
+// cloud honour speed — chatterbox/pocket-tts/remote ignore it.
 const TTS_SPEED_MIN = 0.5;
 const TTS_SPEED_MAX = 2;
 const TTS_SPEED_STEP = 0.05;
@@ -128,9 +125,6 @@ function formatSpeed(v: number): string {
   return `${v.toFixed(2)}×`;
 }
 
-// Compact per-engine speech-speed control: a labelled range slider + live readout,
-// writing into form.tts.speed[engineId]. Disabled (with a hint) for the engines
-// whose workers ignore speed, so operators see why it has no effect there.
 function TtsSpeedField({
   engineId,
   form,
@@ -174,13 +168,9 @@ function TtsSpeedField({
   );
 }
 
-// ElevenLabs voice_settings — the four expressive knobs their API takes on
-// every request. Ranges match ElevenLabs' native 0..1 (stability, style,
-// similarity_boost) plus the boolean use_speaker_boost. Rendered only when the
-// cloud provider is `elevenlabs` — other providers ignore the fields, so
-// showing them there would be misleading. Design matches TtsGainField /
-// TtsSpeedField exactly (same field class, same 360px cap, same label +
-// tabular readout row) so the block blends into the surrounding form.
+// ElevenLabs voice_settings. Ranges match their native 0..1 (stability, style,
+// similarity_boost) plus the boolean use_speaker_boost. Rendered only for the
+// `elevenlabs` provider — every other provider ignores these fields.
 const ELEVENLABS_SLIDER_STEP = 0.01;
 
 function formatPct(v: number): string {
@@ -255,10 +245,6 @@ function ElevenLabsVoiceSettingsField({
   );
 }
 
-// Prominent, self-contained "engine not installed" callout with a step-by-step
-// setup guide. Chatterbox and PocketTTS both live in the optional `tts-heavy`
-// sidecar, so the recommended path is identical; only the engine label and the
-// legacy build-arg differ.
 function FishAudioSettingsField({
   form,
   setForm,
@@ -322,6 +308,8 @@ function FishAudioSettingsField({
   );
 }
 
+// Chatterbox and PocketTTS both live in the optional `tts-heavy` sidecar, so the
+// setup path is identical; only the engine label and the legacy build-arg differ.
 function HeavyEngineSetupGuide({ engine, buildArg }: { engine: 'Chatterbox' | 'PocketTTS'; buildArg: string }) {
   return (
     <div
@@ -383,17 +371,16 @@ export function TtsSection({ data, form, setForm, busy, saveSettings, adminFetch
   const [cloudKeyInput, setCloudKeyInput] = useState('');
   const [cloudKeyTest, setCloudKeyTest] = useState<{ ok: boolean; message: string; latencyMs: number } | null>(null);
   const [cloudKeyTesting, setCloudKeyTesting] = useState(false);
-  // Compat servers don't use the OPENAI/ELEVENLABS env keys — their optional
-  // bearer lives in settings.tts.cloud.compatApiKey, so it rides the settings payload.
+  // Compat servers don't use the OPENAI/ELEVENLABS env keys — their optional bearer
+  // is settings.tts.cloud.compatApiKey, so it rides the settings payload.
   const [compatKeyInput, setCompatKeyInput] = useState('');
 
   useEffect(() => { setCloudKeyInput(''); setCompatKeyInput(''); }, [form.tts.cloud.provider]);
   useEffect(() => { setCloudKeyTest(null); }, [form.tts.cloud.provider]);
 
-  // A cloud fallback is only usable if ITS provider has a key — which can
-  // differ from the default engine's provider, so this is checked per-provider
-  // rather than off the global `available.cloud` flag. `openai-compatible` has
-  // no key-based entry and is trusted by the server, matching engineUsable().
+  // The fallback's provider can differ from the default engine's, so key presence
+  // is checked per-provider, never off the global `available.cloud` flag.
+  // `openai-compatible` has no key-based entry and is trusted, as in engineUsable().
   const fallbackCloudUnconfigured = form.tts.fallback.engine === 'cloud'
     && form.tts.fallback.cloudProvider !== 'openai-compatible'
     && data.tts?.available?.cloudByProvider?.[form.tts.fallback.cloudProvider] === false;
@@ -408,8 +395,8 @@ export function TtsSection({ data, form, setForm, busy, saveSettings, adminFetch
     (isCompat && !!form.tts.cloud.baseUrl.trim())
     || (!isCompat && ttsKeySet)
   );
-  // Fish publishes model ids rather than an account model-list endpoint. Its
-  // two S2.1 suggestions are local UI data; the field still accepts custom ids.
+  // Fish has no account model-list endpoint; its two S2.1 suggestions are local
+  // UI data and the field still accepts custom ids.
   const ttsDiscoveryEnabled = cloudDiscoveryReady && !isFish;
 
   const ttsDiscovery = useModelDiscovery({
@@ -419,9 +406,9 @@ export function TtsSection({ data, form, setForm, busy, saveSettings, adminFetch
     adminFetch,
   });
 
-  // Voice list from the provider itself — the compat server's /audio/voices, or
-  // the operator's ElevenLabs account (where their cloned voices live). Same
-  // readiness gate as model discovery: a URL for compat, a saved key otherwise.
+  // Voice list from the provider itself (compat /audio/voices, or the operator's
+  // ElevenLabs account). Same readiness gate as model discovery: a URL for
+  // compat, a saved key otherwise.
   const voiceDiscovery = useVoiceDiscovery({
     provider: form.tts.cloud.provider,
     baseUrl: form.tts.cloud.baseUrl,
@@ -486,9 +473,9 @@ export function TtsSection({ data, form, setForm, busy, saveSettings, adminFetch
   const ENGINE_LABELS: Record<string, string> = { piper: 'Piper', kokoro: 'Kokoro', chatterbox: 'Chatterbox', 'pocket-tts': 'PocketTTS', cloud: 'Cloud', remote: 'Remote' };
 
   const save = async () => {
-    // Managed-provider keys must land first. Fish voice discovery reads the
-    // saved process secret, and submitting an empty undiscovered Fish voice to
-    // settings would otherwise fail before the key became usable.
+    // Managed-provider keys must land first: Fish voice discovery reads the saved
+    // process secret, so an empty undiscovered Fish voice would fail the settings
+    // write before the key became usable.
     let managedKeySaved = false;
     if (!isCompat && cloudKeyInput.trim()) {
       const cloudKeyVar = envKeyForCloudProvider(form.tts.cloud.provider);
@@ -528,9 +515,9 @@ export function TtsSection({ data, form, setForm, busy, saveSettings, adminFetch
           temperature: form.tts.cloud.temperature,
           topP: form.tts.cloud.topP,
           latency: form.tts.cloud.latency,
-          // Authenticated compatibility servers use their own scoped slot.
-          // Clear the legacy shared slot on Fish or any provider transition;
-          // managed credentials live in secrets.env.
+          // Compat servers use their own scoped slot; the legacy shared slot is
+          // cleared on Fish or any provider transition (managed credentials live
+          // in secrets.env).
           ...(isCompat && compatKeyInput.trim()
             ? { compatApiKey: compatKeyInput.trim() }
             : clearInlineCloudKey
@@ -538,11 +525,10 @@ export function TtsSection({ data, form, setForm, busy, saveSettings, adminFetch
               : {}),
         },
         remote: { url: form.tts.remote.url },
-        // Per-engine voice-level trim. Always sent (server clamps + drops unknown
-        // keys); keyed by engine id, `pocket-tts` with the hyphen.
+        // Always sent — the server clamps and drops unknown keys. Keyed by engine
+        // id, `pocket-tts` with the hyphen.
         gainDb: form.tts.gainDb,
-        // Per-engine speech speed (×). Same contract as gainDb; inert for the
-        // engines whose workers ignore speed (chatterbox/pocket-tts).
+        // Same contract as gainDb; inert for the engines that ignore speed.
         speed: form.tts.speed,
       },
     });
@@ -550,8 +536,8 @@ export function TtsSection({ data, form, setForm, busy, saveSettings, adminFetch
       await refresh();
       notify.info('API key saved; TTS settings were not changed.');
     }
-    // Clearing the legacy inline key is deliberate (keys are provider-scoped
-    // now), but it must never be silent: the operator may have relied on it.
+    // Clearing the legacy inline key is deliberate (keys are provider-scoped now)
+    // but must never be silent — the operator may have relied on it.
     if (settingsSaved && clearInlineCloudKey && hadStoredInlineKey) {
       notify.info(`The API key stored in settings for ${cloudProviderLabel(savedCloudProvider)} was cleared — keys are provider-scoped. Re-enter it in Settings (or set its env key) if you switch back.`);
     }
@@ -559,8 +545,8 @@ export function TtsSection({ data, form, setForm, busy, saveSettings, adminFetch
 
   const selectCloudProvider = (f: FormState, provider: string): FormState => {
     const provVoices = CLOUD_VOICES[provider as keyof typeof CLOUD_VOICES] || [];
-    // Switching provider invalidates the old provider-specific ids. Re-entering
-    // the already-selected cloud engine preserves manual/custom values.
+    // Switching provider invalidates the old provider-specific ids; re-entering
+    // the already-selected engine preserves manual/custom values.
     const sameProvider = provider === f.tts.cloud.provider;
     const voice = sameProvider
       ? f.tts.cloud.voice
@@ -615,13 +601,13 @@ export function TtsSection({ data, form, setForm, busy, saveSettings, adminFetch
   const formEngineLabel = ENGINE_LABELS[form.tts.defaultEngine] || form.tts.defaultEngine;
 
   const savedGainDb: Record<string, number> = savedTts.gainDb || {};
-  // Any engine whose form gain differs from its saved value (absent → 0 unity).
+  // Absent reads as 0 unity.
   const gainDirty = TTS_GAIN_ENGINES.some(
     e => (form.tts.gainDb?.[e] ?? 0) !== (savedGainDb[e] ?? 0),
   );
 
   const savedSpeed: Record<string, number> = savedTts.speed || {};
-  // Any engine whose form speed differs from its saved value (absent → 1.0 unity).
+  // Absent reads as 1.0 unity.
   const speedDirty = TTS_GAIN_ENGINES.some(
     e => (form.tts.speed?.[e] ?? 1) !== (savedSpeed[e] ?? 1),
   );
@@ -1071,8 +1057,8 @@ export function TtsSection({ data, form, setForm, busy, saveSettings, adminFetch
                 const isPreset = isKnownCloudVoice(provider, discoveredVoices, voice);
                 const setVoice = (v: string) =>
                   setForm(f => ({ ...f, tts: { ...f.tts, cloud: { ...f.tts.cloud, voice: v } } }));
-                // A compat server that advertised no voices leaves nothing to
-                // pick from — keep the plain text box it had before discovery.
+                // A compat server that advertised no voices leaves nothing to pick
+                // from — keep the plain text box it had before discovery.
                 const hasList = discoveredVoices.length > 0 || !isCompat;
                 if (!hasList) {
                   return (
@@ -1100,8 +1086,8 @@ export function TtsSection({ data, form, setForm, busy, saveSettings, adminFetch
                     <VoicePicker
                       value={isPreset ? voice : CUSTOM_VOICE_ID}
                       onChange={val => {
-                        // "Custom voice id…" clears the preset so isPreset flips
-                        // false and the free-text input below appears for entry.
+                        // Clearing the preset flips isPreset false, revealing the
+                        // free-text input below.
                         setVoice(val === CUSTOM_VOICE_ID ? '' : val);
                       }}
                       groups={buildCloudVoiceGroups(provider, discoveredVoices)}
@@ -1249,7 +1235,6 @@ export function TtsSection({ data, form, setForm, busy, saveSettings, adminFetch
           );
         })()}
 
-          {/* Audition the selected engine + its configured voice + speed. */}
           {(() => {
             const e = form.tts.defaultEngine;
             const previewVoice =
@@ -1298,9 +1283,8 @@ export function TtsSection({ data, form, setForm, busy, saveSettings, adminFetch
         </div>
       </Card>
 
-      {/* Fallback voice — the operator's explicit rescue, ahead of the
-          hardcoded default-engine → Piper → Kokoro floor. Its own card because
-          it configures a whole second voice, not a knob on the default one. */}
+      {/* The operator's explicit rescue, ahead of the hardcoded
+          default-engine → Piper → Kokoro floor. */}
       <Card
         title="Fallback voice"
         sub="what speaks when a persona's engine fails"
@@ -1361,8 +1345,6 @@ export function TtsSection({ data, form, setForm, busy, saveSettings, adminFetch
           </div>
         )}
       </Card>
-
-      {/* Speech corrections moved to /admin/moods (MoodsPanel). */}
 
       <SaveBar
         note={ttsDirty
