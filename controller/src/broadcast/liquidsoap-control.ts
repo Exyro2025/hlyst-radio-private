@@ -4,6 +4,7 @@
 // with whatever updated settings the controller just wrote to disk.
 
 import net from 'node:net';
+import { cachedAsync } from '../util/ttl-cache.js';
 
 // Liquidsoap shares a container with icecast2 under the `broadcast` service
 // (see docker-compose.yml). The legacy `liquidsoap` hostname is still honoured
@@ -85,6 +86,10 @@ export async function restartLiquidsoap() {
   // "no error" would let /restart-mixer report success while pending settings
   // silently never apply. Confirm by watching the port actually go down, and
   // resend if it doesn't.
+  //
+  // The mixer is about to disappear and come back, so any cached on-air reading
+  // is about to be wrong either way.
+  invalidateStreamStatus();
   let lastErr: Error | null = null;
   for (let attempt = 1; attempt <= 3; attempt++) {
     try {
@@ -138,18 +143,48 @@ export async function reloadAutoPlaylist(): Promise<boolean> {
 // output down so the /stream.mp3 mount disconnects (the station goes off
 // air); stream_on recreates it. The mixer process keeps running throughout.
 export async function startStream() {
-  return sendCommand('stream_on', 2000);
+  try {
+    return await sendCommand('stream_on', 2000);
+  } finally {
+    invalidateStreamStatus();
+  }
 }
 
 export async function stopStream() {
-  return sendCommand('stream_off', 2000);
+  try {
+    return await sendCommand('stream_off', 2000);
+  } finally {
+    invalidateStreamStatus();
+  }
 }
 
+// How long an on-air reading is reused. Every telnet take costs a connection,
+// and radio.liq logs a `New client` / `Client disconnected` pair for each one at
+// its default log level — with the admin UI polling GET /settings every 3s, an
+// uncached read filled the mixer log forever for anyone with an admin tab open
+// (issue #1300, bug 16b). 10s keeps the badge honest (the operator's own on/off
+// toggle invalidates below, so a deliberate change is never stale) while making
+// the connect rate independent of how many admin tabs are watching.
+const STREAM_STATUS_TTL_MS = 10_000;
+
+const streamStatusCache = cachedAsync(
+  async () => /\bon\b/i.test(await sendCommand('stream_status', 2000)),
+  { ttlMs: STREAM_STATUS_TTL_MS },
+);
+
 // Returns true when on air, false otherwise. `stream_status` replies "on" /
-// "off".
+// "off". Cached — see STREAM_STATUS_TTL_MS. A telnet failure still rejects
+// (never cached, never served stale), so callers keep deciding what an
+// unreachable mixer means.
 export async function streamStatus() {
-  const res = await sendCommand('stream_status', 2000);
-  return /\bon\b/i.test(res);
+  return streamStatusCache.get();
+}
+
+// Drop the cached reading. Called by anything that changes what stream_status
+// would report, so an operator toggle shows up immediately rather than after
+// the TTL.
+export function invalidateStreamStatus(): void {
+  streamStatusCache.invalidate();
 }
 
 // Pause / resume / query the idle gate (radio.liq `idle_gate`). Unlike
