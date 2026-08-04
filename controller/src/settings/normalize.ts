@@ -37,6 +37,7 @@ import {
   coerceGuestPersonaIds,
   coercePlaylistIds,
   coerceShowEnergies,
+  coerceShowVocals,
   coerceShowEras,
   coerceShowGenres,
   coerceShowMoods,
@@ -258,6 +259,9 @@ export function normalizeShows(raw: unknown, personaIds: string[]): NormalizedSh
     const genres = coerceShowGenres(item);
     const eras = coerceShowEras(item);
     const energies = coerceShowEnergies(item);
+    // Vocal steering (#1300 FR 13): '' = no constraint, which is what every
+    // show predating the field carries, so loading one is a no-op.
+    const vocals = coerceShowVocals(item);
     // Opt-in: hard-filter the pick pool to EVERY set music filter (mood, genre,
     // era, energy) instead of the default soft leans. Only meaningful when at
     // least one filter is set; defaults OFF. The legacy genre-only `genreStrict`
@@ -306,6 +310,7 @@ export function normalizeShows(raw: unknown, personaIds: string[]): NormalizedSh
       genres,
       eras,
       energies,
+      vocals,
       filtersStrict,
       maxTrackSeconds,
       playlistIds,

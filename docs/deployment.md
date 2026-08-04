@@ -53,6 +53,22 @@ to front. Use `docker/Caddyfile` as the reference route table to replicate.
 docker compose -f docker-compose.byo.yml up -d
 ```
 
+**Route the whole `/stream*` family, not just `/stream.mp3`.** The web image
+is baked for same-origin paths, and everything the proxy doesn't send to
+Icecast falls through to the Next.js catch-all and 404s. On one hostname:
+
+| Path | Upstream | Notes |
+|---|---|---|
+| `/stream.mp3` `/stream.opus` `/stream.flac` `/stream.aac` | Icecast `:7702` | Opus/FLAC/AAC are off by default but **still need routing** — enabling one in admin must not also need a proxy edit. Disable response buffering on these (Caddy `flush_interval -1`, nginx `proxy_buffering off`) or the audio arrives in lumps. |
+| `/listen.pls` `/listen.m3u` | Icecast `:7702` | Playlist files for hardware radios / VLC. Served at the **root**, not under `/api`. |
+| `/api/*` | Controller `:7701` | Strip the `/api` prefix (Caddy `handle_path`). |
+| `/api/listener-auth` | — | Return 404 at the edge. Icecast calls it directly over the internal network; exposed publicly it's an unthrottled password oracle (#478). |
+| everything else | Web `:7700` | |
+
+A path-prefix rule matching `^/stream` covers the first row and any mount
+added later. Splitting the player across two hostnames is a different job —
+it needs a web rebuild with `NEXT_PUBLIC_*` pointing at each.
+
 ### `docker-compose.dev.yml` — local development
 
 For local hacking. Spins up **3 containers** (Icecast + Liquidsoap +

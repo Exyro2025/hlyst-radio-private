@@ -219,6 +219,52 @@ warn_if_state_unmounted() {
 }
 
 # ---------------------------------------------------------------------------
+# ANALYZER_HEAVY selects an IMAGE TAG, and it does so by docker-compose variable
+# interpolation (`subwave-analyzer${ANALYZER_HEAVY:+-heavy}` in
+# docker-compose.yml). The all-in-one image has no analyzer service to select:
+# CLAP and Demucs are baked into the venv at build time or they are not, decided
+# entirely by which tag was pulled. So the variable is inert here by
+# construction — not unsupported, unreachable.
+#
+# Operators set it, see no stem-transitions card appear, and reasonably conclude
+# the feature is broken (#1300 bug 9). The caveat was written down (docs/unraid.md,
+# the doctor) but nothing said it at the moment they were actually looking: the
+# boot right after setting it.
+#
+# Probed rather than read from a baked marker, because torch in the venv IS what
+# makes the heavy tier work — a probe cannot disagree with the thing it describes,
+# a marker can.
+# ---------------------------------------------------------------------------
+ANALYZER_VENV="${SUBWAVE_ANALYZER_VENV:-/opt/analyzer/venv}"
+
+analyzer_venv_is_heavy() {
+	compgen -G "$ANALYZER_VENV/lib/python*/site-packages/torch/__init__.py" >/dev/null 2>&1
+}
+
+warn_if_analyzer_heavy_ignored() {
+	[ -n "${ANALYZER_HEAVY:-}" ] || return 0
+	if analyzer_venv_is_heavy; then
+		log "note: ANALYZER_HEAVY is a docker-compose setting and has no effect on"
+		log "  the all-in-one image — but this IS a heavy build, so CLAP and Demucs"
+		log "  are available anyway. Nothing to do."
+		return 0
+	fi
+	log "################################################################"
+	log "WARNING: ANALYZER_HEAVY is set, and it does NOTHING on this image."
+	log "  It is a docker-compose variable that picks the analyzer service's"
+	log "  image tag. The all-in-one image has no analyzer service — CLAP and"
+	log "  Demucs are baked in at build time, and this build does not have them."
+	log "  Sounds-like search, vocal-aware timing and stem transitions will stay"
+	log "  unavailable no matter what this variable is set to."
+	log "  To get them, change this container's IMAGE to:"
+	log "    ghcr.io/perminder-klair/subwave-aio-heavy"
+	log "  (or -aio-cuda on an NVIDIA host). NOT subwave-analyzer-heavy — that is"
+	log "  the bare analyzer micro-service, not a station image."
+	log "  https://github.com/perminder-klair/subwave/issues/1300"
+	log "################################################################"
+}
+
+# ---------------------------------------------------------------------------
 # Resolve the ICECAST_*_PASSWORD values. Precedence: env override > persisted
 # secrets file > freshly generated. Written back for operator visibility + the
 # documented rotate path; exported for liquidsoap.
@@ -502,6 +548,7 @@ if [ "${SUBWAVE_SUPERVISOR_LIB:-}" = "1" ]; then
 fi
 
 warn_if_state_unmounted
+warn_if_analyzer_heavy_ignored
 init_state
 init_secrets
 
