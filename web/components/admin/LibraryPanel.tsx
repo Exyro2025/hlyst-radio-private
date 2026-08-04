@@ -10,6 +10,7 @@ import { Card, Btn, Seg } from './ui';
 import { llmProviderLabel } from './llm/providerMeta';
 import TaggingPanel, { num } from './LibraryTaggingPanel';
 import type {
+  AnalysisFailure,
   Coverage,
   TaggerState,
   LibraryStatsLite,
@@ -58,6 +59,8 @@ export default function LibraryPanel() {
   const [tab, setTab] = useState<Tab>('tracks');
   const [trackMode, setTrackMode] = useState<TrackMode>('all');
   const [coverage, setCoverage] = useState<Coverage | null>(null);
+  // null = not fetched yet (the panel shows "Loading…"); [] = fetched, empty.
+  const [failures, setFailures] = useState<AnalysisFailure[] | null>(null);
   const [tagger, setTagger] = useState<TaggerState | null>(null);
   const [libStats, setLibStats] = useState<LibraryStatsLite | null>(null);
   const [batch, setBatch] = useState<Batch>('500');
@@ -215,6 +218,32 @@ export default function LibraryPanel() {
       setCoverage((await r.json()) as Coverage);
     } catch { /* transient */ }
   }, [adminFetch, ready]);
+
+  // Per-track analysis failures (#1300 bug 3c). Fetched on demand, never
+  // polled: `coverage.analysisFailed` already says whether there is anything to
+  // look at, and on a healthy station the answer is zero forever.
+  const loadFailures = useCallback(async () => {
+    if (!ready) return;
+    try {
+      const r = await adminFetch('/library/analysis-failures?limit=200');
+      if (!r.ok) return;
+      const j = (await r.json()) as { failures?: AnalysisFailure[] };
+      setFailures(j.failures || []);
+    } catch { /* transient */ }
+  }, [adminFetch, ready]);
+
+  // Forget the failure history so the next run retries these tracks — the
+  // operator's move after fixing the cause. Refreshes coverage so the banner
+  // (driven by the count, not the list) goes away.
+  const clearFailures = useCallback(async () => {
+    if (!ready) return;
+    try {
+      const r = await adminFetch('/library/analysis-failures/clear', { method: 'POST' });
+      if (!r.ok) return;
+      setFailures([]);
+      loadCoverage();
+    } catch { /* transient */ }
+  }, [adminFetch, ready, loadCoverage]);
 
   // Fast loop: just the tagger snapshot, so a 3s running poll doesn't drag the
   // whole heavy /settings body across each time.
@@ -1298,6 +1327,9 @@ export default function LibraryPanel() {
         budgetMode={budgetMode}
         llmLabel={llmLabel}
         embedLabel={embedLabel}
+        failures={failures}
+        onLoadFailures={loadFailures}
+        onClearFailures={clearFailures}
       />
 
       <Tabs tab={tab} setTab={setTab} />

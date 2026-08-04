@@ -597,6 +597,41 @@ router.get('/library/coverage', requireAdmin, async (req, res) => {
 });
 
 // ---------------------------------------------------------------------------
+// GET /library/analysis-failures — the tracks acoustic analysis has thrown on,
+// with the reason. There was no way to get this list short of querying
+// library.db by hand, which is what made a re-analysis loop unexplainable from
+// the outside (#1300 bug 3c). Worst and most recent first; `excluded` marks the
+// ones that have failed enough times to have left every analysis scope.
+// ---------------------------------------------------------------------------
+router.get('/library/analysis-failures', requireAdmin, (req, res) => {
+  try {
+    const limit = parseIntSafe(req.query?.limit, 200);
+    res.json({
+      failures: db.analysisFailures(Math.min(1000, Math.max(1, limit))),
+      excluded: db.analysisFailedCount(),
+      maxAttempts: db.MAX_ANALYSIS_FAILURES,
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ---------------------------------------------------------------------------
+// POST /library/analysis-failures/clear — forget the failure history so the
+// next pass tries these tracks again. The retry after fixing the cause (a
+// remounted share, a repaired file, an analyzer that can finally reach its
+// weights). Body `{ id }` clears one track; no body clears all of them.
+// ---------------------------------------------------------------------------
+router.post('/library/analysis-failures/clear', requireAdmin, (req, res) => {
+  try {
+    const id = typeof req.body?.id === 'string' && req.body.id ? req.body.id : undefined;
+    res.json({ ok: true, cleared: db.clearAnalysisFailures(id) });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ---------------------------------------------------------------------------
 // GET /library/tagger — the tagger snapshot ALONE (same slicing as the /settings
 // payload's `tagger` slice, via the shared taggerView helper). The admin library
 // panel polls THIS on its fast loop (3s running / 10s idle) so live run progress
