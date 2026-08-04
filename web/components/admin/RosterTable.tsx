@@ -158,4 +158,3 @@ export function RosterTable<R>({
   );
 }
 
-export default RosterTable;

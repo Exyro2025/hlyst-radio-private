@@ -103,4 +103,3 @@ export function AnimatedLink({
   );
 }
 
-export default AnimatedLink;

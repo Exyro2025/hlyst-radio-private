@@ -37,4 +37,3 @@ export function RosterAvatar({ src, initials, size = 'sm', className }: RosterAv
   );
 }
 
-export default RosterAvatar;
