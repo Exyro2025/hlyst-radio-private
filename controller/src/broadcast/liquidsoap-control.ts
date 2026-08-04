@@ -263,14 +263,11 @@ export async function getDjQueueIds(): Promise<Set<string>> {
   return _djQueueInflight;
 }
 
-// Resolve the Liquidsoap request id for a queued track. Always a fresh read —
-// cancel decisions can't ride a 4s-stale cache (the track may have gone on
-// air since). Returns null when the track is no longer pending in dj_queue.
-export async function resolveDjQueueRid(subsonicId: string): Promise<string | null> {
-  return (await resolveDjQueueRidWithBed(subsonicId)).rid;
-}
-
-// Same fresh read, plus the bed queued immediately ahead of the track, if any.
+// Resolve the Liquidsoap request id for a queued track, plus the bed queued
+// immediately ahead of it, if any. Always a fresh read — cancel decisions
+// can't ride a 4s-stale cache (the track may have gone on air since); `rid` is
+// null when the track is no longer pending in dj_queue.
+//
 // A bed is a separate dj_queue entry with no subsonic_id (queue.maybePushBed
 // writes it right before the track URI), so an id-keyed cancel can't see it —
 // this is how removeUpcoming finds it to cancel it along with its track.
@@ -286,7 +283,7 @@ export async function resolveDjQueueRidWithBed(
 }
 
 // Resolve the rid of a pending transition CLIP rendered for the given
-// incoming track (stem-blend transitions). Fresh read like resolveDjQueueRid;
+// incoming track (stem-blend transitions). Fresh read like the helper above;
 // null when no clip is pending for that id.
 export async function resolveClipRid(subsonicId: string): Promise<string | null> {
   const snap = await fetchDjQueue();

@@ -302,10 +302,6 @@ export async function communityPersonas(): Promise<CommunityPersona[]> {
 export async function communityShows(): Promise<CommunityShow[]> {
   return (await getCatalog()).shows;
 }
-export async function communityStations(): Promise<CommunityStation[]> {
-  return (await getCatalog()).stations;
-}
-
 export async function readCommunitySkill(slug: string): Promise<CommunitySkill | null> {
   if (!SLUG_RE.test(slug)) return null;
   return (await communitySkills()).find(s => s.slug === slug) ?? null;
