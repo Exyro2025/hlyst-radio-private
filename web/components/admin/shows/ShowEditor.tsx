@@ -37,7 +37,7 @@ import {
   eraLabelOf,
   sameEra,
 } from './types';
-import type { Persona, Show, SkillOption, ThemeOption } from './types';
+import type { Persona, PlaylistIndexStatus, Show, SkillOption, ThemeOption } from './types';
 import { hasAnyMusicFilter, showValid } from './lib';
 import { ChipRow } from './ChipRow';
 
@@ -51,9 +51,9 @@ interface ShowEditorProps {
   activeThemeId: string;
   genres: string[];
   playlists: { id: string; name: string; songCount: number | null }[];
-  // False until /dj/playlists has actually answered, so an id absent from
+  // Only 'ready' means /dj/playlists actually answered, so an id absent from
   // `playlists` can't be called missing while the index is merely unknown.
-  playlistsLoaded: boolean;
+  playlistsStatus: PlaylistIndexStatus;
   apiBase: string;
   adminFetch: (path: string, init?: RequestInit) => Promise<Response>;
   minTrackSeconds?: number;
@@ -67,7 +67,7 @@ interface ShowEditorProps {
 
 export function ShowEditor({
   show, editorRef, personas, moods, themes, skills, activeThemeId, genres, playlists,
-  playlistsLoaded, apiBase,
+  playlistsStatus, apiBase,
   adminFetch, minTrackSeconds, busy, isNew,
   update, onSave, onClose, onRemove,
 }: ShowEditorProps) {
@@ -445,7 +445,7 @@ export function ShowEditor({
             </span>
             <PlaylistPicker
               playlists={playlists}
-              loaded={playlistsLoaded}
+              status={playlistsStatus}
               selected={show.playlistIds}
               max={PLAYLISTS_MAX}
               onChange={playlistIds => update({ playlistIds })}
@@ -483,7 +483,7 @@ export function ShowEditor({
             </span>
             <PlaylistPicker
               playlists={playlists}
-              loaded={playlistsLoaded}
+              status={playlistsStatus}
               selected={show.excludedPlaylistIds}
               max={PLAYLISTS_MAX}
               onChange={excludedPlaylistIds => update({ excludedPlaylistIds })}

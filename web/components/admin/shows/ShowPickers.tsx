@@ -7,7 +7,9 @@
 import { useRef } from 'react';
 import { cn } from '../../../lib/cn';
 import { useDynamicStyle } from '../../../hooks/useDynamicStyle';
+import { SkeletonText } from '../../ui/skeleton';
 import { SWATCH_KEYS } from '../../../lib/theme-tokens.generated';
+import type { PlaylistIndexStatus } from './types';
 
 interface PersonaOpt {
   id: string;
@@ -216,25 +218,49 @@ interface PlaylistOpt {
 // and unremovable from the UI, while failing to resolve on every pick cycle. The
 // only way out was hand-editing settings.json.
 //
-// `loaded` gates the whole idea: a failed `/dj/playlists` fetch also leaves the
-// index empty, and flagging every working anchor as missing there would invite the
-// operator to delete good config. Unknown means "say nothing", not "say gone".
+// `status` gates the whole idea: a pending or failed `/dj/playlists` fetch also
+// leaves the index empty, and flagging every working anchor as missing there would
+// invite the operator to delete good config. Unknown means "say nothing", not
+// "say gone" — and each flavour of unknown says why, because an empty index is
+// only genuinely empty under `ready`. Rendering the three states the same way is
+// what made a slow or unreachable Navidrome read as "you have no playlists".
 export function PlaylistPicker({
   playlists,
-  loaded,
+  status,
   selected,
   max,
   onChange,
 }: {
   playlists: PlaylistOpt[];
-  loaded: boolean;
+  status: PlaylistIndexStatus;
   selected: string[];
   max: number;
   onChange: (next: string[]) => void;
 }) {
-  const missing = loaded
+  const missing = status === 'ready'
     ? selected.filter((id) => !playlists.some((p) => p.id === id))
     : [];
+
+  // Same box as the loaded list so the field doesn't jump when it resolves.
+  if (status === 'loading') {
+    return (
+      <div className="grid max-h-44 gap-1 overflow-y-auto border border-ink bg-[var(--ink-softer)] p-2">
+        <SkeletonText lines={4} label="Loading Navidrome playlists" />
+      </div>
+    );
+  }
+
+  // No rows at all here: without the index there is no name to put beside a
+  // pinned id, and a bare id list is the "is this gone?" ambiguity this picker
+  // exists to remove. Say the index is unavailable and leave the config alone.
+  if (status === 'error') {
+    return (
+      <span className="field-hint opacity-60">
+        Couldn&apos;t reach Navidrome to list playlists, so this show&apos;s pinned
+        playlists are left as they are. Reopen this panel to try again.
+      </span>
+    );
+  }
 
   if (!playlists.length && !missing.length) {
     return (
