@@ -71,6 +71,14 @@ function describeFail(fail: HealthResult | null, candidates: string[]): string |
   if (!fail || fail.ok) return undefined;
   if (fail.kind === 'timeout')
     return 'No response in time — the box may be asleep, on another network, or blocked by a firewall.';
+  // 401/407 is its own diagnosis, not a routing problem: the station sits
+  // behind HTTP Basic Auth (a reverse-proxy or Cloudflare Access password), and
+  // the generic "check your /api/* route" advice below sends people hunting a
+  // proxy bug that isn't there — the reported symptom is "works in the browser,
+  // in VLC and in curl, fails in the app" (#1300, bug 8). The app DOES support
+  // it, via credentials in the URL, which nothing told anyone.
+  if (fail.kind === 'http' && (fail.status === 401 || fail.status === 407))
+    return `The station asked for a password (HTTP ${fail.status}) — it's behind HTTP Basic Auth. Put the credentials in the address as user:pass@host (e.g. dj:secret@radio.yourhost.com) and the app sends them as proper Basic Auth on every request, including the audio stream.`;
   if (fail.kind === 'http')
     return `The server answered with HTTP ${fail.status ?? '?'}, so the address is reachable but the request never reached the controller. Check that your reverse proxy routes /api/* to the controller on port 7701.`;
   // The device doesn't trust the station's cert. Two real-world causes, same
@@ -369,6 +377,7 @@ export default function Onboarding() {
                   the prefix to force one or the other. */}
               <Text className="font-mono text-muted" style={{ fontSize: 10.5, lineHeight: 16, marginTop: 7 }}>
                 Tap the prefix to switch HTTPS / HTTP. HTTPS auto-falls back to HTTP.
+                {'\n'}Password-protected station? Type user:pass@host.
               </Text>
 
               <Pressable

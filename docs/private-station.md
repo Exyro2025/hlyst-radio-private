@@ -68,6 +68,48 @@ every listener connect, so:
 While the password is on, `/listen.pls` and `/listen.m3u` return 403 — they
 would otherwise hand out credential-less URLs that no longer play.
 
+## A different thing: HTTP Basic Auth in front of the whole station
+
+Everything above is SUB/WAVE's *own* privacy lock. Plenty of operators instead
+put **HTTP Basic Auth on the reverse proxy** (nginx `auth_basic`, Caddy
+`basicauth`, Traefik middleware, Cloudflare Access), which gates the admin UI,
+the player, the API and the streams in one go — before a request ever reaches
+the controller.
+
+That works, and the mobile apps support it. The credential form is the same:
+
+```
+https://dj:secret@radio.yourhost.com
+```
+
+Enter that as the **station address** (iOS and Android; on the add-station
+screen just type `dj:secret@radio.yourhost.com`). The app splits the
+credentials out and re-sends them as a proper `Authorization: Basic` header on
+every request — the API polls, the cover artwork, and the audio stream.
+
+That last one is the reason the credentials can't simply be left in the URL:
+**iOS's AVPlayer silently drops `user:pass@` userinfo from a media URL** (and
+Android's player is no more reliable about it), which is why a basic-auth
+station could report *Stream Unreachable* / HTTP 401 in the app while the exact
+same URL played fine in a browser, in VLC and via `curl`. The app converts the
+userinfo into a stream header instead (#764).
+
+Two things to know:
+
+- **The URL is stored as you typed it**, credentials included, in the app's
+  saved-stations list. It's a shared listening password, not an account —
+  don't reuse a password that matters.
+- **Special characters must be percent-encoded** in the userinfo, as in any
+  URL: an `@` in the password becomes `%40`, a `:` becomes `%3A`.
+
+Percent-encoded values are decoded before the header is built, so
+`dj:p%40ss@radio.example` sends the password `p@ss`.
+
+Basic auth on the proxy and SUB/WAVE's own stream password are independent and
+can be combined, but there's rarely a reason to: the proxy lock is broader
+(it covers admin too) while the stream password is what lets you hand a
+listener the stream without handing them the console.
+
 ## Known limits
 
 - One shared password for both locks; rotating it logs every listener out
