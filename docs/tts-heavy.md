@@ -113,9 +113,22 @@ Unraid, including the driver plugin and the extra parameters, are in
 anywhere else it's `--gpus all` on your `docker run`. Everything below about
 device selection and VRAM applies there unchanged.
 
-### Running the analyzer on ANOTHER machine
+Sharing the card with a local TTS or LLM? The worker plays nice: after ~5
+minutes with no CLAP/Demucs use it drops its models out of VRAM and reloads
+them on the next request (`ANALYZE_IDLE_UNLOAD_S` in `.env` tunes the window;
+`0` keeps them resident; CPU-only hosts get the same release with a longer
+30-minute default — #1204). The trade: the first heavy request after a release
+pays a cold reload from the on-disk cache — a few seconds for CLAP on a typical
+box (measured ~2s; a "sounds like ..." search may feel it on slower hardware),
+longer for Demucs. If your station leans on sound search and RAM is plentiful,
+`ANALYZE_IDLE_UNLOAD_S=0` restores the old always-resident behaviour. A few
+hundred MB of CUDA context remain until the analyzer container stops. Pair it with the **quiet times** toggle on the admin
+Library page and a long scan pauses — and frees the GPU — whenever listeners
+are tuned in.
 
-The GPU overlay above assumes the card is in the same host as the station. If it
+### Running the analyzer on another machine
+
+Everything above assumes the card is in the same host as the station. If it
 isn't — the station lives on a NAS or a mini-PC and the GPU is in a desktop
 somewhere else — you do **not** have to move the station, and you certainly
 don't have to stop the stack and copy `appdata` to the GPU box and back.
@@ -147,7 +160,9 @@ So, on the GPU host:
 # docker-compose.yml on the GPU MACHINE — analyzer only.
 services:
   analyzer:
-    image: ghcr.io/perminder-klair/subwave-analyzer-heavy:latest   # or -cuda + the GPU reservation
+    # -heavy is CLAP + Demucs on the CPU, and is amd64-only. For the GPU, swap
+    # in subwave-analyzer-cuda and add the `deploy:` block below.
+    image: ghcr.io/perminder-klair/subwave-analyzer-heavy:latest
     restart: unless-stopped
     ports:
       - "8080:8080"
@@ -157,6 +172,15 @@ services:
       # the usual way; the AIO's equivalent is the appdata share.
       - /mnt/subwave-state:/var/sub-wave
       - analyzer-cache:/opt/analyzer/hf-cache
+    # CUDA image only — same reservation docker-compose.analyzer-gpu.yml applies
+    # (that file also documents the legacy `runtime: nvidia` fallback).
+    # deploy:
+    #   resources:
+    #     reservations:
+    #       devices:
+    #         - driver: nvidia
+    #           count: all
+    #           capabilities: [gpu]
 volumes:
   analyzer-cache:
 ```
@@ -170,27 +194,18 @@ checks, in order:
    host while a scan runs — if that's empty or errors, the share is the problem,
    not the URL.
 3. Watch the station's analyze log: path-open errors mean the mount point
-   differs; timeouts mean the URL.
+   differs. Timeouts are ambiguous — the per-track deadline is
+   `ANALYZE_REQUEST_TIMEOUT_MS` (120s by default), and reading a long track
+   across a slow share *plus* the DSP can outrun it on a link that is otherwise
+   working. Raise it before concluding the URL is wrong.
 
-Keep the local `analyzer` service stopped (`docker compose stop analyzer`) so
-you aren't paying for an idle image, and mind that the share needs write
-permission for the analyzer's user — it writes stems and reads temp audio.
+Keep the local `analyzer` service stopped (`docker compose stop analyzer` after
+each `up -d`, which restarts it) so you aren't paying for an idle image, and
+mind that the share needs write permission for the analyzer's user — it writes
+stems and reads temp audio.
 
 > **Not the same as sharing your music library.** Navidrome's music files aren't
 > involved here; the shared directory is SUB/WAVE's own `state/`.
-
-Sharing the card with a local TTS or LLM? The worker plays nice: after ~5
-minutes with no CLAP/Demucs use it drops its models out of VRAM and reloads
-them on the next request (`ANALYZE_IDLE_UNLOAD_S` in `.env` tunes the window;
-`0` keeps them resident; CPU-only hosts get the same release with a longer
-30-minute default — #1204). The trade: the first heavy request after a release
-pays a cold reload from the on-disk cache — a few seconds for CLAP on a typical
-box (measured ~2s; a "sounds like ..." search may feel it on slower hardware),
-longer for Demucs. If your station leans on sound search and RAM is plentiful,
-`ANALYZE_IDLE_UNLOAD_S=0` restores the old always-resident behaviour. A few
-hundred MB of CUDA context remain until the analyzer container stops. Pair it with the **quiet times** toggle on the admin
-Library page and a long scan pauses — and frees the GPU — whenever listeners
-are tuned in.
 
 ---
 
