@@ -96,9 +96,10 @@ async function refreshAutoPlaylistInner() {
   const showGenres: string[] = show?.genres ?? [];
   const eras = (show?.eras ?? []) as { fromYear: number | null; toYear: number | null }[];
   const showEnergies: string[] = show?.energies ?? [];
-  // A genre or a year window narrows the pool; energy alone only soft-leans
-  // (mirrors picker.hasMusicFilter). Strict (show.filtersStrict) opts EVERY set
-  // filter — mood, genre, era, energy — into a hard filter on the pool.
+  // A genre or a year window narrows the pool; energy or vocals alone only
+  // soft-leans (mirrors picker.hasMusicFilter). Strict (show.filtersStrict) opts
+  // EVERY set filter — mood, genre, era, energy, vocals — into a hard filter on
+  // the pool.
   const narrow = !!(show && (showGenres.length || hasEraBound(eras)));
   const showMoods: string[] = show?.moods ?? [];
   const showVocals = (show?.vocals ?? '') as VocalMode;

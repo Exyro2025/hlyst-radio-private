@@ -172,6 +172,7 @@ export {
   clampMaxOutputTokens,
   clampTtsGain,
   clampTtsSpeed,
+  coerceShowVocals,
   normalizeDial,
   personaToneDirectives,
 } from './settings/vocab.js';

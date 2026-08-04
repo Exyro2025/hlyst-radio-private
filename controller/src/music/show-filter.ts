@@ -391,8 +391,19 @@ export function trackInstrumental(t: FilterTrack | null | undefined): boolean | 
 }
 
 // Soft lean: tracks matching the mode are preferred, un-measured tracks stay
-// eligible, and a pool with no match falls back whole (never-starve). Mirrors
-// preferEnergy exactly — the un-measured track is the unknown-energy track.
+// eligible, and a pool with no match falls back whole (never-starve). Same
+// semantics as preferEnergy — the un-measured track is the unknown-energy track.
+//
+// Note which SLOT it fills, because the two differ: energy has a soft-mode lean
+// (preferEnergy) and a stricter one for filtersStrict (preferEnergyStrict, which
+// drops unknown-energy tracks). Vocals has no soft-mode lean at all — like
+// genre/era/mood, an un-strict show steers through the prompt only — and this is
+// what picker.ts's strict-only lean() calls, i.e. it fills preferEnergyStrict's
+// slot with preferEnergy's tolerance. Deliberate: un-measured is the NORM for
+// this dimension (opt-in Demucs), so dropping unknowns at the source level would
+// gut every discovery source before applyStrictLocks' coverage-gated onlyVocals
+// ever got to make that call. Don't "fix" the asymmetry by swapping in a
+// drop-unknown variant here.
 export function preferVocals<T extends FilterTrack>(tracks: T[], mode?: VocalMode | null): T[] {
   if (!mode) return tracks;
   const wantInstrumental = mode === 'instrumental';
