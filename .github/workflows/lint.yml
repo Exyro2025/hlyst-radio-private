@@ -66,4 +66,13 @@ jobs:
           npm run gen:themes
           git diff --exit-code ../web/lib/theme-tokens.generated.ts
 
+      # The web schema mirror (web/lib/schemas.generated.ts) is generated from
+      # controller/src/schemas/**. Regenerate and fail on any drift, so a schema
+      # change can't ship without regenerating the mirror the forms validate on.
+      - name: Verify schema mirror is up to date
+        if: matrix.package == 'controller'
+        run: |
+          npm run gen:schemas
+          git diff --exit-code ../web/lib/schemas.generated.ts
+
       - run: npm run lint
