@@ -113,6 +113,72 @@ Unraid, including the driver plugin and the extra parameters, are in
 anywhere else it's `--gpus all` on your `docker run`. Everything below about
 device selection and VRAM applies there unchanged.
 
+### Running the analyzer on ANOTHER machine
+
+The GPU overlay above assumes the card is in the same host as the station. If it
+isn't — the station lives on a NAS or a mini-PC and the GPU is in a desktop
+somewhere else — you do **not** have to move the station, and you certainly
+don't have to stop the stack and copy `appdata` to the GPU box and back.
+
+The analyzer is a plain HTTP service, and the controller resolves its backend
+from one variable:
+
+```ini
+# root .env, on the STATION host
+ANALYZE_URL=http://192.168.1.101:8080
+```
+
+It probes `{ANALYZE_URL}/health` for the `analyze` capability and, when that
+answers, sends analysis there instead of to the local `analyzer` container. Use
+a LAN or Tailscale address — `localhost` is the *controller container's*
+loopback.
+
+**One requirement, and it is the whole reason network-share attempts fail:
+both machines must see the state directory at the same path.** The controller
+pre-fetches each track to `/var/sub-wave/analyze-tmp/` and hands the analyzer a
+*path*, not the audio (network fetch on the controller overlaps DSP on the
+analyzer — that's most of the throughput). If the analyzer can't open that path,
+every track fails. Stem-cache rendering (`state/stems/`) writes back through the
+same shared dir.
+
+So, on the GPU host:
+
+```yaml
+# docker-compose.yml on the GPU MACHINE — analyzer only.
+services:
+  analyzer:
+    image: ghcr.io/perminder-klair/subwave-analyzer-heavy:latest   # or -cuda + the GPU reservation
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    volumes:
+      # MUST resolve to the same files the station's /var/sub-wave holds, at
+      # this exact mount point. An NFS/SMB export of the station's state dir is
+      # the usual way; the AIO's equivalent is the appdata share.
+      - /mnt/subwave-state:/var/sub-wave
+      - analyzer-cache:/opt/analyzer/hf-cache
+volumes:
+  analyzer-cache:
+```
+
+Then set `ANALYZE_URL` on the station host and `docker compose up -d`. Sanity
+checks, in order:
+
+1. `curl http://<gpu-host>:8080/health` from the **station** host — expect
+   `"ok": true` with `analyze` in `engines`.
+2. `docker compose exec analyzer ls /var/sub-wave/analyze-tmp` on the **GPU**
+   host while a scan runs — if that's empty or errors, the share is the problem,
+   not the URL.
+3. Watch the station's analyze log: path-open errors mean the mount point
+   differs; timeouts mean the URL.
+
+Keep the local `analyzer` service stopped (`docker compose stop analyzer`) so
+you aren't paying for an idle image, and mind that the share needs write
+permission for the analyzer's user — it writes stems and reads temp audio.
+
+> **Not the same as sharing your music library.** Navidrome's music files aren't
+> involved here; the shared directory is SUB/WAVE's own `state/`.
+
 Sharing the card with a local TTS or LLM? The worker plays nice: after ~5
 minutes with no CLAP/Demucs use it drops its models out of VRAM and reloads
 them on the next request (`ANALYZE_IDLE_UNLOAD_S` in `.env` tunes the window;
