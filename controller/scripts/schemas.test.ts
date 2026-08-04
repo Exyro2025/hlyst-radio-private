@@ -107,3 +107,25 @@ test('patch schema accepts each field independently', () => {
   assert.equal(webhooksPatchSchema.safeParse({ trackPlayListenerGated: true }).success, true);
   assert.equal(webhooksPatchSchema.safeParse({}).success, true);
 });
+
+// Deliberate tightenings over the hand-rolled validator these replaced. Each
+// case previously succeeded by silent coercion; the schema now rejects it, so
+// a malformed value fails loudly at save time rather than producing a broken
+// webhook that only fails later at fire time. Ruled acceptable 2026-08-04:
+// settings.json is only ever written by this validator, so stored data is
+// always well-formed.
+test('rejects a non-boolean enabled (old validator coerced via !== false)', () => {
+  assert.throws(() => validateWebhooksStrict([hook({ enabled: 'true' })]));
+});
+
+test('rejects an authHeader over 500 chars (old validator silently truncated)', () => {
+  assert.throws(() => validateWebhooksStrict([hook({ authHeader: 'x'.repeat(600) })]));
+});
+
+test('rejects a non-string authHeader (old validator silently emptied it)', () => {
+  assert.throws(() => validateWebhooksStrict([hook({ authHeader: 42 })]));
+});
+
+test('rejects a malformed id (old validator silently re-minted a fresh one)', () => {
+  assert.throws(() => validateWebhooksStrict([hook({ id: 'BAD-ID!' })]));
+});
