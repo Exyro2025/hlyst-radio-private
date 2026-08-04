@@ -5,6 +5,7 @@
 
 import net from 'node:net';
 import { cachedAsync } from '../util/ttl-cache.js';
+import { parseDjQueueStatus, type DjQueueStatus } from './skip-policy.js';
 
 // Liquidsoap shares a container with icecast2 under the `broadcast` service
 // (see docker-compose.yml). The legacy `liquidsoap` hostname is still honoured
@@ -118,6 +119,18 @@ export async function restartLiquidsoap() {
 // Unlike restart, this returns a normal "OK" response — Liquidsoap stays up.
 export async function skipTrack() {
   return sendCommand('skip', 2000);
+}
+
+// What a skip would air next from dj_queue (the custom "dj_queue_status"
+// command — see skip-policy.ts for the states). 'unknown' covers a telnet
+// failure and an older radio.liq without the command, so the commit-then-skip
+// wait can degrade to its grace path rather than throw mid-skip.
+export async function djQueueStatus(): Promise<DjQueueStatus> {
+  try {
+    return parseDjQueueStatus(await sendCommand('dj_queue_status', 2000));
+  } catch {
+    return 'unknown';
+  }
 }
 
 // Force the auto.m3u fallback playlist to re-read from disk. The playlist

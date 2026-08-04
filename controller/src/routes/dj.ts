@@ -842,12 +842,20 @@ router.post('/dj/auto-link', requireAdmin, (req, res) => {
 // ---------------------------------------------------------------------------
 // POST /dj/skip — force-end the current track (operator override)
 // There is no listener-facing skip by design; this is admin-gated only.
+// Commits the queued pick to dj_queue first (queue.commitBeforeSkip, #1300
+// bug 6) so the skip airs what the admin queue shows as next, not a random
+// auto.m3u fill — the response says which of the two actually happened.
 // ---------------------------------------------------------------------------
 router.post('/dj/skip', requireAdmin, async (req, res) => {
   try {
+    const prep = await queue.commitBeforeSkip();
     await skipTrack();
-    queue.log('scheduler', 'track skipped by operator');
-    res.json({ ok: true });
+    if (prep.pending && !prep.committed) {
+      queue.log('scheduler', `track skipped by operator — queued pick not confirmed in dj_queue after ${Math.round(prep.waitedMs / 1000)}s; the auto playlist may fill the slot first`);
+    } else {
+      queue.log('scheduler', 'track skipped by operator');
+    }
+    res.json({ ok: true, pending: prep.pending, committed: prep.committed });
   } catch (err) {
     queue.log('error', `/dj/skip failed: ${err.message}`);
     res.status(500).json({ error: err.message });
