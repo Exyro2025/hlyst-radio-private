@@ -7,6 +7,20 @@ export const TOPIC_MAX = 2000;
 export const SHOWS_MAX = 64;
 // Mirrors the controller's GUESTS_PER_SHOW cap (settings.ts).
 export const GUESTS_MAX = 3;
+// Mirrors the controller's PLAYLISTS_PER_SHOW / EXCLUDED_PLAYLISTS_PER_SHOW
+// caps (settings/vocab.ts), which are the same figure. Pinned against drift by
+// controller/scripts/playlists-cap.test.ts.
+export const PLAYLISTS_MAX = 10;
+
+/** How much the panel knows about the live Navidrome playlist index.
+ *
+ * Three states, not a loaded/not-loaded boolean: an empty `playlists` array
+ * means something different in each, and only `ready` licenses the editor to
+ * call a show's pinned id missing. A boolean collapses `loading` and `error`
+ * into one bucket, and whichever way that bucket renders is wrong for the other
+ * half of it — a spinner that never resolves, or a "no playlists" line shown
+ * while the fetch is still in flight. */
+export type PlaylistIndexStatus = 'loading' | 'ready' | 'error';
 
 export interface Show {
   id: string;

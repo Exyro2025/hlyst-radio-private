@@ -23,7 +23,7 @@ import { Card, Btn, Eyebrow, Toggle } from '../ui';
 import { EditorDialog, EditorFooter } from '../../ui/editor-dialog';
 import { AiFill } from '../AiFill';
 import GenreSuggest from '../GenreSuggest';
-import { PersonaPicker, GuestPersonaPicker, ThemePicker } from './ShowPickers';
+import { PersonaPicker, GuestPersonaPicker, ThemePicker, PlaylistPicker } from './ShowPickers';
 import { cn } from '../../../lib/cn';
 import {
   ANY_SENTINEL,
@@ -32,11 +32,12 @@ import {
   FILTER_VALUES_MAX,
   GUESTS_MAX,
   NAME_MAX,
+  PLAYLISTS_MAX,
   TOPIC_MAX,
   eraLabelOf,
   sameEra,
 } from './types';
-import type { Persona, Show, SkillOption, ThemeOption } from './types';
+import type { Persona, PlaylistIndexStatus, Show, SkillOption, ThemeOption } from './types';
 import { hasAnyMusicFilter, showValid } from './lib';
 import { ChipRow } from './ChipRow';
 
@@ -50,6 +51,9 @@ interface ShowEditorProps {
   activeThemeId: string;
   genres: string[];
   playlists: { id: string; name: string; songCount: number | null }[];
+  // Only 'ready' means /dj/playlists actually answered, so an id absent from
+  // `playlists` can't be called missing while the index is merely unknown.
+  playlistsStatus: PlaylistIndexStatus;
   apiBase: string;
   adminFetch: (path: string, init?: RequestInit) => Promise<Response>;
   minTrackSeconds?: number;
@@ -62,7 +66,8 @@ interface ShowEditorProps {
 }
 
 export function ShowEditor({
-  show, editorRef, personas, moods, themes, skills, activeThemeId, genres, playlists, apiBase,
+  show, editorRef, personas, moods, themes, skills, activeThemeId, genres, playlists,
+  playlistsStatus, apiBase,
   adminFetch, minTrackSeconds, busy, isNew,
   update, onSave, onClose, onRemove,
 }: ShowEditorProps) {
@@ -438,40 +443,13 @@ export function ShowEditor({
               over them. Pick none to let genre/era/mood drive selection
               (up to 10).
             </span>
-            {playlists.length === 0 ? (
-              <span className="field-hint opacity-60">
-                No Navidrome playlists found yet. Create some in Navidrome, then
-                reopen this panel.
-              </span>
-            ) : (
-              <div className="grid max-h-44 gap-1 overflow-y-auto border border-ink bg-[var(--ink-softer)] p-2">
-                {playlists.map(pl => {
-                  const checked = show.playlistIds.includes(pl.id);
-                  const atCap = !checked && show.playlistIds.length >= 10;
-                  return (
-                    <label
-                      key={pl.id}
-                      className={`flex items-center gap-2 text-sm ${atCap ? 'opacity-40' : 'cursor-pointer'}`}
-                    >
-                      <input
-                        type="checkbox"
-                        checked={checked}
-                        disabled={atCap}
-                        onChange={() => update({
-                          playlistIds: checked
-                            ? show.playlistIds.filter(id => id !== pl.id)
-                            : [...show.playlistIds, pl.id],
-                        })}
-                      />
-                      <span className="truncate">{pl.name}</span>
-                      {pl.songCount != null && (
-                        <span className="field-hint">({pl.songCount})</span>
-                      )}
-                    </label>
-                  );
-                })}
-              </div>
-            )}
+            <PlaylistPicker
+              playlists={playlists}
+              status={playlistsStatus}
+              selected={show.playlistIds}
+              max={PLAYLISTS_MAX}
+              onChange={playlistIds => update({ playlistIds })}
+            />
           </Field>
 
           {show.playlistIds.length > 0 && (
@@ -503,40 +481,13 @@ export function ShowEditor({
               don&apos;t fit: gather them in a Navidrome playlist and exclude it
               here (up to 10).
             </span>
-            {playlists.length === 0 ? (
-              <span className="field-hint opacity-60">
-                No Navidrome playlists found yet. Create some in Navidrome, then
-                reopen this panel.
-              </span>
-            ) : (
-              <div className="grid max-h-44 gap-1 overflow-y-auto border border-ink bg-[var(--ink-softer)] p-2">
-                {playlists.map(pl => {
-                  const checked = show.excludedPlaylistIds.includes(pl.id);
-                  const atCap = !checked && show.excludedPlaylistIds.length >= 10;
-                  return (
-                    <label
-                      key={pl.id}
-                      className={`flex items-center gap-2 text-sm ${atCap ? 'opacity-40' : 'cursor-pointer'}`}
-                    >
-                      <input
-                        type="checkbox"
-                        checked={checked}
-                        disabled={atCap}
-                        onChange={() => update({
-                          excludedPlaylistIds: checked
-                            ? show.excludedPlaylistIds.filter(id => id !== pl.id)
-                            : [...show.excludedPlaylistIds, pl.id],
-                        })}
-                      />
-                      <span className="truncate">{pl.name}</span>
-                      {pl.songCount != null && (
-                        <span className="field-hint">({pl.songCount})</span>
-                      )}
-                    </label>
-                  );
-                })}
-              </div>
-            )}
+            <PlaylistPicker
+              playlists={playlists}
+              status={playlistsStatus}
+              selected={show.excludedPlaylistIds}
+              max={PLAYLISTS_MAX}
+              onChange={excludedPlaylistIds => update({ excludedPlaylistIds })}
+            />
           </Field>
         </Card>
 
