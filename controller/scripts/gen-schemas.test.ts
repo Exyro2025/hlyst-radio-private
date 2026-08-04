@@ -1,0 +1,173 @@
+// The schema mirror generator. Everything here guards the same property: the
+// output is ONE FLAT FILE, so mistakes that are harmless in separate modules
+// (a duplicated module-private name, a differently-quoted zod import) become
+// broken generated code. They must fail HERE, naming the source file — not
+// downstream as a tsc error inside a file developers are told never to edit,
+// and never silently, since the drift check compares the mirror to its sources
+// and passes happily when the mirror faithfully reproduces the collision.
+import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
+import test from 'node:test';
+
+const { buildMirror, collectDeclarations } = await import('./gen-schemas.js');
+
+const HERE = dirname(fileURLToPath(import.meta.url));
+
+const mod = (file: string, source: string) => ({ file, source });
+const ZOD = "import { z } from 'zod';";
+
+// --- collision guard ---
+
+test('rejects the same top-level name declared by two modules', () => {
+  // The real case: webhook.ts has a module-private `const ID_RE`, and a second
+  // schema module could easily declare its own.
+  assert.throws(
+    () =>
+      buildMirror([
+        mod('webhook.ts', `${ZOD}\nconst ID_RE = /^a$/;\nexport const a = z.string();`),
+        mod('persona.ts', `${ZOD}\nconst ID_RE = /^b$/;\nexport const b = z.string();`),
+      ]),
+    (e: Error) => {
+      // Both files and the identifier, or the message doesn't point at the cause.
+      assert.match(e.message, /ID_RE/);
+      assert.match(e.message, /schemas\/webhook\.ts/);
+      assert.match(e.message, /schemas\/persona\.ts/);
+      return true;
+    },
+  );
+});
+
+test('the collision guard covers every top-level declaration form', () => {
+  const forms = [
+    ['const', 'const X = 1;'],
+    ['let', 'let X = 1;'],
+    ['var', 'var X = 1;'],
+    ['function', 'function X() {}'],
+    ['class', 'class X {}'],
+    ['type', 'type X = string;'],
+    ['interface', 'interface X { a: string }'],
+    ['enum', 'enum X { A }'],
+  ] as const;
+  for (const [label, decl] of forms) {
+    for (const second of forms) {
+      assert.throws(
+        () => buildMirror([mod('a.ts', `${ZOD}\n${decl}`), mod('b.ts', `${ZOD}\n${second[1]}`)]),
+        /duplicate top-level name "X"/,
+        `${label} vs ${second[0]} should collide`,
+      );
+    }
+  }
+});
+
+test('exported and module-private declarations collide alike', () => {
+  assert.throws(
+    () =>
+      buildMirror([
+        mod('a.ts', `${ZOD}\nexport const LIMIT = 16;`),
+        mod('b.ts', `${ZOD}\nconst LIMIT = 4;`),
+      ]),
+    /duplicate top-level name "LIMIT"/,
+  );
+});
+
+test('rejects a module declaring `z`, which the mirror preamble already imports', () => {
+  assert.throws(
+    () => buildMirror([mod('a.ts', `${ZOD}\nconst z2 = 1;\nconst z = 1;`)]),
+    /duplicate top-level name "z"/,
+  );
+});
+
+test('indented (nested) names never collide — only the top level shares a scope', () => {
+  const out = buildMirror([
+    mod('a.ts', `${ZOD}\nexport function f() {\n  const inner = 1;\n  return inner;\n}`),
+    mod('b.ts', `${ZOD}\nexport function g() {\n  const inner = 2;\n  return inner;\n}`),
+  ]);
+  assert.match(out, /export function f/);
+  assert.match(out, /export function g/);
+});
+
+test('collectDeclarations reads top-level names only', () => {
+  const names = collectDeclarations(
+    ['export const A = 1;', 'type B = string;', 'function c() {}', '  const nested = 1;'].join('\n'),
+  );
+  assert.deepEqual(names, ['A', 'B', 'c']);
+});
+
+// --- zod import strip ---
+// eslint's zod-only restriction is not quote- or semicolon-sensitive, so every
+// form that lints clean has to be recognised here or its import survives into
+// the mirror and redeclares `z`.
+
+test('strips the zod import whatever the quote style or semicolon', () => {
+  for (const line of [
+    "import { z } from 'zod';",
+    'import { z } from "zod";',
+    "import { z } from 'zod'",
+    'import {z} from "zod"',
+    "import  {  z  }  from  'zod' ;",
+  ]) {
+    const out = buildMirror([mod('a.ts', `${line}\nexport const a = z.string();`)]);
+    const imports = out.split('\n').filter((l) => /^import\b/.test(l));
+    assert.deepEqual(imports, ["import { z } from 'zod';"], `not stripped: ${line}`);
+  }
+});
+
+test('rejects zod import forms the mirror cannot reproduce', () => {
+  // Deliberate: a namespace import is not the same binding as a named one, and
+  // extra named bindings would simply vanish. Reject loudly rather than rewrite.
+  for (const line of [
+    "import * as z from 'zod';",
+    'import * as zod from "zod";',
+    "import { z, type ZodType } from 'zod';",
+    "import z from 'zod';",
+    "import { ZodType } from 'zod';",
+  ]) {
+    assert.throws(
+      () => buildMirror([mod('a.ts', `${line}\nexport const a = 1;`)]),
+      (e: Error) => {
+        assert.match(e.message, /schemas\/a\.ts/);
+        assert.match(e.message, /import \{ z \} from 'zod'/);
+        return true;
+      },
+      `should have been rejected: ${line}`,
+    );
+  }
+});
+
+test('rejects a multi-line zod import, whose tail a line-wise strip would miss', () => {
+  // The opening `import {` names no specifier, so only the tail identifies it.
+  for (const src of [
+    "import {\n  z,\n} from 'zod';\nexport const a = 1;",
+    "import {\n  z,\n}\nfrom 'zod';\nexport const a = 1;",
+  ]) {
+    assert.throws(() => buildMirror([mod('a.ts', src)]), /schemas\/a\.ts/, src);
+  }
+});
+
+test("a comment mentioning \"from 'zod'\" is not mistaken for an import", () => {
+  // webhook.ts's own header says "this file may import ONLY from 'zod'".
+  const out = buildMirror([
+    mod('a.ts', `// this file may import ONLY from 'zod'.\n${ZOD}\nexport const a = z.string();`),
+  ]);
+  assert.match(out, /may import ONLY from 'zod'/);
+});
+
+// --- the two zod runtimes ---
+
+test('controller and web declare the same zod version', () => {
+  // The drift check only proves the mirror is the same TEXT. If the two
+  // packages resolve different zod builds, the schema the form runs and the
+  // schema the route runs can still disagree — which is the one property this
+  // whole mechanism exists to guarantee. CI asserts this too (lint.yml,
+  // controller leg); this is the copy that fails locally in `npm test`.
+  const read = (p: string) => JSON.parse(readFileSync(join(HERE, '..', p), 'utf8'));
+  const controller = read('package.json').dependencies.zod;
+  const web = read(join('..', 'web', 'package.json')).dependencies.zod;
+  assert.equal(
+    controller,
+    web,
+    `zod version mismatch: controller ${controller} vs web ${web} — the schema mirror is copied text, so both packages must run the same zod.`,
+  );
+});

@@ -75,4 +75,22 @@ jobs:
           npm run gen:schemas
           git diff --exit-code ../web/lib/schemas.generated.ts
 
+      # The drift check above only proves the two sides run the same schema
+      # TEXT. If the packages resolve different zod builds, the schema the form
+      # runs and the schema the route runs can still disagree — the one property
+      # the mirror exists to guarantee. A lone `npm update zod` in either
+      # package is all it takes, so pin the declared ranges to each other.
+      - name: Verify controller and web declare the same zod version
+        if: matrix.package == 'controller'
+        run: |
+          node -e '
+            const c = require("./package.json").dependencies.zod;
+            const w = require("../web/package.json").dependencies.zod;
+            if (c !== w) {
+              console.error(`zod version mismatch: controller ${c} vs web ${w}. The schema mirror is copied text, so both packages must declare the same zod range — update both together.`);
+              process.exit(1);
+            }
+            console.log(`zod ${c} on both sides`);
+          '
+
       - run: npm run lint
