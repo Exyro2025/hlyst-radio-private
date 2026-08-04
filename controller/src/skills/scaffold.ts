@@ -42,8 +42,11 @@ interface SkillFileFields {
   contextFields?: string[]; // "right now" fields the segment may mention (#471)
   window?: 'any' | 'commute'; // custom skills only — emitted when 'commute'
   requiresKey?: string;       // custom skills only — env var the skill needs
-  feed?: string;        // news only
-  feedMaxItems?: number; // news only
+  // Values for the knobs the skill's own tool.mjs declares (`configFields`),
+  // already validated by skills/config-fields.ts. Written as flat frontmatter
+  // lines — an omitted key clears its line. Replaces the old news-only
+  // feed/feedMaxItems pair (#1300).
+  config?: Record<string, string | number>;
   tags?: string[];      // freeform organisation tags
   brief?: string;
 }
@@ -64,8 +67,12 @@ export async function writeSkillFile(fields: SkillFileFields): Promise<void> {
   // restrictive `commute` value is worth writing.
   if (fields.window === 'commute') lines.push('window: commute');
   if (fields.requiresKey) lines.push(`requiresKey: ${fields.requiresKey}`);
-  if (fields.feed) lines.push(`feed: ${fields.feed}`);
-  if (fields.feedMaxItems) lines.push(`feedMaxItems: ${fields.feedMaxItems}`);
+  // Skill-declared knobs (news' feed / feedMaxItems, and anything a custom
+  // tool.mjs declares). Insertion order follows the declaration.
+  for (const [key, value] of Object.entries(fields.config || {})) {
+    const flat = String(value).replace(/[\r\n]+/g, ' ').trim();
+    if (flat) lines.push(`${key}: ${flat}`);
+  }
   if (fields.tags && fields.tags.length) lines.push(`tags: ${fields.tags.join(', ')}`);
   lines.push('---', (fields.brief || '').trim(), '');
   const dir = join(SKILLS_DIR, kind);

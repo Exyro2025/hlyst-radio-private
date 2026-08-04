@@ -16,8 +16,9 @@ import * as settings from '../settings.js';
 import { runStationId, runHourlyCheck, runLink, runBanter, runProgrammeIntro, runProgrammeFeature, runProgrammeOutro, refreshAutoPlaylist } from '../broadcast/scheduler.js';
 import { skillCatalog, runCapability, effectiveContextFields } from '../skills/_agent.js';
 import * as sfxLib from '../broadcast/sfx.js';
-import { loadSkills, parseFrontmatter, parseTags, SEEDED_KINDS, RESERVED_KINDS, SLUG_RE, TAG_RE, TAGS_PER_SKILL_LIMIT, readTemplate, listCommunitySkills, readCommunitySkill } from '../skills/loader.js';
+import { loadSkills, loadedCapabilities, parseFrontmatter, parseTags, SEEDED_KINDS, RESERVED_KINDS, SLUG_RE, TAG_RE, TAGS_PER_SKILL_LIMIT, readTemplate, listCommunitySkills, readCommunitySkill } from '../skills/loader.js';
 import { writeSkillFile, msToCooldownStr, resetBuiltinSkill } from '../skills/scaffold.js';
+import { coerceConfigValues, readConfigValues, type SkillConfigField } from '../skills/config-fields.js';
 import { mapPool } from '../util/async-pool.js';
 import { readFile, rm, stat, mkdir, writeFile } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
@@ -36,10 +37,37 @@ interface SkillFields {
   contextFields?: string[];
   window?: 'any' | 'commute';
   requiresKey?: string;
-  feed?: string;
-  feedMaxItems?: number;
+  config?: Record<string, string | number>;
   tags?: string[];
   brief?: string;
+}
+
+// The knobs a skill declares for itself in tool.mjs (`configFields`). Read off
+// the LOADED capability, never off the kind string — that hardcoding is what
+// made a renamed copy of News lose its feed field (#1300).
+function declaredConfigFields(kind: string): SkillConfigField[] {
+  const cap = loadedCapabilities().find(c => c.kind === kind);
+  return (cap?.configFields as SkillConfigField[] | undefined) || [];
+}
+
+// The skill's own frontmatter as the loader parsed it — the fallback source of
+// current knob values when the state SKILL.md can't be read.
+function loadedConfig(kind: string): Record<string, string> | null {
+  const cap = loadedCapabilities().find(c => c.kind === kind);
+  return (cap?.config as Record<string, string> | undefined) || null;
+}
+
+// The knob values a save should persist. Prefer the explicit `config` object;
+// accept top-level keys too (the pre-#1300 shape, `{ feed, feedMaxItems }`); and
+// when the caller sends neither, keep what's already on disk — writeSkillFile
+// rewrites the whole SKILL.md, so a line we don't emit is a line we delete.
+// Throws on an invalid value (the routes turn that into a 400).
+function resolveConfigValues(kind: string, body: any): Record<string, string | number> {
+  const fields = declaredConfigFields(kind);
+  if (!fields.length) return {};
+  if (body?.config !== undefined) return coerceConfigValues(fields, body.config);
+  if (fields.some(f => body?.[f.key] !== undefined)) return coerceConfigValues(fields, body);
+  return readConfigValues(fields, loadedConfig(kind));
 }
 
 // Normalise a tags form value (array or comma string) with LOUD validation — a
@@ -351,6 +379,10 @@ function buildCustomSkillFields(slug: string, b: Record<string, unknown>): Skill
 router.get('/dj/skills/:kind/file', requireAdmin, async (req, res) => {
   const kind = req.params.kind;
   const cat = skillCatalog().find(s => s.kind === kind);
+  // Settings the skill declares for ITSELF (news' feed, anything a custom
+  // tool.mjs declares) plus their current values — the form renders whatever is
+  // here, so a renamed copy keeps its knobs (#1300).
+  const configFields = declaredConfigFields(kind);
 
   if (SEEDED_KINDS.has(kind)) {
     // Shipped defaults read straight from the built-in's TEMPLATE (NOT the live
@@ -375,15 +407,14 @@ router.get('/dj/skills/:kind/file', requireAdmin, async (req, res) => {
         kind,
         custom: false,
         exists: true,
-        isNews: kind === 'news',
         label: data.label || cat?.label || kind,
         cooldown: data.cooldown || msToCooldownStr(cat?.cooldownMs || 0),
         // Comma-separated "right now" fields this segment may weave in (#471).
         // Prefer the file's own value; fall back to the live effective set.
         context: (data.context ?? data.contextFields)?.trim() || (cat?.contextFields || []).join(', '),
         knownContextFields: [...dj.CONTEXT_FIELDS],
-        feed: data.feed || cat?.feed || null,
-        feedMaxItems: data.feedMaxItems ? parseInt(data.feedMaxItems, 10) : (cat?.feedMaxItems || null),
+        configFields,
+        config: readConfigValues(configFields, data),
         tags: parseTags(data.tags),
         brief: body || cat?.description || '',
         // Built-ins now carry an editable tool.mjs in state too (seeded on first
@@ -398,13 +429,12 @@ router.get('/dj/skills/:kind/file', requireAdmin, async (req, res) => {
         kind,
         custom: false,
         exists: false,
-        isNews: kind === 'news',
         label: cat?.label || kind,
         cooldown: msToCooldownStr(cat?.cooldownMs || 0),
         context: (cat?.contextFields || []).join(', '),
         knownContextFields: [...dj.CONTEXT_FIELDS],
-        feed: cat?.feed || null,
-        feedMaxItems: cat?.feedMaxItems || null,
+        configFields,
+        config: readConfigValues(configFields, loadedConfig(kind)),
         tags: cat?.tags || [],
         brief: cat?.description || '',
         hasTool: await skillHasTool(kind),
@@ -424,7 +454,11 @@ router.get('/dj/skills/:kind/file', requireAdmin, async (req, res) => {
       kind,
       custom: true,
       exists: true,
-      isNews: false,
+      // A custom skill carrying a tool.mjs with `configFields` gets the same
+      // settings section as a built-in — this is the half that was missing for
+      // an exported-and-renamed News skill (#1300).
+      configFields,
+      config: readConfigValues(configFields, data),
       label: data.label || cat?.label || kind,
       cooldown: data.cooldown || (cat?.cooldownMs ? msToCooldownStr(cat.cooldownMs) : ''),
       context: (data.context ?? data.contextFields)?.trim() || (cat?.contextFields || []).join(', '),
@@ -479,8 +513,8 @@ router.post('/dj/skills', requireAdmin, async (req, res) => {
 
 // ---------------------------------------------------------------------------
 // PUT /dj/skills/:kind/file — write a skill's SKILL.md from the admin edit form,
-// then reload so the change applies immediately. Built-in kinds take the news-
-// aware path; custom slugs (which must already exist) take the prompt-only path.
+// then reload so the change applies immediately. Built-in kinds take the seeded
+// path; custom slugs (which must already exist) take the prompt-only path.
 // ---------------------------------------------------------------------------
 router.put('/dj/skills/:kind/file', requireAdmin, async (req, res) => {
   const kind = req.params.kind;
@@ -497,6 +531,10 @@ router.put('/dj/skills/:kind/file', requireAdmin, async (req, res) => {
     let fields: SkillFields;
     try {
       fields = buildCustomSkillFields(kind, b);
+      // Knobs the skill's own tool.mjs declares. Without this the rewrite below
+      // would drop them: an imported+renamed News skill lost its `feed:` line on
+      // the first save from the admin form (#1300).
+      fields.config = resolveConfigValues(kind, b);
     } catch (err) {
       return res.status(400).json({ error: err.message });
     }
@@ -511,7 +549,7 @@ router.put('/dj/skills/:kind/file', requireAdmin, async (req, res) => {
     }
   }
 
-  // Built-in edit — brief/cooldown/label/context, + feed/feedMaxItems for news.
+  // Built-in edit — brief/cooldown/label/context, + any knobs its tool declares.
   const brief = typeof b.brief === 'string' ? b.brief.trim() : '';
   if (!brief) return res.status(400).json({ error: 'brief is required' });
 
@@ -546,20 +584,12 @@ router.put('/dj/skills/:kind/file', requireAdmin, async (req, res) => {
     }
   }
 
-  // Feed is news-only. Validate it parses as an http(s) URL.
-  if (kind === 'news') {
-    const feed = typeof b.feed === 'string' ? b.feed.trim() : '';
-    if (feed) {
-      try {
-        const u = new URL(feed);
-        if (u.protocol !== 'http:' && u.protocol !== 'https:') throw new Error('protocol');
-      } catch {
-        return res.status(400).json({ error: 'feed must be an http(s) URL' });
-      }
-      fields.feed = feed;
-    }
-    const max = parseInt(b.feedMaxItems, 10);
-    if (Number.isFinite(max) && max > 0) fields.feedMaxItems = max;
+  // Knobs the skill declares for itself (news' feed / feedMaxItems), validated
+  // against that declaration rather than against the kind string.
+  try {
+    fields.config = resolveConfigValues(kind, b);
+  } catch (err) {
+    return res.status(400).json({ error: err.message });
   }
 
   try {
