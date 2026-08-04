@@ -813,7 +813,7 @@ git commit -m "feat(web): add zod + react-hook-form and the shared useZodForm he
 Delete `interface Webhook` (lines 17-23) and `function valid` (lines 46-51). Replace the type import at the top of the file:
 
 ```ts
-import { useFieldArray } from 'react-hook-form';
+import { Controller, useFieldArray } from 'react-hook-form';
 import { z } from 'zod';
 import { useZodForm, applyServerFieldErrors } from '@/lib/form';
 import { webhooksSchema, WEBHOOKS_LIMIT, type Webhook } from '@/lib/schemas.generated';
@@ -977,17 +977,28 @@ Replace the `hooks.map(...)` block (lines 378-463). The row keys on `f._rhfKey`,
                 <FieldLabel className="caption" htmlFor={`wh-auth-${f._rhfKey}`}>
                   Authorization header (optional)
                 </FieldLabel>
-                <Input
-                  id={`wh-auth-${f._rhfKey}`}
-                  {...form.register(`webhooks.${i}.authHeader`)}
-                  // A stored header comes back as the 'set' sentinel. Show it as
-                  // blank so an untouched field re-sends 'set' and the server
-                  // keeps the secret.
-                  value={row.authHeader === 'set' ? '' : row.authHeader}
-                  onChange={e => form.setValue(`webhooks.${i}.authHeader`, e.target.value, { shouldDirty: true })}
-                  placeholder={row.authHeader === 'set' ? '(stored, leave blank to keep)' : 'Bearer …'}
-                  aria-label="Authorization header"
-                  spellCheck={false}
+                {/* Controller, not register: the 'set' sentinel must RENDER as
+                    blank while remaining the stored form value, so the display
+                    value diverges from the field value. Spreading register()
+                    and overriding value/onChange would strand RHF's own
+                    onChange and make this a controlled input inside an
+                    uncontrolled registration. */}
+                <Controller
+                  control={form.control}
+                  name={`webhooks.${i}.authHeader`}
+                  render={({ field }) => (
+                    <Input
+                      id={`wh-auth-${f._rhfKey}`}
+                      ref={field.ref}
+                      name={field.name}
+                      onBlur={field.onBlur}
+                      value={field.value === 'set' ? '' : field.value}
+                      onChange={e => field.onChange(e.target.value)}
+                      placeholder={field.value === 'set' ? '(stored, leave blank to keep)' : 'Bearer …'}
+                      aria-label="Authorization header"
+                      spellCheck={false}
+                    />
+                  )}
                 />
                 <FieldDescription className="mt-1 text-[10px]">
                   Sent verbatim as the <code>Authorization</code> header. Stored at rest in <code>settings.json</code>.
@@ -1031,7 +1042,7 @@ Replace the `hooks.map(...)` block (lines 378-463). The row keys on `f._rhfKey`,
       })}
 ```
 
-Note the `authHeader` input uses an explicit `value`/`onChange` pair rather than bare `register`, because the `'set'` sentinel must render as blank while remaining the stored form value.
+Note the `authHeader` input goes through `Controller` rather than `register`, because the `'set'` sentinel must render as blank while remaining the stored form value — the display value legitimately diverges from the field value there.
 
 If `replace` is now unused from the `useFieldArray` destructure, drop it — `@typescript-eslint/no-unused-vars` is an `error` in this project.
 
