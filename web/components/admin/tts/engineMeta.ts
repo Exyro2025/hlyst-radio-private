@@ -51,12 +51,20 @@ export interface EngineAvailability {
   [engine: string]: boolean | string[] | null | Record<string, boolean> | undefined;
 }
 
+export interface EngineStatusOpts {
+  // What to do about an unconfigured Cloud engine. The default points at the
+  // Settings voice tab, which is wrong copy when you are already standing on
+  // it — that page passes its own.
+  cloudKeyAction?: string;
+}
+
 // Badge + machine state + enable hint in one branch tree, so the three can never
 // disagree. A missing flag means "not yet known / assumed up", so only a hard
 // `=== false` is flagged. `warn` is the recoverable-problem tone.
 export function engineStatus(
   id: string,
   available: EngineAvailability | undefined,
+  opts: EngineStatusOpts = {},
 ): EngineStatus {
   const a = available || {};
   switch (id) {
@@ -96,7 +104,10 @@ export function engineStatus(
       return a.cloud === false
         ? {
             label: 'no key', tone: 'warn', state: 'off',
-            hint: { reason: 'No API key is configured for the selected provider', action: 'add it in Settings → Voice' },
+            hint: {
+              reason: 'No API key is configured for the selected provider',
+              action: opts.cloudKeyAction || 'add it in Settings → Voice',
+            },
           }
         : { label: 'key set', tone: 'ok', state: 'ready' };
     case 'remote':

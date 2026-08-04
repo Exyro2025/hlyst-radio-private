@@ -5,6 +5,7 @@ import {
   PROMPT_NAME_MAX, PROMPT_MIN, PROMPT_MAX,
   KOKORO_RE, CHATTERBOX_VOICE_RE, POCKET_TTS_VOICE_RE,
 } from './constants';
+import { CLOUD_PROVIDER_ENV_KEY, cloudProviderLabel } from '../tts/cloudProviderMeta';
 
 // Client-minted opaque id ('p_' personas, 'dp_' prompt presets). The server
 // re-mints anything that fails its ID_RE, so these only need to be unique
@@ -207,36 +208,32 @@ export function voiceForSave(engine: string, voice: string): string {
   return voice; // piper ignores voice; cloud carries its own
 }
 
-// Prefers the controller's provider-aware readiness contract (it covers both
-// credentials and the station-wide Cloud switch); env presence is the fallback for
-// an older controller without that contract.
+// Why this persona's cloud voice won't play, or null when it will.
+//
+// The controller's readiness flag (`cloudByProvider`) folds TWO causes into one
+// boolean: no credentials, and the station-wide `tts.cloud.enabled` switch being
+// off. Reporting them with one sentence sent operators to hunt for a key they
+// had already set — visibly so next to the provider picker's own KEY SET badge,
+// which reads env presence directly. So credentials are checked first and the
+// readiness flag only speaks for what's left: the station switch.
 export function cloudIssue(persona: Persona | undefined, data: SettingsResponse | null): string | null {
   if (persona?.tts?.engine !== 'cloud') return null;
   const provider = persona.tts.cloudProvider;
-  const readiness = data?.tts?.available?.cloudByProvider;
-  if (readiness && provider in readiness) {
-    if (readiness[provider] === false) {
-      const label = provider === 'fish-audio'
-        ? 'Fish Audio'
-        : provider === 'elevenlabs'
-          ? 'ElevenLabs'
-          : provider === 'openai'
-            ? 'OpenAI'
-            : provider;
-      return `${label} is unavailable. Enable Cloud TTS and configure its credentials in Settings.`;
-    }
-    return null;
-  }
   // openai-compatible has no env-key convention — its URL, model, and optional
   // bearer live in tts.cloud settings rather than state/secrets.env.
   if (provider === 'openai-compatible') return null;
-  const envKey = provider === 'elevenlabs'
-    ? 'ELEVENLABS_API_KEY'
-    : provider === 'fish-audio'
-      ? 'FISH_API_KEY'
-      : 'OPENAI_API_KEY';
-  if (data?.env && !data.env[envKey]) {
+  const readiness = data?.tts?.available?.cloudByProvider;
+  const ready = readiness && provider in readiness ? readiness[provider] : undefined;
+  if (ready === true) return null;
+
+  const envKey = CLOUD_PROVIDER_ENV_KEY[provider];
+  // `data.env` absent means the settings payload hasn't landed; stay quiet
+  // rather than accusing a key of being missing before we can see it.
+  if (envKey && data?.env && !data.env[envKey]) {
     return `${envKey} is not configured in Settings.`;
+  }
+  if (ready === false) {
+    return `${cloudProviderLabel(provider)} has a key on file, but Cloud TTS is switched off for the station. Turn it on under Settings → Voice.`;
   }
   return null;
 }
