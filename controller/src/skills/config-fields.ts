@@ -16,12 +16,22 @@
 //
 // Everything here is pure — the unit-test seam is scripts/skill-config-fields.test.ts.
 
-// Frontmatter keys the loader/scaffold own. A skill may not redeclare one as a
-// config field: writeSkillFile emits those from its own typed fields, so a
-// collision would either be silently dropped or write the line twice.
-export const RESERVED_CONFIG_KEYS = new Set([
+// Frontmatter keys writeSkillFile EMITS from its own typed fields. Two jobs:
+// a skill may not redeclare one as a config field (the line would be written
+// twice), and the preserve pass below must not carry one through (the form is
+// authoritative for them — `contextFields` rides along as the legacy alias of
+// `context`, which writeSkillFile supersedes).
+export const OWNED_FRONTMATTER_KEYS = new Set([
   'name', 'label', 'cooldown', 'context', 'contextFields',
-  'window', 'requiresKey', 'tags', 'toolDescription',
+  'window', 'requiresKey', 'tags',
+]);
+
+// Keys a skill may not declare as a knob: everything writeSkillFile owns, plus
+// `toolDescription` (the loader reads it for the agent-facing tool blurb) and
+// `brief` (the admin form always sends one, which the legacy top-level body
+// shape in routes/dj.ts would otherwise capture into a frontmatter line).
+export const RESERVED_CONFIG_KEYS = new Set([
+  ...OWNED_FRONTMATTER_KEYS, 'toolDescription', 'brief',
 ]);
 
 export const CONFIG_KEY_RE = /^[a-zA-Z][a-zA-Z0-9_]{0,32}$/;
@@ -38,6 +48,8 @@ export interface SkillConfigField {
   hint?: string;
   min?: number;
   max?: number;
+  /** number fields only — reject a fractional value instead of truncating it. */
+  integer?: boolean;
 }
 
 export type SkillConfigValues = Record<string, string | number>;
@@ -87,6 +99,7 @@ export function parseConfigFields(raw: unknown): SkillConfigField[] {
       const max = optionalNumber(d.max);
       if (min !== undefined) field.min = min;
       if (max !== undefined) field.max = max;
+      if (d.integer === true) field.integer = true;
     }
     out.push(field);
     if (out.length >= CONFIG_FIELDS_LIMIT) break;
@@ -109,11 +122,44 @@ export function readConfigValues(
     const s = String(raw).trim();
     if (!s) continue;
     if (f.type === 'number') {
-      const n = parseInt(s, 10);
+      // Number(), not parseInt() — a stored "5abc" is a broken value the
+      // operator should see corrected, not silently read back as 5.
+      const n = Number(s);
       if (Number.isFinite(n)) out[f.key] = n;
       continue;
     }
     out[f.key] = s;
+  }
+  return out;
+}
+
+// The frontmatter lines a rewrite must carry through verbatim: everything the
+// form doesn't own and the skill doesn't declare.
+//
+// writeSkillFile rewrites SKILL.md from typed fields, so any line it doesn't
+// emit is a line it DELETES. That is the second half of #1300 — a `feed:` added
+// by hand vanished on the first save from the admin form. It also bites a
+// declared knob whenever the declaration isn't visible: a tool.mjs that fails to
+// import loads prompt-only (loader.ts logs and carries on), so `declaredKeys` is
+// empty and a fix-the-syntax-error-later save would otherwise wipe the values.
+//
+// `declaredKeys` is the DECLARED key list, not the submitted values — a knob the
+// operator deliberately cleared must stay cleared rather than being resurrected
+// from the old file. Order follows the existing file so a save produces a
+// minimal diff.
+export function preservedFrontmatter(
+  frontmatter: Record<string, unknown> | null | undefined,
+  declaredKeys: Iterable<string> = [],
+): Array<[string, string]> {
+  if (!frontmatter) return [];
+  const declared = new Set(declaredKeys);
+  const out: Array<[string, string]> = [];
+  for (const [key, raw] of Object.entries(frontmatter)) {
+    if (OWNED_FRONTMATTER_KEYS.has(key) || declared.has(key)) continue;
+    if (raw === undefined || raw === null) continue;
+    const value = String(raw).replace(/[\r\n]+/g, ' ').trim();
+    if (!value) continue;
+    out.push([key, value]);
   }
   return out;
 }
@@ -138,8 +184,13 @@ export function coerceConfigValues(
     if (!s) continue; // cleared — omit the line entirely
 
     if (f.type === 'number') {
-      const n = parseInt(s, 10);
+      // Number(), not parseInt(): parseInt takes the leading digits and runs,
+      // so "5abc" saved as 5 and "2.7" as 2 — both silently not what the
+      // operator typed. A fractional value is only rejected when the field asks
+      // for a whole number.
+      const n = Number(s);
       if (!Number.isFinite(n)) throw new Error(`${f.key} must be a number`);
+      if (f.integer && !Number.isInteger(n)) throw new Error(`${f.key} must be a whole number`);
       if (f.min !== undefined && n < f.min) throw new Error(`${f.key} must be at least ${f.min}`);
       if (f.max !== undefined && n > f.max) throw new Error(`${f.key} must be at most ${f.max}`);
       out[f.key] = n;
@@ -147,16 +198,21 @@ export function coerceConfigValues(
     }
 
     if (f.type === 'url') {
+      // The URL parser DROPS CR/LF/TAB before parsing, so a pasted value with a
+      // stray newline validates and would then be written folded to a space —
+      // a different URL than the one that passed. Strip first, so the value
+      // validated is the value stored.
+      const url = s.replace(/[\r\n\t]/g, '');
       let u: URL;
       try {
-        u = new URL(s);
+        u = new URL(url);
       } catch {
         throw new Error(`${f.key} must be an http(s) URL`);
       }
       if (u.protocol !== 'http:' && u.protocol !== 'https:') {
         throw new Error(`${f.key} must be an http(s) URL`);
       }
-      out[f.key] = s;
+      out[f.key] = url;
       continue;
     }
 

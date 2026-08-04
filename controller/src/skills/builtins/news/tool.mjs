@@ -9,7 +9,7 @@ export const description = 'Fetch current news headlines from the configured fee
 // different name (a second news source) still gets a feed field — issue #1300.
 export const configFields = {
   feed: { type: 'url', label: 'News feed · RSS 2.0', placeholder: 'https://…/rss.xml' },
-  feedMaxItems: { type: 'number', label: 'Max items', min: 1, max: 50, placeholder: '10' },
+  feedMaxItems: { type: 'number', label: 'Max items', min: 1, max: 50, integer: true, placeholder: '10' },
 };
 
 export default async function getHeadlines(ctx, state, services, config) {

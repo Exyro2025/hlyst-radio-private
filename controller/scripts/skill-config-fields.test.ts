@@ -19,13 +19,14 @@ import {
   parseConfigFields,
   readConfigValues,
   coerceConfigValues,
+  preservedFrontmatter,
   CONFIG_FIELDS_LIMIT,
 } from '../src/skills/config-fields.js';
 
 // The News built-in's actual declaration — the shape a duplicate inherits.
 const NEWS_DECL = {
   feed: { type: 'url', label: 'News feed · RSS 2.0', placeholder: 'https://…/rss.xml' },
-  feedMaxItems: { type: 'number', label: 'Max items', min: 1, max: 50, placeholder: '10' },
+  feedMaxItems: { type: 'number', label: 'Max items', min: 1, max: 50, integer: true, placeholder: '10' },
 };
 
 // ── the reported bug: a renamed copy keeps its knobs ─────────────────────────
@@ -154,6 +155,88 @@ const NEWS_DECL = {
     readConfigValues(fields, { feedMaxItems: 'lots' }),
     {},
     'an unparseable number is dropped rather than surfaced as NaN',
+  );
+}
+
+// ── the rewrite preserves what it doesn't own ────────────────────────────────
+//
+// writeSkillFile rebuilds SKILL.md from typed fields, so a line it doesn't emit
+// is a line it deletes. preservedFrontmatter is what it carries through.
+
+{
+  const declared = ['feed', 'feedMaxItems'];
+
+  // Keys the form owns are re-emitted from its own fields, never carried.
+  assert.deepEqual(
+    preservedFrontmatter(
+      { name: 'news', label: 'News', cooldown: '90m', context: 'time', tags: 'factual', window: 'commute', requiresKey: 'X_KEY' },
+      declared,
+    ),
+    [],
+  );
+
+  // A declared knob is the form's to write — including when the operator just
+  // cleared it. Carrying it would resurrect a value they deleted.
+  assert.deepEqual(preservedFrontmatter({ feed: 'https://example.com/a.xml' }, declared), []);
+
+  // Anything else survives, in file order: a hand-authored knob the tool reads
+  // straight off `config`, and `toolDescription`, which the loader owns but
+  // writeSkillFile never emitted.
+  assert.deepEqual(
+    preservedFrontmatter({ label: 'News', apiBase: 'https://api.example.com', toolDescription: 'Fetch X.', feed: 'https://e.com/a.xml' }, declared),
+    [['apiBase', 'https://api.example.com'], ['toolDescription', 'Fetch X.']],
+  );
+
+  // The load-bearing case: a tool.mjs that fails to import loads prompt-only, so
+  // NOTHING is declared. Its saved values must still survive the save that
+  // follows — otherwise fixing the syntax error can't bring them back.
+  assert.deepEqual(
+    preservedFrontmatter({ label: 'Tech news', feed: 'https://example.com/tech.xml', feedMaxItems: '6' }, []),
+    [['feed', 'https://example.com/tech.xml'], ['feedMaxItems', '6']],
+  );
+
+  // Blank/absent lines aren't carried, and a value is folded to one flat line.
+  assert.deepEqual(preservedFrontmatter({ apiBase: '   ' }, []), []);
+  assert.deepEqual(preservedFrontmatter({ apiBase: 'a\nb' }, []), [['apiBase', 'a b']]);
+  assert.deepEqual(preservedFrontmatter(null, []), []);
+  assert.deepEqual(preservedFrontmatter({}, []), []);
+}
+
+// `brief` is reserved: the admin form always sends one, and the legacy
+// top-level body shape would otherwise capture the whole brief into a
+// frontmatter line.
+{
+  assert.deepEqual(parseConfigFields({ brief: { type: 'text' }, feed: { type: 'url' } }).map(f => f.key), ['feed']);
+}
+
+// ── number coercion is exact, not "leading digits" ───────────────────────────
+{
+  const fields = parseConfigFields(NEWS_DECL);
+  // parseInt would have taken "12abc" as 12 and "2.7" as 2 — both silently not
+  // what the operator typed.
+  assert.throws(() => coerceConfigValues(fields, { feedMaxItems: '12abc' }), /must be a number/);
+  assert.throws(() => coerceConfigValues(fields, { feedMaxItems: '2.7' }), /whole number/);
+  assert.deepEqual(coerceConfigValues(fields, { feedMaxItems: '12' }), { feedMaxItems: 12 });
+
+  // Without `integer`, a fractional value is legitimate.
+  const loose = parseConfigFields({ ratio: { type: 'number', min: 0, max: 1 } });
+  assert.deepEqual(coerceConfigValues(loose, { ratio: '0.25' }), { ratio: 0.25 });
+  assert.throws(() => coerceConfigValues(loose, { ratio: '1.5' }), /at most 1/);
+
+  // Reading back is exact too — a broken stored value is dropped rather than
+  // truncated into a plausible-looking one.
+  assert.deepEqual(readConfigValues(fields, { feedMaxItems: '12abc' }), {});
+  assert.deepEqual(readConfigValues(loose, { ratio: '0.25' }), { ratio: 0.25 });
+}
+
+// A URL keeps exactly the value that passed validation. The URL parser drops
+// CR/LF/TAB before parsing, so a pasted value with a stray newline validates —
+// and would then be written folded to a space, i.e. a DIFFERENT url.
+{
+  const fields = parseConfigFields(NEWS_DECL);
+  assert.deepEqual(
+    coerceConfigValues(fields, { feed: 'https://example.com/a\n.xml' }),
+    { feed: 'https://example.com/a.xml' },
   );
 }
 

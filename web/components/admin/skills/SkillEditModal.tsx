@@ -57,8 +57,6 @@ interface SkillDefaults {
   label?: string;
   cooldown?: string;
   context?: string;
-  feed?: string;
-  feedMaxItems?: number;
   brief?: string;
 }
 
@@ -74,6 +72,8 @@ export interface SkillConfigField {
   hint?: string;
   min?: number;
   max?: number;
+  /** number fields only — whole numbers only, so the stepper moves by 1. */
+  integer?: boolean;
 }
 
 // GET /dj/skills/:kind/file — covers built-in and custom responses.
@@ -128,9 +128,17 @@ function configValues(j: SkillFileResponse): Record<string, string> {
 }
 
 // Comparison key for the tracked fields. Tags keep their order (an authored list,
-// not a set); only context is order-free.
+// not a set); only context is order-free. Config is normalised — a knob the
+// controller reports as unset is ABSENT, so typing into an empty field and
+// clearing it again must not read as an unsaved change.
 function fieldsKey(f: FileFields): string {
-  return JSON.stringify({ ...f, context: [...f.context].sort() });
+  const config = Object.fromEntries(
+    Object.entries(f.config)
+      .map(([k, v]) => [k, (v || '').trim()] as const)
+      .filter(([, v]) => v)
+      .sort(([a], [b]) => a.localeCompare(b)),
+  );
+  return JSON.stringify({ ...f, config, context: [...f.context].sort() });
 }
 
 function titleCase(slug: string): string {
@@ -653,6 +661,7 @@ export default function SkillEditModal({ mode, skill, personas, tagSuggestions, 
                         type={f.type === 'number' ? 'number' : f.type === 'url' ? 'url' : 'text'}
                         min={f.type === 'number' ? f.min : undefined}
                         max={f.type === 'number' ? f.max : undefined}
+                        step={f.type === 'number' ? (f.integer ? 1 : 'any') : undefined}
                         value={fields.config[f.key] || ''}
                         onChange={e => patch({ config: { ...fields.config, [f.key]: e.target.value } })}
                         placeholder={f.placeholder || ''}

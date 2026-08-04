@@ -289,8 +289,6 @@ async function loadSkillDir(dir: string, slug: string, { seeded }: { seeded: boo
     // `configFields`). Drives the admin editor's settings section — see
     // config-fields.ts. Empty for a prompt-only or undeclared skill.
     configFields: [] as SkillConfigField[],
-    feed: data.feed ? data.feed.trim() : undefined,
-    feedMaxItems: data.feedMaxItems && Number.isFinite(parseInt(data.feedMaxItems, 10)) ? parseInt(data.feedMaxItems, 10) : undefined,
   };
 
   // Readiness: a tool module's `ready(services)` wins; else a keyed skill is

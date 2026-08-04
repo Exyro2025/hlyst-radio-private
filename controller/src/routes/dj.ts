@@ -22,7 +22,7 @@ import { coerceConfigValues, readConfigValues, type SkillConfigField } from '../
 import { mapPool } from '../util/async-pool.js';
 import { readFile, rm, stat, mkdir, writeFile } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
-import { STATE_DIR, config } from '../config.js';
+import { STATE_DIR } from '../config.js';
 import { skipTrack } from '../broadcast/liquidsoap-control.js';
 import { getFullContext } from '../context.js';
 
@@ -38,6 +38,7 @@ interface SkillFields {
   window?: 'any' | 'commute';
   requiresKey?: string;
   config?: Record<string, string | number>;
+  configKeys?: string[];
   tags?: string[];
   brief?: string;
 }
@@ -57,17 +58,23 @@ function loadedConfig(kind: string): Record<string, string> | null {
   return (cap?.config as Record<string, string> | undefined) || null;
 }
 
-// The knob values a save should persist. Prefer the explicit `config` object;
-// accept top-level keys too (the pre-#1300 shape, `{ feed, feedMaxItems }`); and
-// when the caller sends neither, keep what's already on disk — writeSkillFile
-// rewrites the whole SKILL.md, so a line we don't emit is a line we delete.
-// Throws on an invalid value (the routes turn that into a 400).
-function resolveConfigValues(kind: string, body: any): Record<string, string | number> {
+// The knob values a save should persist, plus the declared key list that tells
+// writeSkillFile which frontmatter lines this form is authoritative for.
+//
+// Values: prefer the explicit `config` object; accept top-level keys too (the
+// pre-#1300 shape, `{ feed, feedMaxItems }`); and when the caller sends neither,
+// keep what's already on disk — writeSkillFile rewrites the whole SKILL.md, so a
+// line we don't emit is a line we delete. Anything the skill does NOT declare is
+// carried through by writeSkillFile's own preserve pass, so a tool.mjs that
+// currently fails to import costs its skill a settings form, never its saved
+// values. Throws on an invalid value (the routes turn that into a 400).
+function resolveConfig(kind: string, body: any): { config: Record<string, string | number>; configKeys: string[] } {
   const fields = declaredConfigFields(kind);
-  if (!fields.length) return {};
-  if (body?.config !== undefined) return coerceConfigValues(fields, body.config);
-  if (fields.some(f => body?.[f.key] !== undefined)) return coerceConfigValues(fields, body);
-  return readConfigValues(fields, loadedConfig(kind));
+  const configKeys = fields.map(f => f.key);
+  if (!fields.length) return { config: {}, configKeys };
+  if (body?.config !== undefined) return { config: coerceConfigValues(fields, body.config), configKeys };
+  if (fields.some(f => body?.[f.key] !== undefined)) return { config: coerceConfigValues(fields, body), configKeys };
+  return { config: readConfigValues(fields, loadedConfig(kind)), configKeys };
 }
 
 // Normalise a tags form value (array or comma string) with LOUD validation — a
@@ -387,8 +394,10 @@ router.get('/dj/skills/:kind/file', requireAdmin, async (req, res) => {
   if (SEEDED_KINDS.has(kind)) {
     // Shipped defaults read straight from the built-in's TEMPLATE (NOT the live
     // state copy), so the admin "Reset to default" shows the as-shipped brief
-    // even after the state SKILL.md has been edited. News seeds its feed from
-    // config (env-or-BBC), mirroring the seeder.
+    // even after the state SKILL.md has been edited. Knob values are NOT part of
+    // this payload — the reset itself is server-side (resetBuiltinSkill re-seeds
+    // news' feed from config, env-or-BBC), and the UI only reads `defaults` to
+    // decide whether to offer the button.
     const tpl = await readTemplate(kind);
     const defaults = tpl ? {
       label: tpl.data.label || kind,
@@ -396,7 +405,6 @@ router.get('/dj/skills/:kind/file', requireAdmin, async (req, res) => {
       context: (effectiveContextFields({ contextFields: tpl.data.context ?? tpl.data.contextFields }) || []).join(', '),
       tags: parseTags(tpl.data.tags),
       brief: tpl.body || '',
-      ...(kind === 'news' ? { feed: config.news.feedUrl, feedMaxItems: config.news.maxItems } : {}),
     } : null;
 
     const file = join(SKILLS_DIR, kind, 'SKILL.md');
@@ -534,7 +542,7 @@ router.put('/dj/skills/:kind/file', requireAdmin, async (req, res) => {
       // Knobs the skill's own tool.mjs declares. Without this the rewrite below
       // would drop them: an imported+renamed News skill lost its `feed:` line on
       // the first save from the admin form (#1300).
-      fields.config = resolveConfigValues(kind, b);
+      Object.assign(fields, resolveConfig(kind, b));
     } catch (err) {
       return res.status(400).json({ error: err.message });
     }
@@ -587,7 +595,7 @@ router.put('/dj/skills/:kind/file', requireAdmin, async (req, res) => {
   // Knobs the skill declares for itself (news' feed / feedMaxItems), validated
   // against that declaration rather than against the kind string.
   try {
-    fields.config = resolveConfigValues(kind, b);
+    Object.assign(fields, resolveConfig(kind, b));
   } catch (err) {
     return res.status(400).json({ error: err.message });
   }
