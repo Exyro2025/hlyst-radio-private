@@ -362,7 +362,7 @@ export function normalizeWebhooks(raw: unknown): Webhook[] {
     const url = typeof item.url === 'string' ? item.url.trim() : '';
     if (!/^https?:\/\//.test(url) || url.length > 500) continue;
     const events = Array.isArray(item.events)
-      ? item.events.filter((e: string) => WEBHOOK_EVENTS.includes(e))
+      ? item.events.filter((e: string) => (WEBHOOK_EVENTS as readonly string[]).includes(e))
       : [];
     if (!events.length) continue;
     let id = typeof item.id === 'string' && ID_RE.test(item.id) ? item.id : mintId('wh_');

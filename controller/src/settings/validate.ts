@@ -40,8 +40,6 @@ import {
   TTS_CLOUD_PROVIDERS,
   TTS_ENGINES,
   WEATHER_CONDITIONS,
-  WEBHOOKS_LIMIT,
-  WEBHOOK_EVENTS,
   Webhook,
   clampTtsGain,
   clampTtsSpeed,
@@ -59,6 +57,8 @@ import {
 } from './vocab.js';
 import { BOUNDS, rawMaxTrackSec } from './defaults.js';
 import { minTrackSeconds } from './store.js';
+import { webhooksSchema } from '../schemas/webhook.js';
+import { mergeWebhookSecrets } from '../schemas/webhook-server.js';
 
 // Strict validator for a `{engine, voice, cloudProvider}` voice slot. Shared by
 // every persona's `tts` block AND the station-wide TTS fallback slot
@@ -538,55 +538,15 @@ export function validateScheduleOverrideStrict(raw, shows): ScheduleOverride | n
   return { showId, startedAt, expiresAt };
 }
 
-// Strict validator — used by update(). `existing` is the current list, so
-// the operator can keep a previously-set authHeader by sending the redacted
+// Strict validator — used by update(). Shape and format now come from the
+// shared schema (controller/src/schemas/webhook.ts), which the web form runs
+// too; the stateful rules (redaction sentinel, id minting, cross-item dedupe)
+// come from its server-only sibling. `existing` is the current list, so the
+// operator can keep a previously-set authHeader by sending the redacted
 // sentinel back unchanged.
 export function validateWebhooksStrict(raw: unknown, existing: Webhook[] = []) {
-  if (!Array.isArray(raw)) throw new Error('webhooks must be an array');
-  if (raw.length > WEBHOOKS_LIMIT) {
-    throw new Error(`webhooks must be at most ${WEBHOOKS_LIMIT} entries`);
-  }
-  const byId = new Map(existing.map((h) => [h.id, h] as const));
-  const seen = new Set<string>();
-  return raw.map((item, i) => {
-    if (!item || typeof item !== 'object') throw new Error(`webhooks[${i}] must be an object`);
-    const url = String(item.url ?? '').trim();
-    if (!/^https?:\/\//.test(url)) {
-      throw new Error(`webhooks[${i}].url must start with http:// or https://`);
-    }
-    if (url.length > 500) throw new Error(`webhooks[${i}].url too long`);
-    if (!Array.isArray(item.events) || item.events.length === 0) {
-      throw new Error(`webhooks[${i}].events must be a non-empty array`);
-    }
-    const events: string[] = [];
-    for (const e of item.events) {
-      if (!WEBHOOK_EVENTS.includes(e)) {
-        throw new Error(
-          `webhooks[${i}].events entries must be one of: ${WEBHOOK_EVENTS.join(', ')}`,
-        );
-      }
-      if (!events.includes(e)) events.push(e);
-    }
-    let id = typeof item.id === 'string' && ID_RE.test(item.id) ? item.id : mintId('wh_');
-    if (seen.has(id)) id = mintId('wh_');
-    seen.add(id);
-    // authHeader: sentinel 'set' from getRedacted() means "keep the existing
-    // value" — the UI never re-sends the actual header. Anything else replaces.
-    const prior = byId.get(id);
-    let authHeader = '';
-    if (item.authHeader === 'set' && prior?.authHeader) {
-      authHeader = prior.authHeader;
-    } else if (typeof item.authHeader === 'string') {
-      authHeader = item.authHeader.slice(0, 500);
-    }
-    return {
-      id,
-      url,
-      events,
-      enabled: item.enabled !== false,
-      authHeader,
-    };
-  });
+  const parsed = webhooksSchema.parse(raw);
+  return mergeWebhookSecrets(parsed, existing);
 }
 
 // --- Strict update() validators for the mood system (the validateFestivalsStrict
