@@ -227,6 +227,7 @@ export function LlmSection({ data, form, setForm, busy, saveSettings, adminFetch
         budgetSoftPct: form.llm.budgetSoftPct,
         exemptRequests: form.llm.exemptRequests,
         maxOutputTokens: form.llm.maxOutputTokens,
+        discoverySteps: form.llm.discoverySteps,
         ...(INLINE_KEY_PROVIDERS.includes(activeProvider) && compatKeyInput.trim()
           ? { apiKey: compatKeyInput.trim() }
           : {}),
@@ -237,6 +238,7 @@ export function LlmSection({ data, form, setForm, busy, saveSettings, adminFetch
           ollamaUrl: form.llm.fallback.ollamaUrl,
           numCtx: form.llm.fallback.numCtx,
           repeatPenalty: form.llm.fallback.repeatPenalty,
+          discoverySteps: form.llm.fallback.discoverySteps,
           providerBaseUrls: form.llm.fallback.providerBaseUrls,
           reasoning: form.llm.fallback.reasoning,
           ...(INLINE_KEY_PROVIDERS.includes(activeFallbackProvider) && compatFallbackKeyInput.trim()
@@ -787,6 +789,32 @@ export function LlmSection({ data, form, setForm, busy, saveSettings, adminFetch
                 </div>
               )}
 
+              {form.llm.pickerAgent && (
+                <div className="field">
+                  <Label>Discovery rounds per pick</Label>
+                  <Input
+                    type="number"
+                    min={0}
+                    max={5}
+                    step={1}
+                    value={form.llm.fallback.discoverySteps}
+                    onChange={(e: ChangeEvent<HTMLInputElement>) =>
+                      setForm(f => ({ ...f, llm: { ...f.llm, fallback: { ...f.llm.fallback, discoverySteps: Number(e.target.value) } } }))
+                    }
+                    placeholder="0"
+                    className="max-w-[200px]"
+                  />
+                  <div className="field-hint">
+                    The backup resolves its own budget, since it may be a different
+                    provider running a different model. <strong>0 = auto</strong>.
+                    Note the DJ is told how many rounds it has before a pick starts,
+                    and that promise has to hold on whichever leg ends up running &mdash;
+                    so the station uses the <em>lower</em> of the two numbers whenever
+                    the backup is enabled. 0&ndash;5.
+                  </div>
+                </div>
+              )}
+
               {LLM_ENV_VARS[form.llm.fallback.provider] && (() => {
                 const keyVar = LLM_ENV_VARS[form.llm.fallback.provider]!;
                 return (
@@ -992,6 +1020,34 @@ export function LlmSection({ data, form, setForm, busy, saveSettings, adminFetch
               back to the stateless picker. Slow reasoning models often need
               20&ndash;40s per pick; lower it for snappier fallbacks on a fast
               model. 5&ndash;180s.
+            </div>
+          </div>
+        )}
+
+        {form.llm.pickerAgent && (
+          <div className="field mt-4">
+            <Label>Discovery rounds per pick</Label>
+            <Input
+              type="number"
+              min={0}
+              max={5}
+              step={1}
+              value={form.llm.discoverySteps}
+              onChange={(e: ChangeEvent<HTMLInputElement>) =>
+                setForm(f => ({ ...f, llm: { ...f.llm, discoverySteps: Number(e.target.value) } }))
+              }
+              placeholder="0"
+              className="max-w-[200px]"
+            />
+            <div className="field-hint">
+              How many times the DJ may search your library before it has to commit
+              to a track. {' '}<strong>0 = auto</strong>, which picks for you based on
+              your provider: 1 for self-hosted servers (Ollama, llama.cpp, vLLM,
+              LM Studio), 3 for the cloud providers. Raise it if you run a capable
+              model on your own hardware &mdash; auto is cautious there because many
+              local models wander when given more than one round. Lower it to 1 to
+              cut tokens and latency: every round is a separate call, and they all
+              share the agent deadline above. 0&ndash;5.
             </div>
           </div>
         )}

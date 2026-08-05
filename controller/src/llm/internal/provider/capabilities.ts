@@ -262,15 +262,37 @@ export function needsToolCallObject(cfg: any): boolean {
   return capabilitiesFor(cfg?.provider).objectStrategy === 'tool';
 }
 
-// How many free discovery steps this leg's provider gets before `done` is
-// forced. Clamped to [MIN, MAX] so a bad descriptor edit can only ever land on
-// the historical single-call behaviour or the deliberate ceiling — never zero
-// (which would force `done` at step 0 and corner the model into fabricating an
-// id with an empty `seen` map) and never unbounded.
+// How many free discovery steps this leg gets before `done` is forced.
+//
+// The operator's `settings.llm.discoverySteps` wins when set, because the
+// descriptor can only know what a PROVIDER generally does — it cannot know which
+// model that provider is serving. The two cases the override exists for run in
+// opposite directions: a small local model behind an openai-compatible endpoint
+// that copes fine with several rounds, and a frontier-provider id that turns out
+// to wander when given them. `0` (the default) means "follow the descriptor",
+// so an untouched install behaves exactly as if the setting did not exist.
+//
+// Read off the leg's cfg, not from settings, so this stays a pure function of
+// its argument (the whole module's contract) and so the primary and fallback
+// legs resolve independently — the fallback may be a different provider running
+// a different model, which is the same reason toolChoice and numCtx are per-leg.
+//
+// Clamped to [MIN, MAX] on both paths, so neither a bad descriptor edit nor a
+// hand-edited settings.json can land outside the band — never zero after the
+// auto sentinel is resolved (which would force `done` at step 0 and corner the
+// model into fabricating an id with an empty `seen` map) and never unbounded.
 export function discoveryStepsFor(cfg: any): number {
+  const override = cfg?.discoverySteps;
+  if (Number.isFinite(override as number) && (override as number) > 0) {
+    return clampDiscoverySteps(override as number);
+  }
   const declared = capabilitiesFor(cfg?.provider).discoverySteps;
   if (!Number.isFinite(declared as number)) return DISCOVERY_STEPS_MIN;
-  return Math.min(DISCOVERY_STEPS_MAX, Math.max(DISCOVERY_STEPS_MIN, Math.floor(declared as number)));
+  return clampDiscoverySteps(declared as number);
+}
+
+function clampDiscoverySteps(n: number): number {
+  return Math.min(DISCOVERY_STEPS_MAX, Math.max(DISCOVERY_STEPS_MIN, Math.floor(n)));
 }
 
 // The tool-loop step cap for a gated discovery run: every discovery step plus
