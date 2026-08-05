@@ -60,6 +60,7 @@ import {
   clampBudgetSoftPct,
   clampDailyTokenCap,
   clampMaxOutputTokens,
+  clampDiscoverySteps,
   clampNoRepeatWindow,
   clampNumCtx,
   clampRepeatPenalty,
@@ -172,6 +173,7 @@ export {
   WEATHER_CONDITIONS,
   WEATHER_MOOD_DEFAULTS,
   clampMaxOutputTokens,
+  clampDiscoverySteps,
   clampTtsGain,
   clampTtsSpeed,
   coerceShowVocals,
@@ -786,6 +788,10 @@ export async function load() {
       // Per-call output cap (issue #712) — pre-existing settings.json lacks the
       // field and picks up the 0 default (= built-in per-strategy defaults).
       maxOutputTokens: clampMaxOutputTokens(stored.llm?.maxOutputTokens, DEFAULTS.llm.maxOutputTokens),
+      // Discovery-round override — pre-existing settings.json lacks the field
+      // and picks up the 0 default (= follow the provider capability table), so
+      // an upgraded install behaves exactly as it did before the setting existed.
+      discoverySteps: clampDiscoverySteps(stored.llm?.discoverySteps, DEFAULTS.llm.discoverySteps),
       exemptRequests:
         typeof stored.llm?.exemptRequests === 'boolean'
           ? stored.llm.exemptRequests
@@ -816,6 +822,7 @@ export async function load() {
           toolChoice: fb.toolChoice === 'auto' ? 'auto' : DEFAULTS.llm.fallback.toolChoice,
           numCtx: clampNumCtx(fb.numCtx, DEFAULTS.llm.fallback.numCtx),
           repeatPenalty: clampRepeatPenalty(fb.repeatPenalty, DEFAULTS.llm.fallback.repeatPenalty),
+          discoverySteps: clampDiscoverySteps(fb.discoverySteps, DEFAULTS.llm.fallback.discoverySteps),
         };
       })(),
     },

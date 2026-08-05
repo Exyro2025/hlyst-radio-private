@@ -6,6 +6,7 @@
 // Part of the settings/ split — see ../settings.ts for the public barrel.
 
 import { randomBytes } from 'node:crypto';
+import { DISCOVERY_STEPS_MIN, DISCOVERY_STEPS_MAX } from '../llm/internal/provider/capabilities.js';
 
 // Default DJ system-prompt template. Placeholders are substituted at LLM
 // call time via renderDjPrompt(). Keep {name} mandatory — update() refuses
@@ -325,6 +326,26 @@ export function clampMaxOutputTokens(raw: unknown, def: number): number {
   return Math.min(MAX_OUTPUT_TOKENS_MAX, Math.max(MAX_OUTPUT_TOKENS_MIN, n));
 }
 
+// Operator override for the DJ agent's discovery-round budget. 0 is a
+// first-class value meaning "off — follow the provider capability table", so it
+// passes through unclamped; any other value is floored into the harness's own
+// band. Non-numeric/NaN falls back to `def`. Same 0-means-auto shape as
+// clampMaxOutputTokens above.
+//
+// The band is imported from the harness rather than restated here: it is a
+// property of the tool loop (a 0 budget corners the model at step 0 with an
+// empty candidate set; an unbounded one eats the shared deadline the recovery
+// legs need), and a second copy of the numbers would be free to drift from the
+// clamp discoveryStepsFor() applies. This is the one place settings reaches past
+// an `llm/` barrel: capabilities.ts imports nothing, while the llm/provider.js
+// barrel pulls in registry.ts, which imports settings — a cycle.
+export function clampDiscoverySteps(raw: unknown, def: number): number {
+  if (typeof raw !== 'number' || !Number.isFinite(raw)) return def;
+  const n = Math.floor(raw);
+  if (n <= 0) return 0;
+  return Math.min(DISCOVERY_STEPS_MAX, Math.max(DISCOVERY_STEPS_MIN, n));
+}
+
 // Count-based hard no-repeat window (distinct plays). Floored to an integer in
 // [0, 290]: 0 disables; the 290 ceiling stays under the 300-entry _recentPlays
 // cap so the requested window is never silently truncated by a too-short
@@ -410,6 +431,10 @@ export function applyLlmLegPatch(target: Record<string, unknown>, patch: unknown
   }
   if (l.repeatPenalty !== undefined) {
     target.repeatPenalty = clampRepeatPenalty(Number(l.repeatPenalty), target.repeatPenalty as number);
+  }
+  // Discovery-round budget. 0 = follow the provider capability table.
+  if (l.discoverySteps !== undefined) {
+    target.discoverySteps = clampDiscoverySteps(Number(l.discoverySteps), target.discoverySteps as number);
   }
   // Forced-tool tool_choice: 'required' (default) or 'auto'. Only those two are
   // legal; anything else is a config error. See forcedToolChoice() / issue #570.

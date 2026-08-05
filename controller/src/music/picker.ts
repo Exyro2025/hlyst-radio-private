@@ -804,7 +804,7 @@ export async function pickViaPool(queue, ctx, rankTarget: { bpm: number | null; 
           // shared PICKER_CRITERIA holds for both pick strategies.
           sections: library.sectionCount(c) ?? library.sectionCount(rec) ?? undefined,
           // Instrumental flag from measured vocal ranges ([] = no vocals) —
-          // the agent projection carried this (picker-tools.ts) while the
+          // the agent projection carried this (picker/slim.ts) while the
           // pool candidates competed blind on PICKER_CRITERIA's "instrumental
           // opener leaves room to talk" hint. Omitted when un-analysed.
           instrumental: Array.isArray(rec?.vocalRanges)
