@@ -41,34 +41,84 @@ resolve_state_dir() {
 log() { echo "[subwave-aio] $*" >&2; }
 
 # ---------------------------------------------------------------------------
-# One-time state bootstrap. Mode 777 because the services run under different
-# uids (icecast2 / liquidsoap / root).
+# Shared state bootstrap. Mode 777 because the services run under different
+# uids (icecast2 / liquidsoap / root) and, in compose, in other containers.
+#
+# Nothing here is fatal (#1300 bug 10): a state path on a mount that refuses
+# mkdir/chmod — a read-only bind, an NFS export, the exFAT/NTFS disk people
+# move the stem cache to — warns and the boot continues. This script runs
+# under `set -u` (not -e), so its copy of the old bulk chmod merely printed a
+# raw `chmod:` line naming no cause; the broadcast entrypoint's identical
+# block ran under `set -eu` and aborted the container outright. Same block,
+# same list, same messages in both — scripts/state-bootstrap.test.ts drives
+# the two through one table, because them drifting apart is how this returns.
 # ---------------------------------------------------------------------------
-init_state() {
-	mkdir -p /var/sub-wave \
-	         /var/sub-wave/voice \
-	         /var/sub-wave/voices \
-	         /var/sub-wave/archive \
-	         /var/sub-wave/jingles \
-	         /var/sub-wave/logs \
-	         /var/sub-wave/sessions \
-	         /var/sub-wave/sfx
-	chmod 777 /var/sub-wave \
-	          /var/sub-wave/voice \
-	          /var/sub-wave/voices \
-	          /var/sub-wave/archive \
-	          /var/sub-wave/jingles \
-	          /var/sub-wave/logs \
-	          /var/sub-wave/sessions \
-	          /var/sub-wave/sfx
+state_warn() { log "WARNING $*"; }
 
+# True when `other` can write the dir. This — not chmod's exit status — is
+# what the warning keys on: a mount that is already world-writable and simply
+# refuses chmod is a WORKING configuration, and a line printed on every boot of
+# a healthy station is a line operators learn to skip past.
+state_writable_by_others() {
+	case "$(stat -c %a "$1" 2>/dev/null || echo 0)" in
+		*[2367]) return 0 ;;
+		*) return 1 ;;
+	esac
+}
+
+state_prepare_dir() {
+	local p=$1
+	mkdir -p "$p" 2>/dev/null || true
+	if [ ! -d "$p" ]; then
+		state_warn "state dir $p could not be created — a read-only or unwritable mount; the station boots, but anything writing there will fail"
+		return 0
+	fi
+	chmod 777 "$p" 2>/dev/null || true
+	if [ ! -w "$p" ] || ! state_writable_by_others "$p"; then
+		state_warn "state dir $p is mode $(stat -c %a "$p" 2>/dev/null || echo '?') and chmod could not change it — the controller and analyzer write there as other uids; chown/chmod it on the host"
+	fi
+	return 0
+}
+
+state_prepare_file() {
+	local p=$1
+	local mode=${2:-}
+	touch "$p" 2>/dev/null || true
+	if [ ! -f "$p" ]; then
+		state_warn "state file $p could not be created — a read-only or unwritable mount"
+		return 0
+	fi
+	[ -n "$mode" ] && chmod "$mode" "$p" 2>/dev/null || true
+	return 0
+}
+
+bootstrap_state_dirs() {
+	local root=$1
+	local dir=$2
+	local sub
+	state_prepare_dir "$root"
+	state_prepare_dir "$dir"
+	# stems + transitions belong to the analyzer — the stem cache and the
+	# rendered transition clips. They are also the only two dirs worth
+	# relocating to a bigger disk, and the ONLY way to do that is a bind mount
+	# at <state>/stems (music/stem-cache.ts stemsRoot() is <stateDir>/stems,
+	# with no setting behind it). A fresh bind mount lands root-owned 755, so
+	# without the same 777 treatment the rest of the state dir gets, the
+	# analyzer cannot write the cache it was just pointed at.
+	for sub in voice voices archive jingles logs sessions sfx stems transitions; do
+		state_prepare_dir "$dir/$sub"
+	done
 	# Liquidsoap's reload_mode="watch" playlists need the files to exist.
-	touch /var/sub-wave/auto.m3u /var/sub-wave/jingles.m3u
-	chmod 666 /var/sub-wave/auto.m3u /var/sub-wave/jingles.m3u
-
+	state_prepare_file "$dir/auto.m3u" 666
+	state_prepare_file "$dir/jingles.m3u" 666
 	# Keep a co-located Navidrome from scanning the hourly archive mixdowns
 	# in as junk "HH-00" tracks (issue #273).
-	touch /var/sub-wave/archive/.ndignore
+	state_prepare_file "$dir/archive/.ndignore"
+	return 0
+}
+
+init_state() {
+	bootstrap_state_dirs /var/sub-wave /var/sub-wave
 
 	link_liquidsoap_log
 
@@ -438,25 +488,7 @@ run_broadcast() {
 
 	# Bootstrap the resolved station dir's subdirs (the root case is covered
 	# by init_state at boot; a non-root station dir needs its own here).
-	mkdir -p "$STATE_DIR" \
-	         "$STATE_DIR/voice" \
-	         "$STATE_DIR/voices" \
-	         "$STATE_DIR/archive" \
-	         "$STATE_DIR/jingles" \
-	         "$STATE_DIR/logs" \
-	         "$STATE_DIR/sessions" \
-	         "$STATE_DIR/sfx"
-	chmod 777 "$STATE_DIR" \
-	          "$STATE_DIR/voice" \
-	          "$STATE_DIR/voices" \
-	          "$STATE_DIR/archive" \
-	          "$STATE_DIR/jingles" \
-	          "$STATE_DIR/logs" \
-	          "$STATE_DIR/sessions" \
-	          "$STATE_DIR/sfx"
-	touch "$STATE_DIR/auto.m3u" "$STATE_DIR/jingles.m3u"
-	chmod 666 "$STATE_DIR/auto.m3u" "$STATE_DIR/jingles.m3u"
-	touch "$STATE_DIR/archive/.ndignore"
+	bootstrap_state_dirs "$STATE_DIR" "$STATE_DIR"
 
 	# Re-render on every pair launch so a flipped listener-auth flag lands
 	# after a restart-mixer (which bounces this pair, not the container).
