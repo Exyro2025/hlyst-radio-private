@@ -12,7 +12,7 @@ import { generateText, APICallError } from 'ai';
 import { MockLanguageModelV3 } from 'ai/test';
 import { stripThinking, truncationError, extractJson, usageOf, perfOf, warningsOf, budgetMode, isUnreachable, isTransient, isQuotaOrAuthError, isUpstreamOverloaded, isRateLimited, errReason, nearestId, isElevenLabsV3, isFishS21Model, cloudExpressionCueFamily, snapV3Stability, modelTolerant, schemaHint, clipText, soulBrief, SOUL_BRIEF_MAX, renderTerminalPrompt, messageText } from '../src/llm/internal/core/pure.js';
 import { withDeadline, withTransientRetry, retryAfterMs } from '../src/llm/internal/core/retry.js';
-import { reasoningFor, needsToolCallObject, repeatPenaltyApplies, appliedNumCtx, appliedRepeatPenalty, forcedToolChoice, discoveryStepsFor, gatedMaxStepsFor, DISCOVERY_STEPS_MIN, DISCOVERY_STEPS_MAX } from '../src/llm/internal/provider/capabilities.js';
+import { reasoningFor, needsToolCallObject, repeatPenaltyApplies, appliedNumCtx, appliedRepeatPenalty, forcedToolChoice, discoveryStepsFor, gatedMaxStepsFor, runDiscoverySteps, DISCOVERY_STEPS_MIN, DISCOVERY_STEPS_MAX } from '../src/llm/internal/provider/capabilities.js';
 import { agentPlan } from '../src/llm/internal/strategy/plan.js';
 import { introBudgetPhrase, enforceIntroBudget } from '../src/llm/internal/prompts/intro-budget.js';
 import { embeddingBaseUrl } from '../src/llm/internal/provider/embedding.js';
@@ -568,6 +568,18 @@ async function main() {
       const n = discoveryStepsFor({ provider });
       assert.ok(n >= DISCOVERY_STEPS_MIN && n <= DISCOVERY_STEPS_MAX, `${provider} budget ${n} out of band`);
       assert.equal(Number.isInteger(n), true, `${provider} budget must be a whole step count`);
+    }
+  });
+  await test('the per-provider budget reaches only agents that opt in', () => {
+    // The widening was designed and tested for the pick/request agents; a
+    // caller's pinned step cap can be load-bearing (the segment director's
+    // maxSteps: 2 in skills/_agent.ts was measured burning the full
+    // agentTimeoutMs when its loop silently grew). An agent that doesn't opt
+    // in must resolve the historical single step on EVERY provider — including
+    // the wide native ones and even over an operator override.
+    for (const cfg of [{ provider: 'anthropic' }, { provider: 'openai' }, { provider: 'ollama' }, { provider: 'anthropic', discoverySteps: 5 }]) {
+      assert.equal(runDiscoverySteps(cfg, false), DISCOVERY_STEPS_MIN, JSON.stringify(cfg));
+      assert.equal(runDiscoverySteps(cfg, true), discoveryStepsFor(cfg), JSON.stringify(cfg));
     }
   });
 

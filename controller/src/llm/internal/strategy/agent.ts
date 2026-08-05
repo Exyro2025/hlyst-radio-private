@@ -41,7 +41,7 @@ import { withFailover } from '../core/failover.js';
 import { withTransientRetry, withDeadline } from '../core/retry.js';
 import { stripThinking, extractJson, usageOf, perfOf, warningsOf, flattenToolCalls, failureDiagnostics, renderTerminalPrompt } from '../core/pure.js';
 import type { StepLike, ToolCallLike, ToolCallSummary, TokenUsage } from '../core/pure.js';
-import { needsToolCallObject, reasoningFor, samplingWithLocalKnobs, forcedToolChoice, discoveryStepsFor, gatedMaxStepsFor } from '../provider/capabilities.js';
+import { needsToolCallObject, reasoningFor, samplingWithLocalKnobs, forcedToolChoice, runDiscoverySteps } from '../provider/capabilities.js';
 import type { Leg } from '../provider/legs.js';
 import { objectViaToolCall } from './object-via-tool.js';
 import { agentPlan } from './plan.js';
@@ -85,6 +85,13 @@ interface DjAgentOptions {
   kind?: string;
   timeoutMs?: number;
   validate?: (object: unknown) => boolean;
+  // Follow the leg's per-provider discovery budget (descriptor + operator
+  // override) instead of the pinned single historical step. Opt-in per agent,
+  // OFF by default: a caller's step cap can be load-bearing — the segment
+  // director's `maxSteps: 2` (skills/_agent.ts) documents a run burning the
+  // FULL agentTimeoutMs when its loop silently widened — so only the agents
+  // the widening was designed for (pick/request) ask for it.
+  providerDiscoveryBudget?: boolean;
 }
 
 // Operator-overridable via settings.llm.maxOutputTokens (issue #712); 0 keeps
@@ -109,13 +116,15 @@ const TOOL_TIMEOUT_MS = 10_000;
 // `toolChoice:'required'` when several tools are visible and just emit prose —
 // ending the loop with no `done` call).
 //
-// The commit point is `discoveryStepsFor(leg.cfg)` — a PER-PROVIDER budget, not
-// the global 1 it used to be. On every forced-tool provider (ollama,
-// openai-compatible, locca) it still resolves to 1, leaving NO free middle step,
-// so that failure window stays closed exactly as before: one discovery call,
-// then `done`. Providers that honour `toolChoice` and reason across tool results
-// get a wider budget, because the one-call ceiling was never their constraint —
-// it was the weakest provider's, applied to everyone. Do NOT re-widen the
+// The commit point is `runDiscoverySteps(leg.cfg, providerDiscoveryBudget)` — a
+// PER-PROVIDER budget for the agents that OPT IN (the pick/request agents pass
+// providerDiscoveryBudget: true), the historical single step for every other
+// caller. On every forced-tool provider (ollama, openai-compatible, locca) even
+// the opted-in budget still resolves to 1, leaving NO free middle step, so that
+// failure window stays closed exactly as before: one discovery call, then
+// `done`. Providers that honour `toolChoice` and reason across tool results get
+// a wider budget, because the one-call ceiling was never their constraint — it
+// was the weakest provider's, applied to everyone. Do NOT re-widen the
 // forced-tool providers here; the descriptor in provider/capabilities.ts is the
 // one place that decision lives.
 //
@@ -228,6 +237,7 @@ export async function djAgent({
   maxOutputTokens = resolveMaxOutputTokens(MAX_TOKENS_AGENT),
   kind = 'sdk.djAgent',
   timeoutMs,
+  providerDiscoveryBudget = false,
   // Optional caller-supplied acceptance check on the native path's object
   // (e.g. "the picked id must be one a discovery tool actually surfaced").
   // The native path is the only branch with no structural control over WHAT
@@ -247,11 +257,15 @@ export async function djAgent({
     async (leg: Leg) => {
       const toolCount = tools ? Object.keys(tools).length : 0;
       const plan = agentPlan(leg.cfg, schema, toolCount);
-      // Per-provider loop shape (see gatedDiscoveryPrepareStep's note). Both are
-      // read off the LEG, not the caller, so a failover to a backup on a
-      // different provider re-resolves the budget for the leg actually running.
-      const discoverySteps = discoveryStepsFor(leg.cfg);
-      const gatedMaxSteps = gatedMaxStepsFor(leg.cfg);
+      // Loop shape for this run (see gatedDiscoveryPrepareStep's note). The
+      // opt-in is the CALLER's (providerDiscoveryBudget — only the pick/request
+      // agents follow the per-provider budget); the budget itself is read off
+      // the LEG, so a failover to a backup on a different provider re-resolves
+      // it for the leg actually running. The cap is gatedMaxStepsFor's
+      // derivation (budget + 1) applied to the budget in force: exactly ONE
+      // forced-`done` attempt at any budget.
+      const discoverySteps = runDiscoverySteps(leg.cfg, providerDiscoveryBudget);
+      const gatedMaxSteps = discoverySteps + 1;
       // Default to the agent path; branches override before their await. A
       // failure record always attributes to the path actually attempted.
       let lastVia = 'ai-sdk:agent';

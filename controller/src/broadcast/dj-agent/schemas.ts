@@ -11,7 +11,7 @@ import * as dj from '../../llm/dj.js';
 import { modelTolerant } from '../../llm/sdk.js';
 import { autoVoiceAllowed } from '../voice-policy.js';
 import { SEED_NOT_A_PICK_CLAUSE } from '../../util/pick-seed.js';
-import { instruction } from '../../llm/internal/prompts/instructions.js';
+import { instruction } from '../../llm/dj.js';
 
 
 // Plain .nullable() fields, deliberately — GLM's malformed spellings of

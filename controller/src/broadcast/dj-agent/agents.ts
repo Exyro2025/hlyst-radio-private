@@ -59,6 +59,12 @@ export const pickerAgent = defineAgent<PickerRunArgs, PickerExtras>({
   // to agent.ts's recovery cascade sooner — recovery is the mechanism that
   // actually rescues these, not more steps on a polluted trail.
   maxSteps: 2,
+  // The pick/request pair is what the per-provider discovery budget was
+  // designed and tested for, so they opt in here. djAgent callers that DON'T
+  // opt in (the segment director) keep the historical single discovery step —
+  // a pinned step cap can be load-bearing (see directorAgent.maxSteps in
+  // skills/_agent.ts), so the widening never applies implicitly.
+  providerDiscoveryBudget: true,
   timeoutMs: agentDeadline,
   buildSystem: ({ showAt, scope }) => pickSystem(showAt ?? null, !!scope?.playlistTracks?.length),
   // For a strict show (filtersStrict) EVERY set music filter — genre, era, mood,
@@ -85,6 +91,8 @@ export const requestAgent = defineAgent<RequestRunArgs, PickerExtras>({
   schema: () => requestSchema(),
   // See pickerAgent.maxSteps above — same reasoning.
   maxSteps: 2,
+  // See pickerAgent.providerDiscoveryBudget above.
+  providerDiscoveryBudget: true,
   timeoutMs: agentDeadline,
   buildSystem: () => requestSystem(),
   // resolveReferences adds the web-backed reference resolver (request path only;

@@ -303,6 +303,19 @@ export function gatedMaxStepsFor(cfg: any): number {
   return discoveryStepsFor(cfg) + 1;
 }
 
+// The discovery budget actually in force for ONE djAgent run. followProvider
+// is the agent's own opt-in (providerDiscoveryBudget on the definition): the
+// pick/request agents pass true and follow the descriptor + operator override
+// above; every other caller keeps the historical single cornered step. The
+// opt-in exists because a caller's pinned step cap can itself be load-bearing
+// — the segment director's `maxSteps: 2` (skills/_agent.ts) documents a run
+// burning the FULL agentTimeoutMs when its loop silently grew — so the
+// per-provider widening reaches only the agents it was designed and tested
+// for, never every agent on the provider.
+export function runDiscoverySteps(cfg: any, followProvider: boolean): number {
+  return followProvider ? discoveryStepsFor(cfg) : DISCOVERY_STEPS_MIN;
+}
+
 // The tool_choice value to send when SUB/WAVE wants to FORCE a tool call (the
 // structured-output emit/done paths). Defaults to 'required' — every local-model
 // structured-output path depends on it, and forced tool calling is the AI SDK's
