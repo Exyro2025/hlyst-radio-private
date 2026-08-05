@@ -16,6 +16,7 @@ import { bpmCompat, keyCompat } from './mix.js';
 import { shuffle } from '../util/shuffle.js';
 import { mapPool } from '../util/async-pool.js';
 import { artistRootKey, filterPickerCandidates, recencyWindowsForLibrary, effectiveNoRepeatWindow } from './recency.js';
+import { AIRING_RANK_WEIGHT, freshness, lastAiredMsOf, type AiredIndex } from './airing.js';
 import { normGenre, genreMatches, genreResolutionWarningOnce, preferGenre, preferEra, inYearRange, preferEnergy, preferEnergyStrict, preferMood, preferVocals, applyStrictLocks, hasEraBound, eraSpan, type YearRange, type VocalMode } from './show-filter.js';
 import { resolveShowPlaylistPool, resolveExcludedPlaylistIds, type PlaylistPool } from './show-playlist.js';
 import * as likes from '../broadcast/likes.js';
@@ -124,18 +125,27 @@ function analysisFor(t: Candidate): { bpm: number | null; key: string | null; ke
 // with the DJ-mix transition features); imported above.
 
 // Order the pool by a random base nudged up for tempo/harmonic compatibility
-// with the current track. Random stays dominant so the pool keeps its variety
-// and a NULL-analysis pool is indistinguishable from shuffle(). Key compares
-// the pair the transition actually meets — the anchor's ENDING key against
-// each candidate's OPENING key (feature: key ranges) — falling back to the
-// dominant keys (a mini-run rankTarget carries only a dominant key).
-function softRankByCompat(pool: Candidate[], current: { bpm: number | null; key: string | null; keyEnd?: string | null }): Candidate[] {
-  if (current.bpm == null && current.key == null) return shuffle(pool);
+// with the current track AND for airing freshness (music/airing.ts) — tracks
+// the station has never aired, or hasn't aired in weeks, are likelier to
+// survive the CANDIDATE_CAP slice. Random stays dominant so the pool keeps its
+// variety; an un-analysed library with no play history ranks exactly as a
+// plain shuffle. Key compares the pair the transition actually meets — the
+// anchor's ENDING key against each candidate's OPENING key (feature: key
+// ranges) — falling back to the dominant keys (a mini-run rankTarget carries
+// only a dominant key).
+function softRankByCompat(pool: Candidate[], current: { bpm: number | null; key: string | null; keyEnd?: string | null }, aired: AiredIndex): Candidate[] {
+  const now = Date.now();
+  const hasAnchor = current.bpm != null || current.key != null;
   return pool
     .map((t) => {
-      const a = analysisFor(t);
-      const bonus = 0.4 * bpmCompat(current.bpm, a.bpm) + 0.3 * keyCompat(current.keyEnd ?? current.key, a.keyStart ?? a.key);
-      return { t, score: Math.random() + bonus };
+      const compat = hasAnchor
+        ? (() => {
+            const a = analysisFor(t);
+            return 0.4 * bpmCompat(current.bpm, a.bpm) + 0.3 * keyCompat(current.keyEnd ?? current.key, a.keyStart ?? a.key);
+          })()
+        : 0;
+      const fresh = AIRING_RANK_WEIGHT * freshness(lastAiredMsOf(t, aired), now);
+      return { t, score: Math.random() + compat + fresh };
     })
     .sort((x, y) => y.score - x.score)
     .map((s) => s.t);
@@ -555,7 +565,7 @@ async function buildCandidates(mood: string | null | undefined, recentIds: Set<s
   // current track's own analysis when no run is active.
   const curAnalysis = rankTarget
     || (currentTrack?.id ? analysisFor(currentTrack) : { bpm: null, key: null });
-  const final = filterPickerCandidates(softRankByCompat(selectionPool, curAnalysis), {
+  const final = filterPickerCandidates(softRankByCompat(selectionPool, curAnalysis, library.lastAiredInfo()), {
     recentIds,
     recentArtists,
     hardRecentIds,
@@ -764,6 +774,11 @@ export async function pickViaPool(queue, ctx, rankTarget: { bpm: number | null; 
         : null,
       candidates: candidates.map(c => {
         const a = analysisFor(c);
+        // Airing memory (music/airing.ts): true when the station has never
+        // aired this track — a first-play discovery signal for the model.
+        // Omitted (not false) once the track has a play on record, matching
+        // the absent-when-empty convention below.
+        const neverAired = lastAiredMsOf(c, library.lastAiredInfo()) == null;
         // Join editorial tags + perceptual analysis from the library store when
         // the candidate doesn't carry them: Subsonic-sourced candidates (similar,
         // recent, frequent, starred…) are raw Navidrome children with none of
@@ -810,6 +825,7 @@ export async function pickViaPool(queue, ctx, rankTarget: { bpm: number | null; 
           instrumental: Array.isArray(rec?.vocalRanges)
             ? rec.vocalRanges.length === 0
             : undefined,
+          unaired: neverAired || undefined,
           source: c._source || null,
           // Cosine similarity to the current track for the KNN sources
           // (embedding-similar / audio-similar). Omitted for the other sources,

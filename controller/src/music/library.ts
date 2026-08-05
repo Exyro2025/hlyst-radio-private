@@ -13,6 +13,7 @@ import * as db from './library-db.js';
 import * as blocklist from './blocklist.js';
 import { resolveEmbeddingDim } from './embeddings.js';
 import { openingKeyFrom, endingKeyFrom } from './mix.js';
+import { DEEP_CUT_DAYS, EMPTY_AIRED_INDEX, type AiredIndex } from './airing.js';
 
 let loaded = false;
 
@@ -453,6 +454,40 @@ export function tracksByAudioVector(vec: number[] | Float32Array, k: number): an
     if (t) out.push({ ...slimTrack(t), _similarity: hit.similarity });
   }
   return blocklist.rejectBlocked(out);
+}
+
+// Last-aired index over the plays table, memoised briefly — every pick path
+// consults it (pool re-rank, agent collect ordering, the deepCuts tool), and a
+// GROUP BY over the whole play history per tool call would be wasteful. 5 min
+// staleness is harmless: the short horizon is guarded by the recency sets;
+// this signal only separates "days ago" from "never".
+const AIRED_INDEX_TTL_MS = 5 * 60 * 1000;
+let airedIndexCache: { at: number; val: AiredIndex } | null = null;
+
+export function lastAiredInfo(): AiredIndex {
+  if (!loaded) return EMPTY_AIRED_INDEX;
+  if (airedIndexCache && Date.now() - airedIndexCache.at < AIRED_INDEX_TTL_MS) {
+    return airedIndexCache.val;
+  }
+  try {
+    const val = db.lastAiredIndex();
+    airedIndexCache = { at: Date.now(), val };
+    return val;
+  } catch {
+    return EMPTY_AIRED_INDEX;
+  }
+}
+
+// Random sample of the library's unexplored shelf: tracks never aired, or
+// unaired for `days`. Backs the agent's deepCuts discovery tool.
+export function deepCuts(days: number = DEEP_CUT_DAYS, k = 60): any[] {
+  if (!loaded) return [];
+  const cutoffIso = new Date(Date.now() - days * 24 * 60 * 60 * 1000).toISOString();
+  try {
+    return blocklist.rejectBlocked(db.deepCutTracks(cutoffIso, k).map(slimTrack));
+  } catch {
+    return [];
+  }
 }
 
 export function stats() {

@@ -25,7 +25,7 @@ import * as library from '../../../../music/library.js';
 import * as embeddings from '../../../../music/embeddings.js';
 import { filterPickerCandidates } from '../../../../music/recency.js';
 import { applyStrictLocks, type VocalMode } from '../../../../music/show-filter.js';
-import { shuffle } from '../../../../util/shuffle.js';
+import { freshnessBiasedOrder } from '../../../../music/airing.js';
 import { SEED_NOT_A_PICK_CLAUSE } from '../../../../util/pick-seed.js';
 import { slim } from './slim.js';
 
@@ -160,7 +160,14 @@ export function buildPickerContext(scope: PickerScope): PickerContext {
     // gated in pickViaAgent (genres → library tags, mood/energy dropped when the
     // library has no such tags) so an un-analysed library can't starve every
     // tool for the whole show.
-    let pool = applyStrictLocks(shuffle((list || []) as any[]), {
+    //
+    // The ordering is a freshness-biased shuffle (music/airing.ts): a random
+    // base per candidate — a KNN tool's top-60 must not reach the model in
+    // similarity order, or the cap of 8 pins the same nearest neighbours every
+    // pick — nudged up for tracks the station has never aired or hasn't aired
+    // in weeks, so the cap favours the library's unexplored shelf. Randomness
+    // stays dominant; with no play history this IS a plain shuffle.
+    let pool = applyStrictLocks(freshnessBiasedOrder((list || []) as any[], library.lastAiredInfo(), Date.now()), {
       genres: genreLock, eras: eraLock, moods: moodLock, energies: energyLock, vocals: vocalLock,
     }, { starve: true });
     // Strict playlist: HARD-intersect with the lock set, with NO never-starve to

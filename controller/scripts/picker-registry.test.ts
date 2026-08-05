@@ -108,6 +108,15 @@ test('path-scoped tools are off unless their scope field is set', () => {
     .includes('showPlaylistTracks'));
 });
 
+test('deepCuts needs the library mirror, not an embedding index', () => {
+  // Airing memory reads the plays table joined against tracks — no vectors
+  // involved — so it lights up as soon as the library is synced, even on an
+  // install that never ran an embedding pass.
+  assert.ok(!namesOf(bareCtx()).includes('deepCuts'),
+    'deepCuts must be off with an empty library mirror');
+  assert.ok(namesOf(bareCtx({ stats: { total: 100 } })).includes('deepCuts'));
+});
+
 test('the journey tool needs BOTH a waypoint and an audio index', () => {
   const waypointOnly = buildPickerContext(pickerScope({ audioWaypoint: [0.1, 0.2] }));
   assert.ok(!namesOf({ ...waypointOnly, hasAudioEmbeddings: false, hasTextEmbeddings: false, hasEmbeddingProvider: false })
