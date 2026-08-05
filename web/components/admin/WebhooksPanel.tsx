@@ -481,6 +481,12 @@ export default function WebhooksPanel() {
                       placeholder={field.value === 'set' ? '(stored, leave blank to keep)' : 'Bearer …'}
                       aria-label="Authorization header"
                       spellCheck={false}
+                      // Opaque secret, so `off` — the convention every other
+                      // credential box in admin/ follows. Left at the browser
+                      // default, a password manager reads this as the site's
+                      // own login: it offers to fill it, and offers to UPDATE
+                      // the saved password when the form submits.
+                      autoComplete="off"
                     />
                   )}
                 />
