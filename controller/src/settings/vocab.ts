@@ -820,7 +820,6 @@ export const SHOW_FILTER_VALUES_MAX = 15;
 // "all skills" (null) persona materialises the FULL catalog minus one, so a cap
 // near the library size would make that first untick fail (#skill-organization).
 export const SKILLS_PER_PERSONA_LIMIT = 64;
-export const WEBHOOKS_LIMIT = 16;
 // Prompt-template library (djPrompts). Text bounds match the historical
 // single-djPrompt rule — keep them in lockstep with PROMPT_MIN/PROMPT_MAX in
 // web/components/admin/personas/constants.ts.
@@ -886,15 +885,15 @@ export function coercePlaylistIds(raw: unknown): string[] {
 // non-adjacent decades ("90s + 2010s") — inexpressible as a single range.
 export type EraWindow = { fromYear: number | null; toYear: number | null };
 
-// One outbound-webhook entry (settings.webhooks). Shared by the DEFAULTS seed,
-// the lenient load-time normalizer, and the strict update() validator.
-export interface Webhook {
-  id: string;
-  url: string;
-  events: string[];
-  enabled: boolean;
-  authHeader: string;
-}
+// Webhook shape + event list now live in the shared schema, which the web form
+// runs too (controller/src/schemas/webhook.ts). Re-exported here so the many
+// existing importers of `Webhook` / `WEBHOOK_EVENTS` from vocab keep working.
+export {
+  WEBHOOK_EVENTS,
+  WEBHOOKS_LIMIT,
+  type Webhook,
+  type WebhookEvent,
+} from '../schemas/webhook.js';
 
 // One saved DJ prompt-template library entry (settings.djPrompts).
 export interface DjPromptEntry {
@@ -1032,16 +1031,6 @@ export function coerceExcludedPlaylistIds(raw: unknown): string[] {
   }
   return out;
 }
-
-// Event names the outbound webhook fan-out can subscribe to. Kept in sync
-// with broadcast/webhooks.ts WEBHOOK_EVENTS — duplicated here so settings.ts
-// has no runtime dependency on the broadcast module.
-export const WEBHOOK_EVENTS = [
-  'track.play',
-  'dj.say',
-  'dj.link',
-  'request.received',
-];
 
 export function clamp01(n: number): number {
   if (!Number.isFinite(n)) return 0;
