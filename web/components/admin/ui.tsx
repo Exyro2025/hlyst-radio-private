@@ -61,7 +61,6 @@ export interface PillProps {
   /* Toggle state for a pill used as an on/off chip. Set it and the pill
      reports aria-pressed; leave it off for pills that fire a plain action. */
   pressed?: boolean;
-  ariaLabel?: string;
 }
 
 /* Tag pill over shadcn Badge. `tone` ∈ ink | accent | solid (default =
@@ -76,7 +75,7 @@ export interface PillProps {
 
    Without `onClick` the Badge path is unchanged, so the ~87 read-only pills
    render exactly as before. */
-export function Pill({ children, tone, dot, className, onClick, title, pressed, ariaLabel }: PillProps) {
+export function Pill({ children, tone, dot, className, onClick, title, pressed }: PillProps) {
   const content = (
     <>
       {dot && <span className="size-1.5 rounded-full bg-current" />}
@@ -94,7 +93,6 @@ export function Pill({ children, tone, dot, className, onClick, title, pressed, 
         onClick={onClick}
         title={title}
         aria-pressed={pressed}
-        aria-label={ariaLabel}
       >
         {content}
       </button>
