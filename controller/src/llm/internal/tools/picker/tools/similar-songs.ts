@@ -6,7 +6,7 @@ import { definePickerTool } from '../defs.js';
 export default definePickerTool({
   name: 'similarSongs',
   build: ({ collect, emptyResult }) => tool({
-    description: 'Find songs similar to a given song id. Pass the currently-playing song id to keep the flow going.',
+    description: 'Songs the MUSIC SERVER considers similar to a seed track — from artist/genre relationships and listening data, not from the audio or the lyrics. Pass the currently-playing song id to keep the flow going. Works on any track, so it is the fallback when the sharper axes (tracksLikeThis, tracksThatSoundLikeThis) have no vector for the seed. Empty means no similarity data for THAT track, not a thin library.',
     inputSchema: z.object({ songId: z.string() }),
     execute: async ({ songId }) => {
       try {

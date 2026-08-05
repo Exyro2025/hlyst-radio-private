@@ -6,7 +6,7 @@ import { definePickerTool } from '../defs.js';
 export default definePickerTool({
   name: 'randomSongs',
   build: ({ collect }) => tool({
-    description: 'A random sample of songs from the library — use to break a predictable run.',
+    description: 'A random sample from the whole library — use deliberately, to break a run that has become predictable. Weakest signal here: unfiltered by mood, genre or flow, so prefer any tool that can answer the actual moment, and pick the track that fits rather than the first one back.',
     inputSchema: z.object({}),
     execute: async () => {
       try { return collect(await subsonic.getRandomSongs({ size: 18 })); }

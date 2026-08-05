@@ -6,7 +6,7 @@ import { definePickerTool } from '../defs.js';
 export default definePickerTool({
   name: 'recentlyAdded',
   build: ({ collect }) => tool({
-    description: 'A sample of tracks from recently-added albums — "new in the crates".',
+    description: 'A sample of tracks from recently-added albums — "new in the crates". Takes no seed, so results are unrelated to what is on air: reach for it when the set has earned a reset, not when holding a flow.',
     inputSchema: z.object({}),
     execute: async () => {
       try {

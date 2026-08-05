@@ -6,7 +6,7 @@ import { definePickerTool } from '../defs.js';
 export default definePickerTool({
   name: 'tracksByMood',
   build: ({ collect, emptyResult }) => tool({
-    description: 'Songs tagged with a mood: energetic, calm, reflective, celebratory, romantic, spiritual, focus, workout, driving, cooking, rainy, sunny, night, morning, evening, festival, cultural. Optionally constrain by energy level (low|medium|high).',
+    description: 'Songs carrying one of the station\'s mood tags: energetic, calm, reflective, celebratory, romantic, spiritual, focus, workout, driving, cooking, rainy, sunny, night, morning, evening, festival, cultural. That list is the WHOLE vocabulary — a word outside it matches nothing rather than being interpreted, so choose the closest listed mood. Optionally narrow by energy. An empty result names which filter emptied it: "no tracks tagged X" is a coverage gap, not an empty library.',
     inputSchema: z.object({
       mood: z.string(),
       // nullable (not optional): under AI SDK v7's `tool()` an optional field

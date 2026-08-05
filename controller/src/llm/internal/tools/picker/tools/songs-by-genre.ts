@@ -6,7 +6,7 @@ import { definePickerTool } from '../defs.js';
 export default definePickerTool({
   name: 'songsByGenre',
   build: ({ collect, emptyResult }) => tool({
-    description: 'Songs from a library genre tag, fuzzy-matched ("turkish" finds "Turkish Pop"). Use for language/country/style asks — "play something Turkish" — that searchLibrary cannot reach: genre lives in tags, not titles.',
+    description: 'Songs from a library genre tag, fuzzy-matched ("turkish" finds "Turkish Pop"). Use for language/country/style asks — "play something Turkish" — that searchLibrary cannot reach: genre lives in tags, not titles. An error means no genre matches that word (try a broader one); an empty result means the genre exists but has nothing fresh — the opposite problem.',
     inputSchema: z.object({ genre: z.string().describe('a genre, language, or country word, e.g. "jazz", "turkish", "punjabi"') }),
     execute: async ({ genre }) => {
       try {
