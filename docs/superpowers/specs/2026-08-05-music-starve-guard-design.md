@@ -72,22 +72,81 @@ Gate the jingles source on the latch, alongside the existing bed gate:
 jingles = source.available(jingles, {not bed_on_air() and not music_starved()})
 ```
 
-Once latched, jingles stop covering, the rotate has nothing, `radio` goes
-unavailable, and the **existing** `fallback(track_sensitive=false, [radio,
-emergency])` fires the `emergency.mp3` "technical difficulties" loop. No new
-source, no new output — the fix restores the dead-air guard that was already
-there.
+Once latched, jingles stop covering and the rotate has nothing left to serve.
 
-Verified end to end on 2.4.5 with a 5s grace for the test:
+> **CORRECTION — the rest of this section as originally written was wrong, and
+> shipping it caused a worse bug than the one being fixed.** It is kept below,
+> struck through, with the measured truth after it. Read the correction before
+> touching this code.
 
+> ~~The **existing** `fallback(track_sensitive=false, [radio, emergency])` fires
+> the `emergency.mp3` "technical difficulties" loop. No new source, no new
+> output — the fix restores the dead-air guard that was already there.~~
+>
+> ~~Verified end to end on 2.4.5 with a 5s grace for the test:~~
+>
+> ```
+> t=2..5   music=false starved=false jingles=true  programme=true    <- grace: jingle covers
+> STARVED latched after 5.0s
+> t=6..13  music=false starved=true  jingles=false programme=false   <- emergency fires
+> (auto.m3u refilled)
+> RECOVERED
+> t=14..20 music=true  starved=false jingles=true  programme=true    <- back, no restart
+> ```
+
+### What actually happened
+
+That "existing" fallback had **never fired in its life**. It sat at the bottom
+of the chain, below the three stacked `smooth_add` ducking layers, and a
+fallback there can never select its second branch. The stdlib
+(`libs/extra/audio.liq`) builds `smooth_add` as:
+
+```liquidsoap
+special = fallback(track_sensitive=false, [special, blank()])
+add(normalize=false, [normal, special])
 ```
-t=2..5   music=false starved=false jingles=true  programme=true    <- grace: jingle covers
-STARVED latched after 5.0s
-t=6..13  music=false starved=true  jingles=false programme=false   <- emergency fires
-(auto.m3u refilled)
-RECOVERED
-t=14..20 music=true  starved=false jingles=true  programme=true    <- back, no restart
+
+That inner fallback falls through to `blank()`, so it is **always ready**; `add`
+is ready whenever **any** input is. So the whole duck stack reports ready even
+when the music chain is starved, and `fallback([radio, emergency])` below it
+selects index 0 forever. `emergency` has been dead code since the duck layers
+landed.
+
+The verification table above did not catch it because that harness ran
+`output.dummy` on the bare `rotate` and never built the duck layers at all — it
+proved `programme` goes unavailable, which is true, and then assumed the
+fallback below it would see that, which is not. **A starve harness that omits
+the smooth_add stack cannot test this guard.**
+
+Consequence as first shipped: gating jingles off replaced "stingers forever"
+with **silence forever**. Measured on
+`ghcr.io/perminder-klair/subwave-aio-heavy:latest` — `music_ready=false`,
+`duckstack_ready=true`, `safety: Switch to source.8`, steady-state output
+**-91.0 dB (digital silence)**. Reproduced again in the full-chain probe used
+for the fix: post-latch `mean_volume: -91.0 dB, max_volume: -91.0 dB`. That is a
+strictly worse failure than the bug — a personal radio station is far more
+likely to notice a stinger loop than dead air.
+
+### The fix: position the guard above the duck stack
+
+`emergency` and its fallback move up, onto `music_bus`, immediately after the
+`bed_enabled` if/else that defines it:
+
+```liquidsoap
+emergency = single("/sounds/emergency.mp3")
+music_bus = fallback(id="music_safety", track_sensitive=false, [music_bus, emergency])
 ```
+
+Measured in the same full-chain probe: `music_safety` selects `emergency`,
+steady-state **-3.0 dB** — audible. The bottom fallback is **removed**, not left
+in place: a second decorative dead-air guard that structurally cannot fire is
+precisely what caused this. A comment stands in its place pointing at the real
+one and stating why position is load-bearing.
+
+Nothing else moves. `music_safety` sits **below** `music_meta` and the jingle
+rotate, so now-playing metadata and jingle counting are byte-for-byte unchanged,
+and **above** the duck layers, so the DJ can still talk over the emergency loop
+exactly as over music.
 
 ### `jingle_ratio = 0`
 
@@ -161,10 +220,19 @@ milliseconds, so the conversion happens once, at the parse boundary in
 
 - Written on each **edge** (latch and clear), and once at startup with
   `starved: false` so the file exists on a healthy station.
-- While starved, `at` is refreshed every tick as a **heartbeat**. This is what
-  lets the controller tell a live starve from a mixer that died mid-starve and
-  left a stale `true` on disk. Zero steady-state cost: the heartbeat only runs
-  during an outage, when nothing else is happening anyway.
+- While starved, `at` is refreshed as a **heartbeat**. This is what lets the
+  controller tell a live starve from a mixer that died mid-starve and left a
+  stale `true` on disk. **Throttled to `STARVE_HEARTBEAT_SEC = 10.0`, not the
+  1.0s sample rate**: the consumer only asks that the marker be younger than
+  `STARVE_MARKER_STALE_MS` (60s), and at the sample rate an outage costs ~3,600
+  atomic rewrites an hour — ~28,800 across an eight-hour overnight one — on a
+  state dir that is typically a Docker bind mount and is sometimes an SD card or
+  a spinning array. 10s against a 60s threshold keeps a 6x margin. Edge writes
+  (latch, recovery, startup) stay **immediate and unthrottled** — they change the
+  state, and the admin banner should follow on the next poll rather than up to
+  ten seconds later. The write timestamp is recorded for every write, edge or
+  heartbeat, so an edge write restarts the heartbeat window instead of being
+  chased by a redundant one a second later.
 - `atomic=true` with its **own** temp dir,
   `starve_tmp_dir = ensure_tmp_dir("#{state_dir}/tmp/starve")` — one dir per
   writer, per #1240, because the stdlib always names its temp file

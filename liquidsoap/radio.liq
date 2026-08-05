@@ -1145,6 +1145,31 @@ music_bus =
   end
 
 # ---------------------------------------------------------------------------
+# SAFETY — fallback to the emergency loop when the source dies
+# ---------------------------------------------------------------------------
+# If the source dies, play a static "technical difficulties" loop. This is the
+# real dead-air guard: `emergency` is an always-ready, non-silent single, so the
+# broadcast never has nothing to pull.
+#
+# POSITION IS LOAD-BEARING (#1300 bug 7). This MUST stay ABOVE the `smooth_add`
+# ducking layers below. The stdlib implements smooth_add as
+#   add(normalize=false, [normal, fallback(track_sensitive=false, [special, blank()])])
+# — that inner fallback falls through to `blank()`, so it is ALWAYS ready, and
+# `add` is ready whenever ANY input is. The whole duck stack therefore reports
+# ready even when the music chain is starved, and a fallback placed BELOW it can
+# never select its second branch. This guard lived at the bottom of the chain
+# for its whole life and was dead code the entire time; when the starve guard
+# started gating jingles off, that turned "stingers forever" into digital
+# silence forever: measured on subwave-aio-heavy, output at -91.0 dB with the
+# fallback down there versus -3.0 dB with it here — i.e. the loop actually airs.
+#
+# It also has to stay BELOW `music_meta` and the jingle rotate, so now-playing
+# metadata and jingle counting are untouched; and being above the ducking is
+# what lets the DJ talk over the emergency loop exactly as over music.
+emergency = single("/sounds/emergency.mp3")
+music_bus = fallback(id="music_safety", track_sensitive=false, [music_bus, emergency])
+
+# ---------------------------------------------------------------------------
 # DUCKING — gated talkbax, like a broadcast desk
 # ---------------------------------------------------------------------------
 # `smooth_add` drops the music to a fixed ratio whenever a voice source has
@@ -1192,15 +1217,14 @@ radio = smooth_add(
 # NOTE: the jingle rotate lives up on the raw pre-cross music source — see
 # the JINGLES block above music_meta for why it cannot sit here.
 
-# ---------------------------------------------------------------------------
-# SAFETY — fallback to the emergency loop when the source dies
-# ---------------------------------------------------------------------------
-
-# If the source dies, play a static "technical difficulties" loop. This is the
-# real dead-air guard: `emergency` is an always-ready, non-silent single, so the
-# broadcast never has nothing to pull.
-emergency = single("/sounds/emergency.mp3")
-radio = fallback(track_sensitive=false, [radio, emergency])
+# NOTE: the emergency dead-air fallback used to sit HERE, and never once fired
+# (#1300 bug 7). Everything from `ducked` down is a `smooth_add`, and smooth_add
+# is always ready — the stdlib gives its `special` input a `blank()` fallthrough
+# and mixes with `add`, which is ready if any input is. A fallback below that
+# stack can only ever select index 0. It has been moved ABOVE the duck layers,
+# onto `music_bus` (id="music_safety") — see the SAFETY block up there. Do not
+# add a second one down here: a fallback that LOOKS like a dead-air guard but
+# structurally cannot fire is exactly what caused this bug.
 
 # ---------------------------------------------------------------------------
 # IDLE GATE — silence the programme while nobody is listening
@@ -1255,8 +1279,20 @@ radio = switch(
 STARVE_GRACE_SEC = 30.0
 STARVE_SAMPLE_SEC = 1.0
 
+# The heartbeat below refreshes `at` while the outage lasts. It does NOT need to
+# run at the sample rate: the consumer only asks that the marker be younger than
+# STARVE_MARKER_STALE_MS (60s, controller/src/broadcast/music-starve-pure.ts).
+# At 1.0s that is ~3,600 atomic rewrites an hour — ~28,800 over an eight-hour
+# overnight outage — on a state dir that is typically a Docker bind mount and is
+# sometimes an SD card or a spinning array. 10s keeps a 6x margin on the stale
+# threshold. EDGE writes (latch, recovery, startup) stay immediate: they change
+# the state, and the operator UI should see that on the next poll, not up to ten
+# seconds later.
+STARVE_HEARTBEAT_SEC = 10.0
+
 starved_for = ref(0.0)
 starved_since = ref(0.0)
+last_marker_write = ref(0.0)
 
 # NEVER let this raise. An uncaught exception inside a thread.run callback kills
 # that thread PERMANENTLY — the guard would freeze at whatever it last latched,
@@ -1266,6 +1302,10 @@ starved_since = ref(0.0)
 # already defends against. Reporting must not share a failure domain with the
 # guard itself.
 def write_starve_marker(starved, since) =
+  # Stamped for EVERY write, edge or heartbeat, so an edge write also restarts
+  # the heartbeat window rather than being followed by a redundant one a second
+  # later. Set before the write so a throwing write still spaces out its retries.
+  last_marker_write := time()
   try
     file.write(
       data=json.stringify(compact=true, {
@@ -1303,8 +1343,12 @@ thread.run(every=STARVE_SAMPLE_SEC, fun () -> begin
     starved_for := starved_for() + STARVE_SAMPLE_SEC
     if music_starved() then
       # Heartbeat: refreshes `at` so the controller can tell a live outage from
-      # a marker left behind by a mixer that died mid-outage.
-      write_starve_marker(true, starved_since())
+      # a marker left behind by a mixer that died mid-outage. Throttled to
+      # STARVE_HEARTBEAT_SEC — see the constant for why the sample rate is the
+      # wrong write rate.
+      if time() - last_marker_write() >= STARVE_HEARTBEAT_SEC then
+        write_starve_marker(true, starved_since())
+      end
     elsif starved_for() >= STARVE_GRACE_SEC then
       music_starved := true
       starved_since := time()
