@@ -388,12 +388,15 @@ async function main() {
       // to seedCount tracks from outside the window. Bulk runs (no --limit)
       // pass undefined to keep the full library in play.
       untaggedPool: limited ? new Set(targetUntagged) : undefined,
-      // NOTE: no embeddingForId here. library-db has no direct vector-read API
-      // (only knnById, a full vector scan per call), so passing any function —
-      // even one that always returns null — makes the seed selector run one
-      // KNN scan per candidate before falling back anyway. On a large library
-      // that's hours of wasted scans. Omitting it routes the selector straight
-      // to its random-shuffle path, until a cheap bulk vector read exists.
+      // k-means diversity layer. db.getVector is a direct single-row read
+      // (SELECT embedding WHERE id = ?) — the per-candidate KNN-scan cost the
+      // old note warned about predates getVector()/allAudioVectors() and no
+      // longer exists; the selector also bounds its own pool and cluster
+      // count (KMEANS_POOL_CAP/KMEANS_MAX_K) with an incremental k-means++
+      // init, so this is seconds, not hours, on a large library. Candidates
+      // without a vector yet return null and drop out inside the selector;
+      // the shortfall tops up randomly (kmeans-topup).
+      embeddingForId: (id) => db.getVector(id),
     });
     console.log(
       `[tag] seeds: ${seedSelection.seeds.length} new ` +

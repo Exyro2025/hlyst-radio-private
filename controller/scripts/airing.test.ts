@@ -134,6 +134,29 @@ async function main() {
     assert.equal(db.deepCutTracks(cutoff, 2).length, 2);
   });
 
+  console.log('\nrecency-aware KNN (excludeIds):');
+
+  await test('excluded ids are skipped IN the walk, widening to the next neighbours out', () => {
+    // Three vectors on a line: t1 (seed) closest to t2, then t3. Excluding t2
+    // must yield t3 — the next neighbour out — not an empty result, which is
+    // what a post-hoc filter over a k=1 fetch would produce.
+    const vec = (x: number) => {
+      const v = new Float32Array(768);
+      v[0] = 1; v[1] = x;
+      return v;
+    };
+    db.upsertTrackVector('t1', vec(0));
+    db.upsertTrackVector('t2', vec(0.1));
+    db.upsertTrackVector('t3', vec(0.3));
+    assert.deepEqual(db.knnById('t1', 1).map((h) => h.id), ['t2']);
+    assert.deepEqual(
+      db.knnById('t1', 1, { excludeIds: new Set(['t2']) }).map((h) => h.id),
+      ['t3'],
+    );
+    // The seed itself stays excluded alongside the set.
+    assert.ok(!db.knnById('t1', 5, { excludeIds: new Set(['t2']) }).some((h) => h.id === 't1'));
+  });
+
   if (failures) {
     console.error(`\n${failures} test(s) failed`);
     process.exit(1);

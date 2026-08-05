@@ -11,7 +11,8 @@ export default definePickerTool({
     execute: async ({ artist }) => {
       try {
         const list = await subsonic.getTopSongs(artist, { count: 15 });
-        const out = collect(list);
+        // Single-artist by design — opt out of collect()'s per-artist cap.
+        const out = collect(list, 8, { maxPerArtist: Infinity });
         return out.length ? out : emptyResult(list.length, 'no top-songs data for that artist — choose from your other tool results this round');
       }
       catch (err) { return { error: (err as Error).message }; }

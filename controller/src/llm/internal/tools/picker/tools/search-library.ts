@@ -7,7 +7,7 @@ import { definePickerTool } from '../defs.js';
 
 export default definePickerTool({
   name: 'searchLibrary',
-  build: ({ collect, emptyResult }) => tool({
+  build: ({ collect, emptyResult, knnExclude }) => tool({
     description: 'Search the library for something NAMED — an artist, a song title, or a real genre word (e.g. "jazz", "punjabi"). Falls back to vibe search when nothing matches literally, so "punjabi r&b romantic" also works. Not for browsing by feel: a mood, an energy or "something like what\'s on now" belongs to tracksByMood, tracksByEnergy and the similarity tools, which read the station\'s own tagging instead of guessing from text.',
     inputSchema: z.object({
       query: z.string().describe('an artist name, song title, genre, or vibe'),
@@ -39,7 +39,7 @@ export default definePickerTool({
           await library.load();
           const vec = await embeddings.embedQueryText(query.trim(), library.embeddingIndexTextMode());
           if (vec) {
-            const sem = collect(library.tracksByVector(vec, 20));
+            const sem = collect(library.tracksByVector(vec, 20, { excludeIds: knnExclude }));
             if (sem.length > 0) return sem;
           }
         }

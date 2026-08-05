@@ -203,6 +203,13 @@ async function tracksFromAlbums(albums: { id: string }[], perAlbum: number, max:
 
 async function buildCandidates(mood: string | null | undefined, recentIds: Set<string>, recentArtists: Set<string>, currentTrack: Candidate | null, rankTarget: { bpm: number | null; key: string | null } | null = null, audioWaypoint: number[] | null = null, showFilter: ShowFilter = null, hardRecentIds: Set<string> = new Set(), hardRecentKeys: Set<string> = new Set(), playlistPool: PlaylistPool | null = null, playlistStrict = false, blockedArtists: Set<string> = new Set()) {
   await library.load();
+  // Airing memory (music/airing.ts) — orders the similarity sources so the
+  // unexplored shelf survives their small caps; and the id-level recency union
+  // pushed INTO the KNN queries below, so a heavily-aired cluster answers with
+  // its next neighbours out instead of thinning toward empty.
+  const aired = library.lastAiredInfo();
+  const nowMs = Date.now();
+  const knnExclude: Set<string> = new Set([...recentIds, ...hardRecentIds]);
   const pool: Candidate[] = [];
   const sources: Record<string, number> = {};
   const add = (label: string, items: Candidate[]) => {
@@ -266,7 +273,9 @@ async function buildCandidates(mood: string | null | undefined, recentIds: Set<s
       const similar = await subsonic.getSimilarSongs(currentTrack.id, {
         count: 20,
       });
-      add('similar', sampleWithRecentFallback(lean(similar), recentIds, nz(CAP_SIMILAR)));
+      // Freshness-biased order (never the server's Last.fm rank): an
+      // un-shuffled slice pinned the same top-8 popular tracks per seed.
+      add('similar', sampleWithRecentFallback(freshnessBiasedOrder(lean(similar), aired, nowMs), recentIds, nz(CAP_SIMILAR)));
     } catch {}
   }
 
@@ -278,8 +287,11 @@ async function buildCandidates(mood: string | null | undefined, recentIds: Set<s
   // run), so the picker silently falls through to the other sources.
   if (currentTrack?.id) {
     try {
-      const knn = library.tracksLikeThis(currentTrack.id, 15);
-      add('embedding-similar', sampleWithRecentFallback(lean(knn), recentIds, nz(CAP_EMBEDDING_SIMILAR)));
+      // 30 recency-excluded neighbours, freshness-ordered — the old shape took
+      // the literal 4 nearest of 15, deterministic per seed, and contributed
+      // zero when the cluster was fully recent (the exact stuck-rotation case).
+      const knn = library.tracksLikeThis(currentTrack.id, 30, { excludeIds: knnExclude });
+      add('embedding-similar', sampleWithRecentFallback(freshnessBiasedOrder(lean(knn), aired, nowMs), recentIds, nz(CAP_EMBEDDING_SIMILAR)));
     } catch {}
   }
 
@@ -293,7 +305,7 @@ async function buildCandidates(mood: string | null | undefined, recentIds: Set<s
     try {
       if (await subsonic.supportsSonicSimilarity()) {
         const sonic = await subsonic.getSonicSimilarTracks(currentTrack.id, { count: 20 });
-        add('sonic-similar', sampleWithRecentFallback(lean(sonic), recentIds, nz(CAP_SONIC_SIMILAR)));
+        add('sonic-similar', sampleWithRecentFallback(freshnessBiasedOrder(lean(sonic), aired, nowMs), recentIds, nz(CAP_SONIC_SIMILAR)));
       }
     } catch {}
   }
@@ -311,13 +323,13 @@ async function buildCandidates(mood: string | null | undefined, recentIds: Set<s
   // drifts toward the destination vibe instead of hugging the current sound.
   if (audioWaypoint && audioWaypoint.length) {
     try {
-      const knn = library.tracksByAudioVector(audioWaypoint, 15);
-      add('audio-journey', sampleWithRecentFallback(lean(knn), recentIds, nz(CAP_AUDIO_SIMILAR)));
+      const knn = library.tracksByAudioVector(audioWaypoint, 30, { excludeIds: knnExclude });
+      add('audio-journey', sampleWithRecentFallback(freshnessBiasedOrder(lean(knn), aired, nowMs), recentIds, nz(CAP_AUDIO_SIMILAR)));
     } catch {}
   } else if (currentTrack?.id) {
     try {
-      const knn = library.tracksLikeThisAudio(currentTrack.id, 15);
-      add('audio-similar', sampleWithRecentFallback(lean(knn), recentIds, nz(CAP_AUDIO_SIMILAR)));
+      const knn = library.tracksLikeThisAudio(currentTrack.id, 30, { excludeIds: knnExclude });
+      add('audio-similar', sampleWithRecentFallback(freshnessBiasedOrder(lean(knn), aired, nowMs), recentIds, nz(CAP_AUDIO_SIMILAR)));
     } catch {}
   }
 
@@ -525,7 +537,7 @@ async function buildCandidates(mood: string | null | undefined, recentIds: Set<s
   try {
     const wide = await subsonic.getRandomSongs({ size: 12 });
     add('explore', sampleWithRecentFallback(
-      lean(freshnessBiasedOrder(wide, library.lastAiredInfo(), Date.now())),
+      lean(freshnessBiasedOrder(wide, aired, nowMs)),
       recentIds,
       nz(CAP_EXPLORE),
     ));

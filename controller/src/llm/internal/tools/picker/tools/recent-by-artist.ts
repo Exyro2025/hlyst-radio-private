@@ -14,7 +14,8 @@ export default definePickerTool({
     execute: async ({ artist }) => {
       try {
         const list = await subsonic.getRecentSongsByArtist(artist, { albums: 2, count: 6 });
-        const out = collect(list);
+        // Single-artist by design — opt out of collect()'s per-artist cap.
+        const out = collect(list, 8, { maxPerArtist: Infinity });
         return out.length ? out : emptyResult(list.length, 'that artist has no releases in the library — choose from your other tool results this round');
       }
       catch (err) { return { error: (err as Error).message }; }

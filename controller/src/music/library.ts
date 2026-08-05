@@ -357,14 +357,14 @@ export function songsByEnergy(energy: string | null | undefined): any[] {
 // scoped to tagged tracks — the same set that carries embeddings) and KNN from
 // the first candidate that has one. Tracks with no embedding and no title match
 // return []; callers fall back to other sources.
-export function tracksLikeThis(seed: string, k: number): any[] {
+export function tracksLikeThis(seed: string, k: number, opts: db.KnnOpts = {}): any[] {
   if (!loaded || !seed) return [];
-  let hits = db.knnById(seed, k);
+  let hits = db.knnById(seed, k, opts);
   if (hits.length === 0) {
     // Treat `seed` as a title — find the best embedded match and KNN from it.
     for (const row of db.filter({ q: seed, limit: 8 }).rows) {
       if (row.id === seed) continue;            // already tried as an id above
-      hits = db.knnById(row.id, k);
+      hits = db.knnById(row.id, k, opts);
       if (hits.length) break;
     }
   }
@@ -383,15 +383,15 @@ export function tracksLikeThis(seed: string, k: number): any[] {
 // (the agent often passes a title rather than an id). Returns [] when the seed
 // has no audio vector — un-analysed library, or analysis backend without CLAP —
 // so callers fall through to the other sources exactly like the text path.
-export function tracksLikeThisAudio(seed: string, k: number): any[] {
+export function tracksLikeThisAudio(seed: string, k: number, opts: db.KnnOpts = {}): any[] {
   if (!loaded || !seed) return [];
-  let hits = db.knnAudioById(seed, k);
+  let hits = db.knnAudioById(seed, k, opts);
   if (hits.length === 0) {
     // Treat `seed` as a title — find the best matching track that HAS an audio
     // vector and KNN from it.
     for (const row of db.filter({ q: seed, limit: 8 }).rows) {
       if (row.id === seed) continue;            // already tried as an id above
-      hits = db.knnAudioById(row.id, k);
+      hits = db.knnAudioById(row.id, k, opts);
       if (hits.length) break;
     }
   }
@@ -415,7 +415,7 @@ export function embeddingIndexTextMode(): 'plain' | 'prefixed' {
 // embeds a free-text query and calls this to find tracks semantically close
 // to the query — including ones whose lyrics don't literally contain those
 // words.
-export function tracksByVector(vec: number[] | Float32Array, k: number): any[] {
+export function tracksByVector(vec: number[] | Float32Array, k: number, opts: db.KnnOpts = {}): any[] {
   if (!loaded) return [];
   // Guard against an embedding model/provider drift: if the live query vector's
   // length no longer matches the dim the index was built at, knnByVector would
@@ -432,7 +432,7 @@ export function tracksByVector(vec: number[] | Float32Array, k: number): any[] {
     );
     return [];
   }
-  const hits = db.knnByVector(vec, k);
+  const hits = db.knnByVector(vec, k, opts);
   const out: any[] = [];
   for (const hit of hits) {
     const t = db.getTrack(hit.id);
@@ -445,9 +445,9 @@ export function tracksByVector(vec: number[] | Float32Array, k: number): any[] {
 // counterpart to tracksByVector. Used by the picker when a journey waypoint is
 // the audio anchor instead of the current track. Returns [] on an empty audio
 // index, so the picker falls through to its other sources.
-export function tracksByAudioVector(vec: number[] | Float32Array, k: number): any[] {
+export function tracksByAudioVector(vec: number[] | Float32Array, k: number, opts: db.KnnOpts = {}): any[] {
   if (!loaded) return [];
-  const hits = db.knnByAudioVector(vec, k);
+  const hits = db.knnByAudioVector(vec, k, opts);
   const out: any[] = [];
   for (const hit of hits) {
     const t = db.getTrack(hit.id);
