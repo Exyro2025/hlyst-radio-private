@@ -1676,6 +1676,29 @@ server.register(
   end
 )
 
+# What a skip would air next from dj_queue: "ready" (a resolved request is
+# waiting — the fallback will pick it), "resolving" (pushed but still
+# downloading; a skip now would fall through to auto.m3u), "empty". The
+# controller polls this before issuing `skip` so an operator skip airs the
+# committed pick rather than a random auto.m3u fill (#1300 bug 6). A request
+# already popped for boundary prefetch is in neither state here — same
+# blind spot dj_queue_remove documents — and reads as "empty", which the
+# caller treats as keep-waiting, never as proof of an idle queue.
+server.register(
+  "dj_queue_status",
+  description="Report the pending dj_queue state: ready / resolving / empty",
+  usage="dj_queue_status",
+  fun(_) -> begin
+    q = dj_queue.queue()
+    if list.length(q) == 0 then
+      "empty"
+    else
+      ready = list.filter(fun(r) -> request.status(r) == "ready", q)
+      if list.length(ready) > 0 then "ready" else "resolving" end
+    end
+  end
+)
+
 # Remove a PENDING request from dj_queue by RID. Anything on air or already
 # pulled as the next source is no longer in .queue() → NOT_FOUND, which the
 # caller treats as "too late to cancel". Used by DELETE /dj/queue/:trackId.
