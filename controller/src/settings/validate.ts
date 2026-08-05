@@ -555,7 +555,11 @@ export function validateScheduleOverrideStrict(raw, shows): ScheduleOverride | n
 // conversion should copy this shape.
 export function validateWebhooksStrict(raw: unknown, existing: Webhook[] = []) {
   const r = webhooksSchema.safeParse(raw);
-  if (!r.success) throw new Error(`webhooks: ${firstMessage(r.error)}`);
+  // 'webhooks' is passed as the ROOT rather than string-prefixed here: this
+  // schema is the bare array, so its issue paths start at the index, and
+  // firstMessage needs to splice the name in FRONT of that index to produce
+  // 'webhooks.0.url' rather than 'webhooks: 0.url'.
+  if (!r.success) throw new Error(firstMessage(r.error, 'webhooks'));
   return mergeWebhookSecrets(r.data, existing);
 }
 

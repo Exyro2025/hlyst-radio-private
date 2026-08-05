@@ -27,7 +27,10 @@ test('flattenIssues keys errors by dotted field path', () => {
 test('firstMessage returns a flat human-readable string', () => {
   const r = schema.safeParse({ webhooks: [{ url: 'nope' }] });
   assert.equal(r.success, false);
-  assert.equal(firstMessage(r.error), 'URL must start with http:// or https://');
+  assert.equal(
+    firstMessage(r.error),
+    'webhooks.0.url: URL must start with http:// or https://',
+  );
 });
 
 test('firstMessage prefixes the path when the message alone is ambiguous', () => {
@@ -36,6 +39,66 @@ test('firstMessage prefixes the path when the message alone is ambiguous', () =>
   // Path-prefixed, because "expected array, received string" alone tells the
   // operator nothing about WHICH field is wrong.
   assert.match(firstMessage(r.error), /^webhooks: /);
+});
+
+// --- The path is prefixed for EVERY issue code, not just invalid_type. The
+// earlier `code !== 'invalid_type'` heuristic silently stopped applying the
+// moment a schema used .regex()/.max() without a custom message, which is
+// exactly what the shared webhook schema does. ---
+
+test('firstMessage names the row, so two rows failing the same rule differ', () => {
+  // The regression this contract exists to prevent: both messages used to be
+  // the bare rule text, identical, with nothing saying which row to fix.
+  const first = schema.safeParse({ webhooks: [{ url: 'nope' }, { url: 'https://ok.com' }] });
+  const second = schema.safeParse({ webhooks: [{ url: 'https://ok.com' }, { url: 'nope' }] });
+  assert.equal(first.success, false);
+  assert.equal(second.success, false);
+  assert.notEqual(firstMessage(first.error), firstMessage(second.error));
+  assert.match(firstMessage(first.error), /^webhooks\.0\.url: /);
+  assert.match(firstMessage(second.error), /^webhooks\.1\.url: /);
+});
+
+test('firstMessage prefixes codes whose built-in message names no field', () => {
+  // Neither zod message below carries a field name: 'invalid_format' reports
+  // the pattern, 'too_big' reports the limit. Both are produced by the real
+  // webhook schema (id's regex, authHeader's max).
+  const codes = z.object({
+    slug: z.string().regex(/^[a-z]+$/),
+    token: z.string().max(3),
+  });
+  const bad = codes.safeParse({ slug: 'NOPE!', token: 'far too long' });
+  assert.equal(bad.success, false);
+  assert.match(firstMessage(bad.error), /^slug: /);
+
+  const long = codes.safeParse({ slug: 'ok', token: 'far too long' });
+  assert.equal(long.success, false);
+  assert.match(firstMessage(long.error), /^token: /);
+});
+
+test('firstMessage splices `root` in FRONT of the path, not as a bare prefix', () => {
+  // validateWebhooksStrict parses the BARE array, so its paths start at the
+  // index. The root has to become part of the dotted path ('webhooks.0.url'),
+  // not a separate label ('webhooks: 0.url').
+  const bare = z.array(z.object({ url: z.string().regex(/^https?:\/\//, 'bad scheme') }));
+  const r = bare.safeParse([{ url: 'https://ok.com' }, { url: 'nope' }]);
+  assert.equal(r.success, false);
+  assert.equal(firstMessage(r.error, 'webhooks'), 'webhooks.1.url: bad scheme');
+});
+
+test('a root-level issue under `root` reads as just the root name', () => {
+  const bare = z.array(z.object({ url: z.string() }));
+  const r = bare.safeParse('notanarray');
+  assert.equal(r.success, false);
+  // Path is empty, so there is no index to splice — 'webhooks: <message>'.
+  assert.match(firstMessage(r.error, 'webhooks'), /^webhooks: /);
+  assert.ok(!firstMessage(r.error, 'webhooks').startsWith('webhooks.'));
+});
+
+test('firstMessage without a path or a root returns the bare message', () => {
+  // Nothing to name, so nothing is spliced on — the message stands alone.
+  const r = z.string().safeParse(1);
+  assert.equal(r.success, false);
+  assert.equal(firstMessage(r.error), r.error.issues[0].message);
 });
 
 test('flattenIssues keeps only the first error per field', () => {

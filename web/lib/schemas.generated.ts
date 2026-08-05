@@ -41,7 +41,13 @@ const ID_RE = /^[a-z0-9_]{3,32}$/;
 
 export const webhookSchema = z.object({
   // Optional because a brand-new row has no id yet — the server mints one.
-  id: z.string().regex(ID_RE).optional(),
+  // Carries its own message for the same reason url does: zod's built-in
+  // regex/length text is written for a developer ("Invalid string: must match
+  // pattern /^[a-z0-9_]{3,32}$/") and this string reaches an operator's toast.
+  id: z
+    .string()
+    .regex(ID_RE, 'id must be 3-32 characters: lowercase letters, digits or underscores')
+    .optional(),
   url: z
     .string()
     .trim()
@@ -55,7 +61,10 @@ export const webhookSchema = z.object({
   // '' means no header. The literal 'set' is the redaction sentinel from
   // settings.getRedacted() meaning "keep whatever is stored" — resolving it
   // needs the CURRENT list, so see mergeWebhookSecrets() in webhook-server.ts.
-  authHeader: z.string().max(500).default(''),
+  authHeader: z
+    .string()
+    .max(500, 'Authorization header must be 500 characters or fewer')
+    .default(''),
 });
 
 export type WebhookParsed = z.output<typeof webhookSchema>;

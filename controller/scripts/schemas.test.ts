@@ -156,8 +156,21 @@ test('throws a readable single line, not a ZodError JSON blob', () => {
     assert.throws(() => JSON.parse(msg), 'message parsed as JSON — it is still a ZodError blob');
   });
   assert.match(msg, /http:\/\/ or https:\/\//);
-  // Named, so an operator restoring a backup knows WHICH setting is at fault.
-  assert.match(msg, /^webhooks: /);
+  // Named down to the ROW, so an operator restoring a backup knows which
+  // setting is at fault AND which entry in it — a list of sixteen hooks with
+  // one bad url is otherwise unsearchable from the message alone.
+  assert.match(msg, /^webhooks\.0\.url: /);
+});
+
+test('the thrown message distinguishes one bad row from another', () => {
+  const bad = (i: number) =>
+    messageOf(() =>
+      validateWebhooksStrict(
+        Array.from({ length: 3 }, (_, n) => hook({ url: n === i ? 'ftp://x.com' : 'https://ok.com' })),
+      ),
+    );
+  assert.notEqual(bad(0), bad(2));
+  assert.match(bad(2), /^webhooks\.2\.url: /);
 });
 
 test('a plain Error, not a ZodError instance', () => {

@@ -39,13 +39,35 @@ export function flattenIssues(error: ZodError): Record<string, string> {
   return out;
 }
 
-/** A flat, single-line message — what a 400's `error` string carries. */
-export function firstMessage(error: ZodError): string {
+/**
+ * A flat, single-line message — what a 400's `error` string carries.
+ *
+ * The dotted path is prefixed whenever there is one. Zod's built-in messages
+ * name a CONSTRAINT and never a location: 'invalid_type' says "expected array,
+ * received string", 'invalid_format' says "Invalid string: must match pattern
+ * /^[a-z0-9_]{3,32}$/", 'too_big' says "expected string to have <=500
+ * characters". Custom messages usually name their field but never the array
+ * INDEX, so two rows failing the same rule produced byte-identical text and the
+ * operator could not tell which one to fix.
+ *
+ * Deciding this from the issue code — the earlier `code !== 'invalid_type'`
+ * test — does not work. The set of codes carrying field-agnostic messages is
+ * open and grows with every constraint a schema adds, so the heuristic silently
+ * stopped applying to `.regex()` and `.max()` the moment those were used
+ * without a custom message. Prefixing unconditionally is the only rule that
+ * stays correct as the schemas evolve; the cost is mild redundancy when a
+ * custom message already names its own field.
+ *
+ * `root` names the value under validation when the SCHEMA itself is unrooted.
+ * validateWebhooksStrict parses the bare array, so its paths start at the index
+ * ('0.url') and need 'webhooks' in front to read as a settings key; the route
+ * middleware parses the wrapping object, whose paths are already rooted.
+ */
+export function firstMessage(error: ZodError, root?: string): string {
   const issue = error.issues[0];
   if (!issue) return 'invalid request body';
-  const key = pathOf(issue);
-  // Zod's built-in type messages ("expected array, received string") don't name
-  // the field, so prefix the path when the message doesn't stand on its own.
-  const standalone = issue.code !== 'invalid_type';
-  return standalone || !key ? issue.message : `${key}: ${issue.message}`;
+  // pathOf is '' for a root-level issue, so a bare `root` survives on its own
+  // and an unrooted root-level issue keeps just its message.
+  const key = [root, pathOf(issue)].filter(Boolean).join('.');
+  return key ? `${key}: ${issue.message}` : issue.message;
 }
