@@ -14,7 +14,15 @@ export default definePickerTool({
     }),
     execute: async ({ query }) => {
       try {
-        let songs = await subsonic.search(query, { songCount: 25 });
+        // Random page (0/25/50) of the relevance ranking, mirroring
+        // routes/request.ts — first-page-only made result 26+ of any query
+        // unreachable, so repeated searches for the same broad term always
+        // surfaced the same 25 songs. An empty deep page falls back to page 0.
+        const songOffset = Math.floor(Math.random() * 3) * 25;
+        let songs = await subsonic.search(query, { songCount: 25, songOffset });
+        if (songs.length === 0 && songOffset > 0) {
+          songs = await subsonic.search(query, { songCount: 25 });
+        }
         // A lexical miss is often just a spelling/transliteration variance —
         // resolve the query as an artist and retry with the library's actual
         // spelling ("Sikandar Kahlon" → the tagged "Sikander Kahlon").

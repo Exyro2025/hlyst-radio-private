@@ -16,7 +16,7 @@ import { bpmCompat, keyCompat } from './mix.js';
 import { shuffle } from '../util/shuffle.js';
 import { mapPool } from '../util/async-pool.js';
 import { artistRootKey, filterPickerCandidates, recencyWindowsForLibrary, effectiveNoRepeatWindow } from './recency.js';
-import { AIRING_RANK_WEIGHT, freshness, lastAiredMsOf, type AiredIndex } from './airing.js';
+import { AIRING_RANK_WEIGHT, freshness, freshnessBiasedOrder, lastAiredMsOf, type AiredIndex } from './airing.js';
 import { normGenre, genreMatches, genreResolutionWarningOnce, preferGenre, preferEra, inYearRange, preferEnergy, preferEnergyStrict, preferMood, preferVocals, applyStrictLocks, hasEraBound, eraSpan, type YearRange, type VocalMode } from './show-filter.js';
 import { resolveShowPlaylistPool, resolveExcludedPlaylistIds, type PlaylistPool } from './show-playlist.js';
 import * as likes from '../broadcast/likes.js';
@@ -67,6 +67,7 @@ const CAP_EMBEDDING_SIMILAR = 4;
 const CAP_SONIC_SIMILAR = 4;
 const CAP_AUDIO_SIMILAR = 4;
 const CAP_LIKED = 4;
+const CAP_EXPLORE = 4;
 // When a show pins a genre/decade, its dedicated source is the dominant pool
 // contributor (soft lean) and the unrelated discovery sources shrink by this
 // factor so the genre/era actually shows up in the LLM's candidate list.
@@ -382,7 +383,9 @@ async function buildCandidates(mood: string | null | undefined, recentIds: Set<s
         } catch {}
         if (genreName) {
           try {
-            const g = await subsonic.getSongsByGenre(genreName, { count: Math.ceil(genreSetSize / genreNames.length) });
+            // Sampled: a random page of the genre rather than the same
+            // server-ordered head every pick (see getSongsByGenreSampled).
+            const g = await subsonic.getSongsByGenreSampled(genreName, { count: Math.ceil(genreSetSize / genreNames.length) });
             const ranged = inYearRange(g, showFilter!.eras);
             got.push(...(ranged.length ? ranged : g));
           } catch {}
@@ -467,7 +470,13 @@ async function buildCandidates(mood: string | null | undefined, recentIds: Set<s
   // shuffle pattern as recently-added above.
   try {
     const freqPool = await memo('frequent-track-pool', CACHE_TTL_MS, async () => {
-      const albums = await subsonic.getFrequentAlbums({ size: 12 });
+      // Rotate the window (offset 0/12/24, re-rolled each TTL): "frequent" is
+      // ranked by play counts the station itself feeds, so the offset-less
+      // top-12 was a positive-feedback loop pinning the same albums for good.
+      // An empty deep window (small library) falls back to the top.
+      const offset = Math.floor(Math.random() * 3) * 12;
+      let albums = await subsonic.getFrequentAlbums({ size: 12, offset });
+      if (!albums.length && offset > 0) albums = await subsonic.getFrequentAlbums({ size: 12 });
       return tracksFromAlbums(shuffle(albums), 3, 40);
     });
     add('frequent', sampleWithRecentFallback(lean(shuffle(freqPool)), recentIds, nz(CAP_FREQUENT)));
@@ -505,7 +514,24 @@ async function buildCandidates(mood: string | null | undefined, recentIds: Set<s
     } catch {}
   }
 
-  // 7. Fallback if the pool is still thin — starred + random.
+  // 7. Exploration slot — ALWAYS contributes, unlike the thin-pool fallback
+  // below (which never fires while a track is on air: source 1 alone clears
+  // its <8 gate, so the old pool contained zero Navidrome randomness in the
+  // common case). A small server-random sample, freshness-ordered
+  // (music/airing.ts) so never-aired tracks lead, is the pool's only
+  // library-wide draw that isn't anchored on the current track or a frozen
+  // album window — without it every source is a similarity neighbourhood or a
+  // fixed crate and the pool can never leave the bubble it is in.
+  try {
+    const wide = await subsonic.getRandomSongs({ size: 12 });
+    add('explore', sampleWithRecentFallback(
+      lean(freshnessBiasedOrder(wide, library.lastAiredInfo(), Date.now())),
+      recentIds,
+      nz(CAP_EXPLORE),
+    ));
+  } catch {}
+
+  // 8. Fallback if the pool is still thin — starred + random.
   if (pool.length < 8) {
     try {
       const starred = await subsonic.getStarred();
