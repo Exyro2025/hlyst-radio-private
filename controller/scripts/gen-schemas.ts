@@ -20,6 +20,7 @@
 import { readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
+import ts from 'typescript';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const SRC = join(HERE, '..', 'src', 'schemas');
@@ -46,19 +47,101 @@ const ZOD_SPECIFIER = /["']zod["']/;
 // "from 'zod'" mid-sentence (webhook.ts's own header does) isn't caught.
 const ZOD_IMPORT_TAIL = /^\s*(?:\}\s*)?from\s*["']zod["']/;
 
-// Top-level declarations only — no leading whitespace, because anything
-// indented is nested and can't collide in the flat output.
-const TOP_LEVEL_DECL =
-  /^(?:export\s+)?(?:declare\s+)?(?:abstract\s+)?(?:async\s+)?(?:const|let|var|function\s*\*?|class|type|interface|enum)\s+([A-Za-z_$][\w$]*)/;
-
-/** Every top-level binding a module introduces, exported or not. */
+/**
+ * Every top-level name a module introduces — declarations, imported bindings,
+ * and the names it exports.
+ *
+ * Parsed with the TypeScript compiler, not matched with a regex. A line-wise
+ * regex missed whole declaration forms, and a MISS is the dangerous direction:
+ * buildMirror's collision guard can only throw on names it was told about, so
+ * an unseen name yielded a mirror containing two identical declarations and no
+ * error here at all — precisely the "tsc error inside a generated file nobody
+ * may edit" this module exists to prevent. The forms it missed were ordinary:
+ * `export default function f()`, the second declarator of `const A = 1, B = 2`,
+ * destructured `const { a } = …`, and `export { x as y }`. A parser also gets
+ * nesting RIGHT rather than guessing it from leading whitespace — an indented
+ * top-level statement really does share the mirror's scope, and a `const` inside
+ * a function body really doesn't, neither of which indentation can tell you.
+ *
+ * Export NAMES count alongside bindings because the flat mirror shares one
+ * export namespace too: two modules doing `export { a as shared }` collide on
+ * `shared` without either declaring that identifier. `default` counts for the
+ * same reason — one file can only carry one default export.
+ *
+ * Names are de-duplicated per module, so `const foo` followed by
+ * `export { foo }` is one name declared once rather than a module colliding
+ * with itself.
+ *
+ * A syntactically invalid module yields a partial tree rather than a throw;
+ * that degrades to missing a name, and the source modules are typechecked by
+ * the controller's own `tsc --noEmit` regardless.
+ */
 export function collectDeclarations(source: string): string[] {
-  const names: string[] = [];
-  for (const line of source.split('\n')) {
-    const m = TOP_LEVEL_DECL.exec(line);
-    if (m) names.push(m[1]);
+  const sourceFile = ts.createSourceFile(
+    'schema.ts',
+    source,
+    ts.ScriptTarget.Latest,
+    /* setParentNodes */ true,
+    ts.ScriptKind.TS,
+  );
+  const names = new Set<string>();
+
+  // A binding name is either an identifier or a destructuring pattern, and a
+  // pattern introduces one name per element, nested arbitrarily deep.
+  const addBinding = (name: ts.BindingName): void => {
+    if (ts.isIdentifier(name)) {
+      names.add(name.text);
+      return;
+    }
+    for (const element of name.elements) {
+      if (ts.isBindingElement(element)) addBinding(element.name);
+    }
+  };
+
+  const isDefaultExport = (node: ts.Node): boolean =>
+    ts.canHaveModifiers(node) &&
+    !!ts.getModifiers(node)?.some((m) => m.kind === ts.SyntaxKind.DefaultKeyword);
+
+  for (const statement of sourceFile.statements) {
+    if (isDefaultExport(statement)) names.add('default');
+
+    if (ts.isVariableStatement(statement)) {
+      for (const decl of statement.declarationList.declarations) addBinding(decl.name);
+    } else if (
+      ts.isFunctionDeclaration(statement) ||
+      ts.isClassDeclaration(statement) ||
+      ts.isInterfaceDeclaration(statement) ||
+      ts.isTypeAliasDeclaration(statement) ||
+      ts.isEnumDeclaration(statement) ||
+      ts.isModuleDeclaration(statement)
+    ) {
+      // `export default function () {}` is anonymous — already counted above.
+      // A module declaration's name may be a string literal (`declare module 'x'`).
+      if (statement.name && ts.isIdentifier(statement.name)) names.add(statement.name.text);
+    } else if (ts.isImportDeclaration(statement)) {
+      // An import binding occupies the flat file's scope like any declaration.
+      // In practice the only import that survives to here is one this generator
+      // has already rejected, but the guard shouldn't depend on that.
+      const clause = statement.importClause;
+      if (clause?.name) names.add(clause.name.text);
+      const bound = clause?.namedBindings;
+      if (bound && ts.isNamespaceImport(bound)) names.add(bound.name.text);
+      if (bound && ts.isNamedImports(bound)) {
+        for (const element of bound.elements) names.add(element.name.text);
+      }
+    } else if (ts.isExportDeclaration(statement)) {
+      const clause = statement.exportClause;
+      if (clause && ts.isNamedExports(clause)) {
+        for (const element of clause.elements) names.add(element.name.text);
+      }
+      if (clause && ts.isNamespaceExport(clause)) names.add(clause.name.text);
+    } else if (ts.isExportAssignment(statement)) {
+      // `export default <expr>` and `export = <expr>`.
+      names.add('default');
+    }
   }
-  return names;
+
+  return [...names];
 }
 
 // Drops the module's own zod import. DELIBERATE CHOICE: `import * as z from

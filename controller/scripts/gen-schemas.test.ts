@@ -88,11 +88,62 @@ test('indented (nested) names never collide — only the top level shares a scop
   assert.match(out, /export function g/);
 });
 
-test('collectDeclarations reads top-level names only', () => {
+test('collectDeclarations judges nesting by syntax, not by indentation', () => {
   const names = collectDeclarations(
-    ['export const A = 1;', 'type B = string;', 'function c() {}', '  const nested = 1;'].join('\n'),
+    [
+      'export const A = 1;',
+      'type B = string;',
+      'function c() {}',
+      // Indented but still a top-level statement: it genuinely does share the
+      // mirror's one scope. A line-wise collector skipped it on the leading
+      // whitespace alone and so could not have caught it colliding.
+      '  const D = 1;',
+      // Genuinely nested, and so genuinely unable to collide.
+      'function e() {\n  const inner = 1;\n  return inner;\n}',
+    ].join('\n'),
   );
-  assert.deepEqual(names, ['A', 'B', 'c']);
+  assert.deepEqual(names, ['A', 'B', 'c', 'D', 'e']);
+});
+
+test('the collision guard covers the forms a line-wise collector missed', () => {
+  // Each pair declares X two different ways. Every one of these silently
+  // produced a mirror with two X declarations before the collector was parsed
+  // rather than pattern-matched.
+  const pairs: Array<[string, string, string]> = [
+    ['export default function', 'export default function X() {}', 'function X() {}'],
+    ['second declarator', 'export const A = 1, X = 2;', 'const X = 3;'],
+    ['object destructure', 'const { X } = { X: 1 };', 'const X = 2;'],
+    ['renamed destructure', 'const { a: X } = { a: 1 };', 'const X = 2;'],
+    ['array destructure', 'const [X] = [1];', 'const X = 2;'],
+    ['nested destructure', 'const { a: { X } } = { a: { X: 1 } };', 'const X = 2;'],
+    ['renamed export', 'const q = 1;\nexport { q as X };', 'const X = 2;'],
+    ['declare const', 'declare const X: number;', 'const X = 2;'],
+  ];
+  for (const [label, a, b] of pairs) {
+    assert.throws(
+      () => buildMirror([mod('a.ts', `${ZOD}\n${a}`), mod('b.ts', `${ZOD}\n${b}`)]),
+      /duplicate top-level name "X"/,
+      `${label} should collide`,
+    );
+  }
+});
+
+test('two default exports collide — one flat file carries one default', () => {
+  assert.throws(
+    () =>
+      buildMirror([
+        mod('a.ts', `${ZOD}\nexport default z.string();`),
+        mod('b.ts', `${ZOD}\nexport default z.number();`),
+      ]),
+    /duplicate top-level name "default"/,
+  );
+});
+
+test('a module re-exporting its own declaration does not collide with itself', () => {
+  // `const a` then `export { a }` is ONE name introduced once. Counting the
+  // binding and the export separately would make every such module fail.
+  const out = buildMirror([mod('a.ts', `${ZOD}\nconst a = z.string();\nexport { a };`)]);
+  assert.match(out, /export \{ a \}/);
 });
 
 // --- zod import strip ---
