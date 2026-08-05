@@ -86,6 +86,16 @@ jobs:
           node -e '
             const c = require("./package.json").dependencies.zod;
             const w = require("../web/package.json").dependencies.zod;
+            // Both sides reading `dependencies.zod` means a zod that moved to
+            // devDependencies in both packages would compare undefined ===
+            // undefined and pass vacuously — the check would go green having
+            // compared nothing. Demand a declared range before comparing.
+            for (const [pkg, range] of [["controller", c], ["web", w]]) {
+              if (!range) {
+                console.error(`${pkg} does not declare zod in dependencies. The schema mirror is shared runtime code, so both packages must declare zod as a runtime dependency.`);
+                process.exit(1);
+              }
+            }
             if (c !== w) {
               console.error(`zod version mismatch: controller ${c} vs web ${w}. The schema mirror is copied text, so both packages must declare the same zod range — update both together.`);
               process.exit(1);

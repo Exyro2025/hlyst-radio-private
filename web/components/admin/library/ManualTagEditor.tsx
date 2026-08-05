@@ -43,6 +43,7 @@ export function ManualTagEditor(props: {
               <Pill
                 key={m}
                 tone={on ? 'accent' : 'default'}
+                pressed={on}
                 onClick={busy || (!on && sel.length >= 3) ? undefined : () => toggle(m)}
                 className={cn(
                   (busy || (!on && sel.length >= 3)) && !on && 'opacity-40',

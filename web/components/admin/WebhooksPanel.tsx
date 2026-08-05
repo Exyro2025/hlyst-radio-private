@@ -9,7 +9,7 @@ import { Controller, useFieldArray } from 'react-hook-form';
 import { z } from 'zod';
 import { useAdminAuth } from '../../lib/adminAuth';
 import { notify, errorMessage } from '../../lib/notify';
-import { useZodForm, applyServerFieldErrors } from '@/lib/form';
+import { useZodForm, applyServerFieldErrors, fieldAria } from '@/lib/form';
 import {
   webhooksSchema,
   WEBHOOKS_LIMIT,
@@ -402,6 +402,14 @@ export default function WebhooksPanel() {
         // true; blank() and the server response always set it, so the ?? here
         // just re-states that default rather than papering over a real gap.
         const enabled = row.enabled ?? true;
+        // Keyed off _rhfKey, not the array index: reordering or removing a row
+        // must not hand a different row the ids a screen reader is already
+        // pointing at.
+        const urlAria = fieldAria(`wh-url-${f._rhfKey}`, rowErrors?.url);
+        const authAria = fieldAria(`wh-auth-${f._rhfKey}`, rowErrors?.authHeader, {
+          hasDescription: true,
+        });
+        const eventsAria = fieldAria(`wh-events-${f._rhfKey}`, rowErrors?.events);
         const toggleEvent = (ev: WebhookEvent) => {
           const has = row.events.includes(ev);
           form.setValue(
@@ -434,20 +442,23 @@ export default function WebhooksPanel() {
             }
           >
             <div className="grid gap-3">
-              <Field data-invalid={!!rowErrors?.url}>
-                <FieldLabel className="caption" htmlFor={`wh-url-${f._rhfKey}`}>URL</FieldLabel>
+              <Field data-invalid={urlAria.invalid}>
+                <FieldLabel className="caption" {...urlAria.labelProps}>URL</FieldLabel>
                 <Input
-                  id={`wh-url-${f._rhfKey}`}
                   {...form.register(`webhooks.${i}.url`)}
+                  {...urlAria.controlProps}
                   placeholder="https://discord.com/api/webhooks/…"
                   aria-label="Webhook URL"
                   spellCheck={false}
                 />
-                <FieldError errors={rowErrors?.url ? [rowErrors.url] : undefined} />
+                <FieldError
+                  {...urlAria.errorProps}
+                  errors={rowErrors?.url ? [rowErrors.url] : undefined}
+                />
               </Field>
 
-              <Field>
-                <FieldLabel className="caption" htmlFor={`wh-auth-${f._rhfKey}`}>
+              <Field data-invalid={authAria.invalid}>
+                <FieldLabel className="caption" {...authAria.labelProps}>
                   Authorization header (optional)
                 </FieldLabel>
                 {/* Controller, not register: the 'set' sentinel must RENDER as
@@ -461,7 +472,7 @@ export default function WebhooksPanel() {
                   name={`webhooks.${i}.authHeader`}
                   render={({ field }) => (
                     <Input
-                      id={`wh-auth-${f._rhfKey}`}
+                      {...authAria.controlProps}
                       ref={field.ref}
                       name={field.name}
                       onBlur={field.onBlur}
@@ -473,14 +484,22 @@ export default function WebhooksPanel() {
                     />
                   )}
                 />
-                <FieldDescription className="mt-1 text-[10px]">
+                <FieldDescription {...authAria.descriptionProps} className="mt-1 text-[10px]">
                   Sent verbatim as the <code>Authorization</code> header. Stored at rest in <code>settings.json</code>.
                 </FieldDescription>
-                <FieldError errors={rowErrors?.authHeader ? [rowErrors.authHeader] : undefined} />
+                <FieldError
+                  {...authAria.errorProps}
+                  errors={rowErrors?.authHeader ? [rowErrors.authHeader] : undefined}
+                />
               </Field>
 
-              <Field data-invalid={!!rowErrors?.events}>
-                <FieldLabel className="caption">Events</FieldLabel>
+              {/* No single labelable control here, so the Field itself is the
+                  named group (it already carries role="group") and each chip
+                  reports its own on/off via aria-pressed. */}
+              <Field data-invalid={eventsAria.invalid} {...eventsAria.groupProps}>
+                <FieldLabel asChild className="caption" {...eventsAria.labelledByProps}>
+                  <span>Events</span>
+                </FieldLabel>
                 <div className="mt-1 flex flex-wrap gap-2">
                   {events.map(ev => {
                     const on = row.events.includes(ev);
@@ -490,6 +509,7 @@ export default function WebhooksPanel() {
                         tone={on ? 'accent' : 'default'}
                         dot={on}
                         onClick={() => toggleEvent(ev)}
+                        pressed={on}
                         // These pills are the event picker, so they need a
                         // thumb-sized target on a phone.
                         className="min-h-9 cursor-pointer sm:min-h-0"
@@ -499,7 +519,10 @@ export default function WebhooksPanel() {
                     );
                   })}
                 </div>
-                <FieldError errors={rowErrors?.events ? [rowErrors.events] : undefined} />
+                <FieldError
+                  {...eventsAria.errorProps}
+                  errors={rowErrors?.events ? [rowErrors.events] : undefined}
+                />
               </Field>
 
               <div className="mt-1 flex items-center gap-2">

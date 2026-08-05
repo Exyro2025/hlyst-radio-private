@@ -53,6 +53,58 @@ export function useZodForm<S extends z.ZodType<FieldValues, FieldValues>>(
   });
 }
 
+// ARIA wiring for one field, derived from a single base id.
+//
+// The Field primitives in components/ui/field.tsx are presentational: their
+// `data-invalid` turns the field red, and FieldError renders role="alert" so a
+// message is ANNOUNCED the moment it appears. Neither of those associates the
+// message with the control, which is what a screen-reader user needs when they
+// tab BACK to the input — without it the field is an unlabelled-as-invalid box
+// whose explanation was read once and is now unreachable.
+//
+// Returned as spreadable groups so no form open-codes the id suffixes. Two
+// forms deriving `-error` differently is exactly the drift this shared
+// foundation exists to prevent, and every convertible form has this same shape.
+export function fieldAria(
+  baseId: string,
+  error?: { message?: string },
+  opts?: { hasDescription?: boolean },
+) {
+  const errorId = `${baseId}-error`;
+  const descriptionId = `${baseId}-description`;
+  const invalid = !!error;
+  // Reference only ids that are actually in the DOM: FieldError renders null
+  // when there is no error, and a dangling aria-describedby is inconsistently
+  // handled across screen readers (dropped by some, announced empty by others).
+  const describedBy =
+    [opts?.hasDescription ? descriptionId : null, invalid ? errorId : null]
+      .filter(Boolean)
+      .join(' ') || undefined;
+  return {
+    invalid,
+    // For a Field wrapping a real control: label points at it, control owns the id.
+    labelProps: { htmlFor: baseId },
+    controlProps: {
+      id: baseId,
+      // Absent rather than aria-invalid="false" — the attribute only carries
+      // meaning when set, and a literal "false" is noise on every valid field.
+      'aria-invalid': invalid || undefined,
+      'aria-describedby': describedBy,
+    },
+    // For a Field wrapping a GROUP of controls (chips, checkboxes) with no
+    // single labelable element: htmlFor would point at a <div>, which is
+    // invalid, so the group names itself via aria-labelledby instead.
+    labelledByProps: { id: `${baseId}-label` },
+    groupProps: {
+      'aria-labelledby': `${baseId}-label`,
+      'aria-invalid': invalid || undefined,
+      'aria-describedby': describedBy,
+    },
+    descriptionProps: { id: descriptionId },
+    errorProps: { id: errorId },
+  } as const;
+}
+
 // Maps the controller's `fieldErrors` payload back onto individual inputs.
 // The controller emits dotted paths ('webhooks.1.url'), which is exactly
 // react-hook-form's setError field syntax — so a rule only the server can

@@ -10,7 +10,7 @@ import { cn } from '../../lib/cn';
 import { Button } from '../ui/button';
 import { ToggleGroup, ToggleGroupItem } from '../ui/toggle-group';
 import { Switch } from '../ui/switch';
-import { Badge } from '../ui/badge';
+import { Badge, badgeVariants } from '../ui/badge';
 
 export interface EyebrowProps {
   children?: ReactNode;
@@ -58,20 +58,51 @@ export interface PillProps {
   className?: string;
   onClick?: () => void;
   title?: string;
+  /* Toggle state for a pill used as an on/off chip. Set it and the pill
+     reports aria-pressed; leave it off for pills that fire a plain action. */
+  pressed?: boolean;
+  ariaLabel?: string;
 }
 
 /* Tag pill over shadcn Badge. `tone` ∈ ink | accent | solid (default =
-   muted outline); `dot` prepends a small currentColor dot. */
-export function Pill({ children, tone, dot, className, onClick, title }: PillProps) {
-  return (
-    <Badge
-      variant={tone || 'default'}
-      className={cn(onClick && 'cursor-pointer', className)}
-      onClick={onClick}
-      title={title}
-    >
+   muted outline); `dot` prepends a small currentColor dot.
+
+   With `onClick` this renders a real <button> rather than a clickable Badge.
+   Badge is a <span>, so an onClick pill was reachable by mouse only — no tab
+   stop, no Enter/Space, and nothing announcing it as actionable. That made
+   every chip-style multi-select in the admin (webhook events, show genres,
+   skill toggles) keyboard-dead. `type="button"` is load-bearing for the panels
+   that DO sit inside a <form>: without it a chip click submits the form.
+
+   Without `onClick` the Badge path is unchanged, so the ~87 read-only pills
+   render exactly as before. */
+export function Pill({ children, tone, dot, className, onClick, title, pressed, ariaLabel }: PillProps) {
+  const content = (
+    <>
       {dot && <span className="size-1.5 rounded-full bg-current" />}
       {children}
+    </>
+  );
+  if (onClick) {
+    return (
+      <button
+        type="button"
+        /* text-start only to match the Badge <span> exactly: a <button> centres
+           its text by default. The pill is inline-flex so this changes nothing
+           visually today — it keeps the two paths provably style-identical. */
+        className={cn(badgeVariants({ variant: tone || 'default' }), 'cursor-pointer text-start', className)}
+        onClick={onClick}
+        title={title}
+        aria-pressed={pressed}
+        aria-label={ariaLabel}
+      >
+        {content}
+      </button>
+    );
+  }
+  return (
+    <Badge variant={tone || 'default'} className={className} title={title}>
+      {content}
     </Badge>
   );
 }
