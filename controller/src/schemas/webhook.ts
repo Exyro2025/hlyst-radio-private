@@ -26,7 +26,13 @@ export type WebhookEvent = (typeof WEBHOOK_EVENTS)[number];
 
 export const WEBHOOKS_LIMIT = 16;
 
-const ID_RE = /^[a-z0-9_]{3,32}$/;
+// Exported because the LENIENT load-path normaliser (settings/normalize.ts)
+// tests ids against it too. Two copies of this pattern would mean an id that is
+// valid at boot and invalid on the next save — exactly the drift this shared
+// module exists to remove. Named for its feature, not `ID_RE`: the mirror is one
+// flat file, so every top-level name here shares a scope with every other
+// schema module's.
+export const WEBHOOK_ID_RE = /^[a-z0-9_]{3,32}$/;
 
 export const webhookSchema = z.object({
   // Optional because a brand-new row has no id yet — the server mints one.
@@ -35,7 +41,7 @@ export const webhookSchema = z.object({
   // pattern /^[a-z0-9_]{3,32}$/") and this string reaches an operator's toast.
   id: z
     .string()
-    .regex(ID_RE, 'id must be 3-32 characters: lowercase letters, digits or underscores')
+    .regex(WEBHOOK_ID_RE, 'id must be 3-32 characters: lowercase letters, digits or underscores')
     .optional(),
   url: z
     .string()

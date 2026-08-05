@@ -21,8 +21,9 @@ const ZOD = "import { z } from 'zod';";
 // --- collision guard ---
 
 test('rejects the same top-level name declared by two modules', () => {
-  // The real case: webhook.ts has a module-private `const ID_RE`, and a second
-  // schema module could easily declare its own.
+  // The real case: a generic name like `ID_RE` that two schema modules would
+  // each declare for their own feature. webhook.ts avoids it by naming its one
+  // WEBHOOK_ID_RE, which is the fix this guard exists to force.
   assert.throws(
     () =>
       buildMirror([
@@ -203,6 +204,79 @@ test("a comment mentioning \"from 'zod'\" is not mistaken for an import", () => 
     mod('a.ts', `// this file may import ONLY from 'zod'.\n${ZOD}\nexport const a = z.string();`),
   ]);
   assert.match(out, /may import ONLY from 'zod'/);
+});
+
+test('strips a canonical zod import even when indented', () => {
+  // The strip cuts the node the parse validated, not a line matched at column
+  // zero — so an indented import cannot survive it and redeclare `z`.
+  const out = buildMirror([mod('a.ts', `  ${ZOD}\nexport const a = z.string();`)]);
+  assert.deepEqual(
+    out.split('\n').filter((l) => /^\s*import\b/.test(l)),
+    ["import { z } from 'zod';"],
+  );
+});
+
+// --- everything that is not zod ---
+
+test('rejects a module referencing anything but zod', () => {
+  // Each of these used to be copied VERBATIM into the mirror with no error at
+  // all: the strip only ever recognised zod imports, so a project path, a node
+  // builtin or a controller-only package sailed through and broke the web
+  // build instead — inside a generated file nobody is allowed to edit.
+  for (const line of [
+    "import { mintId } from '../settings/vocab.js';",
+    "import type { Webhook } from './webhook.js';",
+    "import { readFileSync } from 'node:fs';",
+    "import express from 'express';",
+    "import * as path from 'node:path';",
+    "import './side-effect.js';",
+  ]) {
+    assert.throws(
+      () => buildMirror([mod('a.ts', `${ZOD}\n${line}\nexport const a = z.string();`)]),
+      (e: Error) => {
+        assert.match(e.message, /schemas\/a\.ts/);
+        assert.match(e.message, /\*-server\.ts/);
+        return true;
+      },
+      `should have been rejected: ${line}`,
+    );
+  }
+});
+
+test('rejects a re-export with a module specifier, which no import check sees', () => {
+  // `export … from` references another module exactly like an import does and
+  // breaks the mirror exactly the same way, but does not start with `import`.
+  for (const line of [
+    "export { thing } from './other.js';",
+    "export * from './other.js';",
+    "export * as ns from './other.js';",
+    "export type { Thing } from './other.js';",
+  ]) {
+    assert.throws(
+      () => buildMirror([mod('a.ts', `${ZOD}\n${line}\nexport const a = z.string();`)]),
+      /schemas\/a\.ts/,
+      `should have been rejected: ${line}`,
+    );
+  }
+});
+
+test('the rejection names the offending specifier', () => {
+  assert.throws(
+    () => buildMirror([mod('a.ts', `${ZOD}\nimport { mintId } from '../settings/vocab.js';`)]),
+    /\.\.\/settings\/vocab\.js/,
+  );
+});
+
+test('a plain `export { a }` with no module specifier is left alone', () => {
+  // Only a `from` clause references another module. Re-exporting a local
+  // declaration is ordinary and must keep working.
+  const out = buildMirror([mod('a.ts', `${ZOD}\nconst a = z.string();\nexport { a };`)]);
+  assert.match(out, /export \{ a \}/);
+});
+
+test('a module needing no zod at all is mirrored as-is', () => {
+  const out = buildMirror([mod('a.ts', 'export const LIMIT = 16;')]);
+  assert.match(out, /export const LIMIT = 16;/);
 });
 
 // --- the two zod runtimes ---

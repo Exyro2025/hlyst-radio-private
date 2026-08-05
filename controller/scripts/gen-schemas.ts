@@ -12,11 +12,13 @@
 // Only pure schema modules are mirrored. *-server.ts siblings hold the rules
 // that need server state and are deliberately excluded.
 //
-// The output is ONE FLAT FILE — every module's top level ends up in the same
-// scope. That is why buildMirror() enforces two things the source modules get
-// for free: unique top-level names across all modules, and exactly one zod
-// import form. Both fail HERE, at generate time, naming the source file — never
-// downstream as a tsc error inside a generated file nobody is allowed to edit.
+// The output is ONE FLAT FILE, built by the WEB package — so every module's top
+// level ends up in the same scope, and every specifier it references has to
+// resolve over there. That is why buildMirror() enforces three things the source
+// modules get for free: unique top-level names across all modules, exactly one
+// zod import form, and no reference to any module BUT zod. All three fail HERE,
+// at generate time, naming the source file — never downstream as a tsc error
+// inside a generated file nobody is allowed to edit.
 import { readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
@@ -38,14 +40,6 @@ export interface SchemaModule {
 // "zod"` lints clean, so the strip has to recognise it too or its import
 // survives into the mirror and redeclares `z`.
 const CANONICAL_ZOD_IMPORT = /^import\s*\{\s*z\s*\}\s*from\s*["']zod["']\s*;?\s*$/;
-// Any import line at all — used to spot a NON-canonical zod import.
-const IMPORT_LINE = /^\s*import\b/;
-const ZOD_SPECIFIER = /["']zod["']/;
-// The closing line of a multi-line zod import (`} from 'zod';`), which the
-// IMPORT_LINE test above would sail past — it only sees the opening `import {`,
-// which names no specifier. Anchored at line start so a comment mentioning
-// "from 'zod'" mid-sentence (webhook.ts's own header does) isn't caught.
-const ZOD_IMPORT_TAIL = /^\s*(?:\}\s*)?from\s*["']zod["']/;
 
 /**
  * Every top-level name a module introduces — declarations, imported bindings,
@@ -144,31 +138,124 @@ export function collectDeclarations(source: string): string[] {
   return [...names];
 }
 
-// Drops the module's own zod import. DELIBERATE CHOICE: `import * as z from
-// 'zod'`, a default import, and extra named bindings (`import { z, ZodType }`)
-// are REJECTED rather than rewritten. A namespace import is not the same
-// binding as a named one, and silently swapping it for the mirror's
-// `import { z } from 'zod'` could change what the code means; extra named
-// bindings would simply vanish and break the mirror at tsc time. One form,
-// enforced loudly, keeps the mirror a verbatim copy.
-function stripZodImport(mod: SchemaModule): string {
-  const kept: string[] = [];
-  for (const line of mod.source.split('\n')) {
-    if (CANONICAL_ZOD_IMPORT.test(line)) continue;
-    const isZodImport =
-      (IMPORT_LINE.test(line) && ZOD_SPECIFIER.test(line)) || ZOD_IMPORT_TAIL.test(line);
-    if (isZodImport) {
+/**
+ * The module specifier a statement pulls in, or null if it pulls in nothing.
+ *
+ * Re-exports count. `export { x } from './y.js'` and `export * from './y.js'`
+ * reference another module exactly like an import does, and land in the mirror
+ * exactly as broken — but they do not begin with the word `import`, so a
+ * line-wise check never saw them at all.
+ */
+function moduleSpecifierOf(statement: ts.Statement): string | null {
+  if (ts.isImportDeclaration(statement) || ts.isExportDeclaration(statement)) {
+    const spec = statement.moduleSpecifier;
+    return spec && ts.isStringLiteral(spec) ? spec.text : null;
+  }
+  if (ts.isImportEqualsDeclaration(statement)) {
+    const ref = statement.moduleReference;
+    return ts.isExternalModuleReference(ref) && ts.isStringLiteral(ref.expression)
+      ? ref.expression.text
+      : null;
+  }
+  return null;
+}
+
+/**
+ * Rejects everything a mirrored module may not reference, and returns the one
+ * zod import it may — as a node, so the strip below cuts exactly that statement.
+ *
+ * Parsed, not pattern-matched, for the reason collectDeclarations is: a MISS is
+ * the dangerous direction. A non-zod import used to sail through untouched and
+ * be copied verbatim into web/lib/schemas.generated.ts, where it resolves
+ * against the WEB package — so `import { mintId } from '../settings/vocab.js'`
+ * produced a mirror that fails at web build time, inside a generated file
+ * developers are told never to edit. That is the exact failure this module
+ * exists to move upstream, and it was only ever enforced for zod.
+ *
+ * eslint's no-restricted-imports rule (controller/eslint.config.mjs) states the
+ * same rule and is the merge gate. This is the second half of the same guard:
+ * it fires for whoever runs `npm run gen:schemas` before they run lint, and it
+ * names the mirror as the reason rather than citing a lint rule id.
+ *
+ * DELIBERATE CHOICE on the zod import itself: `import * as z from 'zod'`, a
+ * default import, and extra named bindings (`import { z, ZodType }`) are
+ * REJECTED rather than rewritten. A namespace import is not the same binding as
+ * a named one, and silently swapping it for the mirror's `import { z } from
+ * 'zod'` could change what the code means; extra named bindings would simply
+ * vanish and break the mirror at tsc time. One form, enforced loudly, keeps the
+ * mirror a verbatim copy.
+ */
+function findZodImport(mod: SchemaModule, sourceFile: ts.SourceFile): ts.Statement | null {
+  const where = `controller/src/schemas/${mod.file}`;
+  let zodImport: ts.Statement | null = null;
+
+  for (const statement of sourceFile.statements) {
+    const specifier = moduleSpecifierOf(statement);
+    if (specifier === null) continue;
+    const text = statement.getText(sourceFile);
+    const oneLine = text.split('\n').map((l) => l.trim()).join(' ');
+
+    if (specifier !== 'zod') {
       throw new Error(
-        `gen:schemas — controller/src/schemas/${mod.file} imports zod as:\n` +
-          `    ${line.trim()}\n` +
+        `gen:schemas — ${where} references the module "${specifier}":\n` +
+          `    ${oneLine}\n` +
+          `  Mirrored modules are copied verbatim into web/lib/schemas.generated.ts, which is\n` +
+          `  built by the WEB package — so this specifier has to resolve there too, and\n` +
+          `  project paths, node builtins and controller-only packages do not. A mirrored\n` +
+          `  module may reference only 'zod'. Move anything else into a *-server.ts sibling,\n` +
+          `  which is not mirrored.`,
+      );
+    }
+
+    if (!CANONICAL_ZOD_IMPORT.test(text)) {
+      throw new Error(
+        `gen:schemas — ${where} imports zod as:\n` +
+          `    ${oneLine}\n` +
           `  The mirror is one flat file with a single \`import { z } from 'zod'\` at the top, so a\n` +
           `  mirrored module must use exactly that form (on one line). Rewrite the import and use\n` +
           `  \`z.\` accessors (z.ZodType, z.infer, …) for anything else you need from zod.`,
       );
     }
-    kept.push(line);
+
+    if (zodImport) {
+      throw new Error(
+        `gen:schemas — ${where} imports zod twice. The mirror carries one \`import { z } from 'zod'\`\n` +
+          `  for every module, so a second one here would redeclare \`z\` in the flat file.`,
+      );
+    }
+    zodImport = statement;
   }
-  return kept.join('\n').trim();
+
+  return zodImport;
+}
+
+// Validates the module's references and drops its own zod import. Cut by NODE
+// POSITION rather than by matching lines: the statement the parse validated is
+// exactly the text removed, so an indented or otherwise unusual-but-canonical
+// import cannot survive the strip and redeclare `z` downstream.
+function stripZodImport(mod: SchemaModule): string {
+  const sourceFile = ts.createSourceFile(
+    'schema.ts',
+    mod.source,
+    ts.ScriptTarget.Latest,
+    /* setParentNodes */ true,
+    ts.ScriptKind.TS,
+  );
+  const zodImport = findZodImport(mod, sourceFile);
+  // A module that needs no zod (constants only) is fine — nothing to strip.
+  if (!zodImport) return mod.source.trim();
+
+  const src = mod.source;
+  // Widen the cut to the whole line the import sits on, so removing it leaves
+  // no blank line behind — byte-for-byte what dropping the line used to do.
+  let from = zodImport.getStart(sourceFile);
+  while (from > 0 && (src[from - 1] === ' ' || src[from - 1] === '\t')) from--;
+  let to = zodImport.end;
+  while (to < src.length && (src[to] === ' ' || src[to] === '\t' || src[to] === ';')) to++;
+  if (src[to] === '\r') to++;
+  if (src[to] === '\n') to++;
+
+  return (src.slice(0, from) + src.slice(to)).trim();
 }
 
 export function buildMirror(modules: SchemaModule[]): string {

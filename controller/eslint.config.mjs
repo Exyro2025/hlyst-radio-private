@@ -25,10 +25,15 @@ export default defineConfig([
         {
           patterns: [
             {
-              // This ESLint version's no-restricted-imports schema has no
-              // top-level "allow" (see task-2-report.md) — "group" is matched
-              // gitignore-style via the `ignore` package, so a leading "!zod"
-              // negates the wildcard restriction for that one import.
+              // Deny-everything-then-allow-one, because this ESLint version's
+              // no-restricted-imports schema has no top-level "allow" key —
+              // passing one is a config validation error, not a no-op. What it
+              // does have is "group", matched gitignore-style by the `ignore`
+              // package, where a leading "!" re-includes a previously excluded
+              // path. So "*" restricts every specifier and "!zod" carves the one
+              // exception back out. Verified to catch bare packages, node:
+              // builtins and relative paths alike; gen-schemas.ts enforces the
+              // same rule a second time, at generate time.
               group: ['*', '!zod'],
               message:
                 'src/schemas/* is mirrored into the browser — import only from "zod". Put anything else in a *-server.ts sibling.',
