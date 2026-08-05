@@ -1080,20 +1080,21 @@ export function LlmSection({ data, form, setForm, busy, saveSettings, adminFetch
           <Input
             type="number"
             min={0}
-            max={290}
+            max={1000}
             step={10}
             value={form.llm.noRepeatWindow}
             onChange={(e: ChangeEvent<HTMLInputElement>) =>
               setForm(f => ({ ...f, llm: { ...f.llm, noRepeatWindow: e.target.value } }))
             }
-            placeholder="100"
+            placeholder="250"
             className="max-w-[200px]"
           />
           <div className="field-hint">
             The last N <strong>distinct</strong> tracks can never be re-picked: a hard
             guard on both the agent and candidate-pool pickers, on top of the time-based
-            window. Auto-scales down on a small library so it never blocks everything.
-            {' '}<strong>0 = off</strong>. Listener requests stay exempt. 0&ndash;290.
+            window. Auto-scales down on a small library so it never blocks everything;
+            on a big library, raise it — it is the station&apos;s long memory.
+            {' '}<strong>0 = off</strong>. Listener requests stay exempt. 0&ndash;1000.
           </div>
         </div>
       </Card>

@@ -680,7 +680,7 @@ function slimAlbum(album: string | null | undefined, title: string | null | unde
 export async function pickViaPool(queue, ctx, rankTarget: { bpm: number | null; key: string | null } | null = null, audioWaypoint: number[] | null = null, opts: { avoidArtist?: string | null } = {}) {
   await library.load();
   const stats = library.stats();
-  const windows = recencyWindowsForLibrary(stats.distinctArtists);
+  const windows = recencyWindowsForLibrary(stats.distinctArtists, stats.total);
   const recentIds = queue.recentlyPlayedIds(windows.trackHours);
   const recentArtists = queue.recentArtistsSince(windows.artistHours);
   // Count-based HARD no-repeat guard (last N distinct plays) — non-relaxable,

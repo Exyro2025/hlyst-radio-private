@@ -15,6 +15,7 @@ import * as library from '../music/library.js';
 import * as settings from '../settings.js';
 import { normGenre, genreMatches, genreResolutionWarningOnce, inYearRange, preferEnergy, preferEnergyStrict, preferMood, applyStrictLocks, hasEraBound, eraSpan, type VocalMode } from '../music/show-filter.js';
 import { freshnessBiasedOrder } from '../music/airing.js';
+import { recencyWindowsForLibrary } from '../music/recency.js';
 import { resolveShowPlaylistPool, resolveExcludedPlaylistIds } from '../music/show-playlist.js';
 import { getFullContext } from '../context.js';
 import { queue } from './queue.js';
@@ -89,12 +90,17 @@ export async function refreshAutoPlaylist() {
 async function refreshAutoPlaylistInner() {
   const ctx = await getFullContext();
   const mood = ctx.dominantMood;
-  // Match the auto-DJ picker's window (dj-agent.pickViaAgent) — 12h. Keyed by
-  // BOTH id and lowercased `title|artist`: a library with duplicate copies of a
-  // song holds N Subsonic ids for it, so an id-only recency filter lets copies
+  // Match the auto-DJ picker's window (dj-agent.pickViaAgent) — the same
+  // library-scaled recencyWindowsForLibrary figure, not a fixed 12h, so the
+  // coast and the live picker agree on what "recent" means. Keyed by BOTH id
+  // and lowercased `title|artist`: a library with duplicate copies of a song
+  // holds N Subsonic ids for it, so an id-only recency filter lets copies
   // #2..N sail into the fallback and re-air a just-played track (issue #874).
   // Mirrors collect() in the picker's tool layer.
-  const { ids: recentIds, keys: recentKeys } = queue.recentlyPlayed(12);
+  await library.load();
+  const libStats = library.stats();
+  const windows = recencyWindowsForLibrary(libStats.distinctArtists, libStats.total);
+  const { ids: recentIds, keys: recentKeys } = queue.recentlyPlayed(windows.trackHours);
 
   // The fallback is what airs when the live AI picks pause (e.g. pause-when-empty
   // with zero listeners). When a show is scheduled for this hour, the fallback
@@ -186,8 +192,6 @@ async function refreshAutoPlaylistInner() {
   const pool = builder.pool;
   const fromSource = builder.fromSource;
   const take = builder.take;
-
-  await library.load();
 
   // 0. Dedicated show-genre / era source — the dominant contributor whenever a
   // show pins a genre or a year window. Both Navidrome queries filter server-side,

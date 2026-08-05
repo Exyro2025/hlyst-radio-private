@@ -351,9 +351,13 @@ export function clampDiscoverySteps(raw: unknown, def: number): number {
 // cap so the requested window is never silently truncated by a too-short
 // sidecar. Library-size clamping happens separately at use time
 // (effectiveNoRepeatWindow). Non-numeric/NaN falls back to `def`.
+// Ceiling 1000 (was 290): the old ceiling was under a day of airtime even
+// maxed out, far too small a memory for a 10k-50k library — the sidecar the
+// count guard walks was sized up with it (config.queue.recentPlaysMax + the
+// queue's boot prune), so the ceiling stays honestly suppliable.
 export function clampNoRepeatWindow(raw: unknown, def: number): number {
   if (typeof raw !== 'number' || !Number.isFinite(raw)) return def;
-  return Math.min(290, Math.max(0, Math.floor(raw)));
+  return Math.min(1000, Math.max(0, Math.floor(raw)));
 }
 
 // Validate + apply the connection fields shared by the primary LLM leg and its

@@ -166,7 +166,7 @@ async function repickRequestFromSeen({ seen, badId, requester, text }:
 async function pickViaAgent(queue, ctx, { wantLink, audioWaypoint = null, current = null, showAt = null, rankTarget = null, linkAirAt = null }: { wantLink: boolean; audioWaypoint?: number[] | null; current?: any; showAt?: Date | null; rankTarget?: { bpm: number | null; key: string | null } | null; linkAirAt?: Date | null }): Promise<boolean> {
   await library.load();
   const stats = library.stats();
-  const windows = recencyWindowsForLibrary(stats.distinctArtists);
+  const windows = recencyWindowsForLibrary(stats.distinctArtists, stats.total);
   // Scale the track-recency window to the tagged library's artist diversity:
   // dense catalogues keep the long anti-repeat guard, while small-artist
   // libraries don't exclude every real candidate before the picker sees it.
