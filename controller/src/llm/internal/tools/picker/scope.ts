@@ -133,6 +133,11 @@ export interface PickerContext {
   hasTextEmbeddings: boolean;
   hasAudioEmbeddings: boolean;
   hasEmbeddingProvider: boolean;
+  // True when most of the text index is label-only vectors (artist/title/album
+  // text with no tags/lyrics/acoustics), i.e. "semantic similarity" is really
+  // artist-string proximity. The text-similarity tools adjust their
+  // descriptions so the model weighs their results for what they actually are.
+  textIndexDegraded: boolean;
 }
 
 export function buildPickerContext(scope: PickerScope): PickerContext {
@@ -252,6 +257,9 @@ export function buildPickerContext(scope: PickerScope): PickerContext {
   const hasTextEmbeddings = (stats.withEmbedding ?? 0) > 0;
   const hasAudioEmbeddings = (stats.withAudioEmbedding ?? 0) > 0;
   const hasEmbeddingProvider = embeddings.isAvailable();
+  // Same 50% threshold the coverage UI calls similarityThin.
+  const labelShare = library.labelOnlyShare();
+  const textIndexDegraded = labelShare != null && labelShare > 0.5;
 
   // Seed-similarity with a cross-index rescue (#1247).
   //
@@ -306,5 +314,5 @@ export function buildPickerContext(scope: PickerScope): PickerContext {
     return { tracks: [] as any[], matched: 0, fellBack: false };
   };
 
-  return { scope, seen, collect, emptyResult, seedSimilarity, knnExclude, stats, hasTextEmbeddings, hasAudioEmbeddings, hasEmbeddingProvider };
+  return { scope, seen, collect, emptyResult, seedSimilarity, knnExclude, stats, hasTextEmbeddings, hasAudioEmbeddings, hasEmbeddingProvider, textIndexDegraded };
 }

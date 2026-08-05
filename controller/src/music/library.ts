@@ -512,6 +512,23 @@ export function stats() {
   };
 }
 
+// Share of text vectors that embed nothing but the artist/title/album label —
+// no Last.fm tags, no lyric excerpt, no measured acoustics — as 0..1, or null
+// when the index is empty/unloaded. On such an index cosine "similarity" ranks
+// by artist/album TEXT while presenting itself as mood similarity (#1246).
+// The coverage UI has surfaced this for a while (similarityThin ≥50%); the
+// picker tools read it here so the RUNTIME can react too.
+export function labelOnlyShare(): number | null {
+  if (!loaded) return null;
+  try {
+    const embedded = db.stats().withEmbedding ?? 0;
+    if (!embedded) return null;
+    return db.labelOnlyVectorCount() / embedded;
+  } catch {
+    return null;
+  }
+}
+
 // How many tracks have had a vocal pass at all (vocal_ranges_json NOT NULL,
 // where a stored "[]" — analysed instrumental — counts as done). Deliberately
 // NOT folded into stats(): it's an extra COUNT that only the vocal show filter

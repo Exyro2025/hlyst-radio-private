@@ -68,6 +68,7 @@ const CAP_SONIC_SIMILAR = 4;
 const CAP_AUDIO_SIMILAR = 4;
 const CAP_LIKED = 4;
 const CAP_EXPLORE = 4;
+const CAP_MOOD_WILDCARD = 3;
 // When a show pins a genre/decade, its dedicated source is the dominant pool
 // contributor (soft lean) and the unrelated discovery sources shrink by this
 // factor so the genre/era actually shows up in the LLM's candidate list.
@@ -488,6 +489,22 @@ async function buildCandidates(mood: string | null | undefined, recentIds: Set<s
     }
     const moodHits = shuffle(lean(preferEnergy(moodPool, showFilter?.energies)));
     add('mood-library', sampleFresh(moodHits, recentIds, CAP_MOOD_LIBRARY));
+
+    // Mood wildcard — autonomous hours only (a show's pinned moods are
+    // operator intent). Only ~8 of the 17-mood vocabulary ever become the
+    // autonomous dominantMood (the period/weather maps), so the pool's one
+    // broad sampler cycled the same few buckets all day; a taste of one
+    // random OTHER mood walks the rest of the vocabulary over time. Tiny cap:
+    // seasoning, not a second mood source.
+    if (!showFilter?.moods.length) {
+      try {
+        const others = settings.moodVocab().filter((m: string) => !poolMoods.includes(m));
+        if (others.length) {
+          const wild = others[Math.floor(Math.random() * others.length)];
+          add('mood-wildcard', sampleFresh(shuffle(library.songsByMood(wild)), recentIds, CAP_MOOD_WILDCARD));
+        }
+      } catch {}
+    }
   }
 
   // 3. Mood-matched Navidrome playlists — operator's hand curation. Skipped when
