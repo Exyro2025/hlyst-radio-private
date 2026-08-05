@@ -1104,7 +1104,7 @@ class Queue {
         // Hard length cap (#447 max-track-length): stamp a cue_out so Liquidsoap
         // cuts an over-length autonomous pick mid-air. Explicit listener requests
         // (requestedBy set) stay exempt — a requested long mix plays in full,
-        // mirroring the request path's selection-cap exemption in picker-tools.
+        // mirroring the request path's selection-cap exemption in the picker tools.
         // Beds: if this item's link would outlast the song's own intro, push an
         // instrumental bed into dj_queue AHEAD of the track. The DJ then talks
         // over the bed and the track ramps in under the closing words, instead

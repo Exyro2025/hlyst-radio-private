@@ -40,6 +40,7 @@ import { hasEraBound, genreResolutionWarningOnce, type VocalMode } from '../musi
 import { djCallsAllowed } from './listeners.js';
 import { autoVoiceAllowed } from './voice-policy.js';
 import { pickerAgent, requestAgent } from './dj-agent/agents.js';
+import { pickerScope } from '../llm/tools.js';
 import {
   HANDOFF_MAX_AGE_MS,
   breakerFailure,
@@ -249,8 +250,10 @@ async function pickViaAgent(queue, ctx, { wantLink, audioWaypoint = null, curren
     queue.log('picker', `show "${activeShow.name}" pins ${activeShow.playlistIds.length} playlist(s) but none resolved to tracks — anchor ignored${activeShow.playlistStrict ? ' (STRICT toggle has no effect)' : ''}. Stale playlist id (deleted/recreated in Navidrome?) or a Navidrome error; re-select the playlists in the show editor.`);
   }
 
-  const run = await pickerAgent.run({
-    messages: session.windowMessages(),
+  // One scope value carries every constraint this pick runs under, and travels
+  // to the discovery tools without being unpacked on the way (see PickerRunArgs
+  // in dj-agent/agents.ts for why that matters).
+  const scope = pickerScope({
     recentIds,
     recentKeys,
     hardRecentIds,
@@ -267,6 +270,11 @@ async function pickViaAgent(queue, ctx, { wantLink, audioWaypoint = null, curren
     playlistLock,
     playlistTracks,
     excludedIds,
+  });
+
+  const run = await pickerAgent.run({
+    messages: session.windowMessages(),
+    scope,
     showAt,
   });
   const { steps, toolCalls, extras } = run;
@@ -836,9 +844,12 @@ async function runRequestViaAgent(queue: any, { requester, text }: { requester: 
     if (last && last.role === 'user') last.content += '\n' + tail;
     else messages.push({ role: 'user', content: tail });
 
+    // A request runs with recency only — no show locks. An explicit listener
+    // ask wins over the show's strict filters, which is why the scope stops
+    // here rather than being built from the active show.
     const run = await requestAgent.run({
       messages,
-      recentIds,
+      scope: pickerScope({ recentIds }),
     });
     const { toolCalls, extras } = run;
     // Reassigned when the unknown-id salvage below (repickRequestFromSeen)

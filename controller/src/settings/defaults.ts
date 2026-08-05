@@ -415,7 +415,7 @@ export const DEFAULTS = {
     // a DESCRIBED track ("the song from the new Dune movie") via web search, then
     // matches it against the local library. Off by default: it needs a web-search
     // provider (settings.search) and costs a web round-trip + a small extraction
-    // call per use. No-op unless searchReady() — see llm/internal/tools/picker-tools.ts.
+    // call per use. No-op unless searchReady() — see llm/internal/tools/picker/tools/identify-requested-track.ts.
     requestWebResolve: false,
     // Hard wall-clock ceiling (ms) on a single DJ-agent generation (track
     // picks and listener requests). Enforced by withDeadline in llm/sdk.ts;

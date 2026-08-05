@@ -15,7 +15,7 @@
 // Policy chokepoint, like util/request-guard.ts: the clause below is the ONE
 // wording, shared by the pick/request schema field descriptions
 // (broadcast/dj-agent/schemas.ts) and the empty-tool-result rule the model sees
-// at the exact moment it fails (llm/internal/tools/picker-tools.ts). Never
+// at the exact moment it fails (llm/internal/tools/picker/scope.ts). Never
 // inline a second copy — they drift, and the wording is the whole fix.
 //
 // Pure + unit-pinned (scripts/pick-seed.test.ts).
