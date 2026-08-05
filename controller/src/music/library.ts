@@ -102,6 +102,10 @@ export function get(songId: string): any {
     genre: t.genre,
     moods: t.moods,
     audioMoods: t.audioMoods,
+    // Last.fm enrichment tags — show-filter.trackAllTags' any-namespace union
+    // (blocklist `tag` rules) resolves them through this projection for
+    // Subsonic-sourced rows; before this line the field was silently dropped.
+    lastfmTags: t.lastfmTags,
     energy: t.energy,
     source: t.source,
     confidence: t.confidence,
