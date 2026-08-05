@@ -14,8 +14,15 @@ import { definePickerTool } from '../defs.js';
 export default definePickerTool({
   name: 'tracksLikeThis',
   available: ({ hasTextEmbeddings }) => hasTextEmbeddings,
-  build: ({ emptyResult, seedSimilarity, stats }) => tool({
-    description: 'Tracks whose mood + lyrics + metadata embed closest to a seed track — the library\'s own semantic similarity. Pass the currently-playing song id (best) OR a track title.',
+  build: ({ emptyResult, seedSimilarity, stats, textIndexDegraded }) => tool({
+    description: 'Tracks whose mood + lyrics + metadata embed closest to a seed track — the library\'s own semantic similarity. Pass the currently-playing song id (best) OR a track title.'
+      // Degraded-index honesty (#1246): with mostly label-only vectors this
+      // tool ranks by artist/album TEXT while calling itself semantic — the
+      // model then reasons about an artist-name ranking as if it were a mood
+      // ranking. Say what the ranking really is so it weighs results right.
+      + (textIndexDegraded
+          ? ' NOTE: most of this library\'s text vectors carry only artist/title/album labels (no tags, lyrics or measured sound), so "similar" here largely means same artist or same scene BY NAME — lean on the mood/genre/audio tools for real musical similarity.'
+          : ''),
     // No k input: the agent reliably picked a small k (10–20), and the
     // nearest neighbours cluster tightly + many are recently-played, so that
     // left ~1 survivor after recency filtering. Pull a wide fixed KNN (60)

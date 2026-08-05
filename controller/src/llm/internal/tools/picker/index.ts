@@ -42,6 +42,7 @@ import tracksLikeThis from './tools/tracks-like-this.js';
 import tracksThatSoundLikeThis from './tools/tracks-that-sound-like-this.js';
 import searchByLyrics from './tools/search-by-lyrics.js';
 import searchBySound from './tools/search-by-sound.js';
+import deepCuts from './tools/deep-cuts.js';
 import recentlyAdded from './tools/recently-added.js';
 import starredSongs from './tools/starred-songs.js';
 import randomSongs from './tools/random-songs.js';
@@ -63,6 +64,7 @@ export const PICKER_TOOLS: readonly PickerToolModule[] = [
   tracksThatSoundLikeThis,
   searchByLyrics,
   searchBySound,
+  deepCuts,
   recentlyAdded,
   starredSongs,
   randomSongs,

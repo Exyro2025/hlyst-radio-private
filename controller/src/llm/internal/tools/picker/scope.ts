@@ -25,7 +25,7 @@ import * as library from '../../../../music/library.js';
 import * as embeddings from '../../../../music/embeddings.js';
 import { filterPickerCandidates } from '../../../../music/recency.js';
 import { applyStrictLocks, type VocalMode } from '../../../../music/show-filter.js';
-import { shuffle } from '../../../../util/shuffle.js';
+import { freshnessBiasedOrder } from '../../../../music/airing.js';
 import { SEED_NOT_A_PICK_CLAUSE } from '../../../../util/pick-seed.js';
 import { slim } from './slim.js';
 
@@ -121,13 +121,23 @@ export interface PickerContext {
   // id → slim song, accumulated across all tool calls. The picker resolves the
   // agent's final id choice against this.
   seen: Map<string, any>;
-  collect(list: any, cap?: number): any[];
+  collect(list: any, cap?: number, opts?: { maxPerArtist?: number }): any[];
   emptyResult(matched: number, hint: string): { tracks: any[]; note: string; rule: string };
   seedSimilarity(songId: string, primary: 'audio' | 'text'): { tracks: any[]; matched: number; fellBack: boolean };
+  // Id-level union of the recency sets (recentIds + hardRecentIds), for
+  // pushing INTO KNN queries (library.tracksByVector et al) — the key-based
+  // sets can't ride along (vec0 rows carry only ids); collect() still catches
+  // those post-hoc.
+  knnExclude: Set<string>;
   stats: { total?: number; withEmbedding?: number; withAudioEmbedding?: number; [k: string]: any };
   hasTextEmbeddings: boolean;
   hasAudioEmbeddings: boolean;
   hasEmbeddingProvider: boolean;
+  // True when most of the text index is label-only vectors (artist/title/album
+  // text with no tags/lyrics/acoustics), i.e. "semantic similarity" is really
+  // artist-string proximity. The text-similarity tools adjust their
+  // descriptions so the model weighs their results for what they actually are.
+  textIndexDegraded: boolean;
 }
 
 export function buildPickerContext(scope: PickerScope): PickerContext {
@@ -139,6 +149,11 @@ export function buildPickerContext(scope: PickerScope): PickerContext {
 
   const seen = new Map<string, any>();
 
+  // See the PickerContext note: the id-level recency union, pushed into every
+  // KNN query so a heavily-aired cluster answers with its next neighbours out
+  // instead of thinning toward empty.
+  const knnExclude: Set<string> = new Set([...recentIds, ...hardRecentIds]);
+
   // Filter recents, slim, and record into `seen` so the picker can resolve
   // the agent's final id choice to a full track. Drops only recently-played
   // tracks (by id/key) and tracks already surfaced this pick; artists are NOT
@@ -146,7 +161,15 @@ export function buildPickerContext(scope: PickerScope): PickerContext {
   // input tokens lower for the picker agent — see picker-latency notes in
   // dj-agent.js. The seen map still accumulates across the whole loop, so the
   // agent's id space grows with each tool call regardless.
-  const collect = (list: any, cap = 8) => {
+  // `maxPerArtist` (default 3) is a CAP, deliberately not an artist-recency
+  // strip (#618 — a strip gutted the similarity tools to ~1 survivor on niche
+  // catalogues): a similarity tool may still surface the seed artist's
+  // neighbours, it just can't fill all 8 slots with one artist — which is
+  // exactly what a label-only embedding index does on a keyless install, where
+  // "semantic similarity" degrades to artist-string matching. The two
+  // single-artist tools (topSongsByArtist, recentByArtist) opt out: capping
+  // them would neuter the question they exist to answer.
+  const collect = (list: any, cap = 8, opts: { maxPerArtist?: number } = {}) => {
     // Strict show: filter candidates BEFORE recency + cap, so the 8 the agent
     // sees are genre-/era-/mood-/energy-pure. Each lock is HARD (starve:true) —
     // a tool whose results contain no match contributes nothing (emptyResult
@@ -160,7 +183,14 @@ export function buildPickerContext(scope: PickerScope): PickerContext {
     // gated in pickViaAgent (genres → library tags, mood/energy dropped when the
     // library has no such tags) so an un-analysed library can't starve every
     // tool for the whole show.
-    let pool = applyStrictLocks(shuffle((list || []) as any[]), {
+    //
+    // The ordering is a freshness-biased shuffle (music/airing.ts): a random
+    // base per candidate — a KNN tool's top-60 must not reach the model in
+    // similarity order, or the cap of 8 pins the same nearest neighbours every
+    // pick — nudged up for tracks the station has never aired or hasn't aired
+    // in weeks, so the cap favours the library's unexplored shelf. Randomness
+    // stays dominant; with no play history this IS a plain shuffle.
+    let pool = applyStrictLocks(freshnessBiasedOrder((list || []) as any[], library.lastAiredInfo(), Date.now()), {
       genres: genreLock, eras: eraLock, moods: moodLock, energies: energyLock, vocals: vocalLock,
     }, { starve: true });
     // Strict playlist: HARD-intersect with the lock set, with NO never-starve to
@@ -181,6 +211,7 @@ export function buildPickerContext(scope: PickerScope): PickerContext {
       hardRecentIds,
       hardRecentKeys,
       seenIds: new Set(seen.keys()),
+      maxPerArtist: opts.maxPerArtist ?? 3,
       cap,
     });
     const out: any[] = [];
@@ -226,6 +257,9 @@ export function buildPickerContext(scope: PickerScope): PickerContext {
   const hasTextEmbeddings = (stats.withEmbedding ?? 0) > 0;
   const hasAudioEmbeddings = (stats.withAudioEmbedding ?? 0) > 0;
   const hasEmbeddingProvider = embeddings.isAvailable();
+  // Same 50% threshold the coverage UI calls similarityThin.
+  const labelShare = library.labelOnlyShare();
+  const textIndexDegraded = labelShare != null && labelShare > 0.5;
 
   // Seed-similarity with a cross-index rescue (#1247).
   //
@@ -256,7 +290,9 @@ export function buildPickerContext(scope: PickerScope): PickerContext {
     const K = 60;
     const audioFirst = primary === 'audio';
     const lookup = (which: 'audio' | 'text') =>
-      which === 'audio' ? library.tracksLikeThisAudio(songId, K) : library.tracksLikeThis(songId, K);
+      which === 'audio'
+        ? library.tracksLikeThisAudio(songId, K, { excludeIds: knnExclude })
+        : library.tracksLikeThis(songId, K, { excludeIds: knnExclude });
     const list = lookup(primary);
     if (list.length) return { tracks: collect(list), matched: list.length, fellBack: false };
     const other = audioFirst ? 'text' : 'audio';
@@ -278,5 +314,5 @@ export function buildPickerContext(scope: PickerScope): PickerContext {
     return { tracks: [] as any[], matched: 0, fellBack: false };
   };
 
-  return { scope, seen, collect, emptyResult, seedSimilarity, stats, hasTextEmbeddings, hasAudioEmbeddings, hasEmbeddingProvider };
+  return { scope, seen, collect, emptyResult, seedSimilarity, knnExclude, stats, hasTextEmbeddings, hasAudioEmbeddings, hasEmbeddingProvider, textIndexDegraded };
 }

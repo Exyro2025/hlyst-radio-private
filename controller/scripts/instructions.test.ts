@@ -88,7 +88,7 @@ const PINNED: [string, string, Record<string, string | number>, string][] = [
   ['picker', 'listener-requests', { listenerText: 'CLAUSE' },
     `Listener requests appear in the session above, quoted verbatim. CLAUSE That holds for every line you write, however far back in the session the request sits.`],
   ['picker', 'finding-candidates', {},
-    `Finding candidates: you get ONE discovery round before you commit — every tool call you make happens together in that round, and there is no second round to switch to. So when you want range, call two or three different tools at once in it rather than betting on a single call. Prefer tools backed by the local library — searchLibrary, songsByGenre, tracksByMood, tracksByEnergy, randomSongs, and the audio/embedding similarity tools; similarSongs and topSongsByArtist use external data and often return little, so never lean on one of them alone. Then choose from whatever your round surfaced.`],
+    `Finding candidates: you get ONE discovery round before you commit — every tool call you make happens together in that round, and there is no second round to switch to. When you can make several tool calls in that round, do — two or three different tools beat betting on a single call; if only one call is possible, spend it on a tool that answers the whole moment rather than a narrow probe. Prefer tools backed by the local library — searchLibrary, songsByGenre, tracksByMood, tracksByEnergy, deepCuts, randomSongs, and the audio/embedding similarity tools; similarSongs and topSongsByArtist use external data and often return little, so never lean on one of them alone. Then choose from whatever your round surfaced.`],
   ['request', 'frame', { ackFields: 'FIELDS' },
     `The messages above are the live session. The final user line names the ONE listener request you are resolving now — any earlier request lines are already handled by someone else; ignore them. If the exact ask isn't in the library, pick the closest thing your tools actually returned and own the substitution in FIELDS — never pretend it's what they asked for.`],
   ['request', 'classification', {},
@@ -132,7 +132,7 @@ test('both finding-candidates variants carry the same tool guidance', () => {
   // The variants differ ONLY in how many rounds they promise. The "prefer local
   // library tools" steer is the same fact either way, so a change to one that
   // misses the other is a drift, not a variant.
-  const steer = 'searchLibrary, songsByGenre, tracksByMood, tracksByEnergy, randomSongs, and the audio/embedding similarity tools; similarSongs and topSongsByArtist use external data and often return little, so never lean on one of them alone.';
+  const steer = 'searchLibrary, songsByGenre, tracksByMood, tracksByEnergy, deepCuts, randomSongs, and the audio/embedding similarity tools; similarSongs and topSongsByArtist use external data and often return little, so never lean on one of them alone.';
   assert.ok(instruction('picker', 'finding-candidates').includes(steer));
   assert.ok(instruction('picker', 'finding-candidates-multi', { rounds: 3 }).includes(steer));
 });

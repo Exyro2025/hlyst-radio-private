@@ -7,14 +7,38 @@ import { definePickerTool } from '../defs.js';
 
 export default definePickerTool({
   name: 'searchLibrary',
-  build: ({ collect, emptyResult }) => tool({
+  build: ({ collect, emptyResult, knnExclude }) => tool({
     description: 'Search the library for something NAMED — an artist, a song title, or a real genre word (e.g. "jazz", "punjabi"). Falls back to vibe search when nothing matches literally, so "punjabi r&b romantic" also works. Not for browsing by feel: a mood, an energy or "something like what\'s on now" belongs to tracksByMood, tracksByEnergy and the similarity tools, which read the station\'s own tagging instead of guessing from text.',
     inputSchema: z.object({
       query: z.string().describe('an artist name, song title, genre, or vibe'),
     }),
     execute: async ({ query }) => {
       try {
-        let songs = await subsonic.search(query, { songCount: 25 });
+        // Random page (0/25/50) of the relevance ranking, mirroring
+        // routes/request.ts — first-page-only made result 26+ of any query
+        // unreachable, so repeated searches for the same broad term always
+        // surfaced the same 25 songs.
+        //
+        // A deep page is only safe on a BROAD term. This tool's job is finding
+        // something NAMED, so on a narrow result set a deep page is the
+        // relevance TAIL: search "Karan Aujla" on a library holding 40 of that
+        // artist's tracks, roll offset 25, and the model gets 15 low-relevance
+        // hits — often other artists' tracks that merely mention the name — as
+        // the whole basis for the pick, since on a forced-tool provider this is
+        // its ONE discovery call. Falling back only on a completely EMPTY page
+        // missed that: 26–75 results took the tail two thirds of the time.
+        //
+        // A SHORT page is the signal. A full page means at least offset+25
+        // results exist (a genuinely broad term, where the deep page is
+        // legitimately diverse); anything less means we ran off the end of a
+        // narrow set and page 0 is the right answer. Costs one extra call only
+        // in that case.
+        const PAGE = 25;
+        const songOffset = Math.floor(Math.random() * 3) * PAGE;
+        let songs = await subsonic.search(query, { songCount: PAGE, songOffset });
+        if (songs.length < PAGE && songOffset > 0) {
+          songs = await subsonic.search(query, { songCount: PAGE });
+        }
         // A lexical miss is often just a spelling/transliteration variance —
         // resolve the query as an artist and retry with the library's actual
         // spelling ("Sikandar Kahlon" → the tagged "Sikander Kahlon").
@@ -31,7 +55,7 @@ export default definePickerTool({
           await library.load();
           const vec = await embeddings.embedQueryText(query.trim(), library.embeddingIndexTextMode());
           if (vec) {
-            const sem = collect(library.tracksByVector(vec, 20));
+            const sem = collect(library.tracksByVector(vec, 20, { excludeIds: knnExclude }));
             if (sem.length > 0) return sem;
           }
         }

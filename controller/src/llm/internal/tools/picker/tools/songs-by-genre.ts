@@ -12,7 +12,9 @@ export default definePickerTool({
       try {
         const name = await subsonic.resolveGenreName(genre);
         if (!name) return { error: `no library genre matching "${genre}"` };
-        const list = await subsonic.getSongsByGenre(name, { count: 50 });
+        // Sampled: a random page of the genre, not the same server-ordered
+        // head every call (see getSongsByGenreSampled).
+        const list = await subsonic.getSongsByGenreSampled(name, { count: 50 });
         const out = collect(list);
         return out.length ? out : emptyResult(list.length, `the "${name}" genre has nothing fresh right now — choose from your other tool results this round`);
       }

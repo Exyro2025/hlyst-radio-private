@@ -108,6 +108,28 @@ test('path-scoped tools are off unless their scope field is set', () => {
     .includes('showPlaylistTracks'));
 });
 
+test('deepCuts needs the library mirror, not an embedding index', () => {
+  // Airing memory reads the plays table joined against tracks — no vectors
+  // involved — so it lights up as soon as the library is synced, even on an
+  // install that never ran an embedding pass.
+  assert.ok(!namesOf(bareCtx()).includes('deepCuts'),
+    'deepCuts must be off with an empty library mirror');
+  assert.ok(namesOf(bareCtx({ stats: { mirrorTotal: 100, total: 100 } })).includes('deepCuts'));
+});
+
+test('deepCuts reads the MIRROR size, not the tagged count', () => {
+  // `stats.total` counts only TAGGED tracks. db.deepCutTracks queries `tracks`
+  // unconditionally, so a synced-but-untagged install has rows to sample — and
+  // is the install that needs this tool most, since nothing else there knows
+  // anything about the library. Gating on `total` left it dark exactly there.
+  assert.ok(
+    namesOf(bareCtx({ stats: { mirrorTotal: 50000, total: 0 } })).includes('deepCuts'),
+    'deepCuts must light up on a synced library the tagger has not reached',
+  );
+  // And a genuinely empty mirror still keeps it off, whatever `total` claims.
+  assert.ok(!namesOf(bareCtx({ stats: { mirrorTotal: 0, total: 0 } })).includes('deepCuts'));
+});
+
 test('the journey tool needs BOTH a waypoint and an audio index', () => {
   const waypointOnly = buildPickerContext(pickerScope({ audioWaypoint: [0.1, 0.2] }));
   assert.ok(!namesOf({ ...waypointOnly, hasAudioEmbeddings: false, hasTextEmbeddings: false, hasEmbeddingProvider: false })

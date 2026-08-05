@@ -12,8 +12,11 @@ import { definePickerTool } from '../defs.js';
 export default definePickerTool({
   name: 'searchByLyrics',
   available: ({ hasTextEmbeddings, hasEmbeddingProvider }) => hasTextEmbeddings && hasEmbeddingProvider,
-  build: ({ collect, emptyResult }) => tool({
-    description: 'Semantic lyric / theme search over the library — for thematic picks the mood vocab can\'t express, e.g. "songs about hometown", "tracks with hopeful lyrics", "feeling stuck".',
+  build: ({ collect, emptyResult, knnExclude, textIndexDegraded }) => tool({
+    description: 'Semantic lyric / theme search over the library — for thematic picks the mood vocab can\'t express, e.g. "songs about hometown", "tracks with hopeful lyrics", "feeling stuck".'
+      + (textIndexDegraded
+          ? ' NOTE: few tracks in this index carry lyric excerpts, so matches are mostly metadata text rather than actual lyrics — treat results loosely.'
+          : ''),
     // No k input: the agent reliably picked a small k, and recency filtering
     // then thins it further. Pull a wide fixed KNN (60) internally — collect()
     // still caps to 8 fresh ones. Mirrors the seed-similarity tools.
@@ -26,7 +29,7 @@ export default definePickerTool({
         await library.load();
         const vec = await embeddings.embedQueryText(query.trim(), library.embeddingIndexTextMode());
         if (!vec) return { error: 'embedding query failed' };
-        const list = library.tracksByVector(vec, 60);
+        const list = library.tracksByVector(vec, 60, { excludeIds: knnExclude });
         const out = collect(list);
         return out.length ? out : emptyResult(list.length, 'no thematic match in the lyric index — choose from your other tool results this round');
       }

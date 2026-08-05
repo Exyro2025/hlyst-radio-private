@@ -35,6 +35,7 @@ import { djObject, nearestId, modelTolerant } from '../llm/sdk.js';
 import * as budget from './dj-budget.js';
 import { withTrace, logEvent } from '../observability/events.js';
 import { recencyWindowsForLibrary, effectiveNoRepeatWindow, artistRootKey } from '../music/recency.js';
+import { EXPLORE_SEED_PROBABILITY } from '../music/airing.js';
 import { ARTIST_VARIETY_WINDOW, alternativeCandidates } from './dj-agent/artist-guard.js';
 import { hasEraBound, genreResolutionWarningOnce, type VocalMode } from '../music/show-filter.js';
 import { djCallsAllowed } from './listeners.js';
@@ -165,7 +166,10 @@ async function repickRequestFromSeen({ seen, badId, requester, text }:
 async function pickViaAgent(queue, ctx, { wantLink, audioWaypoint = null, current = null, showAt = null, rankTarget = null, linkAirAt = null }: { wantLink: boolean; audioWaypoint?: number[] | null; current?: any; showAt?: Date | null; rankTarget?: { bpm: number | null; key: string | null } | null; linkAirAt?: Date | null }): Promise<boolean> {
   await library.load();
   const stats = library.stats();
-  const windows = recencyWindowsForLibrary(stats.distinctArtists);
+  // Sized off the MIRROR, not `stats.total` (TAGGED tracks only) — see the same
+  // note in music/picker.ts. Both paths must agree on how big the library is.
+  const librarySize = stats.mirrorTotal || stats.total;
+  const windows = recencyWindowsForLibrary(stats.distinctArtists, librarySize);
   // Scale the track-recency window to the tagged library's artist diversity:
   // dense catalogues keep the long anti-repeat guard, while small-artist
   // libraries don't exclude every real candidate before the picker sees it.
@@ -181,7 +185,7 @@ async function pickViaAgent(queue, ctx, { wantLink, audioWaypoint = null, curren
   // and (unlike recentIds/recentKeys above) this survives the tool-level
   // starvation cascade. Clamped to library size so a small catalogue never
   // fully blocks; 0 = off, leaving the relaxable window in sole charge.
-  const effN = effectiveNoRepeatWindow(settings.get().llm?.noRepeatWindow ?? 0, stats.total);
+  const effN = effectiveNoRepeatWindow(settings.get().llm?.noRepeatWindow ?? 0, librarySize);
   const { ids: hardRecentIds, keys: hardRecentKeys } = queue.recentlyPlayedByCount(effN);
 
   // Show playlist anchor: resolve the union here (async Navidrome fetch) and
@@ -740,12 +744,25 @@ export async function runTrackEvent(queue, ctx, { wantLink, showAt = null, prede
     // Mirrored by the pool picker's listener-liked candidate source, so both
     // paths lean the same way. A lean, never a lock: VARIETY still applies.
     const favClause = likes.favouritesClause(settings.get()?.likes);
+    // Exploration nudge (ε-greedy seed break, music/airing.ts): every pick
+    // seeding discovery from the on-air track is a random walk that never
+    // leaves its similarity cluster, so a fraction of picks steer the round
+    // toward the unaired shelf instead. Deliberately carries NO track id — a
+    // raw id in the event message is the #1247 seed-echo trap (an id no tool
+    // returned can only be a discarded pick); the deepCuts tool is the safe
+    // carrier of concrete candidates. Skipped mid-run/journey (they own the
+    // direction) and on strict-playlist shows (deep cuts are almost surely
+    // off-playlist, so the call would be spent on an emptyResult).
+    const exploreClause = !inRun && !audioWaypoint && !ctx?.activeShow?.playlistStrict
+      && Math.random() < EXPLORE_SEED_PROBABILITY
+      ? ' Exploration nudge: include deepCuts in your discovery round this pick — surface something the station has never aired (or hasn\'t in weeks) and give it real consideration when it can fit the moment.'
+      : '';
     const eventText = `Now playing "${current?.title}" by ${current?.artist}`
       + (current?.id ? ` [id: ${current.id}]` : '')
       + (previous ? ` (after "${previous.title}" by ${previous.artist})` : '')
       + '. Pick the track to play next.'
       + linkClause;
-    const promptSuffix = `${clockClause}${favClause}${effectClause}${runClause}${journeyClause}`;
+    const promptSuffix = `${clockClause}${favClause}${effectClause}${runClause}${journeyClause}${exploreClause}`;
     session.appendTurn({
       role: 'event', kind: 'pick', text: eventText,
       meta: promptSuffix ? { promptSuffix } : {},

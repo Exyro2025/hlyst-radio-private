@@ -347,13 +347,17 @@ export function clampDiscoverySteps(raw: unknown, def: number): number {
 }
 
 // Count-based hard no-repeat window (distinct plays). Floored to an integer in
-// [0, 290]: 0 disables; the 290 ceiling stays under the 300-entry _recentPlays
-// cap so the requested window is never silently truncated by a too-short
-// sidecar. Library-size clamping happens separately at use time
-// (effectiveNoRepeatWindow). Non-numeric/NaN falls back to `def`.
+// [0, 1000]: 0 disables. The ceiling stays under the _recentPlays sidecar cap
+// (config.queue.recentPlaysMax) so the requested window is never silently
+// truncated by a too-short sidecar — 1000 against a 2500-entry cap. It was 290
+// against a 300-entry cap, which is under a day of airtime even maxed out and
+// far too short a memory for a 10k–50k library; the sidecar was sized up with
+// the ceiling, so it stays honestly suppliable. Library-size clamping happens
+// separately at use time (effectiveNoRepeatWindow). Non-numeric/NaN falls back
+// to `def`.
 export function clampNoRepeatWindow(raw: unknown, def: number): number {
   if (typeof raw !== 'number' || !Number.isFinite(raw)) return def;
-  return Math.min(290, Math.max(0, Math.floor(raw)));
+  return Math.min(1000, Math.max(0, Math.floor(raw)));
 }
 
 // Validate + apply the connection fields shared by the primary LLM leg and its
