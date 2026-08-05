@@ -6,7 +6,7 @@
 // (which resets the AiFill box).
 
 import type { ChangeEvent, RefObject } from 'react';
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Input } from '../../ui/input';
 import { Textarea } from '../../ui/textarea';
 import { Label } from '../../ui/label';
@@ -93,6 +93,23 @@ export function ShowEditor({
   const unknownGenres = genres.length
     ? show.genres.filter(g => !knownGenres.has(norm(g)))
     : [];
+  // Discoverability hint only: blocklist rules scoped to this show are edited
+  // on Library → Blocked, not here — but a filter that silently loses to a rule
+  // there would be baffling without a pointer. Best-effort, 0 hides the line.
+  const [scopedRuleCount, setScopedRuleCount] = useState(0);
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const r = await adminFetch('/library/blocklist');
+        if (!r.ok || cancelled) return;
+        const j = await r.json() as { rules?: Array<{ showIds?: string[] }> };
+        if (cancelled) return;
+        setScopedRuleCount((j.rules || []).filter(ru => ru.showIds?.includes(show.id)).length);
+      } catch {}
+    })();
+    return () => { cancelled = true; };
+  }, [adminFetch, show.id]);
   return (
     <EditorDialog
       open
@@ -510,6 +527,14 @@ export function ShowEditor({
               onChange={excludedPlaylistIds => update({ excludedPlaylistIds })}
             />
           </Field>
+
+          {scopedRuleCount > 0 && (
+            <span className="field-hint">
+              {scopedRuleCount} blocklist rule{scopedRuleCount === 1 ? '' : 's'} also
+              appl{scopedRuleCount === 1 ? 'ies' : 'y'} to this show — managed on{' '}
+              <a href="/admin/library?tab=blocked" className="underline">Library → Blocked</a>.
+            </span>
+          )}
         </Card>
 
         <Card flat title="Brief" bodyClass="grid gap-3.5">
