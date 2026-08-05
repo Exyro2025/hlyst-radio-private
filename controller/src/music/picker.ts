@@ -96,7 +96,11 @@ async function memo(key, ttl, fn) {
   const hit = cache.get(key);
   if (hit && Date.now() - hit.at < ttl) return hit.val;
   const val = await fn();
-  cache.set(key, { val, at: Date.now() });
+  // An empty result is not knowledge worth pinning for the whole TTL — a
+  // transient Navidrome error or a momentary miss used to blank that source
+  // for 30 minutes. Re-asking next pick costs one call.
+  const isEmpty = Array.isArray(val) ? val.length === 0 : val == null;
+  if (!isEmpty) cache.set(key, { val, at: Date.now() });
   return val;
 }
 
@@ -218,9 +222,17 @@ function notRecent(recentIds: Set<string>) {
   return (t: Candidate) => t && t.id && !recentIds.has(t.id);
 }
 
-function sampleWithRecentFallback(items: Candidate[], recentIds: Set<string>, cap: number): Candidate[] {
-  const fresh = items.filter(notRecent(recentIds));
-  return (fresh.length > 0 ? fresh : items).slice(0, cap);
+// Fresh-only sample: recently-played items drop, full stop. This used to
+// never-starve (return the UNFILTERED list when everything was recent), which
+// re-emitted exactly the tracks that just played from the narrowest sources —
+// the moment a similarity cluster was fully aired, the guard against
+// repetition became a source of it. Genuine starvation is handled at wider
+// scopes: the final pool has its own relaxation cascade, the unconditional
+// explore slot keeps the pool fed, and behind everything sits the auto.m3u
+// coast — so a source with nothing fresh should say so by contributing
+// nothing.
+function sampleFresh(items: Candidate[], recentIds: Set<string>, cap: number): Candidate[] {
+  return items.filter(notRecent(recentIds)).slice(0, cap);
 }
 
 // Walk a list of albums and return up to `perAlbum` tracks from each, capped.
@@ -310,7 +322,7 @@ async function buildCandidates(mood: string | null | undefined, recentIds: Set<s
       });
       // Freshness-biased order (never the server's Last.fm rank): an
       // un-shuffled slice pinned the same top-8 popular tracks per seed.
-      add('similar', sampleWithRecentFallback(freshnessBiasedOrder(lean(similar), aired, nowMs), recentIds, nz(CAP_SIMILAR)));
+      add('similar', sampleFresh(freshnessBiasedOrder(lean(similar), aired, nowMs), recentIds, nz(CAP_SIMILAR)));
     } catch {}
   }
 
@@ -326,7 +338,7 @@ async function buildCandidates(mood: string | null | undefined, recentIds: Set<s
       // the literal 4 nearest of 15, deterministic per seed, and contributed
       // zero when the cluster was fully recent (the exact stuck-rotation case).
       const knn = library.tracksLikeThis(currentTrack.id, 30, { excludeIds: knnExclude });
-      add('embedding-similar', sampleWithRecentFallback(freshnessBiasedOrder(lean(knn), aired, nowMs), recentIds, nz(CAP_EMBEDDING_SIMILAR)));
+      add('embedding-similar', sampleFresh(freshnessBiasedOrder(lean(knn), aired, nowMs), recentIds, nz(CAP_EMBEDDING_SIMILAR)));
     } catch {}
   }
 
@@ -340,7 +352,7 @@ async function buildCandidates(mood: string | null | undefined, recentIds: Set<s
     try {
       if (await subsonic.supportsSonicSimilarity()) {
         const sonic = await subsonic.getSonicSimilarTracks(currentTrack.id, { count: 20 });
-        add('sonic-similar', sampleWithRecentFallback(freshnessBiasedOrder(lean(sonic), aired, nowMs), recentIds, nz(CAP_SONIC_SIMILAR)));
+        add('sonic-similar', sampleFresh(freshnessBiasedOrder(lean(sonic), aired, nowMs), recentIds, nz(CAP_SONIC_SIMILAR)));
       }
     } catch {}
   }
@@ -359,12 +371,12 @@ async function buildCandidates(mood: string | null | undefined, recentIds: Set<s
   if (audioWaypoint && audioWaypoint.length) {
     try {
       const knn = library.tracksByAudioVector(audioWaypoint, 30, { excludeIds: knnExclude });
-      add('audio-journey', sampleWithRecentFallback(freshnessBiasedOrder(lean(knn), aired, nowMs), recentIds, nz(CAP_AUDIO_SIMILAR)));
+      add('audio-journey', sampleFresh(freshnessBiasedOrder(lean(knn), aired, nowMs), recentIds, nz(CAP_AUDIO_SIMILAR)));
     } catch {}
   } else if (currentTrack?.id) {
     try {
       const knn = library.tracksLikeThisAudio(currentTrack.id, 30, { excludeIds: knnExclude });
-      add('audio-similar', sampleWithRecentFallback(freshnessBiasedOrder(lean(knn), aired, nowMs), recentIds, nz(CAP_AUDIO_SIMILAR)));
+      add('audio-similar', sampleFresh(freshnessBiasedOrder(lean(knn), aired, nowMs), recentIds, nz(CAP_AUDIO_SIMILAR)));
     } catch {}
   }
 
@@ -380,7 +392,7 @@ async function buildCandidates(mood: string | null | undefined, recentIds: Set<s
         const favs = likes
           .topLiked({ windowDays: likeCfg.windowDays, limit: likeCfg.maxTracks })
           .map((f) => f.track);
-        add('listener-liked', sampleWithRecentFallback(lean(shuffle(favs)), recentIds, nz(CAP_LIKED)));
+        add('listener-liked', sampleFresh(lean(shuffle(favs)), recentIds, nz(CAP_LIKED)));
       } catch {}
     }
   }
@@ -448,7 +460,7 @@ async function buildCandidates(mood: string | null | undefined, recentIds: Set<s
       // mood/energy filters on top (no-op in soft mode).
       const leaned = lean(preferEnergy(exact.length ? exact : collected, showFilter!.energies));
       // Strict bumps the cap so this genre-native source dominates the merged pool.
-      add('show-genre', sampleWithRecentFallback(shuffle(leaned), recentIds, strict ? CAP_SHOW_GENRE_STRICT : CAP_SHOW_GENRE));
+      add('show-genre', sampleFresh(shuffle(leaned), recentIds, strict ? CAP_SHOW_GENRE_STRICT : CAP_SHOW_GENRE));
     } catch {}
   }
 
@@ -457,7 +469,7 @@ async function buildCandidates(mood: string | null | undefined, recentIds: Set<s
   // is hard-filtered to its ids below); in soft mode it's just the dominant
   // source, with the discovery sources contributing a (narrowed) minority.
   if (hasPlaylist) {
-    add('show-playlist', sampleWithRecentFallback(shuffle(playlistPool!.tracks), recentIds, strictPlaylist ? CAP_SHOW_PLAYLIST_STRICT : CAP_SHOW_PLAYLIST));
+    add('show-playlist', sampleFresh(shuffle(playlistPool!.tracks), recentIds, strictPlaylist ? CAP_SHOW_PLAYLIST_STRICT : CAP_SHOW_PLAYLIST));
   }
 
   // 2. Mood-tagged library (LLM-built tags, may be sparse). A multi-mood show
@@ -475,7 +487,7 @@ async function buildCandidates(mood: string | null | undefined, recentIds: Set<s
       }
     }
     const moodHits = shuffle(lean(preferEnergy(moodPool, showFilter?.energies)));
-    add('mood-library', sampleWithRecentFallback(moodHits, recentIds, CAP_MOOD_LIBRARY));
+    add('mood-library', sampleFresh(moodHits, recentIds, CAP_MOOD_LIBRARY));
   }
 
   // 3. Mood-matched Navidrome playlists — operator's hand curation. Skipped when
@@ -497,7 +509,7 @@ async function buildCandidates(mood: string | null | undefined, recentIds: Set<s
           plTracks.push(...songs);
         } catch {}
       }
-      add('playlist', sampleWithRecentFallback(lean(shuffle(plTracks)), recentIds, nz(CAP_PLAYLIST)));
+      add('playlist', sampleFresh(lean(shuffle(plTracks)), recentIds, nz(CAP_PLAYLIST)));
     } catch {}
   }
 
@@ -510,7 +522,7 @@ async function buildCandidates(mood: string | null | undefined, recentIds: Set<s
       const albums = await subsonic.getRecentlyAddedAlbums({ size: 12 });
       return tracksFromAlbums(shuffle(albums), 3, 40);
     });
-    add('recent', sampleWithRecentFallback(lean(shuffle(recentPool)), recentIds, nz(CAP_RECENT)));
+    add('recent', sampleFresh(lean(shuffle(recentPool)), recentIds, nz(CAP_RECENT)));
   } catch {}
 
   // 5. Frequent albums — scrobble-backed favourites. Same wide-pool-then-
@@ -526,7 +538,7 @@ async function buildCandidates(mood: string | null | undefined, recentIds: Set<s
       if (!albums.length && offset > 0) albums = await subsonic.getFrequentAlbums({ size: 12 });
       return tracksFromAlbums(shuffle(albums), 3, 40);
     });
-    add('frequent', sampleWithRecentFallback(lean(shuffle(freqPool)), recentIds, nz(CAP_FREQUENT)));
+    add('frequent', sampleFresh(lean(shuffle(freqPool)), recentIds, nz(CAP_FREQUENT)));
   } catch {}
 
   // 6. Similar-artist top songs — adjacency through Last.fm artist graph.
@@ -556,7 +568,10 @@ async function buildCandidates(mood: string | null | undefined, recentIds: Set<s
       );
       add(
         'similar-artist',
-        sampleWithRecentFallback(lean(similarArtistTracks), recentIds, nz(CAP_SIMILAR_ARTIST)),
+        // Freshness-ordered: the memo holds a popularity-ranked slice, and an
+        // un-shuffled cut of it served the same 4 tracks, in the same order,
+        // for the whole 30-minute TTL.
+        sampleFresh(freshnessBiasedOrder(lean(similarArtistTracks), aired, nowMs), recentIds, nz(CAP_SIMILAR_ARTIST)),
       );
     } catch {}
   }
@@ -571,7 +586,7 @@ async function buildCandidates(mood: string | null | undefined, recentIds: Set<s
   // fixed crate and the pool can never leave the bubble it is in.
   try {
     const wide = await subsonic.getRandomSongs({ size: 12 });
-    add('explore', sampleWithRecentFallback(
+    add('explore', sampleFresh(
       lean(freshnessBiasedOrder(wide, aired, nowMs)),
       recentIds,
       nz(CAP_EXPLORE),
@@ -582,11 +597,11 @@ async function buildCandidates(mood: string | null | undefined, recentIds: Set<s
   if (pool.length < 8) {
     try {
       const starred = await subsonic.getStarred();
-      add('starred', sampleWithRecentFallback(shuffle(starred), recentIds, 4));
+      add('starred', sampleFresh(shuffle(starred), recentIds, 4));
     } catch {}
     try {
       const random = await subsonic.getRandomSongs({ size: 10 });
-      add('random', sampleWithRecentFallback(random, recentIds, 4));
+      add('random', sampleFresh(random, recentIds, 4));
     } catch {}
   }
 
