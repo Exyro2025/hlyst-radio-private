@@ -49,6 +49,13 @@ end
 np_tmp_dir = ensure_tmp_dir("#{state_dir}/tmp/now-playing")
 jingle_tmp_dir = ensure_tmp_dir("#{state_dir}/tmp/jingle")
 bed_tmp_dir = ensure_tmp_dir("#{state_dir}/tmp/bed")
+starve_tmp_dir = ensure_tmp_dir("#{state_dir}/tmp/starve")
+
+# MUSIC STARVE GUARD (#1300 bug 7) — the latch only. Declared up here because
+# the jingles gate reads it from a thunk at line ~962, long before the tick
+# that drives it can be registered (the tick needs idle_mode, defined ~1214).
+# Same lazy-thunk pattern bed_on_air already uses.
+music_starved = ref(false)
 
 # ---------------------------------------------------------------------------
 # RUNTIME SETTINGS — written by the controller at startup, read here.
@@ -959,7 +966,7 @@ music =
     )
     # A bed on air makes jingles unavailable (see bed_on_air above) so the
     # rotate can't split a bed from the song it ramps into.
-    jingles = source.available(jingles, {not bed_on_air()})
+    jingles = source.available(jingles, {not bed_on_air() and not music_starved()})
     rotate(
       weights=[1, jingle_ratio()],  # 1 jingle for every N music tracks (settings.json)
       [jingles, music]
@@ -1218,6 +1225,97 @@ radio = switch(
 # starves Icecast (/stream.mp3 404s) — measured in ANY position, so
 # reordering doesn't help. The emergency single already covers a dead source;
 # don't reintroduce it.
+
+# ---------------------------------------------------------------------------
+# MUSIC STARVE GUARD (#1300 bug 7)
+# ---------------------------------------------------------------------------
+# `rotate` skips unavailable sources, so with the music chain starved
+# (Navidrome unreachable, auto.m3u empty or exhausted) the jingle rotate above
+# serves stingers back to back forever — and the `emergency` fallback CANNOT
+# see it, because `radio` is still available: it is producing jingles. Measured
+# on 2.4.5 with an empty auto.m3u: music_ready=false, jingles_ready=true,
+# radio_ready=true. That is the bug in one line.
+#
+# So sample the PRE-rotate chain (music_meta — the same handle on_metadata
+# uses) and, once it has been starved for a sustained window, make jingles
+# unavailable. The rotate empties, `radio` goes unavailable, and the emergency
+# single fires exactly as it was always meant to.
+#
+# The window is not just a false-positive guard, it IS the "a jingle may cover
+# a brief hiccup" behaviour: the chain is legitimately not-ready at a track
+# boundary while a request resolves (the controller bounds that at
+# SKIP_COMMIT_WAIT_MS = 20s), so a blip is still papered over by a stinger and
+# only a sustained outage escalates. Recovery is unconditional: any tick that
+# sees the source ready clears the latch, no restart.
+#
+# Suppressed while the idle gate holds the programme frozen for an empty room —
+# "the music source is starved" is not a meaningful claim about a station
+# nobody is listening to. Entering idle clears the latch outright, so the first
+# listener back gets a full fresh window rather than a stale verdict.
+STARVE_GRACE_SEC = 30.0
+STARVE_SAMPLE_SEC = 1.0
+
+starved_for = ref(0.0)
+starved_since = ref(0.0)
+
+# NEVER let this raise. An uncaught exception inside a thread.run callback kills
+# that thread PERMANENTLY — the guard would freeze at whatever it last latched,
+# worst case the emergency loop forever with no path back. Observed directly
+# while developing this (an EACCES on the write killed the tick outright), and
+# the realistic trigger is the same unwritable state mount ensure_tmp_dir
+# already defends against. Reporting must not share a failure domain with the
+# guard itself.
+def write_starve_marker(starved, since) =
+  try
+    file.write(
+      data=json.stringify(compact=true, {
+        starved = starved,
+        since = since,
+        at = time()
+      }),
+      atomic=true,
+      temp_dir=starve_tmp_dir,
+      "#{state_dir}/music-starved.json"
+    )
+  catch err do
+    log(label="subwave", "music-starved.json write failed (#{err})")
+  end
+end
+
+# Publish the healthy state at startup so a working station has the file.
+write_starve_marker(false, 0.0)
+
+thread.run(every=STARVE_SAMPLE_SEC, fun () -> begin
+  if idle_mode() then
+    starved_for := 0.0
+    if music_starved() then
+      music_starved := false
+      write_starve_marker(false, 0.0)
+    end
+  elsif source.is_ready(music_meta) then
+    starved_for := 0.0
+    if music_starved() then
+      music_starved := false
+      log(label="subwave", "music source recovered - jingle rotate re-armed")
+      write_starve_marker(false, 0.0)
+    end
+  else
+    starved_for := starved_for() + STARVE_SAMPLE_SEC
+    if music_starved() then
+      # Heartbeat: refreshes `at` so the controller can tell a live outage from
+      # a marker left behind by a mixer that died mid-outage.
+      write_starve_marker(true, starved_since())
+    elsif starved_for() >= STARVE_GRACE_SEC then
+      music_starved := true
+      starved_since := time()
+      log(
+        label="subwave",
+        "MUSIC SOURCE STARVED for #{starved_for()}s - jingles gated off, emergency loop takes over"
+      )
+      write_starve_marker(true, starved_since())
+    end
+  end
+end)
 
 # ---------------------------------------------------------------------------
 # BROADCAST BUS — masters preserved; the brick-wall limiter is the ONLY
