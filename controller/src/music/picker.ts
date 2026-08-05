@@ -106,6 +106,41 @@ async function memo(key, ttl, fn) {
 // CACHE_TTL_MS otherwise.
 export function clearPoolCache() {
   cache.clear();
+  offered.clear();
+}
+
+// Offered-but-not-picked memory. The 30-min memos mean several consecutive
+// picks draw the non-similarity half of the pool from the SAME frozen fetches,
+// and nothing used to remember which candidates the model had already been
+// shown and passed over — so the same names re-surfaced pick after pick for
+// the whole TTL. Each time a candidate reaches the final pool without being
+// chosen it accrues a soft ranking penalty (capped, decaying with the memo
+// window); the chosen track's entry clears. A penalty, never a filter — a
+// repeatedly-offered track can still win when it genuinely fits.
+const OFFER_PENALTY = 0.15;
+const OFFER_PENALTY_CAP = 0.45;
+const offered = new Map<string, { count: number; at: number }>();
+
+function offerPenalty(id: string | undefined, nowMs: number): number {
+  if (!id) return 0;
+  const e = offered.get(id);
+  if (!e || nowMs - e.at > CACHE_TTL_MS) return 0;
+  return Math.min(OFFER_PENALTY_CAP, e.count * OFFER_PENALTY);
+}
+
+function recordOffered(ids: Array<string | undefined>) {
+  const now = Date.now();
+  // Lazy sweep so the map tracks the live memo window, not all time.
+  if (offered.size > 500) {
+    for (const [id, e] of offered) {
+      if (now - e.at > CACHE_TTL_MS) offered.delete(id);
+    }
+  }
+  for (const id of ids) {
+    if (!id) continue;
+    const e = offered.get(id);
+    offered.set(id, { count: (e?.count ?? 0) + 1, at: now });
+  }
 }
 
 // --- Tempo / harmonic compatibility (Stage B, soft re-rank only) -----------
@@ -146,7 +181,7 @@ function softRankByCompat(pool: Candidate[], current: { bpm: number | null; key:
           })()
         : 0;
       const fresh = AIRING_RANK_WEIGHT * freshness(lastAiredMsOf(t, aired), now);
-      return { t, score: Math.random() + compat + fresh };
+      return { t, score: Math.random() + compat + fresh - offerPenalty(t.id, now) };
     })
     .sort((x, y) => y.score - x.score)
     .map((s) => s.t);
@@ -785,6 +820,10 @@ export async function pickViaPool(queue, ctx, rankTarget: { bpm: number | null; 
     }
   }
 
+  // Offered-memory: every candidate reaching the model accrues its soft
+  // penalty for future picks; whichever one is chosen clears below.
+  recordOffered(candidates.map((c) => c.id));
+
   const recentPlays = summariseRecent(queue);
   // The model's recent transition asks, for the deliberate-variety nudge —
   // only consulted by pickNextTrack when effects are active. Guarded call:
@@ -896,6 +935,7 @@ export async function pickViaPool(queue, ctx, rankTarget: { bpm: number | null; 
     // take the top candidate rather than returning null, which would starve
     // the queue and drop the stream to the generic auto.m3u playlist.
     queue.log('error', `picker LLM failed: ${err.message} — falling back to first pool candidate`);
+    if (candidates[0]?.id) offered.delete(candidates[0].id);
     return {
       song: candidates[0],
       reason: 'fallback (LLM pick failed)',
@@ -921,12 +961,14 @@ export async function pickViaPool(queue, ctx, rankTarget: { bpm: number | null; 
       'error',
       `picker returned unknown id ${pickRaw?.id}; falling back to first candidate`,
     );
+    if (candidates[0]?.id) offered.delete(candidates[0].id);
     return {
       song: candidates[0],
       reason: 'fallback (LLM returned invalid id)',
     };
   }
 
+  if (chosen.id) offered.delete(chosen.id);
   return {
     song: chosen,
     reason: pickRaw.reason || null,
