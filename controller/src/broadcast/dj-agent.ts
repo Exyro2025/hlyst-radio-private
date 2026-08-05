@@ -166,7 +166,10 @@ async function repickRequestFromSeen({ seen, badId, requester, text }:
 async function pickViaAgent(queue, ctx, { wantLink, audioWaypoint = null, current = null, showAt = null, rankTarget = null, linkAirAt = null }: { wantLink: boolean; audioWaypoint?: number[] | null; current?: any; showAt?: Date | null; rankTarget?: { bpm: number | null; key: string | null } | null; linkAirAt?: Date | null }): Promise<boolean> {
   await library.load();
   const stats = library.stats();
-  const windows = recencyWindowsForLibrary(stats.distinctArtists, stats.total);
+  // Sized off the MIRROR, not `stats.total` (TAGGED tracks only) — see the same
+  // note in music/picker.ts. Both paths must agree on how big the library is.
+  const librarySize = stats.mirrorTotal || stats.total;
+  const windows = recencyWindowsForLibrary(stats.distinctArtists, librarySize);
   // Scale the track-recency window to the tagged library's artist diversity:
   // dense catalogues keep the long anti-repeat guard, while small-artist
   // libraries don't exclude every real candidate before the picker sees it.
@@ -182,7 +185,7 @@ async function pickViaAgent(queue, ctx, { wantLink, audioWaypoint = null, curren
   // and (unlike recentIds/recentKeys above) this survives the tool-level
   // starvation cascade. Clamped to library size so a small catalogue never
   // fully blocks; 0 = off, leaving the relaxable window in sole charge.
-  const effN = effectiveNoRepeatWindow(settings.get().llm?.noRepeatWindow ?? 0, stats.total);
+  const effN = effectiveNoRepeatWindow(settings.get().llm?.noRepeatWindow ?? 0, librarySize);
   const { ids: hardRecentIds, keys: hardRecentKeys } = queue.recentlyPlayedByCount(effN);
 
   // Show playlist anchor: resolve the union here (async Navidrome fetch) and

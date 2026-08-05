@@ -66,6 +66,33 @@ async function main() {
     assert.equal(airing.lastAiredMsOf({ id: 'id-3', title: 'Unheard', artist: 'Y' }, index), null);
   });
 
+  console.log('\nunaired flag (an unanswerable index must not answer):');
+
+  await test('an empty index yields undefined, never "everything is unaired"', () => {
+    // EMPTY_AIRED_INDEX is what library.lastAiredInfo() returns on BOTH of its
+    // failure paths (unloaded library, a thrown DB read). Read as history, every
+    // candidate carries `unaired: true` and PICKER_CRITERIA's VARIETY rule tells
+    // the model to prefer all of them equally — a uniform lie rather than an
+    // absent signal, with nothing distinguishing the two.
+    assert.equal(airing.hasAiringHistory(airing.EMPTY_AIRED_INDEX), false);
+    assert.equal(airing.unairedFlag({ id: 'anything', title: 'T', artist: 'A' }, airing.EMPTY_AIRED_INDEX), undefined);
+  });
+
+  await test('with real history the flag is true only for tracks with no airing', () => {
+    const index = { byId: new Map([['aired', now - DAY]]), byKey: new Map<string, number>() };
+    assert.equal(airing.hasAiringHistory(index), true);
+    assert.equal(airing.unairedFlag({ id: 'aired', title: 'A', artist: 'a' }, index), undefined);
+    assert.equal(airing.unairedFlag({ id: 'unheard', title: 'B', artist: 'b' }, index), true);
+  });
+
+  await test('a key-only index still counts as history', () => {
+    // Backfilled plays carry no track id; the key half alone is real history.
+    const index = { byId: new Map<string, number>(), byKey: new Map([['song|artist', now - DAY]]) };
+    assert.equal(airing.hasAiringHistory(index), true);
+    assert.equal(airing.unairedFlag({ id: 'x', title: 'Song', artist: 'Artist' }, index), undefined);
+    assert.equal(airing.unairedFlag({ id: 'y', title: 'Other', artist: 'Artist' }, index), true);
+  });
+
   console.log('\nfreshness-biased order:');
 
   await test('unaired tracks win the cap more often, but never deterministically', () => {
@@ -134,6 +161,19 @@ async function main() {
     assert.equal(db.deepCutTracks(cutoff, 2).length, 2);
   });
 
+  await test('deepCutTracks still returns whole track records after the id/row split', () => {
+    // The sampling runs as an id-only scan plus a row fetch (so a 50k library
+    // isn't materialised in full, fat JSON columns and all, to keep 60 rows).
+    // The caller still gets rowToTrack output, not bare ids.
+    const cutoff = iso(now + DAY);
+    const rows = db.deepCutTracks(cutoff, 10);
+    const t3 = rows.find((r) => r.id === 't3');
+    assert.ok(t3, 't3 missing from the sample');
+    assert.equal(t3!.title, 'Song t3');
+    assert.equal(t3!.artist, 'A');
+  });
+
+
   console.log('\nrecency-aware KNN (excludeIds):');
 
   await test('excluded ids are skipped IN the walk, widening to the next neighbours out', () => {
@@ -155,6 +195,41 @@ async function main() {
     );
     // The seed itself stays excluded alongside the set.
     assert.ok(!db.knnById('t1', 5, { excludeIds: new Set(['t2']) }).some((h) => h.id === 't1'));
+  });
+
+  await test('a huge exclude set of NON-indexed ids still returns k', () => {
+    // The picker passes its recency union, most of whose ids were never
+    // embedded (auto.m3u plays, backfilled history) and so cannot displace a
+    // hit. Widening LIMIT by the raw set SIZE read hundreds of rows to discard;
+    // the bounded first pass must still find k.
+    const ghosts = new Set(Array.from({ length: 800 }, (_, i) => `ghost-${i}`));
+    assert.deepEqual(db.knnById('t1', 2, { excludeIds: ghosts }).map((h) => h.id), ['t2', 't3']);
+  });
+
+  await test('an exclude set that really covers the near neighbours falls through to the exact pass', () => {
+    // k=1 bounds the first pass at seed + k + 3k rows. Excluding more near
+    // neighbours than that must still reach the survivor rather than come back
+    // short — that is the guarantee the raw-size widening gave, and the bounded
+    // pass is only allowed to be cheaper, never wrong.
+    for (let i = 0; i < 8; i++) {
+      const v = new Float32Array(768);
+      v[0] = 1; v[1] = 0.11 + i * 0.001;
+      db.upsertTrackMeta(`n${i}`, { title: `Near ${i}`, artist: 'A', album: 'B', duration: 200 });
+      db.upsertTrackVector(`n${i}`, v);
+    }
+    const near = new Set(['t2', ...Array.from({ length: 8 }, (_, i) => `n${i}`)]);
+    assert.deepEqual(db.knnById('t1', 1, { excludeIds: near }).map((h) => h.id), ['t3']);
+  });
+
+  console.log('\naudio-vector coverage probe:');
+
+  await test('hasAudioVector reports coverage without decoding the blob', () => {
+    const v = new Float32Array(512);
+    v[0] = 1;
+    db.upsertTrackAudioVector('t2', v);
+    assert.equal(db.hasAudioVector('t2'), true);
+    assert.equal(db.hasAudioVector('t3'), false);
+    assert.equal(db.hasAudioVector('nope'), false);
   });
 
   if (failures) {

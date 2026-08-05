@@ -59,6 +59,32 @@ export function lastAiredMsOf(song: CandidateLike, index: AiredIndex): number | 
   return null;
 }
 
+// Whether this index carries any airing history at all. An EMPTY index is what
+// library.lastAiredInfo() returns on BOTH of its failure paths — an unloaded
+// library, and a thrown DB read (a locked handle during a tagger checkpoint,
+// WAL contention, a handle swap mid-pick) — and it is also what a station that
+// has genuinely never aired anything looks like.
+export function hasAiringHistory(index: AiredIndex): boolean {
+  return index.byId.size > 0 || index.byKey.size > 0;
+}
+
+// The `unaired` flag the pickers publish to the model: true when the station
+// has provably never aired this track, undefined when the question can't be
+// answered. It is deliberately NOT `lastAiredMsOf(...) == null`.
+//
+// PICKER_CRITERIA's VARIETY rule tells the model to prefer an unaired candidate
+// over a familiar staple, so the flag has to mean something. Read off an empty
+// index every candidate carries it, and the signal degrades to a uniform lie
+// rather than to absent: on the failure paths above the model is told to prefer
+// all 18 equally, and on a station with no history yet the flag is true of the
+// whole library, which discriminates nothing while costing tokens on every
+// candidate. Both cases want the field OMITTED, and undefined is what the
+// callers' `...(unaired ? {unaired: true} : {})` spread already drops.
+export function unairedFlag(song: CandidateLike, index: AiredIndex): true | undefined {
+  if (!hasAiringHistory(index)) return undefined;
+  return lastAiredMsOf(song, index) == null ? true : undefined;
+}
+
 // 0..1 freshness: 0 = just aired, 1 = never aired or past the horizon. A
 // linear ramp, so "aired last week" sits between "aired today" and "never
 // aired" instead of cliffing at the boundary.

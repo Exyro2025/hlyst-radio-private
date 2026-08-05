@@ -16,7 +16,7 @@ import { bpmCompat, keyCompat } from './mix.js';
 import { shuffle } from '../util/shuffle.js';
 import { mapPool } from '../util/async-pool.js';
 import { artistRootKey, filterPickerCandidates, recencyWindowsForLibrary, effectiveNoRepeatWindow } from './recency.js';
-import { AIRING_RANK_WEIGHT, freshness, freshnessBiasedOrder, lastAiredMsOf, type AiredIndex } from './airing.js';
+import { AIRING_RANK_WEIGHT, freshness, freshnessBiasedOrder, lastAiredMsOf, unairedFlag, type AiredIndex } from './airing.js';
 import { normGenre, genreMatches, genreResolutionWarningOnce, preferGenre, preferEra, inYearRange, preferEnergy, preferEnergyStrict, preferMood, preferVocals, applyStrictLocks, hasEraBound, eraSpan, type YearRange, type VocalMode } from './show-filter.js';
 import { resolveShowPlaylistPool, resolveExcludedPlaylistIds, type PlaylistPool } from './show-playlist.js';
 import * as likes from '../broadcast/likes.js';
@@ -92,16 +92,26 @@ const SHOW_GENRE_FETCH_CONCURRENCY = 4;
 // pick would re-fetch playlists, recent/frequent album lists and re-walk their
 // tracks — turning ~1 Navidrome call per pick into ~15.
 const CACHE_TTL_MS = 30 * 60 * 1000;
+// Shorter TTL for an EMPTY result. An empty answer is not knowledge worth
+// pinning for the full 30 minutes — a momentary Navidrome miss used to blank
+// that source until the TTL rolled. But not caching it AT ALL is the opposite
+// failure: a PERMANENTLY empty source re-runs its whole fetch chain on every
+// pick, forever. `similar-artist` is the sharp end — on a niche or regional
+// catalogue where the on-air artist has no Last.fm coverage that is
+// searchArtists + getArtistInfo + up to two getTopSongs, four upstream calls
+// per pick, and the memo exists precisely to stop ~1 Navidrome call per pick
+// becoming ~15. Same for `playlists` on a Navidrome with no playlists and for
+// the recent/frequent track pools whenever tracksFromAlbums comes back empty.
+// A few minutes clears a transient blank within a pick or two while a
+// permanent one costs one refetch per window instead of one per pick.
+const EMPTY_CACHE_TTL_MS = 5 * 60 * 1000;
 const cache = new Map();
 async function memo(key, ttl, fn) {
   const hit = cache.get(key);
-  if (hit && Date.now() - hit.at < ttl) return hit.val;
+  if (hit && Date.now() < hit.until) return hit.val;
   const val = await fn();
-  // An empty result is not knowledge worth pinning for the whole TTL — a
-  // transient Navidrome error or a momentary miss used to blank that source
-  // for 30 minutes. Re-asking next pick costs one call.
   const isEmpty = Array.isArray(val) ? val.length === 0 : val == null;
-  if (!isEmpty) cache.set(key, { val, at: Date.now() });
+  cache.set(key, { val, until: Date.now() + (isEmpty ? Math.min(EMPTY_CACHE_TTL_MS, ttl) : ttl) });
   return val;
 }
 
@@ -234,6 +244,30 @@ function notRecent(recentIds: Set<string>) {
 // nothing.
 function sampleFresh(items: Candidate[], recentIds: Set<string>, cap: number): Candidate[] {
   return items.filter(notRecent(recentIds)).slice(0, cap);
+}
+
+// The DEDICATED SHOW sources (show-genre, show-playlist) keep the never-starve
+// that sampleFresh drops, because zero from them does not mean the same thing.
+//
+// A discovery source contributing nothing simply removes itself from the pool
+// and the other sources carry the pick. These two are the pool's only in-filter
+// contributors, and the STRICT end-filters below never-starve on an empty
+// result — `if (inPl.length) selectionPool = inPl` keeps the FULL pool when no
+// playlist track survived, and applyStrictLocks(starve:false) skips a dimension
+// with zero matches. So a show pinned to a 40-track playlist whose tracks are
+// all inside the (now library-scaled, up to 36 h) recency window contributes
+// nothing here and the strict show is then handed nothing BUT off-playlist
+// discovery candidates — the exact opposite of what the lock is for. Same path
+// for a strict-genre show and the genre dimension.
+//
+// Recency still wins whenever anything fresh exists; the fallback only fires
+// when the alternative is abandoning the show's own universe. The hard
+// no-repeat guard (hardRecentIds/hardRecentKeys) is applied later by
+// filterPickerCandidates and is NOT relaxed here, so a track that just aired
+// still cannot come back — this only re-admits the softer time-window set.
+function sampleShowSource(items: Candidate[], recentIds: Set<string>, cap: number): Candidate[] {
+  const fresh = items.filter(notRecent(recentIds));
+  return (fresh.length > 0 ? fresh : items).slice(0, cap);
 }
 
 // Walk a list of albums and return up to `perAlbum` tracks from each, capped.
@@ -461,7 +495,7 @@ async function buildCandidates(mood: string | null | undefined, recentIds: Set<s
       // mood/energy filters on top (no-op in soft mode).
       const leaned = lean(preferEnergy(exact.length ? exact : collected, showFilter!.energies));
       // Strict bumps the cap so this genre-native source dominates the merged pool.
-      add('show-genre', sampleFresh(shuffle(leaned), recentIds, strict ? CAP_SHOW_GENRE_STRICT : CAP_SHOW_GENRE));
+      add('show-genre', sampleShowSource(shuffle(leaned), recentIds, strict ? CAP_SHOW_GENRE_STRICT : CAP_SHOW_GENRE));
     } catch {}
   }
 
@@ -470,7 +504,7 @@ async function buildCandidates(mood: string | null | undefined, recentIds: Set<s
   // is hard-filtered to its ids below); in soft mode it's just the dominant
   // source, with the discovery sources contributing a (narrowed) minority.
   if (hasPlaylist) {
-    add('show-playlist', sampleFresh(shuffle(playlistPool!.tracks), recentIds, strictPlaylist ? CAP_SHOW_PLAYLIST_STRICT : CAP_SHOW_PLAYLIST));
+    add('show-playlist', sampleShowSource(shuffle(playlistPool!.tracks), recentIds, strictPlaylist ? CAP_SHOW_PLAYLIST_STRICT : CAP_SHOW_PLAYLIST));
   }
 
   // 2. Mood-tagged library (LLM-built tags, may be sparse). A multi-mood show
@@ -601,14 +635,24 @@ async function buildCandidates(mood: string | null | undefined, recentIds: Set<s
   // library-wide draw that isn't anchored on the current track or a frozen
   // album window — without it every source is a similarity neighbourhood or a
   // fixed crate and the pool can never leave the bubble it is in.
-  try {
-    const wide = await subsonic.getRandomSongs({ size: 12 });
-    add('explore', sampleFresh(
-      lean(freshnessBiasedOrder(wide, aired, nowMs)),
-      recentIds,
-      nz(CAP_EXPLORE),
-    ));
-  } catch {}
+  //
+  // Skipped for a strict-playlist show, mirroring the coast's identical source
+  // (scheduler.ts §2b — keep the two in step): a library-wide random draw
+  // can't be playlist-filtered, so every track it contributes is either
+  // discarded by the strict end-filter below — a wasted Navidrome round trip on
+  // every pick — or, on the never-starve branch, becomes a live OFF-playlist
+  // candidate for the LLM. Strict GENRE shows keep it: lean() filters it
+  // server-agnostically on the way in, so it still lands in-genre.
+  if (!strictPlaylist) {
+    try {
+      const wide = await subsonic.getRandomSongs({ size: 12 });
+      add('explore', sampleFresh(
+        lean(freshnessBiasedOrder(wide, aired, nowMs)),
+        recentIds,
+        nz(CAP_EXPLORE),
+      ));
+    } catch {}
+  }
 
   // 8. Fallback if the pool is still thin — starred + random.
   if (pool.length < 8) {
@@ -759,13 +803,19 @@ function slimAlbum(album: string | null | undefined, title: string | null | unde
 export async function pickViaPool(queue, ctx, rankTarget: { bpm: number | null; key: string | null } | null = null, audioWaypoint: number[] | null = null, opts: { avoidArtist?: string | null } = {}) {
   await library.load();
   const stats = library.stats();
-  const windows = recencyWindowsForLibrary(stats.distinctArtists, stats.total);
+  // Sized off the MIRROR, not `stats.total`, which counts only TAGGED tracks.
+  // Both of these ask "how big is the catalogue we are picking from", and the
+  // picker draws most of its pool straight from Navidrome — a 50k library with
+  // 2k tagged is a 50k library to both of these guards. On `total` it read as a
+  // small one and never reached the wide windows this scaling exists to give it.
+  const librarySize = stats.mirrorTotal || stats.total;
+  const windows = recencyWindowsForLibrary(stats.distinctArtists, librarySize);
   const recentIds = queue.recentlyPlayedIds(windows.trackHours);
   const recentArtists = queue.recentArtistsSince(windows.artistHours);
   // Count-based HARD no-repeat guard (last N distinct plays) — non-relaxable,
   // survives buildCandidates' starvation cascade. Clamped to library size so a
   // small catalogue never fully blocks; 0 = off. Mirrors the agent path.
-  const effN = effectiveNoRepeatWindow(settings.get().llm?.noRepeatWindow ?? 0, stats.total);
+  const effN = effectiveNoRepeatWindow(settings.get().llm?.noRepeatWindow ?? 0, librarySize);
   const { ids: hardRecentIds, keys: hardRecentKeys } = queue.recentlyPlayedByCount(effN);
   const currentTrack = queue.current?.track || null;
   // Resolve the active show once: its music-steering filters shape the pool
@@ -856,6 +906,10 @@ export async function pickViaPool(queue, ctx, rankTarget: { bpm: number | null; 
   // penalty for future picks; whichever one is chosen clears below.
   recordOffered(candidates.map((c) => c.id));
 
+  // One airing-index read for the whole candidate projection below (it is
+  // memoised in library.ts, but resolving it per candidate hid that).
+  const airedNow = library.lastAiredInfo();
+
   const recentPlays = summariseRecent(queue);
   // The model's recent transition asks, for the deliberate-variety nudge —
   // only consulted by pickNextTrack when effects are active. Guarded call:
@@ -883,11 +937,13 @@ export async function pickViaPool(queue, ctx, rankTarget: { bpm: number | null; 
         : null,
       candidates: candidates.map(c => {
         const a = analysisFor(c);
-        // Airing memory (music/airing.ts): true when the station has never
-        // aired this track — a first-play discovery signal for the model.
-        // Omitted (not false) once the track has a play on record, matching
-        // the absent-when-empty convention below.
-        const neverAired = lastAiredMsOf(c, library.lastAiredInfo()) == null;
+        // Airing memory (music/airing.ts): true when the station has provably
+        // never aired this track — a first-play discovery signal for the model.
+        // Omitted (not false) once the track has a play on record, matching the
+        // absent-when-empty convention below, and ALSO omitted when the index
+        // can't answer — see unairedFlag for why "empty index" must not read as
+        // "everything is unaired".
+        const neverAired = unairedFlag(c, airedNow);
         // Join editorial tags + perceptual analysis from the library store when
         // the candidate doesn't carry them: Subsonic-sourced candidates (similar,
         // recent, frequent, starred…) are raw Navidrome children with none of
@@ -934,7 +990,7 @@ export async function pickViaPool(queue, ctx, rankTarget: { bpm: number | null; 
           instrumental: Array.isArray(rec?.vocalRanges)
             ? rec.vocalRanges.length === 0
             : undefined,
-          unaired: neverAired || undefined,
+          unaired: neverAired,
           source: c._source || null,
           // Cosine similarity to the current track for the KNN sources
           // (embedding-similar / audio-similar). Omitted for the other sources,

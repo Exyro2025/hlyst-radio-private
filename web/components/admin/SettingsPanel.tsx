@@ -239,7 +239,11 @@ export default function SettingsPanel() {
         reasoning: !!v.llm?.reasoning,
         toolChoice: v.llm?.toolChoice === 'auto' ? 'auto' : 'required',
         pickerAgent: !!v.llm?.pickerAgent,
-        noRepeatWindow: String(typeof v.llm?.noRepeatWindow === 'number' ? v.llm.noRepeatWindow : 100),
+        // Fallback must track the controller's default (config.ts, 250): a
+        // settings.json written before the field existed omits the key, and
+        // seeding the OLD default here means opening Settings and saving any
+        // LLM field silently persists it over the new one.
+        noRepeatWindow: String(typeof v.llm?.noRepeatWindow === 'number' ? v.llm.noRepeatWindow : 250),
         requestWebResolve: !!v.llm?.requestWebResolve,
         agentTimeoutMs: typeof v.llm?.agentTimeoutMs === 'number' ? v.llm.agentTimeoutMs : 45000,
         pauseWhenEmpty: !!v.llm?.pauseWhenEmpty,

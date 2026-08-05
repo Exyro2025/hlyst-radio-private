@@ -17,11 +17,27 @@ export default definePickerTool({
         // Random page (0/25/50) of the relevance ranking, mirroring
         // routes/request.ts — first-page-only made result 26+ of any query
         // unreachable, so repeated searches for the same broad term always
-        // surfaced the same 25 songs. An empty deep page falls back to page 0.
-        const songOffset = Math.floor(Math.random() * 3) * 25;
-        let songs = await subsonic.search(query, { songCount: 25, songOffset });
-        if (songs.length === 0 && songOffset > 0) {
-          songs = await subsonic.search(query, { songCount: 25 });
+        // surfaced the same 25 songs.
+        //
+        // A deep page is only safe on a BROAD term. This tool's job is finding
+        // something NAMED, so on a narrow result set a deep page is the
+        // relevance TAIL: search "Karan Aujla" on a library holding 40 of that
+        // artist's tracks, roll offset 25, and the model gets 15 low-relevance
+        // hits — often other artists' tracks that merely mention the name — as
+        // the whole basis for the pick, since on a forced-tool provider this is
+        // its ONE discovery call. Falling back only on a completely EMPTY page
+        // missed that: 26–75 results took the tail two thirds of the time.
+        //
+        // A SHORT page is the signal. A full page means at least offset+25
+        // results exist (a genuinely broad term, where the deep page is
+        // legitimately diverse); anything less means we ran off the end of a
+        // narrow set and page 0 is the right answer. Costs one extra call only
+        // in that case.
+        const PAGE = 25;
+        const songOffset = Math.floor(Math.random() * 3) * PAGE;
+        let songs = await subsonic.search(query, { songCount: PAGE, songOffset });
+        if (songs.length < PAGE && songOffset > 0) {
+          songs = await subsonic.search(query, { songCount: PAGE });
         }
         // A lexical miss is often just a spelling/transliteration variance —
         // resolve the query as an artist and retry with the library's actual

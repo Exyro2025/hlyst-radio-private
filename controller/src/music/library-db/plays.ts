@@ -44,43 +44,73 @@ export interface LastAiredIndex {
   byKey: Map<string, number>;
 }
 
+// Two queries, not one GROUP BY over (track_id, title, artist): each half is
+// covered by its own index from schema v20 (idx_plays_track_played /
+// idx_plays_key_played), so SQLite walks each in key order and reads MAX() off
+// the last row of every group instead of sorting the entire play history into a
+// temp b-tree twice. The combined grouping the single query used could be
+// served by neither index. Both maps are bounded by DISTINCT tracks, not by
+// row count, so a year of history costs the same memory as a week of it.
 export function lastAiredIndex(): LastAiredIndex {
-  const rows = requireDb().prepare(`
-    SELECT track_id, title, artist, MAX(played_at) AS last_at
-    FROM plays GROUP BY track_id, title, artist
-  `).all() as Array<{ track_id: string | null; title: string | null; artist: string | null; last_at: string }>;
+  const d = requireDb();
   const byId = new Map<string, number>();
   const byKey = new Map<string, number>();
-  for (const r of rows) {
+
+  for (const r of d.prepare(`
+    SELECT track_id, MAX(played_at) AS last_at
+    FROM plays WHERE track_id IS NOT NULL AND track_id != '' GROUP BY track_id
+  `).all() as Array<{ track_id: string; last_at: string }>) {
+    const at = Date.parse(r.last_at);
+    if (Number.isFinite(at)) byId.set(r.track_id, at);
+  }
+
+  for (const r of d.prepare(`
+    SELECT title, artist, MAX(played_at) AS last_at
+    FROM plays WHERE title IS NOT NULL AND title != '' GROUP BY title, artist
+  `).all() as Array<{ title: string; artist: string | null; last_at: string }>) {
     const at = Date.parse(r.last_at);
     if (!Number.isFinite(at)) continue;
-    if (r.track_id) {
-      const prev = byId.get(r.track_id);
-      if (prev == null || at > prev) byId.set(r.track_id, at);
-    }
-    if (r.title) {
-      const key = `${r.title.toLowerCase().trim()}|${(r.artist || '').toLowerCase().trim()}`;
-      const prev = byKey.get(key);
-      if (prev == null || at > prev) byKey.set(key, at);
-    }
+    // GROUP BY is on the RAW columns while the key is lowercased+trimmed, so
+    // two casings of one title collapse here and the later (max) wins.
+    const key = `${r.title.toLowerCase().trim()}|${(r.artist || '').toLowerCase().trim()}`;
+    const prev = byKey.get(key);
+    if (prev == null || at > prev) byKey.set(key, at);
   }
+
   return { byId, byKey };
 }
 
 // Random sample of tracks the station has never aired, or last aired before
 // the cutoff — the library's unexplored shelf. Id-level only: a duplicate copy
 // whose twin aired can appear, and the caller's recency key filters catch it.
+// Sampled in two steps, and the split is the point. `SELECT t.* … ORDER BY
+// RANDOM()` materialised EVERY track row — outro_json, pace_json,
+// structure_json, vocal_ranges_json, lyric_excerpt and all — to keep 60 of
+// them, on the synchronous better-sqlite3 handle that also serves listener
+// polls (the failure mode #723 documented for stats()). The id pass reads one
+// indexed column and the row pass touches only the survivors.
+//
+// NOT EXISTS rather than a LEFT JOIN onto a grouped subquery: "never aired, or
+// last aired before the cutoff" is exactly "has no play at or after the
+// cutoff", which idx_plays_track_played answers per track without grouping the
+// whole plays table first.
 export function deepCutTracks(cutoffIso: string, limit: number): TrackRecord[] {
-  const rows = requireDb().prepare(`
-    SELECT t.* FROM tracks t
-    LEFT JOIN (
-      SELECT track_id, MAX(played_at) AS last_at
-      FROM plays WHERE track_id IS NOT NULL GROUP BY track_id
-    ) p ON p.track_id = t.id
-    WHERE p.last_at IS NULL OR p.last_at < ?
+  const d = requireDb();
+  const ids = (d.prepare(`
+    SELECT t.id FROM tracks t
+    WHERE NOT EXISTS (
+      SELECT 1 FROM plays p WHERE p.track_id = t.id AND p.played_at >= ?
+    )
     ORDER BY RANDOM() LIMIT ?
-  `).all(cutoffIso, Math.max(1, Math.floor(limit))) as TrackRow[];
-  return rows.map(rowToTrack);
+  `).all(cutoffIso, Math.min(500, Math.max(1, Math.floor(limit)))) as Array<{ id: string }>).map((r) => r.id);
+  if (!ids.length) return [];
+  const rows = d.prepare(
+    `SELECT * FROM tracks WHERE id IN (${ids.map(() => '?').join(',')})`,
+  ).all(...ids) as TrackRow[];
+  // IN () answers in storage order; restore the sampled order so the caller's
+  // slice is the random draw it asked for.
+  const byId = new Map(rows.map((r) => [r.id, r]));
+  return ids.map((id) => byId.get(id)).filter((r): r is TrackRow => !!r).map(rowToTrack);
 }
 
 export function listPlays(opts: { limit?: number; offset?: number } = {}): { total: number; rows: PlayRecord[] } {

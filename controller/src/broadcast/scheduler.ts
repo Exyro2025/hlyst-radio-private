@@ -99,7 +99,10 @@ async function refreshAutoPlaylistInner() {
   // Mirrors collect() in the picker's tool layer.
   await library.load();
   const libStats = library.stats();
-  const windows = recencyWindowsForLibrary(libStats.distinctArtists, libStats.total);
+  // The MIRROR size, not `total` (TAGGED tracks only) — same reading the two
+  // pick paths use, so the coast's window matches theirs on an untagged library
+  // too rather than reading a 50k catalogue as an empty one.
+  const windows = recencyWindowsForLibrary(libStats.distinctArtists, libStats.mirrorTotal || libStats.total);
   const { ids: recentIds, keys: recentKeys } = queue.recentlyPlayed(windows.trackHours);
 
   // The fallback is what airs when the live AI picks pause (e.g. pause-when-empty
@@ -237,7 +240,9 @@ async function refreshAutoPlaylistInner() {
       // Genre/era are server-side native here; enforce() adds the strict
       // mood/energy filters on top (no-op in soft mode).
       const leaned = enforce(preferEnergy(exact.length ? exact : collected, showEnergies));
-      take('show-genre', shuffle(leaned), strict ? SHOW_GENRE_STRICT_WEIGHT : SHOW_GENRE_WEIGHT);
+      // neverStarve: this is the coast's only in-genre contributor and the
+      // strict end-pass never-starves on an empty in-filter set — see TakeOpts.
+      take('show-genre', shuffle(leaned), strict ? SHOW_GENRE_STRICT_WEIGHT : SHOW_GENRE_WEIGHT, { neverStarve: true });
     } catch (err) {
       queue.log('error', `Show-genre fetch failed: ${err.message}`);
     }
@@ -248,7 +253,10 @@ async function refreshAutoPlaylistInner() {
   // fill the pool before the (shrunk) discovery sources. In strict mode the
   // whole pool is filtered to these ids at the end, so this is the universe.
   if (hasPlaylist) {
-    take('show-playlist', shuffle(playlistPool!.tracks), strictPlaylist ? SHOW_PLAYLIST_STRICT_WEIGHT : SHOW_PLAYLIST_WEIGHT);
+    // neverStarve: on a strict-playlist show this source IS the coast's
+    // universe, and the end-filter below never-starves to the full pool when
+    // nothing in-playlist survived — see TakeOpts.
+    take('show-playlist', shuffle(playlistPool!.tracks), strictPlaylist ? SHOW_PLAYLIST_STRICT_WEIGHT : SHOW_PLAYLIST_WEIGHT, { neverStarve: true });
   }
 
   // 1. Mood-tagged from the LLM-built library (only if tagger has run). A

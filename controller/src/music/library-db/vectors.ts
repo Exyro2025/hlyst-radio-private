@@ -57,11 +57,20 @@ export function knnByAudioVector(vec: number[] | Float32Array, k: number, opts: 
   return knnByBuffer(buf, k, null, 'track_audio_vectors', opts.excludeIds);
 }
 
+// How far past k the first pass widens for the exclusion set, as a multiple of
+// k. The LIMIT has to clear the excluded rows for k survivors to exist, but
+// sizing it by the raw set size over-reads badly: callers pass the picker's
+// RECENCY union (recentIds ∪ hardRecentIds — hundreds of ids at the current
+// noRepeatWindow and library-scaled windows), and most of those are Subsonic
+// ids from auto.m3u plays or backfilled history that were never embedded, so
+// they cannot appear in this table and cannot displace a hit. Widening by all
+// of them made every KNN materialise several hundred rows to discard. The
+// bounded pass covers the realistic overlap; the exact pass below still
+// guarantees the old result whenever it doesn't.
+const EXCLUDE_WIDEN_K_FACTOR = 3;
+
 // `table` is always a hardcoded vec0 table name from our own code (never user
 // input), so interpolating it is safe — the MATCH buffer is still bound.
-// The LIMIT widens by the exclusion set's size so k survivors can always be
-// found past the excluded rows; vec0's MATCH is a brute-force scan either way,
-// so a larger LIMIT only grows the top-k heap, never the scan.
 function knnByBuffer(
   buf: Buffer,
   k: number,
@@ -69,20 +78,40 @@ function knnByBuffer(
   table: 'track_vectors' | 'track_audio_vectors',
   excludeIds?: ReadonlySet<string> | null,
 ): KnnHit[] {
-  const limit = (excludeId ? k + 1 : k) + (excludeIds ? excludeIds.size : 0);
-  const rows = requireDb()
-    .prepare(
-      `SELECT id, distance FROM ${table} WHERE embedding MATCH ? ORDER BY distance LIMIT ?`,
-    )
-    .all(buf, limit) as Array<{ id: string; distance: number }>;
-  const hits: KnnHit[] = [];
-  for (const r of rows) {
-    if (excludeId && r.id === excludeId) continue;
-    if (excludeIds && excludeIds.has(r.id)) continue;
-    hits.push({ id: r.id, similarity: 1 - r.distance });
-    if (hits.length === k) break;
-  }
+  const base = excludeId ? k + 1 : k;
+  const want = excludeIds ? excludeIds.size : 0;
+  const stmt = requireDb().prepare(
+    `SELECT id, distance FROM ${table} WHERE embedding MATCH ? ORDER BY distance LIMIT ?`,
+  );
+  const run = (limit: number): KnnHit[] => {
+    const rows = stmt.all(buf, limit) as Array<{ id: string; distance: number }>;
+    const hits: KnnHit[] = [];
+    for (const r of rows) {
+      if (excludeId && r.id === excludeId) continue;
+      if (excludeIds && excludeIds.has(r.id)) continue;
+      hits.push({ id: r.id, similarity: 1 - r.distance });
+      if (hits.length === k) break;
+    }
+    return hits;
+  };
+
+  const widened = Math.min(want, k * EXCLUDE_WIDEN_K_FACTOR);
+  const hits = run(base + widened);
+  // Only when the bounded pass actually fell short of k does the overlap turn
+  // out to be larger than assumed — then pay for the full widening, which is
+  // byte-for-byte the previous behaviour.
+  if (hits.length < k && widened < want) return run(base + want);
   return hits;
+}
+
+// Whether a track has a CLAP vector at all, without decoding the blob — the
+// cheap gate for callers that need to SAMPLE ids the audio index covers rather
+// than discover the gaps by averaging around them (see the journey destination
+// in broadcast/dj-agent/runs.ts).
+export function hasAudioVector(id: string): boolean {
+  return !!requireDb()
+    .prepare(`SELECT 1 FROM track_audio_vectors WHERE id = ? LIMIT 1`)
+    .get(id);
 }
 
 export function vectorCount(): number {

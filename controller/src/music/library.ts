@@ -36,6 +36,7 @@ export async function load() {
 export async function reload() {
   if (db.isOpen()) db.close();
   loaded = false;
+  invalidateAiredIndex();
   await load();
 }
 
@@ -45,6 +46,7 @@ export async function reload() {
 // reload(), this deletes the file first (db.reset()) for a true fresh start.
 export async function reset() {
   loaded = false;
+  invalidateAiredIndex();
   await db.reset();
   await load();
 }
@@ -71,6 +73,7 @@ export function checkpoint(): void {
 export function shutdown(): void {
   if (db.isOpen()) db.close();
   loaded = false;
+  invalidateAiredIndex();
 }
 
 // Record one aired track into the durable play-history table. Called fire-and-
@@ -456,6 +459,15 @@ export function tracksByAudioVector(vec: number[] | Float32Array, k: number, opt
   return blocklist.rejectBlocked(out);
 }
 
+// Whether the CLAP index covers this track. Cheap indexed existence check (no
+// blob decode) for callers that need to SAMPLE ids the audio index actually
+// holds — the journey destination in broadcast/dj-agent/runs.ts, where a blind
+// sample of a partially-analysed bucket yields a centroid of one or two tracks.
+export function hasAudioVector(id: string): boolean {
+  if (!loaded || !id) return false;
+  try { return db.hasAudioVector(id); } catch { return false; }
+}
+
 // Last-aired index over the plays table, memoised briefly — every pick path
 // consults it (pool re-rank, agent collect ordering, the deepCuts tool), and a
 // GROUP BY over the whole play history per tool call would be wasteful. 5 min
@@ -463,6 +475,20 @@ export function tracksByAudioVector(vec: number[] | Float32Array, k: number, opt
 // this signal only separates "days ago" from "never".
 const AIRED_INDEX_TTL_MS = 5 * 60 * 1000;
 let airedIndexCache: { at: number; val: AiredIndex } | null = null;
+let airedIndexWarnedAt = 0;
+const AIRED_WARN_THROTTLE_MS = 10 * 60 * 1000;
+
+// Drop the memoised airing index. Called wherever the backing DB is swapped or
+// wiped — reload() after a backup restore, reset() after the admin Library
+// Reset, which deletes the whole plays table. Without this the picker keeps
+// re-ranking against airings from a database that no longer exists for up to
+// AIRED_INDEX_TTL_MS: freshnessBiasedOrder de-prioritises tracks with no play
+// history at all, and slim()/pickViaPool withhold `unaired` from tracks the
+// station has provably never aired. Exactly why db.invalidateStats() is wired
+// into library-db/lifecycle.ts.
+function invalidateAiredIndex(): void {
+  airedIndexCache = null;
+}
 
 export function lastAiredInfo(): AiredIndex {
   if (!loaded) return EMPTY_AIRED_INDEX;
@@ -473,7 +499,16 @@ export function lastAiredInfo(): AiredIndex {
     const val = db.lastAiredIndex();
     airedIndexCache = { at: Date.now(), val };
     return val;
-  } catch {
+  } catch (err) {
+    // Degrading to an empty index is right — airing memory is a soft ranking
+    // signal and must never block a pick — but doing it SILENTLY meant a
+    // persistently unreadable plays table looked exactly like a station with no
+    // history. Throttled so a wedged handle can't flood the log on every pick.
+    const now = Date.now();
+    if (now - airedIndexWarnedAt > AIRED_WARN_THROTTLE_MS) {
+      airedIndexWarnedAt = now;
+      console.warn(`[library] airing index unavailable: ${(err as Error).message} — picks fall back to plain shuffle and drop the "unaired" signal`);
+    }
     return EMPTY_AIRED_INDEX;
   }
 }
@@ -492,11 +527,15 @@ export function deepCuts(days: number = DEEP_CUT_DAYS, k = 60): any[] {
 
 export function stats() {
   if (!loaded) {
-    return { total: 0, distinctArtists: 0, byMood: {}, byEnergy: {}, byGenre: {}, updatedAt: null, embeddingMeta: null };
+    return { total: 0, mirrorTotal: 0, distinctArtists: 0, byMood: {}, byEnergy: {}, byGenre: {}, updatedAt: null, embeddingMeta: null };
   }
   const s = db.stats();
   return {
     total: s.total,
+    // Library-mirror size (every row, tagged or not) — NOT `total`, which
+    // counts only tracks the tagger has reached. Anything sizing itself to the
+    // library rather than to tagging coverage reads this one.
+    mirrorTotal: s.mirrorTotal,
     distinctArtists: s.distinctArtists,
     byMood: s.byMood,
     byEnergy: s.byEnergy,
