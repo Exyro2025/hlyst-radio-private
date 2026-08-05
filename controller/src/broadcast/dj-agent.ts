@@ -35,6 +35,7 @@ import { djObject, nearestId, modelTolerant } from '../llm/sdk.js';
 import * as budget from './dj-budget.js';
 import { withTrace, logEvent } from '../observability/events.js';
 import { recencyWindowsForLibrary, effectiveNoRepeatWindow, artistRootKey } from '../music/recency.js';
+import { EXPLORE_SEED_PROBABILITY } from '../music/airing.js';
 import { ARTIST_VARIETY_WINDOW, alternativeCandidates } from './dj-agent/artist-guard.js';
 import { hasEraBound, genreResolutionWarningOnce, type VocalMode } from '../music/show-filter.js';
 import { djCallsAllowed } from './listeners.js';
@@ -740,12 +741,25 @@ export async function runTrackEvent(queue, ctx, { wantLink, showAt = null, prede
     // Mirrored by the pool picker's listener-liked candidate source, so both
     // paths lean the same way. A lean, never a lock: VARIETY still applies.
     const favClause = likes.favouritesClause(settings.get()?.likes);
+    // Exploration nudge (ε-greedy seed break, music/airing.ts): every pick
+    // seeding discovery from the on-air track is a random walk that never
+    // leaves its similarity cluster, so a fraction of picks steer the round
+    // toward the unaired shelf instead. Deliberately carries NO track id — a
+    // raw id in the event message is the #1247 seed-echo trap (an id no tool
+    // returned can only be a discarded pick); the deepCuts tool is the safe
+    // carrier of concrete candidates. Skipped mid-run/journey (they own the
+    // direction) and on strict-playlist shows (deep cuts are almost surely
+    // off-playlist, so the call would be spent on an emptyResult).
+    const exploreClause = !inRun && !audioWaypoint && !ctx?.activeShow?.playlistStrict
+      && Math.random() < EXPLORE_SEED_PROBABILITY
+      ? ' Exploration nudge: include deepCuts in your discovery round this pick — surface something the station has never aired (or hasn\'t in weeks) and give it real consideration when it can fit the moment.'
+      : '';
     const eventText = `Now playing "${current?.title}" by ${current?.artist}`
       + (current?.id ? ` [id: ${current.id}]` : '')
       + (previous ? ` (after "${previous.title}" by ${previous.artist})` : '')
       + '. Pick the track to play next.'
       + linkClause;
-    const promptSuffix = `${clockClause}${favClause}${effectClause}${runClause}${journeyClause}`;
+    const promptSuffix = `${clockClause}${favClause}${effectClause}${runClause}${journeyClause}${exploreClause}`;
     session.appendTurn({
       role: 'event', kind: 'pick', text: eventText,
       meta: promptSuffix ? { promptSuffix } : {},

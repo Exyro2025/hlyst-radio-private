@@ -7,6 +7,7 @@
 import * as subsonic from '../../../../music/subsonic.js';
 import * as library from '../../../../music/library.js';
 import { durationSeconds } from '../../../../music/recency.js';
+import { lastAiredMsOf } from '../../../../music/airing.js';
 
 export function slim(s: any) {
   const base = {
@@ -50,6 +51,11 @@ export function slim(s: any) {
   const introMs = rec?.introMs ?? s.introMs ?? null;
   const pace = rec?.paceMean ?? s.paceMean ?? null;
   const sections = library.sectionCount(rec) ?? library.sectionCount(s);
+  // Airing memory (music/airing.ts): true when the station has never aired
+  // this track — the first-play discovery signal PICKER_CRITERIA's VARIETY
+  // rule references. Omitted (not false) once the track has a play on record,
+  // mirroring the pool picker's candidate payload.
+  const unaired = lastAiredMsOf(s, library.lastAiredInfo()) == null;
   return {
     ...base,
     ...(moods.length ? { moods } : {}),
@@ -61,5 +67,6 @@ export function slim(s: any) {
     ...(introMs != null ? { intro_ms: introMs } : {}),
     ...(pace != null ? { pace } : {}),
     ...(sections != null ? { sections } : {}),
+    ...(unaired ? { unaired: true } : {}),
   };
 }

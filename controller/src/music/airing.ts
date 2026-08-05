@@ -29,6 +29,14 @@ export const AIRING_RANK_WEIGHT = 0.4;
 // The deepCuts tool's window: never aired, or unaired for this many days.
 export const DEEP_CUT_DAYS = 30;
 
+// ε-greedy seed break: the fraction of agent picks whose event message steers
+// the discovery round toward the unaired shelf (the deepCuts tool) instead of
+// the on-air track's neighbourhood. Every pick seeding from the current track
+// is a random walk that never leaves its cluster; one pick in four pointed at
+// the shelf is the walk's exit, while three in four keep the flow-first
+// character intact.
+export const EXPLORE_SEED_PROBABILITY = 0.25;
+
 export interface AiredIndex {
   byId: Map<string, number>;
   byKey: Map<string, number>;
