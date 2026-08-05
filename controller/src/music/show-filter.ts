@@ -32,6 +32,8 @@ export interface FilterTrack {
   // Demucs vocal ranges. [] = instrumental, null/absent = never measured — the
   // distinction trackInstrumental is built on.
   vocalRanges?: unknown[] | null;
+  // Last.fm enrichment tags — part of trackAllTags' any-namespace union.
+  lastfmTags?: string[] | null;
 }
 
 // ── Genre ──────────────────────────────────────────────────────────────────
@@ -363,6 +365,24 @@ export function onlyEnergy<T extends FilterTrack>(tracks: T[], energies?: string
     const e = trackEnergy(t);
     return e != null && energies.includes(e);
   });
+}
+
+// Every tag the track carries, across ALL tag namespaces we ingest: genre tags
+// ∪ editorial moods ∪ zero-shot audio moods ∪ Last.fm tags. This is what the
+// blocklist's `tag` rules match against ("arbitrary tag matching", #1300 FR 1)
+// — whatever field an operator's tagger writes, if it reaches any list the
+// pipeline carries, it matches here. Raw strings, not normalised — the caller
+// owns comparison semantics (blocklist-rules normalises exact, deliberately
+// not substring: Last.fm tags are noisy free text).
+export function trackAllTags(t: FilterTrack | null | undefined): string[] {
+  const rec = (Array.isArray(t?.moods) || Array.isArray(t?.lastfmTags))
+    ? t
+    : (t?.id ? library.get(t.id) : null) ?? t;
+  const out = new Set<string>(trackGenres(t).filter(Boolean));
+  for (const m of Array.isArray(rec?.moods) ? rec.moods : []) if (m) out.add(String(m));
+  for (const m of Array.isArray(rec?.audioMoods) ? rec.audioMoods : []) if (m) out.add(String(m));
+  for (const m of Array.isArray(rec?.lastfmTags) ? rec.lastfmTags : []) if (m) out.add(String(m));
+  return [...out];
 }
 
 // ── Vocals (instrumental steering) ───────────────────────────────────────────

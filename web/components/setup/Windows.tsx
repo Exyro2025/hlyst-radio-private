@@ -63,8 +63,8 @@ export default function Windows() {
               >
                 Docker Desktop ↗
               </a>{' '}
-              with the <strong>WSL2 backend</strong>, then — and this is the step
-              people miss — turn on integration for your distro:{' '}
+              with the <strong>WSL2 backend</strong>, then turn on integration for
+              your distro, which is the step most people miss:{' '}
               <strong>Settings → Resources → WSL integration</strong>, toggle{' '}
               <code className="bs-code-inline">Ubuntu</code>, apply and restart.
               Without it, <code className="bs-code-inline">docker</code> simply

@@ -14,6 +14,7 @@ import { queue } from '../broadcast/queue.js';
 import * as session from '../broadcast/session.js';
 import { getStreamStatus } from '../broadcast/listeners.js';
 import { isIdle } from '../broadcast/stream-idle.js';
+import { currentStarve } from '../broadcast/music-starve.js';
 import { getSetupStatusSync } from '../setup/firstRun.js';
 import { getStationTimezone } from '../time.js';
 import { listThemesAnnotated, DEFAULT_THEME_ID } from '../themes.js';
@@ -511,12 +512,18 @@ router.get('/state', (req, res) => {
   const activeShow = settings.resolveActiveShow();
   const activeThemeId =
     (activeShow?.themeId && activeShow.themeId) || s?.theme?.active || DEFAULT_THEME_ID;
+  const starve = currentStarve();
   res.json({
     ...snap,
     needsSetup: getSetupStatusSync().needsSetup,
     // True while the idle gate has the programme paused (zero listeners) —
     // lets clients tell "silence because the room is empty" from "broken".
     streamIdle: isIdle(),
+    // True while the mixer reports its music chain starved (#1300 bug 7):
+    // nothing to play, so the emergency loop is on air. Distinct from
+    // streamIdle, which is a deliberate pause for an empty room.
+    musicStarved: starve.starved,
+    musicStarvedSince: starve.since,
     theme: { active: activeThemeId },
     // Listener-player UI settings ride along with /state like the theme does,
     // so the player can flip them live on the next poll. Defaults off if

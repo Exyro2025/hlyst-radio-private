@@ -49,7 +49,7 @@ export default function SetupOverview() {
       eyebrow="SELF-HOSTED · OPEN SOURCE"
       title="Run your own SUB/WAVE."
       meta="≈ 10 min · 4 commands · needs Navidrome + an LLM"
-      intro="SUB/WAVE points at your Navidrome library and your LLM, which is a local Ollama box by default, or any hosted provider you like. Once it's running, the AI DJ broadcasts from your homelab, picks tracks from your own collection, and takes requests from anyone you share the URL with."
+      intro="SUB/WAVE points at your Navidrome library and a language model. The model is a local Ollama box by default, or any hosted provider you like. Once it's running, the AI DJ broadcasts from your homelab, picks tracks from your own collection, and takes requests from anyone you share the URL with."
       current="/setup"
       heroAside={
         <div className="bs-dj-glyph" aria-hidden="true">
@@ -99,7 +99,7 @@ export default function SetupOverview() {
         <p className="bs-eyebrow">WHERE ARE YOU INSTALLING?</p>
         <h2>Follow your platform.</h2>
         <p>
-          The install is the same everywhere — Docker, one host port, a wizard.
+          The install is the same everywhere: Docker, one host port, a wizard.
           What differs is the host: which runtime to install, how much memory the
           VM gets, which architecture the optional heavy images run on, and the
           firewall. Each page is the whole path start to finish, so you only need
