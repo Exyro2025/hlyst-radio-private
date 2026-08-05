@@ -61,6 +61,12 @@ export interface PillProps {
   /* Toggle state for a pill used as an on/off chip. Set it and the pill
      reports aria-pressed; leave it off for pills that fire a plain action. */
   pressed?: boolean;
+  /* Unavailable, but still worth finding — a chip past a selection cap, or one
+     frozen while a save is in flight. Keep passing `onClick`: the pill swallows
+     it. Dropping the handler instead would fall back to the Badge <span> and
+     take the chip out of the tab order entirely, which is what this prop
+     exists to avoid. */
+  disabled?: boolean;
 }
 
 /* Tag pill over shadcn Badge. `tone` ∈ ink | accent | solid (default =
@@ -75,7 +81,7 @@ export interface PillProps {
 
    Without `onClick` the Badge path is unchanged, so the ~87 read-only pills
    render exactly as before. */
-export function Pill({ children, tone, dot, className, onClick, title, pressed }: PillProps) {
+export function Pill({ children, tone, dot, className, onClick, title, pressed, disabled }: PillProps) {
   const content = (
     <>
       {dot && <span className="size-1.5 rounded-full bg-current" />}
@@ -89,10 +95,22 @@ export function Pill({ children, tone, dot, className, onClick, title, pressed }
         /* text-start only to match the Badge <span> exactly: a <button> centres
            its text by default. The pill is inline-flex so this changes nothing
            visually today — it keeps the two paths provably style-identical. */
-        className={cn(badgeVariants({ variant: tone || 'default' }), 'cursor-pointer text-start', className)}
-        onClick={onClick}
+        className={cn(
+          badgeVariants({ variant: tone || 'default' }),
+          disabled ? 'cursor-default' : 'cursor-pointer',
+          'text-start',
+          className,
+        )}
+        /* aria-disabled, NOT the `disabled` attribute. A disabled <button> is
+           removed from the tab order, so a keyboard user cannot land on it to
+           hear WHY it is unavailable — for a chip past a selection cap that is
+           the whole message. aria-disabled announces the state and keeps the
+           tab stop, so the handler has to refuse the click itself: the element
+           is still natively clickable, by pointer and by Enter/Space alike. */
+        onClick={disabled ? undefined : onClick}
         title={title}
         aria-pressed={pressed}
+        aria-disabled={disabled || undefined}
       >
         {content}
       </button>
