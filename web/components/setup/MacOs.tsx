@@ -201,7 +201,7 @@ DOCKER_DEFAULT_PLATFORM=linux/amd64`}</CodeBlock>
             x86/amd64 emulation</strong>. Without it the emulated images fall back
             to QEMU, which is several times slower again. Even with it, a full
             CLAP + Demucs pass over a large library is an overnight job on a
-            laptop — leave the analyzer lean unless you specifically want
+            laptop. Leave the analyzer lean unless you want
             &ldquo;sounds-like&rdquo; search and vocal-aware transitions.
           </p>
         </div>
