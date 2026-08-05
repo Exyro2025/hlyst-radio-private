@@ -127,14 +127,25 @@ for the fix: post-latch `mean_volume: -91.0 dB, max_volume: -91.0 dB`. That is a
 strictly worse failure than the bug — a personal radio station is far more
 likely to notice a stinger loop than dead air.
 
-### The fix: position the guard above the duck stack
+### The fix: position the guard above every `add` in the music path
 
-`emergency` and its fallback move up, onto `music_bus`, immediately after the
-`bed_enabled` if/else that defines it:
+`emergency` and its fallback move up, onto `music` — immediately **before** the
+`# STUDIO BED` block, not after it:
 
 ```liquidsoap
 emergency = single("/sounds/emergency.mp3")
-music_bus = fallback(id="music_safety", track_sensitive=false, [music_bus, emergency])
+emergency = (fade.in(duration=EMERGENCY_FADE_SEC, emergency) : source)
+music =
+  fallback(
+    id="music_safety",
+    track_sensitive=false,
+    transitions=[
+      fun (_, back_to_music) -> back_to_music,
+      fun (_, to_emergency) ->
+        (fade.in(duration=EMERGENCY_FADE_SEC, to_emergency) : source)
+    ],
+    [music, emergency]
+  )
 ```
 
 Measured in the same full-chain probe: `music_safety` selects `emergency`,
@@ -143,10 +154,91 @@ in place: a second decorative dead-air guard that structurally cannot fire is
 precisely what caused this. A comment stands in its place pointing at the real
 one and stating why position is load-bearing.
 
-Nothing else moves. `music_safety` sits **below** `music_meta` and the jingle
-rotate, so now-playing metadata and jingle counting are byte-for-byte unchanged,
-and **above** the duck layers, so the DJ can still talk over the emergency loop
+`music_safety` sits **below** `music_meta`, the jingle rotate and the cross, so
+now-playing metadata and jingle counting are byte-for-byte unchanged, and
+**above** the duck layers, so the DJ can still talk over the emergency loop
 exactly as over music.
+
+#### The studio bed is the same trap, one line above the fix
+
+The first cut of this fix bound the guard to `music_bus`, i.e. **after** the
+studio-bed block. That is the identical mechanism wearing a different hat. With
+`bed_enabled = true` — documented in-file as a supported source edit, *"Flip back
+to `true` to restore it"* — the bus becomes:
+
+```liquidsoap
+add(normalize=false, weights=[1.0, 0.02], [music, mksafe(single(bed_path))])
+```
+
+`mksafe` makes the bed **infallible** and `add` is ready whenever any input is,
+so the bus is permanently ready and a guard beneath it is dead code again. It
+is not a hypothetical: a one-line flag flip re-arms the exact bug that was just
+repaired, and the operator who flips it gets no hint of why the station went
+quiet.
+
+Measured on the full chain (bed on, three duck layers built, music starved),
+same probe, 12s steady-state window:
+
+| guard bound to | mean | max | `music_safety` behaviour |
+|---|---|---|---|
+| `music_bus` (below the bed `add`) | **-57.1 dB** | -54.1 dB | never selects `emergency` at all |
+| `music` (above the bed `add`) | **-9.0 dB** | -6.0 dB | selects `emergency`, at the loop's own level |
+
+48.1 dB apart. The broken case is not digital silence — it is the ambient bed
+alone at weight 0.02, which is worse than silence diagnostically: the mixer
+looks alive, the mount serves audio, and the "technical difficulties" loop the
+guard exists to play never airs.
+
+So the guard binds to `music`, and the bed block builds `music_bus` from the
+already-guarded source. The rule is now stated as "above every `add` in the
+music path", not "above the ducking" — `smooth_add`'s `blank()` fallthrough and
+the bed's `mksafe` are two instances of one property.
+
+### The emergency branch fades in — and that is not a debounce
+
+Because the guard is live for the first time, it now fires on **brief** gaps as
+well as sustained starves: `track_sensitive=false` switches the instant `music`
+reports not-ready. Two known cases — a cold boot before `auto.m3u` resolves (a
+~100-200ms stab of the loop at mixer start) and a track seam where `dj_queue`
+and `auto_playlist` are momentarily both unready (auto entries are whole-file
+`subhttp:` downloads, so a slow Navidrome widens the window).
+
+A **debounce is the wrong fix and is explicitly rejected**: a guard that delays
+firing is a fallback that doesn't fire, which is the bug class this whole
+document is about. Instead the guard fires immediately and its *level* ramps
+over `EMERGENCY_FADE_SEC = 1.0`. A sub-second stab is inaudible; a genuine
+starve is at full level in about a second; the guard's timing is untouched.
+
+It takes **two** fades, and both are load-bearing:
+
+- `switch` applies **no transition to its first selection** — measured on 2.4.5,
+  the log reads `Switch to emergency.` at boot and `Switch to emergency with
+  transition.` every time after. Boot *is* the first selection, so the
+  `transitions=` entry alone would leave the cold-boot stab at full level.
+- so `emergency` carries a one-shot `fade.in` of its own. Its default
+  `track_sensitive=false` memoises the ramp to the source's **first frame ever**
+  — exactly right for boot, and useless for later starves, since a looping
+  single never reaches a fresh track boundary.
+
+The two compose: at boot the child's fade ramps; on every later switch the
+transition wraps a fresh ramp around an inner fade already sitting at unity. The
+music branch keeps the stdlib's identity transition, because coming **back** must
+be instant — a recovered station fading up over its own first second of music is
+a second bug, not a nicety. Both `fade.in` results are cast `(… : source)`: it
+returns extra methods (`fade_duration` etc.) that will not unify with the plain
+`music` child, which is a type error rather than a style choice.
+
+Measured post-fix, 100 ms RMS windows, emergency at -9.0 dB:
+
+| moment | fade off (control) | fade on |
+|---|---|---|
+| cold boot | -9.03 dB from the first window | -38.5 dB → -9.03 dB over **1.0s** |
+| mid-run starve | -29 dB (music) → -9.03 dB in one 100 ms window | -32.6 dB → -9.03 dB over **1.0s** |
+| recovery to music | single-window step | single-window step (**unfaded**, as required) |
+
+A churn run driving 43 switches through one process showed the last cycle
+ramping identically to the first, with no errors from the per-transition source
+creation.
 
 ### `jingle_ratio = 0`
 

@@ -1120,6 +1120,88 @@ voice = mic_chain(amplify(override="liq_amplify", 1., edge_fade(voice_queue)))
 intro = mic_chain(amplify(override="liq_amplify", 1., edge_fade(intro_queue)))
 
 # ---------------------------------------------------------------------------
+# SAFETY — fallback to the emergency loop when the source dies
+# ---------------------------------------------------------------------------
+# If the source dies, play a static "technical difficulties" loop. This is the
+# real dead-air guard: `emergency` is an always-ready, non-silent single, so the
+# broadcast never has nothing to pull.
+#
+# POSITION IS LOAD-BEARING (#1300 bug 7). This MUST stay ABOVE **both** the
+# studio-bed `add` below AND the three `smooth_add` ducking layers below that.
+# They are the same trap wearing two hats: `add` is ready whenever ANY of its
+# inputs is ready, so anything mixed into the music chain makes that chain look
+# alive even while the music is starved, and a fallback placed BELOW the mix can
+# only ever select index 0.
+#   * STUDIO BED — the bed is `mksafe(single(bed_path))`, and `mksafe` makes it
+#     INFALLIBLE, i.e. ready forever. With `bed_enabled = true` (a documented
+#     one-line source edit, see below) a guard under that `add` is dead code
+#     again, and the operator who flipped the flag gets silent dead air with no
+#     hint of why.
+#   * DUCKING — the stdlib implements smooth_add as
+#       add(normalize=false, [normal, fallback(track_sensitive=false, [special, blank()])])
+#     — that inner fallback falls through to `blank()`, so the special leg is
+#     ALWAYS ready and the whole duck stack reports ready regardless of `normal`.
+# This guard lived at the bottom of the chain for its whole life and was dead
+# code the entire time; when the starve guard started gating jingles off, that
+# turned "stingers forever" into digital silence forever: measured on
+# subwave-aio-heavy, output at -91.0 dB with the fallback down there versus
+# -3.0 dB with it up here — i.e. the loop actually airs.
+#
+# It also has to stay BELOW `music_meta` and the jingle rotate, so now-playing
+# metadata and jingle counting are untouched; and being above the ducking is
+# what lets the DJ talk over the emergency loop exactly as over music.
+#
+# The ~1s fade-in on the emergency branch is NOT a debounce, and must never be
+# turned into one. `track_sensitive=false` means this switches the instant
+# `music` reports not-ready, and now that it can actually fire it fires on brief
+# real gaps too: a cold boot before auto.m3u resolves (measured: a ~100-200ms
+# stab of the loop at mixer start) and the odd track seam where dj_queue and
+# auto_playlist are both momentarily unready (auto_playlist entries are
+# whole-file `subhttp:` downloads, so a slow Navidrome widens that window).
+# DELAYING the switch would be the wrong fix — a dead-air guard that waits
+# before firing is a guard that doesn't fire, which is exactly the bug class
+# repaired above. So fire immediately and ramp the LEVEL instead: a sub-second
+# stab stays inaudible, a genuine starve is at full level in about a second, and
+# the guard's timing is untouched. The music branch keeps the stdlib's identity
+# transition because coming BACK from the loop must be instant — a recovered
+# station fading up over its own first second of music is a second bug, not a
+# nicety.
+#
+# It takes BOTH fades below to cover both cases, so don't delete either:
+#   * `transitions` fires only when switching FROM one child TO another, and
+#     `switch` applies NO transition to its FIRST selection (measured on 2.4.5:
+#     the log reads "Switch to emergency." at boot and "Switch to emergency with
+#     transition." every time after). Boot is precisely the first selection.
+#   * so `emergency` also carries a one-shot fade of its own. fade.in defaults
+#     to track_sensitive=false, which memoises the ramp to the source's first
+#     frame EVER — right for the cold boot, useless for every later starve,
+#     because a looping single never reaches a fresh track boundary.
+# The two compose: at boot the child's own fade ramps; on every later switch the
+# transition wraps a fresh ramp around an inner fade already sitting at unity.
+# Measured post-fix (100 ms RMS windows): boot -38.5 dB -> -9.0 dB over 1.0s;
+# mid-run starve -32.6 dB -> -9.0 dB over 1.0s; recovery a single-window step
+# back to music with no ramp; unchanged after 43 switches in one process.
+EMERGENCY_FADE_SEC = 1.0
+emergency = single("/sounds/emergency.mp3")
+# The `: source` casts drop fade.in's extra methods (fade_duration etc.), which
+# otherwise refuse to unify with the plain source the identity transition and
+# the `music` child are — a type error, not a style choice.
+emergency = (fade.in(duration=EMERGENCY_FADE_SEC, emergency) : source)
+music =
+  fallback(
+    id="music_safety",
+    track_sensitive=false,
+    transitions=[
+      # to music — identity, i.e. the stdlib default. No fade on the way back.
+      fun (_, back_to_music) -> back_to_music,
+      # to emergency — ramp up over EMERGENCY_FADE_SEC.
+      fun (_, to_emergency) ->
+        (fade.in(duration=EMERGENCY_FADE_SEC, to_emergency) : source)
+    ],
+    [music, emergency]
+  )
+
+# ---------------------------------------------------------------------------
 # STUDIO BED — low-level room tone, mixed in BEFORE voice ducking so
 # smooth_add ducks it with the music (otherwise it competes with the voice).
 # ---------------------------------------------------------------------------
@@ -1128,6 +1210,11 @@ bed_path = "/sounds/bed.mp3"
 
 # Studio bed disabled — the looping ambient bed was audible/annoying under the
 # DJ's voice during links. Flip back to `true` to restore it.
+#
+# Flipping it is safe for the dead-air guard ONLY because the guard now sits
+# ABOVE this block, on `music`. `mksafe` below makes the bed infallible, so this
+# `add` is permanently ready — build the guard from `music_bus` instead of
+# `music` and turning this flag on silently disarms it (#1300 bug 7).
 bed_enabled = false
 
 music_bus =
@@ -1143,31 +1230,6 @@ music_bus =
     log("Studio bed off (bed_enabled=#{bed_enabled}) — music plays without a bed")
     music
   end
-
-# ---------------------------------------------------------------------------
-# SAFETY — fallback to the emergency loop when the source dies
-# ---------------------------------------------------------------------------
-# If the source dies, play a static "technical difficulties" loop. This is the
-# real dead-air guard: `emergency` is an always-ready, non-silent single, so the
-# broadcast never has nothing to pull.
-#
-# POSITION IS LOAD-BEARING (#1300 bug 7). This MUST stay ABOVE the `smooth_add`
-# ducking layers below. The stdlib implements smooth_add as
-#   add(normalize=false, [normal, fallback(track_sensitive=false, [special, blank()])])
-# — that inner fallback falls through to `blank()`, so it is ALWAYS ready, and
-# `add` is ready whenever ANY input is. The whole duck stack therefore reports
-# ready even when the music chain is starved, and a fallback placed BELOW it can
-# never select its second branch. This guard lived at the bottom of the chain
-# for its whole life and was dead code the entire time; when the starve guard
-# started gating jingles off, that turned "stingers forever" into digital
-# silence forever: measured on subwave-aio-heavy, output at -91.0 dB with the
-# fallback down there versus -3.0 dB with it here — i.e. the loop actually airs.
-#
-# It also has to stay BELOW `music_meta` and the jingle rotate, so now-playing
-# metadata and jingle counting are untouched; and being above the ducking is
-# what lets the DJ talk over the emergency loop exactly as over music.
-emergency = single("/sounds/emergency.mp3")
-music_bus = fallback(id="music_safety", track_sensitive=false, [music_bus, emergency])
 
 # ---------------------------------------------------------------------------
 # DUCKING — gated talkbax, like a broadcast desk
@@ -1221,10 +1283,12 @@ radio = smooth_add(
 # (#1300 bug 7). Everything from `ducked` down is a `smooth_add`, and smooth_add
 # is always ready — the stdlib gives its `special` input a `blank()` fallthrough
 # and mixes with `add`, which is ready if any input is. A fallback below that
-# stack can only ever select index 0. It has been moved ABOVE the duck layers,
-# onto `music_bus` (id="music_safety") — see the SAFETY block up there. Do not
-# add a second one down here: a fallback that LOOKS like a dead-air guard but
-# structurally cannot fire is exactly what caused this bug.
+# stack can only ever select index 0. It has been moved ABOVE the duck layers
+# AND above the studio-bed `add` (which has the same always-ready property when
+# `bed_enabled` is on, via `mksafe`), onto `music` (id="music_safety") — see the
+# SAFETY block up there. Do not add a second one down here: a fallback that
+# LOOKS like a dead-air guard but structurally cannot fire is exactly what
+# caused this bug.
 
 # ---------------------------------------------------------------------------
 # IDLE GATE — silence the programme while nobody is listening
