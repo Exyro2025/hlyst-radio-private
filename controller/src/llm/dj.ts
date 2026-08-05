@@ -34,6 +34,9 @@ export {
   generateProgrammeExchange,
 } from './internal/prompts/programme.js';
 export { PICKER_CRITERIA, pickNextTrack, showMusicLean, effectsGuidance } from './internal/prompts/picker.js';
+// Re-exported here so the prompt builders can describe the harness's real loop
+// shape without reaching past the dj/ barrel into the provider layer.
+export { promptDiscoverySteps } from './internal/provider/legs.js';
 export { generatePersona, generateShow, generateTheme, generateSaySuggestions } from './internal/prompts/generate.js';
 
 // Re-exported so routes/debug.js can read the LLM call ring buffer through the
