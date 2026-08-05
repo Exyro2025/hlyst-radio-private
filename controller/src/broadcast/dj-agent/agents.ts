@@ -16,16 +16,18 @@ export const pickerAgent = defineAgent({
   // the on-air persona's djMode, and the say length its scriptLength — same
   // reason effectsGuidance() is dynamic. See pickSchema above.
   schema: () => pickSchema(),
-  // The done-tool path is meant to end the loop at step 1 (COMMIT_AFTER_STEPS
-  // in agent.ts): step 0 discovers, step 1 commits. That held for every
-  // provider UNTIL GLM (Zhipu/Z.ai) — it can decline the forced `done` call
-  // repeatedly within the SAME conversation rather than complying on the first
-  // attempt, so a taller maxSteps stopped being a rarely-hit backstop and
-  // became a real (and wasted) retry budget: each extra step just grows an
-  // increasingly "I already declined" trail, which made compliance WORSE, not
-  // better, in testing. 2 keeps the main run to exactly discovery + one
-  // committed attempt and hands off to agent.ts's own two-tier recovery (which
-  // includes a clean-context retry) sooner — recovery is the mechanism that
+  // Advisory floor only. On the done-tool path the cap is DERIVED per provider
+  // (gatedMaxStepsFor = discovery budget + 1 in provider/capabilities.ts), so
+  // this value reaches the model only as the `Math.max` floor on the native leg.
+  //
+  // The reason the derivation exists rather than a number here: GLM (Zhipu/Z.ai)
+  // can decline the forced `done` call repeatedly within the SAME conversation
+  // rather than complying on the first attempt, so a taller cap stopped being a
+  // rarely-hit backstop and became a real (and wasted) retry budget — each extra
+  // step just grows an increasingly "I already declined" trail, which made
+  // compliance WORSE, not better, in testing. Deriving the cap keeps the main run
+  // at exactly discovery + ONE committed attempt at every budget, and hands off
+  // to agent.ts's recovery cascade sooner — recovery is the mechanism that
   // actually rescues these, not more steps on a polluted trail.
   maxSteps: 2,
   timeoutMs: agentDeadline,
