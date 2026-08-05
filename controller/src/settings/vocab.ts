@@ -281,7 +281,7 @@ export function clampNumCtx(raw: unknown, def: number): number {
 // Non-numeric/NaN falls back to `def`. See appliedRepeatPenalty() in
 // capabilities.ts — Ollama ignores this field (ai-sdk-ollama v4 has no
 // per-call repeat_penalty channel at all; restoration is a tracked follow-up).
-function clampRepeatPenalty(raw: unknown, def: number): number {
+export function clampRepeatPenalty(raw: unknown, def: number): number {
   if (typeof raw !== 'number' || !Number.isFinite(raw)) return def;
   return Math.min(2.0, Math.max(1.0, raw));
 }

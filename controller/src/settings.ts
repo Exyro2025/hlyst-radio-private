@@ -62,6 +62,7 @@ import {
   clampMaxOutputTokens,
   clampNoRepeatWindow,
   clampNumCtx,
+  clampRepeatPenalty,
   clampTtsGain,
   clampTtsSpeed,
   coerceGuestPersonaIds,
@@ -753,6 +754,13 @@ export async function load() {
       // Clamp to a sane band: 0 disables (Ollama default), else [2048, 131072].
       // Non-numeric/NaN falls back to the default. Floored to an integer.
       numCtx: clampNumCtx(stored.llm?.numCtx, DEFAULTS.llm.numCtx),
+      // Clamped to [1.0, 2.0]; 1.0 = off. This block does NOT spread DEFAULTS,
+      // so a field missing HERE is written to settings.json by update() and then
+      // silently dropped on the next cold load — which is exactly what happened
+      // to repeat_penalty between #918 and #1327: the operator's configured
+      // value survived in memory for that process, vanished on restart, and
+      // llama.cpp fell back to its own 1.0 default with nothing in the logs.
+      repeatPenalty: clampRepeatPenalty(stored.llm?.repeatPenalty, DEFAULTS.llm.repeatPenalty),
       pickerAgent:
         typeof stored.llm?.pickerAgent === 'boolean'
           ? stored.llm.pickerAgent
@@ -807,6 +815,7 @@ export async function load() {
             typeof fb.reasoning === 'boolean' ? fb.reasoning : DEFAULTS.llm.fallback.reasoning,
           toolChoice: fb.toolChoice === 'auto' ? 'auto' : DEFAULTS.llm.fallback.toolChoice,
           numCtx: clampNumCtx(fb.numCtx, DEFAULTS.llm.fallback.numCtx),
+          repeatPenalty: clampRepeatPenalty(fb.repeatPenalty, DEFAULTS.llm.fallback.repeatPenalty),
         };
       })(),
     },
