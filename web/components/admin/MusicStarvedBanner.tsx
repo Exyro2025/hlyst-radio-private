@@ -4,43 +4,35 @@ import Link from 'next/link';
 import { useEffect, useRef, useState } from 'react';
 import { AlertTriangle } from 'lucide-react';
 
-interface NavidromeStatus {
-  ok: boolean;
-  reason?: string;
-  url?: string;
-}
-
-// Polls the same Navidrome ping the DJ Doc reads, so the two never disagree.
-// Renders nothing until a failing result arrives.
-export default function NavidromeBanner({
+// The mixer reports its music chain starved (#1300 bug 7): nothing to play, so
+// the emergency loop is on air. Broader than NavidromeBanner on purpose — a
+// starve also happens with Navidrome perfectly healthy (an empty auto.m3u, an
+// over-strict show whose pool resolved to nothing), and it reports what is
+// actually happening ON AIR rather than which dependency is down.
+//
+// Renders nothing until a starved reading arrives, and stands down entirely
+// while the Navidrome banner is up, which is the more specific message.
+export default function MusicStarvedBanner({
   adminFetch,
-  onStatus,
+  suppressed = false,
 }: {
   adminFetch: (path: string, init?: RequestInit) => Promise<Response>;
-  // Lets the shell suppress the broader starve banner while this more specific
-  // one is up — a Navidrome outage raises both, and two stacked red bars
-  // saying overlapping things is worse than one.
-  onStatus?: (ok: boolean) => void;
+  suppressed?: boolean;
 }) {
-  const [status, setStatus] = useState<NavidromeStatus | null>(null);
+  const [starved, setStarved] = useState(false);
   // adminFetch's identity changes as auth state ticks; hold the latest in a ref
   // so the poll interval mounts once instead of tearing down every render.
   const fetchRef = useRef(adminFetch);
   fetchRef.current = adminFetch;
-  const onStatusRef = useRef(onStatus);
-  onStatusRef.current = onStatus;
 
   useEffect(() => {
     let cancelled = false;
     const check = async () => {
       try {
-        const r = await fetchRef.current('/doctor/navidrome');
+        const r = await fetchRef.current('/state');
         if (!r.ok) return; // 401 / 5xx — don't flip the banner on an auth blip
-        const j = (await r.json()) as NavidromeStatus;
-        if (!cancelled) {
-          setStatus(j);
-          onStatusRef.current?.(j.ok);
-        }
+        const j = (await r.json()) as { musicStarved?: boolean };
+        if (!cancelled) setStarved(j.musicStarved === true);
       } catch {
         // Controller unreachable — leave the last known state rather than
         // flapping; a dead controller has its own, louder failure modes.
@@ -54,7 +46,7 @@ export default function NavidromeBanner({
     };
   }, []);
 
-  if (!status || status.ok) return null;
+  if (!starved || suppressed) return null;
 
   return (
     <div
@@ -63,15 +55,15 @@ export default function NavidromeBanner({
     >
       <AlertTriangle size={14} className="shrink-0 text-[var(--danger)]" aria-hidden="true" />
       <span>
-        <b>Can&rsquo;t reach Navidrome.</b> The DJ has no music source
-        {status.reason ? <> — {status.reason}</> : null}. Check the connection in Settings &rarr;
-        Music source and that Navidrome is running.
+        <b>No music to play.</b> The station has run out of tracks and is airing the emergency
+        loop. Check that your music source is reachable and that the current show isn&rsquo;t
+        filtered down to nothing.
       </span>
       <Link
-        href="/admin/settings?section=music"
+        href="/admin/doctor"
         className="ml-auto inline-flex min-h-9 items-center font-bold text-[var(--danger)] underline-offset-2 hover:underline sm:min-h-0"
       >
-        Music source &rarr;
+        Run the Doctor &rarr;
       </Link>
     </div>
   );
