@@ -1175,7 +1175,12 @@ intro = mic_chain(amplify(override="liq_amplify", 1., edge_fade(intro_queue)))
 #   * so `emergency` also carries a one-shot fade of its own. fade.in defaults
 #     to track_sensitive=false, which memoises the ramp to the source's first
 #     frame EVER — right for the cold boot, useless for every later starve,
-#     because a looping single never reaches a fresh track boundary.
+#     because a looping single never reaches a fresh track boundary. The fade.in
+#     operator registers on_track/on_metadata/on_frame callbacks on the emergency
+#     single itself; unlike dj_transition's fades on per-track sources, these
+#     callbacks don't collect and walk on every frame the loop produces. One per
+#     switch; CPU cost only while emergency airs. Not a blocker; escape hatch is
+#     static fade.scale + mkfade-ref (stdlib idiom).
 # The two compose: at boot the child's own fade ramps; on every later switch the
 # transition wraps a fresh ramp around an inner fade already sitting at unity.
 # Measured post-fix (100 ms RMS windows): boot -38.5 dB -> -9.0 dB over 1.0s;
