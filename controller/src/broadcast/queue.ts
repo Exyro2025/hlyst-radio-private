@@ -425,8 +425,15 @@ class Queue {
     // so it sits above allowDuplicate. Every playback path funnels through
     // push() (dj-agent, requests, MCP, studio queue), making this the last
     // line even for sources that bypass the subsonic/library filters.
-    if (blocklist.isBlocked(track)) {
-      this.log('blocked', `${track?.title} — ${track?.artist} (on the never-play blocklist, refused)`);
+    const blockHit = blocklist.hitOf(track);
+    if (blockHit) {
+      // Name what refused it — an id entry reads as before; a rule names
+      // itself so the operator can find it on the Blocked tab (a seasonal
+      // refusal otherwise looks like a random "not found" to whoever queued).
+      const why = blockHit.kind === 'rule'
+        ? `blocked by rule "${blockHit.label}"${blockHit.seasonal ? ' (out of season)' : ''}, refused`
+        : 'on the never-play blocklist, refused';
+      this.log('blocked', `${track?.title} — ${track?.artist} (${why})`);
       return -2;
     }
     if (!allowDuplicate && track?.id) {
@@ -463,15 +470,16 @@ class Queue {
   }
 
   // Drop now-blocked tracks from the upcoming queue — called when a blocklist
-  // entry is added. Only undrained items (`!sent`) are removable; anything
-  // already handed to Liquidsoap plays out (we never interrupt), and the
-  // currently playing track is likewise left alone. Returns how many dropped.
+  // entry or rule is added/edited. Only undrained items (`!sent`) are
+  // removable; anything already handed to Liquidsoap plays out (we never
+  // interrupt), and the currently playing track is likewise left alone.
+  // Returns how many dropped.
   purgeBlocked(): number {
     const keep = this.upcoming.filter(i => i.sent || !blocklist.isBlocked(i.track));
     const dropped = this.upcoming.length - keep.length;
     if (dropped > 0) {
       this.upcoming = keep;
-      this.log('blocked', `purged ${dropped} upcoming track${dropped === 1 ? '' : 's'} now on the never-play blocklist`);
+      this.log('blocked', `purged ${dropped} upcoming track${dropped === 1 ? '' : 's'} now blocked by the never-play blocklist`);
       this.persist();
     }
     return dropped;

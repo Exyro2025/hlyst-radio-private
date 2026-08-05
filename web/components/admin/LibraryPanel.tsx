@@ -45,6 +45,7 @@ import { Tabs } from './library/Tabs';
 import { BrowseFilters } from './library/BrowseFilters';
 import { TrackTable } from './library/TrackTable';
 import { BlockedTab } from './library/BlockedTab';
+import { BlockRulesCard } from './library/BlockRulesCard';
 import { HistoryTab } from './library/HistoryTab';
 import { AddToPlaylistBar } from './library/AddToPlaylistBar';
 
@@ -790,8 +791,11 @@ export default function LibraryPanel() {
   };
 
   // Lifts whichever entry matched this row — possibly an album or artist block
-  // made from a different row entirely.
+  // made from a different row entirely. Rule refs never reach here (TrackTable
+  // offers no one-click unblock for them — a rule can block hundreds of rows),
+  // so the guard is a type-level formality.
   const unblockRow = async (track: Track, ref: BlockRef) => {
+    if (ref.kind === 'rule') return;
     setBlocking(track.id);
     try {
       await removeEntry(ref);
@@ -1443,15 +1447,21 @@ export default function LibraryPanel() {
       )}
 
       {tab === 'blocked' && (
-        <BlockedTab
-          entries={blockedEntries}
-          loading={blockedLoading}
-          unblocking={unblocking}
-          bulkBusy={bulkBusy}
-          onUnblock={unblockEntry}
-          onBulkUnblock={bulkUnblock}
-          onRefresh={loadBlocked}
-        />
+        <>
+          {/* Attribute rules above the id entries — one "why won't this air"
+              surface, two kinds of block. Self-contained; after a rule change
+              only the row marks on the other tabs need re-stamping. */}
+          <BlockRulesCard onChanged={() => { void recheckBlocked(); }} />
+          <BlockedTab
+            entries={blockedEntries}
+            loading={blockedLoading}
+            unblocking={unblocking}
+            bulkBusy={bulkBusy}
+            onUnblock={unblockEntry}
+            onBulkUnblock={bulkUnblock}
+            onRefresh={loadBlocked}
+          />
+        </>
       )}
 
       {tab === 'history' && (
