@@ -4,6 +4,7 @@
 // Part of the settings/ split — see ../settings.ts for the public barrel.
 
 import { config } from '../config.js';
+import { SHOW_MAX_TRACK_SECONDS } from '../schemas/show.js';
 import { DEFAULT_THEME_ID } from '../themes.js';
 import {
   AAC_BITRATES,
@@ -727,7 +728,10 @@ export const BOUNDS = {
   bedsCrossSec: { min: 0, max: 15, type: 'float' },
   // 0 = off; 36000 s (10h) is a generous ceiling that still leaves room for
   // long-form mix shows without letting a typo set an absurd value.
-  maxTrackSeconds: { min: 0, max: 36000, type: 'int' },
+  // Ceiling from the shared show schema: the strict show validator has always
+  // bounds-checked a show's own override against this station figure, so two
+  // copies of the number would drift.
+  maxTrackSeconds: { min: 0, max: SHOW_MAX_TRACK_SECONDS, type: 'int' },
   // −23 (EBU R128 broadcast) … −9 (very loud); −14 is the streaming standard.
   loudnessTargetLufs: { min: -23, max: -9, type: 'float' },
   // 0 disables boosting entirely (cut-only levelling); 12 dB is plenty — the

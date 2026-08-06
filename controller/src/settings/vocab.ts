@@ -7,6 +7,18 @@
 
 import { randomBytes } from 'node:crypto';
 import { DISCOVERY_STEPS_MIN, DISCOVERY_STEPS_MAX } from '../llm/internal/provider/capabilities.js';
+// The show shape's rules now live in the shared schema the admin form runs too.
+// Re-exported from this barrel (below) so its many importers don't move.
+import {
+  EXCLUDED_PLAYLISTS_PER_SHOW,
+  GUESTS_PER_SHOW,
+  PLAYLISTS_PER_SHOW,
+  SHOW_FILTER_VALUES_MAX,
+  SHOW_ID_RE,
+  SHOW_ENERGY as SHOW_ENERGY_VALUES,
+  SHOW_VOCALS as SHOW_VOCALS_VALUES,
+  type EraWindow,
+} from '../schemas/show.js';
 
 // Default DJ system-prompt template. Placeholders are substituted at LLM
 // call time via renderDjPrompt(). Keep {name} mandatory — update() refuses
@@ -675,13 +687,18 @@ export function normalizeMoodMap(
 
 // Energy bands a show can pin as a soft music-steering filter. Mirrors the
 // tagger's per-track energy classes and the `tracksByMood` agent-tool filter.
-export const SHOW_ENERGY = ['low', 'medium', 'high'];
-
-// Vocal steering a show can pin. Unlike the list filters above this is ONE
-// value, because the three states are mutually exclusive and "both" is just no
+//
+// Vocal steering a show can pin. Unlike the list filters this is ONE value,
+// because the three states are mutually exclusive and "both" is just no
 // constraint — which is what '' means, and what every show that predates the
 // field carries. Backed by Demucs vocal ranges (music/show-filter.trackInstrumental).
-export const SHOW_VOCALS = ['instrumental', 'vocal'];
+//
+// Both now live in the shared show schema, which the admin form runs too
+// (controller/src/schemas/show.ts). Re-exported so the many existing importers
+// of this barrel don't move. Typed as readonly there; widened here because
+// callers do `SHOW_ENERGY.includes(x)` on unknown strings.
+export const SHOW_ENERGY: readonly string[] = SHOW_ENERGY_VALUES;
+export const SHOW_VOCALS: readonly string[] = SHOW_VOCALS_VALUES;
 
 // Default festival calendar — the seeded set the admin UI shows on first boot.
 // After the operator edits the list, persisted festivals replace these.
@@ -789,7 +806,12 @@ export const CHATTERBOX_VOICE_RE = /^[A-Za-z0-9_.-]{1,80}\.wav$/;
 // `.onnx.json` manifest. Basename only, no path separators. Empty is valid and
 // means "use the baked-in default voice" (issue #230).
 export const PIPER_VOICE_RE = /^[A-Za-z0-9_.-]{1,100}\.onnx$/;
-export const ID_RE = /^[a-z0-9_]{3,32}$/;
+// The entity-id pattern shows, personas and skill assignments all share. Its
+// one definition is SHOW_ID_RE in the shared show schema — a mirrored module
+// cannot import a common one (gen-schemas.ts rejects every specifier but
+// 'zod'), so it is homed in the first feature that needed it. Whoever converts
+// personas should decide its permanent home.
+export const ID_RE = SHOW_ID_RE;
 // Persona avatar filename — `<personaId>.(png|jpg|jpeg|webp)`. The id segment
 // reuses ID_RE's shape so an avatar field can never reference a basename
 // outside the persona-avatars directory. Empty is also valid (no avatar set).
@@ -811,7 +833,7 @@ export const PERSONA_LIMIT = 48;
 // delivery hint) clamp it further at their own boundary — see soulBrief() in
 // llm/internal/core/pure.ts.
 export const SOUL_MAX = 2000;
-export const SHOWS_LIMIT = 64;
+export { SHOWS_LIMIT } from '../schemas/show.js';
 // Show `topic` — the standing brief the DJ works from while the show is on air.
 // Injected into the pick prompts (picker.ts / dj-agent schemas) and the
 // programme producer plan, so like SOUL_MAX it is a recurring per-call token
@@ -819,13 +841,12 @@ export const SHOWS_LIMIT = 64;
 // carry the same amount of detail as a persona sketch. Keep in lockstep with
 // TOPIC_MAX in web/components/admin/shows/types.ts and the AI-fill draft schema
 // in llm/internal/prompts/generate.ts.
-export const SHOW_TOPIC_MAX = 2000;
+// Definition lives in the shared schema; the rationale above stays here.
+export { SHOW_TOPIC_MAX } from '../schemas/show.js';
 // Guest co-hosts per show. Small on purpose: each guest is a full persona the
 // speaker rotation can hand a segment to, and past ~3 the host stops sounding
 // like the host.
-export const GUESTS_PER_SHOW = 3;
-export const PLAYLISTS_PER_SHOW = 10;
-export const EXCLUDED_PLAYLISTS_PER_SHOW = 10;
+export { GUESTS_PER_SHOW, PLAYLISTS_PER_SHOW, EXCLUDED_PLAYLISTS_PER_SHOW };
 // Values per multi-select music filter (moods / genres / eras). Within one
 // attribute the values OR together at pick time; across attributes they AND.
 // Raised 6 → 15: the AND-across argument for keeping it small never applied
@@ -844,7 +865,7 @@ export const EXCLUDED_PLAYLISTS_PER_SHOW = 10;
 // music/picker.ts + broadcast/scheduler.ts), so the pool doesn't grow either.
 // Keep in lockstep with FILTER_VALUES_MAX in
 // web/components/admin/shows/types.ts (pinned by scripts/show-filter-cap.test.ts).
-export const SHOW_FILTER_VALUES_MAX = 15;
+export { SHOW_FILTER_VALUES_MAX };
 // Must comfortably exceed a realistic skill library: unticking one skill on an
 // "all skills" (null) persona materialises the FULL catalog minus one, so a cap
 // near the library size would make that first untick fail (#skill-organization).
@@ -912,7 +933,7 @@ export function coercePlaylistIds(raw: unknown): string[] {
 // One era window { fromYear, toYear } — at least one bound set; both-null
 // entries are meaningless and dropped. Multiple windows let a show span
 // non-adjacent decades ("90s + 2010s") — inexpressible as a single range.
-export type EraWindow = { fromYear: number | null; toYear: number | null };
+export type { EraWindow };
 
 // Webhook shape + event list now live in the shared schema, which the web form
 // runs too (controller/src/schemas/webhook.ts). Re-exported here so the many

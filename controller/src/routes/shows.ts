@@ -16,12 +16,31 @@
 import express from 'express';
 import * as settings from '../settings.js';
 import { requireAdmin } from '../middleware/auth.js';
+import { validateBodyAsync } from '../middleware/validate.js';
+import { showPostSchema } from '../schemas/show.js';
+import { listThemes } from '../themes.js';
+import { minTrackSeconds } from '../settings.js';
 import { readCommunityShow } from '../shows/community.js';
 import { SLUG_RE } from '../skills/loader.js';
 import { queue } from '../broadcast/queue.js';
 import { rollSessionNow } from '../broadcast/scheduler.js';
 
 export const router = express.Router();
+
+// The show schema is a factory over live state (roster, mood vocabulary, theme
+// registry, the crossfade-derived track-length floor) — the same four inputs
+// update() assembles for validateShowsStrict. Built per request so a persona
+// added seconds ago is a legal host immediately.
+async function showPostContext() {
+  await settings.load();
+  const s = settings.get();
+  return showPostSchema({
+    personaIds: (s.personas || []).map((p: { id: string }) => p.id),
+    moodNames: (s.moods || []).map((m: { name: string }) => m.name),
+    themeIds: (await listThemes()).map((t: { id: string }) => t.id),
+    minTrackSeconds: minTrackSeconds(),
+  });
+}
 
 router.post('/shows/community/:slug/install', requireAdmin, async (req, res) => {
   const slug = String(req.params.slug);
@@ -134,11 +153,10 @@ router.delete('/shows/:id', requireAdmin, async (req, res) => {
 // referenced yet; an edited show keeps its id). A client-minted `s_` id survives
 // validateShowsStrict, so grid slots that already point at the show stay valid.
 // ---------------------------------------------------------------------------
-router.post('/shows', requireAdmin, async (req, res) => {
-  const incoming = req.body?.show;
-  if (!incoming || typeof incoming !== 'object') {
-    return res.status(400).json({ error: 'missing show' });
-  }
+router.post('/shows', requireAdmin, validateBodyAsync(showPostContext), async (req, res) => {
+  // validateBodyAsync ran the shared schema, so this is the parsed show — the
+  // same value settings.update() will re-validate as the chokepoint.
+  const incoming = req.body.show;
 
   await settings.load();
   const existing = settings.get().shows || [];

@@ -11,10 +11,7 @@ import {
   DJ_PROMPT_NAME_MAX,
   DJ_PROMPT_TEXT_MAX,
   DJ_PROMPT_TEXT_MIN,
-  EXCLUDED_PLAYLISTS_PER_SHOW,
-  EraWindow,
   FREQUENCIES,
-  GUESTS_PER_SHOW,
   ID_RE,
   KOKORO_VOICE_RE,
   MOODS_LIMIT,
@@ -24,15 +21,9 @@ import {
   OVERRIDE_MAX_MINUTES,
   PERSONA_LIMIT,
   PIPER_VOICE_RE,
-  PLAYLISTS_PER_SHOW,
   POCKET_TTS_VOICE_RE,
   SCRIPT_LENGTHS,
-  SHOWS_LIMIT,
-  SHOW_ENERGY,
-  SHOW_VOCALS,
-  SHOW_FILTER_VALUES_MAX,
   SHOW_MOODS,
-  SHOW_TOPIC_MAX,
   SKILLS_PER_PERSONA_LIMIT,
   SKILL_SLUG_RE,
   SOUL_MAX,
@@ -43,22 +34,17 @@ import {
   Webhook,
   clampTtsGain,
   clampTtsSpeed,
-  coerceExcludedPlaylistIds,
-  coerceGuestPersonaIds,
-  coercePlaylistIds,
-  coerceShowEnergies,
-  coerceShowVocals,
-  coerceShowGenres,
-  coerceShowMoods,
   emptyWeek,
   mintId,
   normalizeDial,
   normalizeMoodName,
 } from './vocab.js';
-import { BOUNDS, rawMaxTrackSec } from './defaults.js';
+
 import { minTrackSeconds } from './store.js';
 import { webhooksSchema } from '../schemas/webhook.js';
 import { mergeWebhookSecrets } from '../schemas/webhook-server.js';
+import { showsSchema, type ShowSchemaContext } from '../schemas/show.js';
+import { resolveShowIds } from '../schemas/show-server.js';
 import { firstMessage } from '../util/zod-error.js';
 
 // Strict validator for a `{engine, voice, cloudProvider}` voice slot. Shared by
@@ -276,218 +262,30 @@ export function validatePersonasStrict(raw) {
 
 export function validateShowsStrict(raw, personas, allowedThemeIds: Set<string>, moodNames: string[] = SHOW_MOODS) {
   if (!Array.isArray(raw)) throw new Error('shows must be an array');
-  if (raw.length > SHOWS_LIMIT) throw new Error(`shows must be at most ${SHOWS_LIMIT} entries`);
-  const personaIds = personas.map(p => p.id);
-  const seen = new Set();
-  return raw.map((item, i) => {
-    if (!item || typeof item !== 'object') throw new Error(`shows[${i}] must be an object`);
-    const name = String(item.name ?? '').trim();
-    if (name.length < 1 || name.length > 60) throw new Error(`shows[${i}].name must be 1-60 chars`);
-    const topic = String(item.topic ?? '').trim();
-    if (topic.length > SHOW_TOPIC_MAX) throw new Error(`shows[${i}].topic must be 0-${SHOW_TOPIC_MAX} chars`);
-    if (!personaIds.includes(item.personaId)) {
-      throw new Error(`shows[${i}].personaId must reference an existing persona`);
+  // Note the legacy singular fields #929 replaced (mood / genre / …) are
+  // refused by the SCHEMA, not here, so POST /shows and a backup restore get
+  // the same answer. The lenient load path migrates them instead.
+  const ctx: ShowSchemaContext = {
+    personaIds: personas.map(p => p.id),
+    moodNames,
+    themeIds: [...allowedThemeIds],
+    minTrackSeconds: minTrackSeconds(),
+  };
+  const parsed = showsSchema(ctx).safeParse(raw);
+  if (!parsed.success) throw new Error(firstMessage(parsed.error, 'shows'));
+  // The schema drops a themeId it doesn't recognise (see the comment on that
+  // field). Reporting it is the caller's job, so the mirrored module stays
+  // side-effect free — and an operator whose palette silently reverted to the
+  // station default deserves the line in the log.
+  parsed.data.forEach((show, i) => {
+    const wanted = String((raw[i] as Record<string, unknown>)?.themeId ?? '').trim();
+    if (wanted && !show.themeId) {
+      console.warn(
+        `[shows] dropping unknown themeId "${wanted}" from "${show.name}" — falling back to the station theme`,
+      );
     }
-    // Empty/missing moods means "Any": the show pins no mood and the autonomous
-    // dominantMood chain (festival > weather > time) applies while it's on air.
-    // Multi-value (#929): the plural array is canonical; a legacy singular
-    // `mood` from an older client still validates and becomes a one-element
-    // list. Every entry must come from the canonical vocabulary.
-    const rawMoods = Array.isArray(item.moods)
-      ? item.moods
-      : item.mood == null || item.mood === '' ? [] : [item.mood];
-    if (rawMoods.length > SHOW_FILTER_VALUES_MAX) {
-      throw new Error(`shows[${i}].moods must have at most ${SHOW_FILTER_VALUES_MAX} entries`);
-    }
-    for (const m of rawMoods) {
-      if (typeof m !== 'string' || !moodNames.includes(m)) {
-        throw new Error(`shows[${i}].moods entries must be one of: ${moodNames.join(', ')}`);
-      }
-    }
-    const moods = coerceShowMoods({ moods: rawMoods });
-    // Optional per-show theme override. Empty/missing means "fall back to the
-    // station default while this show is on air". The allow-set is built once
-    // by update() so we stay sync here.
-    //
-    // A stale id (a retired built-in like the old "sunset"/"neon" palettes,
-    // renamed in 58c3782b, or a custom theme file deleted under our feet) is
-    // DROPPED to "" rather than throwing — same tolerance as the lenient load
-    // path and the serve-time fallback in GET /themes. Throwing here bricked EVERY
-    // shows/schedule save and full restore for any install still carrying one
-    // retired id on one show, because update() re-validates the whole array
-    // (issue #917 is the theme.active twin of this). Self-heals: the dead id
-    // is gone the next time the array is persisted. This never discards a fresh
-    // operator pick — those come from the live theme list — only a dead one.
-    let themeId = '';
-    if (item.themeId !== undefined && item.themeId !== null && item.themeId !== '') {
-      const v = String(item.themeId).trim();
-      if (allowedThemeIds.has(v)) {
-        themeId = v;
-      } else {
-        console.warn(`[shows] dropping unknown themeId "${v}" from "${name}" — falling back to the station theme`);
-      }
-    }
-    // Optional music-steering filters — all default to "no constraint" and all
-    // multi-value lists (#929, legacy singular fields still accepted). Genres
-    // are free text resolved fuzzily at pick time, so they aren't checked
-    // against the live library here.
-    // Legacy singular `genre` splits on commas — same rule as the load-path
-    // migration (operators crammed "funk, soul" into the one field).
-    const rawGenres = Array.isArray(item.genres)
-      ? item.genres
-      : item.genre == null || String(item.genre).trim() === '' ? [] : String(item.genre).split(',');
-    // Cap-check only the explicit plural form; a legacy comma-crammed string
-    // is silently capped by the coercer instead of failing an old client.
-    if (Array.isArray(item.genres) && item.genres.length > SHOW_FILTER_VALUES_MAX) {
-      throw new Error(`shows[${i}].genres must have at most ${SHOW_FILTER_VALUES_MAX} entries`);
-    }
-    for (const g of rawGenres) {
-      if (typeof g !== 'string') throw new Error(`shows[${i}].genres entries must be strings`);
-      if (g.trim().length > 64) throw new Error(`shows[${i}].genres entries must be 0-64 chars`);
-    }
-    const genres = coerceShowGenres({ genres: rawGenres });
-    const rawEnergies = Array.isArray(item.energies)
-      ? item.energies
-      : item.energy == null || item.energy === '' ? [] : [item.energy];
-    for (const e of rawEnergies) {
-      if (typeof e !== 'string' || !SHOW_ENERGY.includes(e)) {
-        throw new Error(`shows[${i}].energies entries must be one of: ${SHOW_ENERGY.join(', ')}`);
-      }
-    }
-    const energies = coerceShowEnergies({ energies: rawEnergies });
-    // One value, not a list — instrumental and vocal are mutually exclusive and
-    // wanting both is wanting neither. Absent/'' is no constraint, so an
-    // existing show round-trips unchanged.
-    if (item.vocals != null && item.vocals !== '') {
-      if (typeof item.vocals !== 'string' || !SHOW_VOCALS.includes(item.vocals)) {
-        throw new Error(`shows[${i}].vocals must be '' or one of: ${SHOW_VOCALS.join(', ')}`);
-      }
-    }
-    const vocals = coerceShowVocals(item);
-    // Opt-in hard filter across every set music constraint — mood, genre, era,
-    // energy (vs the default soft leans). Boolean, defaults OFF. The legacy
-    // genre-only `genreStrict` is deliberately NOT carried over (see the load
-    // path): the toggle now spans every filter, so migrating it would silently
-    // harden mood/era/energy an old show never opted into.
-    const filtersStrict = item.filtersStrict === true;
-    const parseYear = (v, field) => {
-      if (v == null || v === '') return null;
-      const n = Number(v);
-      if (!Number.isInteger(n) || n < 1900 || n > 2100) {
-        throw new Error(`shows[${i}].${field} must be an integer between 1900 and 2100`);
-      }
-      return n;
-    };
-    // Era windows: `eras` is a list of { fromYear, toYear } windows (#929);
-    // legacy top-level fromYear/toYear still validate as a one-window list.
-    // Each window needs at least one bound; both-null entries are dropped.
-    const rawEras = Array.isArray(item.eras)
-      ? item.eras
-      : item.fromYear == null && item.toYear == null ? [] : [{ fromYear: item.fromYear, toYear: item.toYear }];
-    if (rawEras.length > SHOW_FILTER_VALUES_MAX) {
-      throw new Error(`shows[${i}].eras must have at most ${SHOW_FILTER_VALUES_MAX} entries`);
-    }
-    const eras: EraWindow[] = [];
-    for (const [j, w] of rawEras.entries()) {
-      if (!w || typeof w !== 'object') throw new Error(`shows[${i}].eras[${j}] must be an object`);
-      const fromYear = parseYear((w as Record<string, unknown>).fromYear, `eras[${j}].fromYear`);
-      const toYear = parseYear((w as Record<string, unknown>).toYear, `eras[${j}].toYear`);
-      if (fromYear == null && toYear == null) continue;
-      if (fromYear != null && toYear != null && fromYear > toYear) {
-        throw new Error(`shows[${i}].eras[${j}].fromYear must be <= toYear`);
-      }
-      if (!eras.some(e => e.fromYear === fromYear && e.toYear === toYear)) {
-        eras.push({ fromYear, toYear });
-      }
-    }
-    // Per-show track-length override (seconds): null = inherit station default,
-    // 0 = unlimited, >0 = own cap. Empty/missing → inherit. A legacy minutes
-    // value from a stale client is migrated (×60) before bounds-checking.
-    let maxTrackSeconds: number | null = null;
-    const rawSec = rawMaxTrackSec(item);
-    if (rawSec != null && rawSec !== '') {
-      const n = Number(rawSec);
-      if (!Number.isInteger(n) || n < BOUNDS.maxTrackSeconds.min || n > BOUNDS.maxTrackSeconds.max) {
-        throw new Error(
-          `shows[${i}].maxTrackSeconds must be an integer between ${BOUNDS.maxTrackSeconds.min} and ${BOUNDS.maxTrackSeconds.max}`,
-        );
-      }
-      // Same crossfade-relative floor as the station cap (0 = inherit/unlimited
-      // stays allowed). Shows have no own crossfade, so it's the station value.
-      const floor = minTrackSeconds();
-      if (n !== 0 && n < floor) {
-        throw new Error(
-          `shows[${i}].maxTrackSeconds must be 0 (inherit/unlimited) or at least ${floor}s`,
-        );
-      }
-      maxTrackSeconds = n;
-    }
-    // Optional Navidrome playlist anchor. Shape-checked only (array of strings,
-    // capped) — ids are resolved against the live Navidrome at pick time, never
-    // here, so a stale id is tolerated. playlistStrict is a plain boolean.
-    let playlistIds: string[] = [];
-    if (item.playlistIds !== undefined && item.playlistIds !== null) {
-      if (!Array.isArray(item.playlistIds)) {
-        throw new Error(`shows[${i}].playlistIds must be an array of strings`);
-      }
-      if (item.playlistIds.length > PLAYLISTS_PER_SHOW) {
-        throw new Error(`shows[${i}].playlistIds must have at most ${PLAYLISTS_PER_SHOW} entries`);
-      }
-      for (const v of item.playlistIds) {
-        if (typeof v !== 'string') throw new Error(`shows[${i}].playlistIds entries must be strings`);
-      }
-      playlistIds = coercePlaylistIds(item.playlistIds);
-    }
-    const playlistStrict = item.playlistStrict === true;
-    // Optional Navidrome playlist blocklist. Shape-checked only — same rules as
-    // playlistIds; stale ids contribute nothing at pick time.
-    let excludedPlaylistIds: string[] = [];
-    if (item.excludedPlaylistIds !== undefined && item.excludedPlaylistIds !== null) {
-      if (!Array.isArray(item.excludedPlaylistIds)) {
-        throw new Error(`shows[${i}].excludedPlaylistIds must be an array of strings`);
-      }
-      if (item.excludedPlaylistIds.length > EXCLUDED_PLAYLISTS_PER_SHOW) {
-        throw new Error(`shows[${i}].excludedPlaylistIds must have at most ${EXCLUDED_PLAYLISTS_PER_SHOW} entries`);
-      }
-      for (const v of item.excludedPlaylistIds) {
-        if (typeof v !== 'string') throw new Error(`shows[${i}].excludedPlaylistIds entries must be strings`);
-      }
-      excludedPlaylistIds = coerceExcludedPlaylistIds(item.excludedPlaylistIds);
-    }
-    // Optional guest co-hosts. Strict path: unknown personas and a guest that
-    // duplicates the host are operator mistakes worth surfacing, not dropping.
-    let guestPersonaIds: string[] = [];
-    if (item.guestPersonaIds !== undefined && item.guestPersonaIds !== null) {
-      if (!Array.isArray(item.guestPersonaIds)) {
-        throw new Error(`shows[${i}].guestPersonaIds must be an array of persona ids`);
-      }
-      if (item.guestPersonaIds.length > GUESTS_PER_SHOW) {
-        throw new Error(`shows[${i}].guestPersonaIds must have at most ${GUESTS_PER_SHOW} entries`);
-      }
-      for (const v of item.guestPersonaIds) {
-        if (typeof v !== 'string' || !personaIds.includes(v)) {
-          throw new Error(`shows[${i}].guestPersonaIds must reference existing personas`);
-        }
-        if (v === item.personaId) {
-          throw new Error(`shows[${i}].guestPersonaIds must not include the show's host persona`);
-        }
-      }
-      guestPersonaIds = coerceGuestPersonaIds(item.guestPersonaIds, item.personaId, personaIds);
-    }
-    // Banter without guests is inert, not an error — the tick re-checks the
-    // live roster anyway, so a stale true can't air a one-person "exchange".
-    const banter = item.banter === true;
-    // Programme mode + optional feature-beat capability pin. The kind is
-    // shape-checked only — resolved against the live skill catalog at air time,
-    // so a stale/misspelled kind degrades instead of blocking a settings save.
-    const programme = item.programme === true;
-    const segmentSkill = String(item.segmentSkill ?? '').trim();
-    if (segmentSkill.length > 64) throw new Error(`shows[${i}].segmentSkill must be 0-64 chars`);
-    let id = typeof item.id === 'string' && ID_RE.test(item.id) ? item.id : mintId('s_');
-    if (seen.has(id)) id = mintId('s_');
-    seen.add(id);
-    return { id, name, topic, personaId: item.personaId, guestPersonaIds, banter, programme, segmentSkill, moods, themeId, genres, eras, energies, vocals, filtersStrict, maxTrackSeconds, playlistIds, playlistStrict, excludedPlaylistIds };
   });
+  return resolveShowIds(parsed.data);
 }
 
 export function validateScheduleStrict(raw, shows) {

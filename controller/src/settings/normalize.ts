@@ -20,8 +20,6 @@ import {
   PIPER_VOICE_RE,
   POCKET_TTS_VOICE_RE,
   SCRIPT_LENGTHS,
-  SHOWS_LIMIT,
-  SHOW_TOPIC_MAX,
   SKILLS_PER_PERSONA_LIMIT,
   SKILL_SLUG_RE,
   SOUL_MAX,
@@ -33,23 +31,36 @@ import {
   Webhook,
   clampTtsGain,
   clampTtsSpeed,
-  coerceExcludedPlaylistIds,
-  coerceGuestPersonaIds,
-  coercePlaylistIds,
-  coerceShowEnergies,
-  coerceShowVocals,
-  coerceShowEras,
-  coerceShowGenres,
-  coerceShowMoods,
   emptyWeek,
   mintId,
   normalizeDial,
 } from './vocab.js';
-import { DEFAULTS, coerceMaxTrackSeconds, rawMaxTrackSec } from './defaults.js';
+import { DEFAULTS, coerceMaxTrackSeconds } from './defaults.js';
 // The webhook rules themselves, so this lenient path and update()'s strict one
 // cannot restate them differently — see normalizeWebhooks below.
 import { WEBHOOK_ID_RE, webhookSchema, type WebhookParsed } from '../schemas/webhook.js';
 import { resolveWebhookIds } from '../schemas/webhook-server.js';
+import {
+  EXCLUDED_PLAYLISTS_PER_SHOW,
+  GUESTS_PER_SHOW,
+  PLAYLISTS_PER_SHOW,
+  SHOW_ENERGY,
+  SHOW_FILTER_VALUES_MAX,
+  SHOW_GENRE_MAX,
+  SHOW_NAME_MAX,
+  SHOW_SEGMENT_SKILL_MAX,
+  SHOW_THEME_ID_MAX,
+  SHOW_TOPIC_MAX,
+  SHOW_VOCALS,
+  SHOW_YEAR_MAX,
+  SHOW_YEAR_MIN,
+  SHOWS_LIMIT,
+  migrateLegacyShowFields,
+  showSchema,
+  type ShowParsed,
+  type ShowSchemaContext,
+} from '../schemas/show.js';
+import { resolveShowIds } from '../schemas/show-server.js';
 
 // ── normalizers (lenient — used by load(), clamp/default rather than throw) ──
 
@@ -230,100 +241,98 @@ export function normalizeDjPrompts(raw: unknown): DjPromptEntry[] {
 
 export function normalizeShows(raw: unknown, personaIds: string[]): NormalizedShow[] {
   if (!Array.isArray(raw)) return [];
-  const seen = new Set<string>();
-  const out: NormalizedShow[] = [];
+  // The SAME schema update() enforces, given a context that says which rules
+  // this caller is in a position to check. All three nulls are deliberate and
+  // documented on ShowSchemaContext: load runs before the mood cache exists,
+  // has no theme registry, and clamps the track-length cap to the hard bounds
+  // instead of the crossfade-derived floor. Everything else — the name and
+  // brief lengths, the era windows, the per-attribute caps, the host reference
+  // — is one rule, executed once.
+  const ctx: ShowSchemaContext = {
+    personaIds,
+    moodNames: null,
+    themeIds: null,
+    minTrackSeconds: null,
+  };
+  const schema = showSchema(ctx);
+  const rows: ShowParsed[] = [];
   for (const item of raw) {
     if (!item || typeof item !== 'object') continue;
-    const name = typeof item.name === 'string' ? item.name.trim().slice(0, 60) : '';
-    if (!name) continue;
-    if (!personaIds.includes(item.personaId)) continue; // drop dangling owner
-    // Empty moods = "Any" (the autonomous mood applies on air). Unknown mood
-    // strings are dropped rather than failing the whole show. Multi-value
-    // (#929): plural arrays are canonical; legacy singular fields migrate to
-    // one-element lists here (coerceShow* handle both shapes).
-    const moods = coerceShowMoods(item);
-    let id = typeof item.id === 'string' && ID_RE.test(item.id) ? item.id : mintId('s_');
-    if (seen.has(id)) id = mintId('s_');
-    seen.add(id);
-    // themeId is the optional per-show theme override. Lenient path: we only
-    // sanity-check the shape. A stale id (theme file deleted under our feet)
-    // is harmless — routes/public.ts (GET /themes) falls back to the station
-    // default at serve time. Empty/missing means "no
-    // override" and is stored as an empty string for round-trip cleanliness.
-    const themeId =
-      typeof item.themeId === 'string' && item.themeId.trim()
-        ? item.themeId.trim().slice(0, 64)
-        : '';
-    // Optional music-steering filters (soft lean, applied at pick time). Each
-    // is a LIST — OR within the attribute, AND across attributes (#929).
-    // Genres are free text resolved fuzzily against the live library when a
-    // pick is made (mirrors the listener-request path) — never validated
-    // against Subsonic here. Eras are decade/year windows. Energies come from
-    // the tagger's three bands. All default to "no constraint" (empty list).
-    const genres = coerceShowGenres(item);
-    const eras = coerceShowEras(item);
-    const energies = coerceShowEnergies(item);
-    // Vocal steering (#1300 FR 13): '' = no constraint, which is what every
-    // show predating the field carries, so loading one is a no-op.
-    const vocals = coerceShowVocals(item);
-    // Opt-in: hard-filter the pick pool to EVERY set music filter (mood, genre,
-    // era, energy) instead of the default soft leans. Only meaningful when at
-    // least one filter is set; defaults OFF. The legacy genre-only `genreStrict`
-    // is deliberately NOT carried over: the toggle now spans every filter, so
-    // auto-migrating an old genre-strict show would silently harden mood/era/
-    // energy too. Old shows come back soft; the operator re-opts into strict.
-    const filtersStrict = item.filtersStrict === true;
-    // Per-show track-length override (seconds). null = inherit the station-wide
-    // maxTrackSeconds; 0 = unlimited (opt this show back out of the cap so a
-    // long-form mix show can air hour-long sets); >0 = this show's own cap.
-    const maxTrackSeconds = coerceMaxTrackSeconds(rawMaxTrackSec(item), true);
-    // Optional Navidrome playlist anchor — the union of these playlists becomes
-    // the show's candidate pool. playlistStrict (default off) makes the playlist
-    // the show's ENTIRE universe; soft just lets it dominate. Both default empty
-    // so existing shows are byte-for-byte unchanged.
-    const playlistIds = coercePlaylistIds(item.playlistIds);
-    const playlistStrict = item.playlistStrict === true;
-    // Optional Navidrome playlist blocklist — tracks from these playlists are
-    // excluded from the candidate pool. Empty = no exclusions.
-    const excludedPlaylistIds = coerceExcludedPlaylistIds(item.excludedPlaylistIds);
-    // Optional guest co-hosts. Lenient path: dangling persona ids (persona
-    // deleted under our feet) and the host itself are silently dropped so the
-    // show survives with whatever roster is still real.
-    const guestPersonaIds = coerceGuestPersonaIds(item.guestPersonaIds, item.personaId, personaIds);
-    // Scripted banter breaks (multi-voice exchanges). Only meaningful with
-    // guests — stored as given, checked against the live roster at air time.
-    const banter = item.banter === true;
-    // Programme mode: the show airs as a produced episode (intro → feature →
-    // outro arc — broadcast/programme.ts). segmentSkill optionally pins the
-    // feature beat to one segment capability kind; free text, resolved against
-    // the live skill catalog at air time (a stale kind degrades to the
-    // producer's choice, same tolerance as playlistIds).
-    const programme = item.programme === true;
-    const segmentSkill = typeof item.segmentSkill === 'string' ? item.segmentSkill.trim().slice(0, 64) : '';
-    out.push({
-      id,
-      name,
-      topic: typeof item.topic === 'string' ? item.topic.trim().slice(0, SHOW_TOPIC_MAX) : '',
-      personaId: item.personaId,
-      guestPersonaIds,
-      banter,
-      programme,
-      segmentSkill,
-      moods,
-      themeId,
-      genres,
-      eras,
-      energies,
-      vocals,
-      filtersStrict,
-      maxTrackSeconds,
-      playlistIds,
-      playlistStrict,
-      excludedPlaylistIds,
+    // Legacy singular fields (#929) are MIGRATED here and refused by the strict
+    // path. This is the caller that actually meets them: a settings.json
+    // written before the change.
+    const migrated = migrateLegacyShowFields(item);
+    const parsed = schema.safeParse({
+      ...migrated,
+      // undefined lets the schema's own default apply. Repaired rather than
+      // rejected because none of these is worth losing a working show over —
+      // and each repair lands on the same value the strict path would have
+      // demanded, so load and save still agree about what a valid show is.
+      id: typeof migrated.id === 'string' && ID_RE.test(migrated.id) ? migrated.id : undefined,
+      // A stale mood or energy costs the show that one filter, not the show.
+      moods: Array.isArray(migrated.moods) ? migrated.moods.slice(0, SHOW_FILTER_VALUES_MAX) : undefined,
+      energies: Array.isArray(migrated.energies)
+        ? migrated.energies.filter((e: unknown) => typeof e === 'string' && (SHOW_ENERGY as readonly string[]).includes(e))
+        : undefined,
+      // Anything unrecognised reads as no constraint — a steering field that
+      // silently stops applying is a far smaller failure than a show that
+      // stops playing music.
+      vocals: (SHOW_VOCALS as readonly string[]).includes(migrated.vocals as string) ? migrated.vocals : undefined,
+      // Clamp rather than reject: an out-of-range cap from a hand-edited file
+      // should bound the show, not delete it.
+      maxTrackSeconds: coerceMaxTrackSeconds(migrated.maxTrackSeconds, true),
+      // Over-long free text is trimmed to the same ceiling the strict path
+      // enforces.
+      name: typeof migrated.name === 'string' ? migrated.name.trim().slice(0, SHOW_NAME_MAX) : undefined,
+      topic: typeof migrated.topic === 'string' ? migrated.topic.slice(0, SHOW_TOPIC_MAX) : undefined,
+      genres: Array.isArray(migrated.genres)
+        ? migrated.genres
+            .filter((g: unknown) => typeof g === 'string')
+            .map((g: string) => g.trim().slice(0, SHOW_GENRE_MAX))
+            .slice(0, SHOW_FILTER_VALUES_MAX)
+        : undefined,
+      segmentSkill: typeof migrated.segmentSkill === 'string'
+        ? migrated.segmentSkill.trim().slice(0, SHOW_SEGMENT_SKILL_MAX)
+        : undefined,
+      themeId: typeof migrated.themeId === 'string'
+        ? migrated.themeId.trim().slice(0, SHOW_THEME_ID_MAX)
+        : undefined,
+      // Dangling guests and the host itself are dropped so the show survives
+      // with whatever roster is still real; the strict path rejects both.
+      guestPersonaIds: Array.isArray(migrated.guestPersonaIds)
+        ? migrated.guestPersonaIds
+            .filter((g: unknown) => typeof g === 'string' && g !== migrated.personaId && personaIds.includes(g))
+            .slice(0, GUESTS_PER_SHOW)
+        : undefined,
+      // Era windows that can never match (from > to) are dropped rather than
+      // failing the show.
+      eras: Array.isArray(migrated.eras)
+        ? migrated.eras.filter((w: unknown) => {
+            const e = w as { fromYear?: unknown; toYear?: unknown } | null;
+            if (!e || typeof e !== 'object') return false;
+            const f = e.fromYear == null || e.fromYear === '' ? null : Number(e.fromYear);
+            const t = e.toYear == null || e.toYear === '' ? null : Number(e.toYear);
+            if (f != null && (!Number.isInteger(f) || f < SHOW_YEAR_MIN || f > SHOW_YEAR_MAX)) return false;
+            if (t != null && (!Number.isInteger(t) || t < SHOW_YEAR_MIN || t > SHOW_YEAR_MAX)) return false;
+            return f == null || t == null || f <= t;
+          }).slice(0, SHOW_FILTER_VALUES_MAX)
+        : undefined,
+      playlistIds: Array.isArray(migrated.playlistIds)
+        ? migrated.playlistIds.slice(0, PLAYLISTS_PER_SHOW)
+        : undefined,
+      excludedPlaylistIds: Array.isArray(migrated.excludedPlaylistIds)
+        ? migrated.excludedPlaylistIds.slice(0, EXCLUDED_PLAYLISTS_PER_SHOW)
+        : undefined,
     });
-    if (out.length >= SHOWS_LIMIT) break;
+    // What survives a drop: a nameless show, one whose host no longer exists.
+    // Both are shows with no owner or no identity, which is what the
+    // hand-rolled loader dropped too.
+    if (!parsed.success) continue;
+    rows.push(parsed.data);
+    if (rows.length >= SHOWS_LIMIT) break;
   }
-  return out;
+  // Same minting and de-duplication the strict path runs, from the same module.
+  return resolveShowIds(rows) as NormalizedShow[];
 }
 
 export function normalizeSchedule(raw: unknown, showIds: string[]) {

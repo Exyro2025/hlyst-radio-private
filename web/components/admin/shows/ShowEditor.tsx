@@ -32,6 +32,7 @@ import {
   FILTER_VALUES_MAX,
   GUESTS_MAX,
   NAME_MAX,
+  EXCLUDED_PLAYLISTS_MAX,
   PLAYLISTS_MAX,
   TOPIC_MAX,
   VOCAL_OPTIONS,
@@ -39,7 +40,7 @@ import {
   sameEra,
 } from './types';
 import type { Persona, PlaylistIndexStatus, Show, SkillOption, ThemeOption } from './types';
-import { hasAnyMusicFilter, showValid } from './lib';
+import { hasAnyMusicFilter, showContext, showValid } from './lib';
 import { ChipRow } from './ChipRow';
 
 interface ShowEditorProps {
@@ -73,7 +74,18 @@ export function ShowEditor({
   update, onSave, onClose, onRemove,
 }: ShowEditorProps) {
   // Save show gates on THIS show only — other unsaved shows don't block it.
-  const valid = showValid(show);
+  // Same schema the controller runs, given the live roster/moods/themes this
+  // editor already receives as props — so the footer's Save gate cannot
+  // disagree with the validator on the other end of the request.
+  const valid = showValid(
+    show,
+    showContext({
+      personas,
+      moods,
+      themeIds: themes.map(t => t.id),
+      minTrackSeconds: minTrackSeconds ?? null,
+    }),
+  );
   // The editor is remounted per show, so this resets on switch.
   const [genreDraft, setGenreDraft] = useState('');
   const addGenre = (g: string) => {
@@ -523,7 +535,7 @@ export function ShowEditor({
               playlists={playlists}
               status={playlistsStatus}
               selected={show.excludedPlaylistIds}
-              max={PLAYLISTS_MAX}
+              max={EXCLUDED_PLAYLISTS_MAX}
               onChange={excludedPlaylistIds => update({ excludedPlaylistIds })}
             />
           </Field>
