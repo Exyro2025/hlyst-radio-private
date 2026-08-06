@@ -19,6 +19,7 @@ import {
   SHOW_VOCALS as SHOW_VOCALS_VALUES,
   type EraWindow,
 } from '../schemas/show.js';
+import { SKILL_SLUG_RE as SKILL_SLUG_PATTERN } from '../schemas/skill.js';
 
 // Default DJ system-prompt template. Placeholders are substituted at LLM
 // call time via renderDjPrompt(). Keep {name} mandatory — update() refuses
@@ -817,8 +818,14 @@ export const ID_RE = SHOW_ID_RE;
 // outside the persona-avatars directory. Empty is also valid (no avatar set).
 export const AVATAR_FILENAME_RE = /^[a-z0-9_]{3,32}\.(png|jpe?g|webp)$/;
 // Skill slugs (e.g. 'weather', 'random-facts'). The skills registry is the
-// source of truth for which slugs exist; settings only checks the shape.
-export const SKILL_SLUG_RE = /^[a-z0-9-]{1,40}$/;
+// source of truth for which slugs exist; settings only checks the shape — and
+// now checks the SAME shape, aliasing the pattern in the shared skill schema
+// (skills/loader.ts's SLUG_RE is the third name for it). The separate pattern
+// this replaces (`/^[a-z0-9-]{1,40}$/`) disagreed in both directions: it
+// accepted `-nope`, which no skill can be called, and rejected a real
+// 41–49-char slug, so a legitimately-named skill could not be assigned to a
+// persona at all.
+export const SKILL_SLUG_RE = SKILL_SLUG_PATTERN;
 
 // Exported for the community-persona install route (routes/personas.ts), which
 // gives a friendly 409 before settings.update() would throw on an oversize roster.
