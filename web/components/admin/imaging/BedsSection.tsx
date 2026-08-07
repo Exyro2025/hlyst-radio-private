@@ -15,7 +15,15 @@ import { SkeletonCards } from '@/components/ui/skeleton';
 import { Btn, Seg } from '../ui';
 import { PreviewButton, type SettingsData, type SaveSettings } from '../settings/shared';
 import type { BedsData, BedsForm } from './types';
-import { IMAGING_DESCRIPTION_MAX, IMAGING_NAME_MAX, IMAGING_PROMPT_MAX } from '@/lib/schemas.generated';
+import { notify } from '../../../lib/notify';
+import {
+  BEDS_CROSS_SEC_BOUNDS,
+  BEDS_THRESHOLD_SEC_BOUNDS,
+  IMAGING_DESCRIPTION_MAX,
+  IMAGING_NAME_MAX,
+  IMAGING_PROMPT_MAX,
+  bedsPatchSchema,
+} from '@/lib/schemas.generated';
 import {
   SectionMasthead, PanelBox, PanelHead, EmptyState, DropZone, MetaLine, TabMetric, pad2,
 } from './parts';
@@ -71,14 +79,29 @@ export function BedsSection({ bedsData, bedsForm, setBedsForm, busy, createBed, 
   const thresholdSec = beds?.thresholdSec ?? 12;
   const crossSec = beds?.crossSec ?? 6;
 
+  // Pre-flight against the SAME schema the controller enforces
+  // (controller/src/schemas/settings.ts, mirrored). This used to hand-check
+  // `v >= 0 && v <= max` against a bare 60 / 15 copied from BOUNDS — two
+  // literals with nothing keeping them in step with the controller.
+  //
+  // It also no longer swallows a bad value. The old branch dropped anything
+  // out of range and reset the input, so typing 99 silently reverted to the
+  // stored number with no explanation; now the schema's own message says why,
+  // matching what the server would have answered.
   const saveNumber = async (
-    raw: string, current: number, max: number,
+    raw: string, current: number,
     patch: (v: number) => Record<string, unknown>,
     reset: (v: string | null) => void,
   ) => {
-    const v = parseFloat(raw);
-    if (Number.isFinite(v) && v >= 0 && v <= max && v !== current) {
-      await saveSettings(patch(v)); // refreshes `data`, so clearing shows the new value
+    const parsed = bedsPatchSchema.safeParse(patch(parseFloat(raw)).beds);
+    if (!parsed.success) {
+      notify.err(parsed.error.issues[0]?.message || 'invalid value');
+      reset(null);
+      return;
+    }
+    const [[field, value]] = Object.entries(parsed.data) as [[string, number]];
+    if (value !== current) {
+      await saveSettings({ beds: { [field]: value } }); // refreshes `data`, so clearing shows the new value
     }
     reset(null);
   };
@@ -135,15 +158,15 @@ export function BedsSection({ bedsData, bedsForm, setBedsForm, busy, createBed, 
                 className="mono-num w-[72px]"
                 type="number"
                 step={1}
-                min={0}
-                max={60}
+                min={BEDS_THRESHOLD_SEC_BOUNDS.min}
+                max={BEDS_THRESHOLD_SEC_BOUNDS.max}
                 value={thresholdEdit ?? String(thresholdSec)}
                 disabled={busy}
                 aria-label="Bed threshold seconds"
                 onChange={(e: ChangeEvent<HTMLInputElement>) => setThresholdEdit(e.target.value)}
                 onBlur={() => {
                   if (thresholdEdit == null) return;
-                  void saveNumber(thresholdEdit, thresholdSec, 60,
+                  void saveNumber(thresholdEdit, thresholdSec,
                     v => ({ beds: { thresholdSec: v } }), setThresholdEdit);
                 }}
               />
@@ -162,15 +185,15 @@ export function BedsSection({ bedsData, bedsForm, setBedsForm, busy, createBed, 
                 className="mono-num w-[72px]"
                 type="number"
                 step={1}
-                min={0}
-                max={15}
+                min={BEDS_CROSS_SEC_BOUNDS.min}
+                max={BEDS_CROSS_SEC_BOUNDS.max}
                 value={crossEdit ?? String(crossSec)}
                 disabled={busy}
                 aria-label="Ramp seconds"
                 onChange={(e: ChangeEvent<HTMLInputElement>) => setCrossEdit(e.target.value)}
                 onBlur={() => {
                   if (crossEdit == null) return;
-                  void saveNumber(crossEdit, crossSec, 15,
+                  void saveNumber(crossEdit, crossSec,
                     v => ({ beds: { crossSec: v } }), setCrossEdit);
                 }}
               />

@@ -13,6 +13,7 @@
 // with settings/validate.ts — settings/ must not import middleware/.
 import type { NextFunction, Request, Response } from 'express';
 import type { ZodType } from 'zod';
+import { validateSettingsPatch } from '../settings/patch-registry.js';
 import { firstMessage, flattenIssues } from '../util/zod-error.js';
 
 export function validateBody(schema: ZodType) {
@@ -79,6 +80,29 @@ export function validatePublicBody(schema: ZodType) {
  * is a server fault, and reporting it as a validation error would tell the
  * operator their input was bad when it never got looked at.
  */
+/**
+ * Same contract, for the one body that is a PARTIAL PATCH rather than an object.
+ *
+ * `POST /settings` carries any subset of 42 top-level keys, so there is no
+ * single `ZodType` to hand `validateBody` — a schema over the whole settings
+ * object would strip every key a form learns to send next. The per-key registry
+ * (settings/patch-registry.ts) validates only the keys actually present and
+ * roots each issue path at its settings key, which is what finally gives the
+ * dozen panels posting here the `fieldErrors` channel #1323 built.
+ *
+ * Unlike validateBody this does NOT rewrite req.body. settings.update() runs
+ * the same schemas as it applies each key and stays the authoritative
+ * chokepoint — it is reached by backup restore and onboarding, which never pass
+ * through here at all.
+ */
+export function validateSettingsBody() {
+  return (req: Request, res: Response, next: NextFunction) => {
+    const failure = validateSettingsPatch(req.body || {});
+    if (failure) return res.status(400).json(failure);
+    next();
+  };
+}
+
 export function validateBodyAsync(resolve: (req: Request) => Promise<ZodType> | ZodType) {
   return async (req: Request, res: Response, next: NextFunction) => {
     let schema: ZodType;

@@ -87,6 +87,7 @@ import {
   rawMaxTrackSec,
 } from './settings/defaults.js';
 import { validateCompatParams } from './settings/compat-params.js';
+import { parseSettingsPatchKey } from './settings/patch-registry.js';
 import { minTrackSeconds, peek, setCache } from './settings/store.js';
 import {
   SKILL_RENAMES,
@@ -1025,13 +1026,11 @@ export async function update(patch) {
   const next = JSON.parse(JSON.stringify(cur));
   let restart = false;
 
+  // On the shared schema (#1348) — see settings/patch-registry.ts. The schema
+  // says what the value may BE; whether applying it costs a mixer restart stays
+  // here, because that is a property of the transition, not of the value.
   if ('jingleRatio' in patch) {
-    const v = parseInt(patch.jingleRatio, 10);
-    if (!Number.isFinite(v) || v < BOUNDS.jingleRatio.min || v > BOUNDS.jingleRatio.max) {
-      throw new Error(
-        `jingleRatio must be int in [${BOUNDS.jingleRatio.min}, ${BOUNDS.jingleRatio.max}]`,
-      );
-    }
+    const v = parseSettingsPatchKey<number>('jingleRatio', patch.jingleRatio);
     if (v !== cur.jingleRatio) {
       next.jingleRatio = v;
       restart = true;
@@ -1976,34 +1975,29 @@ export async function update(patch) {
       next.transitions.stemBlends = !!tr.stemBlends;
     }
   }
+  // On the shared schema (#1348). The block schemas keep the branches' own
+  // leniency — a non-object block is an empty patch, an absent field is left
+  // alone — so this stays a plain "apply what was sent".
   if ('sfx' in patch) {
-    const sx = patch.sfx || {};
+    const sx = parseSettingsPatchKey<{ enabled?: boolean }>('sfx', patch.sfx);
     if (sx.enabled !== undefined) {
-      next.sfx.enabled = !!sx.enabled;
+      next.sfx.enabled = sx.enabled;
     }
   }
   if ('beds' in patch) {
-    const bd = patch.beds || {};
+    const bd = parseSettingsPatchKey<{
+      enabled?: boolean;
+      thresholdSec?: number;
+      crossSec?: number;
+    }>('beds', patch.beds);
     if (bd.enabled !== undefined) {
-      next.beds.enabled = !!bd.enabled;
+      next.beds.enabled = bd.enabled;
     }
     if (bd.thresholdSec !== undefined) {
-      const v = parseFloat(bd.thresholdSec);
-      if (!Number.isFinite(v) || v < BOUNDS.bedsThresholdSec.min || v > BOUNDS.bedsThresholdSec.max) {
-        throw new Error(
-          `beds.thresholdSec must be number in [${BOUNDS.bedsThresholdSec.min}, ${BOUNDS.bedsThresholdSec.max}]`,
-        );
-      }
-      next.beds.thresholdSec = v;
+      next.beds.thresholdSec = bd.thresholdSec;
     }
     if (bd.crossSec !== undefined) {
-      const v = parseFloat(bd.crossSec);
-      if (!Number.isFinite(v) || v < BOUNDS.bedsCrossSec.min || v > BOUNDS.bedsCrossSec.max) {
-        throw new Error(
-          `beds.crossSec must be number in [${BOUNDS.bedsCrossSec.min}, ${BOUNDS.bedsCrossSec.max}]`,
-        );
-      }
-      next.beds.crossSec = v;
+      next.beds.crossSec = bd.crossSec;
     }
   }
   if ('ui' in patch) {

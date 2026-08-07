@@ -13,7 +13,13 @@ import { Badge } from '../../ui/badge';
 import { Btn } from '../ui';
 import { PreviewButton, type SettingsData, type SaveSettings } from '../settings/shared';
 import type { JingleImportFailure, JingleImportResult } from './types';
-import { IMAGING_DESCRIPTION_MAX, JINGLE_TEXT_MAX } from '@/lib/schemas.generated';
+import { notify } from '../../../lib/notify';
+import {
+  IMAGING_DESCRIPTION_MAX,
+  JINGLE_RATIO_BOUNDS,
+  JINGLE_TEXT_MAX,
+  jingleRatioSchema,
+} from '@/lib/schemas.generated';
 import {
   SectionMasthead, PanelBox, PanelHead, EmptyState, DropZone, MetaLine, TabMetric, pad2,
 } from './parts';
@@ -107,8 +113,8 @@ export function JinglesSection({
             <Input
               className="mono-num w-[84px]"
               type="number"
-              min={0}
-              max={1000}
+              min={JINGLE_RATIO_BOUNDS.min}
+              max={JINGLE_RATIO_BOUNDS.max}
               value={jingleRatio}
               aria-label="Jingle ratio"
               onChange={(e: ChangeEvent<HTMLInputElement>) => setJingleRatio(e.target.value)}
@@ -123,7 +129,19 @@ export function JinglesSection({
             sm
             tone="accent"
             className="min-h-9 sm:min-h-0"
-            onClick={() => saveSettings({ jingleRatio: parseInt(jingleRatio, 10) })}
+            onClick={() => {
+              // Pre-flight against the controller's own schema, so an
+              // out-of-range ratio reads the same message here and on the wire.
+              // The raw string goes in on purpose — the schema parses it the way
+              // update() does, including the string forms `type="number"` still
+              // hands back.
+              const parsed = jingleRatioSchema.safeParse(jingleRatio);
+              if (!parsed.success) {
+                notify.err(parsed.error.issues[0]?.message || 'invalid value');
+                return;
+              }
+              void saveSettings({ jingleRatio: parsed.data });
+            }}
             disabled={busy || !ratioDirty}
           >
             Save · needs restart
