@@ -23,6 +23,13 @@ import {
   type EraWindow,
 } from '../schemas/show.js';
 import { SKILL_SLUG_RE as SKILL_SLUG_PATTERN } from '../schemas/skill.js';
+import {
+  SETTINGS_AAC_BITRATES,
+  SETTINGS_LOUDNESS_SOURCES,
+  SETTINGS_MP3_BITRATES,
+  SETTINGS_OPUS_BITRATES,
+  SETTINGS_SEARCH_PROVIDERS,
+} from '../schemas/settings.js';
 
 // Default DJ system-prompt template. Placeholders are substituted at LLM
 // call time via renderDjPrompt(). Keep {name} mandatory — update() refuses
@@ -574,7 +581,7 @@ export const TTS_CLOUD_PROVIDERS = ['openai', 'elevenlabs', 'fish-audio', 'opena
 // results; `brave` is Brave's Search API (metered, $5/mo free credits) — both
 // read their key from SEARCH_API_KEY. `searxng` is keyless self-hosted
 // meta-search via settings.search.baseUrl.
-export const SEARCH_PROVIDERS = ['duckduckgo', 'tavily', 'brave', 'searxng'] as const;
+export const SEARCH_PROVIDERS = SETTINGS_SEARCH_PROVIDERS;
 
 // Canonical mood vocabulary + each mood's CLAP sound-prompt. This is the SEED:
 // the operator edits the live list from /admin/moods (settings.moods), and every
@@ -1116,16 +1123,18 @@ export const SEED_PERSONAS = [
 // /stream.mp3 mount. Matches the literal branches in radio.liq —
 // %mp3(bitrate=…) needs a parse-time int, so the encoder is pre-baked for
 // this small set. Add a branch in radio.liq if you add a value here.
-export const MP3_BITRATES = [64, 96, 128, 160, 192, 320] as const;
+// Homed in schemas/settings.ts (#1348) so the mirrored archive/stream schemas
+// and the browser can read them; re-exported here so no call site moved.
+export const MP3_BITRATES = SETTINGS_MP3_BITRATES;
 // Opus + AAC encoders share the same parse-time-literal constraint as %mp3, so
 // each is pre-baked for a small set in radio.liq. Add a branch there if you add
 // a value here.
-export const OPUS_BITRATES = [96, 128, 192, 256, 320] as const;
-export const AAC_BITRATES = [128, 192, 256] as const;
+export const OPUS_BITRATES = SETTINGS_OPUS_BITRATES;
+export const AAC_BITRATES = SETTINGS_AAC_BITRATES;
 
 // Where per-track loudness comes from (queue.applyLoudnessGain, issue #998):
 // an embedded ReplayGain tag (Navidrome's OpenSubsonic replayGain field),
 // the analyzer's measured LUFS, or tag-with-measured-fallback (the default).
-export const LOUDNESS_SOURCES = ['replaygain-then-measured', 'replaygain', 'measured'] as const;
+export const LOUDNESS_SOURCES = SETTINGS_LOUDNESS_SOURCES;
 export type LoudnessSource = (typeof LOUDNESS_SOURCES)[number];
 

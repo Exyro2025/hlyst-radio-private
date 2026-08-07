@@ -7,7 +7,10 @@ import { config } from '../config.js';
 import {
   BEDS_CROSS_SEC_BOUNDS,
   BEDS_THRESHOLD_SEC_BOUNDS,
+  CROSSFADE_DURATION_BOUNDS,
   JINGLE_RATIO_BOUNDS,
+  LOUDNESS_MAX_BOOST_DB_BOUNDS,
+  LOUDNESS_TARGET_LUFS_BOUNDS,
 } from '../schemas/settings.js';
 import { SHOW_MAX_TRACK_SECONDS } from '../schemas/show.js';
 import { DEFAULT_THEME_ID } from '../themes.js';
@@ -726,7 +729,7 @@ export const BOUNDS = {
   // constant and this re-exports it — the same rule that homed SHOW_ID_RE in
   // schemas/show.ts. The rationale for each figure moved with it.
   jingleRatio: { ...JINGLE_RATIO_BOUNDS, type: 'int' },
-  crossfadeDuration: { min: 0, max: 30, type: 'float' },
+  crossfadeDuration: { ...CROSSFADE_DURATION_BOUNDS, type: 'float' },
   bedsThresholdSec: { ...BEDS_THRESHOLD_SEC_BOUNDS, type: 'float' },
   bedsCrossSec: { ...BEDS_CROSS_SEC_BOUNDS, type: 'float' },
   // 0 = off; 36000 s (10h) is a generous ceiling that still leaves room for
@@ -735,11 +738,8 @@ export const BOUNDS = {
   // bounds-checked a show's own override against this station figure, so two
   // copies of the number would drift.
   maxTrackSeconds: { min: 0, max: SHOW_MAX_TRACK_SECONDS, type: 'int' },
-  // −23 (EBU R128 broadcast) … −9 (very loud); −14 is the streaming standard.
-  loudnessTargetLufs: { min: -23, max: -9, type: 'float' },
-  // 0 disables boosting entirely (cut-only levelling); 12 dB is plenty — the
-  // per-track peak headroom cap bites long before that on dynamic material.
-  loudnessMaxBoostDb: { min: 0, max: 12, type: 'float' },
+  loudnessTargetLufs: { ...LOUDNESS_TARGET_LUFS_BOUNDS, type: 'float' },
+  loudnessMaxBoostDb: { ...LOUDNESS_MAX_BOOST_DB_BOUNDS, type: 'float' },
 };
 
 export const MP3_BITRATE_SET = new Set<number>(MP3_BITRATES);

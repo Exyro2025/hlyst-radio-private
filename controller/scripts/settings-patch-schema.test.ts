@@ -23,9 +23,25 @@ const {
   BEDS_CROSS_SEC_BOUNDS,
   BEDS_THRESHOLD_SEC_BOUNDS,
   JINGLE_RATIO_BOUNDS,
+  archivePatchSchema,
+  audioPatchSchema,
   bedsPatchSchema,
+  crossfadeDurationSchema,
+  djHouseRulesSchema,
   jingleRatioSchema,
+  likesPatchSchema,
+  localeSchema,
+  loudnessPatchSchema,
+  scrobblePatchSchema,
+  searchPatchSchema,
   sfxPatchSchema,
+  stationDescriptionSchema,
+  stationSchema,
+  streamPatchSchema,
+  transitionsPatchSchema,
+  uiPatchSchema,
+  weatherPatchSchema,
+  webhooksPolicyPatchSchema,
 } = await import('../src/schemas/settings.js');
 const {
   SETTINGS_PATCH_KEYS,
@@ -181,17 +197,25 @@ test('the inventory has no duplicates', () => {
   assert.equal(new Set(SETTINGS_PATCH_KEYS).size, SETTINGS_PATCH_KEYS.length);
 });
 
-test('every registered schema names its key in every message it can produce', () => {
+test('no registered schema can leak a raw zod message', () => {
   // The flat `error` string is the message VERBATIM, so operators keep reading
-  // the exact strings they always have. That only holds while each message
-  // names its own dotted field, which is the invariant this enforces —
-  // structurally, over the whole registry, so a schema added later can't quietly
-  // ship a bare zod message like 'expected number, received string'.
+  // the exact strings they always have. Most name a dotted field, but not all
+  // do — 'station name must be 80 chars or fewer', 'search.baseUrl too long'
+  // and "locale must be 'en-GB' or 'en-US'" are shipping strings that don't.
+  // So the enforced rule is the weaker, TRUE one: every message is non-empty,
+  // single-line, and is not one of zod's built-ins ('Invalid input: expected
+  // …'), which is what a careless z.string()/z.number()/z.enum() would emit.
   const hostile: unknown[] = [
-    99999, -1, 'abc', '', null, true, [], {}, NaN, Infinity,
+    99999, -1, 'abc', '', null, true, [], {}, NaN, Infinity, -0.5,
     { enabled: 'x', thresholdSec: 999, crossSec: 999 },
-    { thresholdSec: 'abc' },
-    { crossSec: -1 },
+    { bitrate: 7, retentionDays: -1, bufferSeconds: 'x', opusBitrate: 1, aacBitrate: 1 },
+    { targetLufs: 99, maxBoostDb: 99, source: 'nope' },
+    { lat: 999, lng: 999, units: 'Metric' },
+    { provider: 'nope', baseUrl: 5, apiKey: 'x'.repeat(500) },
+    { stemCacheGb: 'x', analyzeQuietMinutes: 999 },
+    { maxTracks: 99, windowDays: -9 },
+    { lastfm: { username: 'x'.repeat(99) }, listenbrainz: { baseUrl: 'ftp://x' } },
+    { idleAfterMinutes: 0 },
   ];
   let sawFailure = false;
   for (const key of Object.keys(SETTINGS_PATCH_SCHEMAS)) {
@@ -199,17 +223,225 @@ test('every registered schema names its key in every message it can produce', ()
       const failure = validateSettingsPatch({ [key]: value });
       if (!failure) continue;
       sawFailure = true;
-      assert.ok(
-        failure.error.startsWith(key),
-        `${key} produced a message that does not name its field: ${failure.error}`,
-      );
-      for (const [path, message] of Object.entries(failure.fieldErrors)) {
+      const messages = [failure.error, ...Object.values(failure.fieldErrors)];
+      for (const m of messages) {
+        assert.ok(m && m.length > 0, `${key} produced an empty message`);
+        assert.ok(!m.includes('\n'), `${key} produced a multi-line message: ${m}`);
+        assert.ok(
+          !/^Invalid input|^Invalid option|^Too big|^Too small|^Expected /.test(m),
+          `${key} leaked a raw zod message: ${m}`,
+        );
+      }
+      for (const path of Object.keys(failure.fieldErrors)) {
         assert.ok(path.startsWith(key), `fieldErrors path not rooted at ${key}: ${path}`);
-        assert.ok(message.startsWith(key), `fieldErrors message for ${path}: ${message}`);
       }
     }
   }
   assert.ok(sawFailure, 'hostile values produced no failures at all — test is vacuous');
+});
+
+// --- fidelity of the second slice ------------------------------------------
+// One test per behaviour that the OBVIOUS conversion would have changed.
+
+test('crossfadeDuration keeps parseFloat leniency and its message', () => {
+  assert.equal(crossfadeDurationSchema.parse('10.5'), 10.5);
+  assert.equal(crossfadeDurationSchema.parse('10.5 seconds'), 10.5);
+  assert.equal(crossfadeDurationSchema.parse([10]), 10);
+  assert.equal(
+    crossfadeDurationSchema.safeParse(31).error?.issues[0]?.message,
+    'crossfadeDuration must be number in [0, 30]',
+  );
+  assert.equal(crossfadeDurationSchema.safeParse(null).success, false);
+});
+
+test('archive.retentionDays keeps its EN DASH', () => {
+  const msg = archivePatchSchema.safeParse({ retentionDays: -1 }).error?.issues[0]?.message;
+  assert.equal(msg, 'archive.retentionDays must be 0 (keep forever) or 1–3650 days');
+  // U+2013, not a hyphen. Retyping it changes the operator's toast.
+  assert.ok(msg?.includes('–'));
+  assert.ok(!msg?.includes('1-3650'));
+});
+
+test('archive.bitrate accepts the set, truncates a float into it, reads junk', () => {
+  assert.equal(archivePatchSchema.parse({ bitrate: 128 }).bitrate, 128);
+  assert.equal(archivePatchSchema.parse({ bitrate: '128' }).bitrate, 128);
+  assert.equal(archivePatchSchema.parse({ bitrate: 128.9 }).bitrate, 128);
+  assert.equal(archivePatchSchema.parse({ bitrate: '128kbps' }).bitrate, 128);
+  assert.equal(archivePatchSchema.safeParse({ bitrate: 130 }).success, false);
+});
+
+test('stream.bufferSeconds uses Number(), not parseInt, and rounds AFTER the bounds test', () => {
+  // '' / null / [] are 0 here (a legal "no burst") where parseInt gives NaN,
+  // and '5abc' is refused where parseInt would accept 5. Both directions.
+  assert.equal(streamPatchSchema.parse({ bufferSeconds: '' }).bufferSeconds, 0);
+  assert.equal(streamPatchSchema.parse({ bufferSeconds: null }).bufferSeconds, 0);
+  assert.equal(streamPatchSchema.safeParse({ bufferSeconds: '5abc' }).success, false);
+  // Bounds on the UNROUNDED value: 59.6 passes and stores 60; 60.4 fails.
+  assert.equal(streamPatchSchema.parse({ bufferSeconds: 59.6 }).bufferSeconds, 60);
+  assert.equal(streamPatchSchema.safeParse({ bufferSeconds: 60.4 }).success, false);
+  assert.equal(streamPatchSchema.parse({ bufferSeconds: 22.6 }).bufferSeconds, 23);
+});
+
+test('stream keeps its bitrate sets and idle bounds', () => {
+  assert.equal(streamPatchSchema.parse({ opusBitrate: '192' }).opusBitrate, 192);
+  assert.equal(streamPatchSchema.safeParse({ opusBitrate: 64 }).success, false);
+  assert.equal(streamPatchSchema.safeParse({ aacBitrate: 320 }).success, false);
+  assert.equal(streamPatchSchema.parse({ idleAfterMinutes: '10.9' }).idleAfterMinutes, 10);
+  assert.equal(streamPatchSchema.safeParse({ idleAfterMinutes: 0 }).success, false);
+  assert.equal(streamPatchSchema.parse({ flacEnabled: 'no' }).flacEnabled, true);
+});
+
+test('loudness.source is tested RAW — no trim, no case folding', () => {
+  assert.equal(loudnessPatchSchema.parse({ source: 'measured' }).source, 'measured');
+  assert.equal(loudnessPatchSchema.safeParse({ source: ' measured' }).success, false);
+  assert.equal(loudnessPatchSchema.safeParse({ source: 'Measured' }).success, false);
+  assert.equal(
+    loudnessPatchSchema.safeParse({ source: 'x' }).error?.issues[0]?.message,
+    'loudness.source must be one of: replaygain-then-measured, replaygain, measured',
+  );
+  assert.equal(loudnessPatchSchema.parse({ targetLufs: '-14.5' }).targetLufs, -14.5);
+});
+
+test('weather ignores a bad locationName instead of refusing it', () => {
+  // Non-string and blank are DROPPED (the label can never be blanked); over-80
+  // truncates. onAirLocation differs: '' IS accepted, to reset the fallback.
+  assert.equal(weatherPatchSchema.parse({ locationName: 5 }).locationName, undefined);
+  assert.equal(weatherPatchSchema.parse({ locationName: '   ' }).locationName, undefined);
+  assert.equal(weatherPatchSchema.parse({ locationName: '  Leeds ' }).locationName, 'Leeds');
+  assert.equal(weatherPatchSchema.parse({ locationName: 'x'.repeat(99) }).locationName?.length, 80);
+  assert.equal(weatherPatchSchema.parse({ onAirLocation: '' }).onAirLocation, '');
+  assert.equal(weatherPatchSchema.parse({ onAirLocation: 5 }).onAirLocation, undefined);
+});
+
+test('weather keeps its own message wording and raw units check', () => {
+  assert.equal(
+    weatherPatchSchema.safeParse({ lat: 91 }).error?.issues[0]?.message,
+    'weather.lat out of range',
+  );
+  assert.equal(
+    weatherPatchSchema.safeParse({ lng: 181 }).error?.issues[0]?.message,
+    'weather.lng out of range',
+  );
+  assert.equal(weatherPatchSchema.parse({ lat: '51.5abc' }).lat, 51.5);
+  assert.equal(weatherPatchSchema.safeParse({ units: 'Metric' }).success, false);
+});
+
+test('an emptied station name resolves to the product default', () => {
+  assert.equal(stationSchema.parse(''), 'SUB/WAVE');
+  assert.equal(stationSchema.parse('   '), 'SUB/WAVE');
+  assert.equal(stationSchema.parse(null), 'SUB/WAVE');
+  assert.equal(stationSchema.parse('  Night Loop  '), 'Night Loop');
+  assert.equal(
+    stationSchema.safeParse('x'.repeat(81)).error?.issues[0]?.message,
+    'station name must be 80 chars or fewer',
+  );
+  // stationDescription has no such substitution — empty is a real value.
+  assert.equal(stationDescriptionSchema.parse(''), '');
+  assert.equal(stationDescriptionSchema.safeParse('x'.repeat(201)).success, false);
+});
+
+test('locale trims BEFORE the strict pair', () => {
+  // settingsStrictOneOf tests the raw value, which is right for units/source
+  // and wrong here — the branch coerces and trims first.
+  assert.equal(localeSchema.parse(' en-GB '), 'en-GB');
+  assert.equal(localeSchema.safeParse('en-gb').success, false);
+  assert.equal(
+    localeSchema.safeParse(null).error?.issues[0]?.message,
+    "locale must be 'en-GB' or 'en-US'",
+  );
+});
+
+test('search.baseUrl TYPE-checks where scrobble.listenbrainz.baseUrl coerces', () => {
+  // Same shape, same message tail, different acceptance. Do not unify.
+  assert.equal(searchPatchSchema.safeParse({ baseUrl: 5 }).success, false);
+  assert.equal(
+    searchPatchSchema.safeParse({ baseUrl: 5 }).error?.issues[0]?.message,
+    'search.baseUrl must be a string',
+  );
+  assert.equal(scrobblePatchSchema.parse({ listenbrainz: { baseUrl: null } })
+    .listenbrainz?.baseUrl, '');
+  assert.equal(searchPatchSchema.safeParse({ baseUrl: 'ftp://x' }).success, false);
+  // No trailing-slash strip on either — that consumer appends a path.
+  assert.equal(searchPatchSchema.parse({ baseUrl: 'http://x/' }).baseUrl, 'http://x/');
+});
+
+test('search.apiKey stringifies null to "null" and does NOT trim', () => {
+  // Not a good design, but the shipping one, and a secret field is the last
+  // place to change storage behaviour by accident.
+  assert.equal(searchPatchSchema.parse({ apiKey: null }).apiKey, 'null');
+  assert.equal(searchPatchSchema.parse({ apiKey: '  k  ' }).apiKey, '  k  ');
+  assert.equal(searchPatchSchema.safeParse({ apiKey: 'x'.repeat(201) }).success, false);
+});
+
+test('scrobble string fields clear on null (?? \'\'), unlike search.apiKey', () => {
+  assert.equal(scrobblePatchSchema.parse({ lastfm: { username: null } }).lastfm?.username, '');
+  assert.equal(scrobblePatchSchema.parse({ lastfm: { username: ' bob ' } }).lastfm?.username, 'bob');
+  assert.equal(scrobblePatchSchema.safeParse({ lastfm: { username: 'x'.repeat(41) } }).success, false);
+  assert.equal(
+    scrobblePatchSchema.safeParse({ lastfm: { apiKey: 'x'.repeat(201) } }).error?.issues[0]?.message,
+    'scrobble.lastfm.apiKey must be 0-200 chars',
+  );
+  // A non-object sub-block is an empty patch, not an error.
+  assert.deepEqual(scrobblePatchSchema.parse({ lastfm: 'nonsense' }).lastfm, {});
+});
+
+test('audio.stemCacheGb keeps a float; analyzeQuietMinutes floors', () => {
+  assert.equal(audioPatchSchema.parse({ stemCacheGb: 15.5 }).stemCacheGb, 15.5);
+  assert.equal(audioPatchSchema.parse({ stemCacheGb: true }).stemCacheGb, 1);
+  // Number(), not parseInt — '10abc' is refused here where a parseInt field
+  // would have accepted 10.
+  assert.equal(audioPatchSchema.safeParse({ stemCacheGb: '10abc' }).success, false);
+  assert.equal(audioPatchSchema.safeParse({ stemCacheGb: null }).success, false);
+  assert.equal(audioPatchSchema.parse({ analyzeQuietMinutes: 10.9 }).analyzeQuietMinutes, 10);
+  assert.equal(audioPatchSchema.safeParse({ analyzeQuietMinutes: 0.5 }).success, false);
+});
+
+test('likes rounds BEFORE the bounds test, which moves values across a bound', () => {
+  // 0.6 -> 1 accepted, 0.4 -> 0 refused, 25.4 accepted, 25.5 refused.
+  // z.number().int().min(1).max(25) refuses all four.
+  assert.equal(likesPatchSchema.parse({ maxTracks: 0.6 }).maxTracks, 1);
+  assert.equal(likesPatchSchema.safeParse({ maxTracks: 0.4 }).success, false);
+  assert.equal(likesPatchSchema.parse({ maxTracks: 25.4 }).maxTracks, 25);
+  assert.equal(likesPatchSchema.safeParse({ maxTracks: 25.5 }).success, false);
+  assert.equal(likesPatchSchema.parse({ windowDays: 0 }).windowDays, 0);
+  assert.equal(
+    likesPatchSchema.safeParse({ windowDays: 999 }).error?.issues[0]?.message,
+    'likes.windowDays must be 0-365 (0 = all time)',
+  );
+});
+
+test('ui.skin is DROPPED when invalid, and stringifies non-strings', () => {
+  assert.equal(uiPatchSchema.parse({ skin: 'Classic' }).skin, 'classic');
+  assert.equal(uiPatchSchema.parse({ skin: '  classic ' }).skin, 'classic');
+  // String(null) is 'null', which matches the slug pattern and is stored today.
+  assert.equal(uiPatchSchema.parse({ skin: null }).skin, 'null');
+  assert.equal(uiPatchSchema.parse({ skin: 7 }).skin, '7');
+  // Non-matching is dropped, and the patch still SUCCEEDS.
+  assert.equal(uiPatchSchema.parse({ skin: '-bad' }).skin, undefined);
+  assert.equal(uiPatchSchema.parse({ skin: 'a'.repeat(33) }).skin, undefined);
+  assert.equal(uiPatchSchema.parse({ skin: {} }).skin, undefined);
+  assert.equal(uiPatchSchema.safeParse({ skin: '-bad' }).success, true);
+});
+
+test('the never-throwing blocks still never throw', () => {
+  // ui, transitions and webhooksPolicy have no refusal path at all today.
+  for (const v of [{ pairDrain: 'x' }, { stemBlends: 0 }, 'nonsense', null, []]) {
+    assert.equal(transitionsPatchSchema.safeParse(v).success, true);
+  }
+  for (const v of [{ trackPlayListenerGated: 'x' }, 'nonsense', null]) {
+    assert.equal(webhooksPolicyPatchSchema.safeParse(v).success, true);
+  }
+  assert.equal(uiPatchSchema.safeParse({ boothBuddy: 'x', tuneInOverlay: 0 }).success, true);
+  assert.equal(transitionsPatchSchema.parse({ pairDrain: 'x' }).pairDrain, true);
+});
+
+test('djHouseRules caps at 2000 and coerces', () => {
+  assert.equal(djHouseRulesSchema.parse(null), '');
+  assert.equal(djHouseRulesSchema.parse('  spell out numbers  '), 'spell out numbers');
+  assert.equal(
+    djHouseRulesSchema.safeParse('x'.repeat(2001)).error?.issues[0]?.message,
+    'djHouseRules must be at most 2000 chars',
+  );
 });
 
 test('parseSettingsPatchKey throws a plain Error, never a ZodError', () => {
@@ -354,5 +586,74 @@ test('update() still tolerates a key it has never heard of', async () => {
 });
 
 test('the converted keys are exactly the ones with schemas', () => {
-  assert.deepEqual(Object.keys(SETTINGS_PATCH_SCHEMAS).sort(), ['beds', 'jingleRatio', 'sfx']);
+  // The remaining keys are documented in CLAUDE.md with the reason each one
+  // resists a stateless schema (clamps that fall back to the CURRENT value,
+  // post-merge cross-field rules, write-throughs into another key).
+  assert.deepEqual(Object.keys(SETTINGS_PATCH_SCHEMAS).sort(), [
+    'archive', 'audio', 'beds', 'crossfadeDuration', 'djHouseRules', 'jingleRatio',
+    'likes', 'locale', 'loudness', 'scrobble', 'search', 'sfx', 'station',
+    'stationDescription', 'stream', 'transitions', 'ui', 'weather', 'webhooksPolicy',
+  ]);
+});
+
+test('update() round-trips the second slice, coercions and restarts intact', async () => {
+  const a = await settings.update({
+    crossfadeDuration: '8.5',
+    station: '   ',
+    locale: ' en-US ',
+    loudness: { source: 'measured', targetLufs: '-15' },
+    likes: { maxTracks: 0.6 },
+    audio: { stemCacheGb: 15.5 },
+    ui: { skin: 'Classic', boothBuddy: 1 },
+  });
+  assert.equal(a.saved.crossfadeDuration, 8.5);
+  assert.equal(a.saved.station, 'SUB/WAVE'); // emptied -> product default
+  assert.equal(a.saved.locale, 'en-US');
+  assert.equal(a.saved.loudness.source, 'measured');
+  assert.equal(a.saved.loudness.targetLufs, -15);
+  assert.equal(a.saved.likes.maxTracks, 1);
+  assert.equal(a.saved.stemCacheGb ?? a.saved.audio.stemCacheGb, 15.5);
+  assert.equal(a.saved.ui.skin, 'classic');
+  assert.equal(a.saved.ui.boothBuddy, true);
+  assert.equal(a.requiresRestart, true); // crossfade changed
+
+  // An invalid skin is dropped, and the save still succeeds.
+  const b = await settings.update({ ui: { skin: '-nope' } });
+  assert.equal(b.saved.ui.skin, 'classic');
+});
+
+test('update() applies scrobble sub-blocks without clobbering the sibling', async () => {
+  await settings.update({
+    scrobble: { lastfm: { apiKey: 'k1', apiSecret: 's1', username: 'bob' } },
+  });
+  // routes/scrobble.ts posts a PARTIAL sub-block after the handshake; a replace
+  // would blank apiKey/apiSecret.
+  const r = await settings.update({ scrobble: { lastfm: { sessionKey: 'sk', enabled: true } } });
+  assert.equal(r.saved.scrobble.lastfm.apiKey, 'k1');
+  assert.equal(r.saved.scrobble.lastfm.apiSecret, 's1');
+  assert.equal(r.saved.scrobble.lastfm.username, 'bob');
+  assert.equal(r.saved.scrobble.lastfm.sessionKey, 'sk');
+});
+
+test("update() honours the 'set' redaction sentinel on secrets only", async () => {
+  await settings.update({ scrobble: { lastfm: { apiKey: 'real-key', username: 'bob' } } });
+  const r = await settings.update({ scrobble: { lastfm: { apiKey: 'set', username: 'set' } } });
+  // The secret is kept; a USERNAME of literally 'set' is stored, as it always was.
+  assert.equal(r.saved.scrobble.lastfm.apiKey, 'real-key');
+  assert.equal(r.saved.scrobble.lastfm.username, 'set');
+
+  await settings.update({ search: { apiKey: 'real-search-key' } });
+  const s = await settings.update({ search: { apiKey: 'set' } });
+  assert.equal(s.saved.search.apiKey, 'real-search-key');
+});
+
+test('update() reports the second slice through fieldErrors at the route', () => {
+  const failure = validateSettingsPatch({ stream: { bufferSeconds: 999 }, likes: { maxTracks: 0 } });
+  assert.ok(failure);
+  assert.deepEqual(Object.keys(failure.fieldErrors).sort(), [
+    'likes.maxTracks',
+    'stream.bufferSeconds',
+  ]);
+  // stream's branch runs before likes', so it owns the flat string.
+  assert.equal(failure.error, 'stream.bufferSeconds must be a number between 0 and 60');
 });

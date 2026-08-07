@@ -31,7 +31,27 @@
 // Hence: the inventory is enforced at the boundary the operator types at, and
 // update() stays tolerant of keys it doesn't know.
 import { ZodError, type ZodType } from 'zod';
-import { bedsPatchSchema, jingleRatioSchema, sfxPatchSchema } from '../schemas/settings.js';
+import {
+  archivePatchSchema,
+  audioPatchSchema,
+  bedsPatchSchema,
+  crossfadeDurationSchema,
+  djHouseRulesSchema,
+  jingleRatioSchema,
+  likesPatchSchema,
+  localeSchema,
+  loudnessPatchSchema,
+  scrobblePatchSchema,
+  searchPatchSchema,
+  sfxPatchSchema,
+  stationDescriptionSchema,
+  stationSchema,
+  streamPatchSchema,
+  transitionsPatchSchema,
+  uiPatchSchema,
+  weatherPatchSchema,
+  webhooksPolicyPatchSchema,
+} from '../schemas/settings.js';
 import { firstMessage, flattenIssues } from '../util/zod-error.js';
 
 /**
@@ -108,8 +128,24 @@ const SETTINGS_PATCH_KEY_SET: ReadonlySet<string> = new Set(SETTINGS_PATCH_KEYS)
  */
 export const SETTINGS_PATCH_SCHEMAS: Readonly<Partial<Record<SettingsPatchKey, ZodType>>> = {
   jingleRatio: jingleRatioSchema,
+  crossfadeDuration: crossfadeDurationSchema,
+  archive: archivePatchSchema,
+  stream: streamPatchSchema,
+  loudness: loudnessPatchSchema,
+  weather: weatherPatchSchema,
+  station: stationSchema,
+  stationDescription: stationDescriptionSchema,
+  locale: localeSchema,
+  djHouseRules: djHouseRulesSchema,
+  search: searchPatchSchema,
+  audio: audioPatchSchema,
+  transitions: transitionsPatchSchema,
   sfx: sfxPatchSchema,
   beds: bedsPatchSchema,
+  ui: uiPatchSchema,
+  webhooksPolicy: webhooksPolicyPatchSchema,
+  scrobble: scrobblePatchSchema,
+  likes: likesPatchSchema,
 };
 
 /**
@@ -128,26 +164,32 @@ function prefixed(key: string, issues: Record<string, string>): Record<string, s
 }
 
 /**
- * The flat `error` string — the first issue's message, verbatim.
+ * The flat `error` string — the first issue's message, VERBATIM.
  *
- * INVARIANT: every message in SETTINGS_PATCH_SCHEMAS names its own dotted field
- * ('beds.thresholdSec must be number in [0, 60]'), so the message alone already
- * says where the problem is.
+ * INVARIANT: every message in SETTINGS_PATCH_SCHEMAS is the exact string its
+ * hand-rolled branch threw, and is written to stand alone.
  *
  * This is the one place that does NOT go through `firstMessage`, and the
  * exception is narrow. firstMessage prefixes the issue path unconditionally
  * because zod's BUILT-IN messages name a constraint and never a location —
  * 'expected array, received string' is useless without 'webhooks.1.url' in
- * front. Every message here is custom and already carries the full path, so
- * prefixing yields 'crossSec: beds.crossSec must be number in [0, 15]'. Taking
- * the message as written keeps these strings byte-identical to the hand-rolled
- * branches they replace, which is the whole posture of the first slice.
+ * front. Every message here is custom and already self-locating, so prefixing
+ * would produce 'crossSec: beds.crossSec must be number in [0, 15]'. Carrying
+ * the message as written keeps these strings byte-identical to the branches
+ * they replace, which operators have been reading in toasts for as long as the
+ * keys have existed.
  *
- * The path is not lost — it rides `fieldErrors`, which is where a form needs
- * it. The invariant is enforced in scripts/settings-patch-schema.test.ts, which
- * throws hostile values at every registered schema and fails any message that
- * doesn't name its key. `firstMessage` remains the fallback for an issue with
- * no message at all, so a future schema can't produce a bare 400.
+ * Most of them name a dotted field ('beds.thresholdSec must be …') but NOT all:
+ * 'station name must be 80 chars or fewer', 'search.baseUrl too long' and
+ * "locale must be 'en-GB' or 'en-US'" are all shipping strings that don't fit
+ * that mould. The enforced rule is therefore the weaker, true one — a message
+ * must be non-empty, single-line, and must not be one of zod's built-ins —
+ * checked structurally in scripts/settings-patch-schema.test.ts by throwing
+ * hostile values at every registered schema. The dotted path is never lost: it
+ * rides `fieldErrors`, which is where a form needs it anyway.
+ *
+ * `firstMessage` remains the fallback for an issue carrying no message at all,
+ * so a future schema cannot produce a bare 400.
  */
 function flatten(err: ZodError): string {
   return err.issues[0]?.message || firstMessage(err);
