@@ -5,7 +5,7 @@
 // The weekly plan lives at /admin/shows/schedule, which owns the board and
 // PUT /schedule — this page loads the schedule read-only for the hours-a-week
 // counts. Putting a show on air right now is a takeover, and lives on the dash.
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
 import { Users, Share2 } from 'lucide-react';
 import { useAdminAuth } from '../../lib/adminAuth';
@@ -23,7 +23,7 @@ import { useRosterView } from '../../lib/adminView';
 import { showSubmitUrl } from '../../lib/repo';
 import { ShowDefRow } from './shows/ShowDefRow';
 import { ShowEditor } from './shows/ShowEditor';
-import { clientMintId, emptyWeek, hydrateShow, showPayload, showRow, showValid } from './shows/lib';
+import { clientMintId, emptyWeek, hydrateShow, showContext, showPayload, showRow, showValid } from './shows/lib';
 import type {
   CommunityShow,
   FormState,
@@ -199,8 +199,23 @@ export default function ShowsPanel() {
     return () => { cancelled = true; };
   }, [hydrated, needsAuth]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const personas: Persona[] = data?.values?.personas || [];
-  const moods: string[] = data?.tts?.moods || [];
+  // Memoised because showCtx depends on them and `x || []` is a fresh array
+  // every render — which would rebuild the context, and with it re-run a schema
+  // parse for every row, on each one.
+  const personas: Persona[] = useMemo(() => data?.values?.personas || [], [data?.values?.personas]);
+  const moods: string[] = useMemo(() => data?.tts?.moods || [], [data?.tts?.moods]);
+  // The four inputs the shared show schema needs. Built once here so the row
+  // badges, the Save gate and the editor all judge a show the same way — and
+  // the same way the controller will.
+  const showCtx = useMemo(
+    () => showContext({
+      personas,
+      moods,
+      themeIds: themes.map(t => t.id),
+      minTrackSeconds: data?.values?.minTrackSeconds ?? null,
+    }),
+    [personas, moods, themes, data?.values?.minTrackSeconds],
+  );
   const apiBase = (process.env.NEXT_PUBLIC_API_URL as string | undefined) || '/api';
   const personaName = (id: string): string => personas.find(p => p.id === id)?.name || '—';
 
@@ -297,7 +312,7 @@ export default function ShowsPanel() {
   // The local entry is swapped for the server's normalized copy (same id — a
   // client-minted s_ id is kept server-side), so other unsaved edits survive.
   const saveShow = async (s: Show): Promise<boolean> => {
-    if (!showValid(s)) return false;
+    if (!showValid(s, showCtx)) return false;
     setBusy(true);
     try {
       const r = await adminFetch('/shows', {
@@ -413,13 +428,13 @@ export default function ShowsPanel() {
 
       {view === 'list' && form.shows.length > 0 && (
         <ShowsTable
-          rows={form.shows.map((s, i) => showRow(s, i, personas, apiBase, countHours(s.id)))}
+          rows={form.shows.map((s, i) => showRow(s, i, personas, apiBase, countHours(s.id), showCtx))}
           onEdit={r => focusShow(r.index)}
         />
       )}
 
       {view === 'cards' && form.shows.map((s, i) => {
-        const ok = showValid(s);
+        const ok = showValid(s, showCtx);
         const hrs = countHours(s.id);
         const host = personas.find(p => p.id === s.personaId) ?? null;
         const guests = (s.guestPersonaIds || [])
@@ -445,6 +460,7 @@ export default function ShowsPanel() {
           key={focused.id}
           show={focused}
           editorRef={editorRef}
+          ctx={showCtx}
           personas={personas}
           moods={moods}
           themes={themes}

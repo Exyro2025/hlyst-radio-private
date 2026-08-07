@@ -20,6 +20,13 @@ import { EditorDialog, EditorFooter } from '../../ui/editor-dialog';
 import { SkeletonForm } from '@/components/ui/skeleton';
 import { Eyebrow } from '../ui';
 import { CONTEXT_FIELD_LABELS, CONTEXT_FIELDS_FALLBACK, splitContext } from './contextFields';
+import type { ContextField } from '@/lib/schemas.generated';
+import {
+  SKILL_TAG_RE,
+  TAGS_PER_SKILL_LIMIT,
+  skillCreateSchema,
+  skillFileSchema,
+} from '@/lib/schemas.generated';
 import { skillSubmitUrl } from '../../../lib/repo';
 
 // Only what this modal needs from GET /dj/skills; the full list type lives in
@@ -95,12 +102,7 @@ interface SkillFileResponse {
   error?: string;
 }
 
-const SLUG_RE = /^[a-z0-9][a-z0-9-]{0,48}$/;
 const COOLDOWN_PRESETS = ['15m', '25m', '45m', '1h', '6h'];
-// Mirror the controller's tag rules (skills/loader.ts TAG_RE / limit) so a bad
-// tag fails here instead of on save.
-const TAG_RE = /^[a-z0-9][a-z0-9-]{0,23}$/;
-const TAGS_MAX = 8;
 
 // Snapshotted so "dirty" can be computed and edits reverted.
 interface FileFields {
@@ -187,14 +189,14 @@ export default function SkillEditModal({ mode, skill, personas, tagSuggestions, 
   const addTag = (raw: string) => {
     const tag = raw.trim().toLowerCase();
     if (!tag) return;
-    if (!TAG_RE.test(tag)) {
+    if (!SKILL_TAG_RE.test(tag)) {
       notify.err(`"${tag}" isn't a valid tag — lowercase letters, digits, hyphens, max 24 chars`);
       return;
     }
     setFields(f => {
       if (f.tags.includes(tag)) return f;
-      if (f.tags.length >= TAGS_MAX) {
-        notify.err(`At most ${TAGS_MAX} tags per skill`);
+      if (f.tags.length >= TAGS_PER_SKILL_LIMIT) {
+        notify.err(`At most ${TAGS_PER_SKILL_LIMIT} tags per skill`);
         return f;
       }
       return { ...f, tags: [...f.tags, tag] };
@@ -255,8 +257,49 @@ export default function SkillEditModal({ mode, skill, personas, tagSuggestions, 
 
   const assignDirty = isEdit && JSON.stringify([...assigned].sort()) !== assignSnapshot;
   const dirty = loaded && (fieldsKey(fields) !== snapshot || assignDirty);
-  const nameValid = !isEdit ? SLUG_RE.test(name) : true;
-  const canSave = loaded && !!fields.brief.trim() && nameValid && !busy;
+
+  // The SKILL.md fields exactly as the controller will receive them. Built once
+  // and used by BOTH the save gate and the request, so the form can never
+  // validate one shape and post another.
+  //
+  // `config` is deliberately outside it: the knobs a skill declares in its own
+  // tool.mjs are runtime data (validated by skills/config-fields.ts against
+  // that declaration), which is why the shared schema doesn't own them either.
+  const fileBody = {
+    label: fields.label.trim() || undefined,
+    cooldown: fields.cooldown.trim() || undefined,
+    context: fields.context,          // [] resets to the default profile
+    tags: fields.tags,                // [] clears the tags line
+    brief: fields.brief,
+    ...(custom ? { window: fields.window, requiresKey: requiresKey || undefined } : {}),
+  };
+
+  // The same schema the controller runs (controller/src/schemas/skill.ts via
+  // the generated mirror) — so a bad cooldown is caught at the input instead of
+  // coming back as a 400 after the operator hits Save.
+  const parsed = (mode === 'create' ? skillCreateSchema : skillFileSchema(custom))
+    .safeParse(mode === 'create' ? { ...fileBody, name: name.trim().toLowerCase() } : fileBody);
+  const issueFor = (key: string): string | undefined =>
+    (parsed.success ? undefined : parsed.error.issues.find(i => i.path[0] === key)?.message);
+  const nameValid = !issueFor('name');
+  const cooldownError = issueFor('cooldown');
+  const canSave = loaded && parsed.success && !busy;
+  // Any schema objection the form has no inline slot for — a disk-authored
+  // requiresKey that isn't UPPER_SNAKE_CASE, an unknown context token riding
+  // the hidden passthrough state, a bad tag loaded off disk — used to disable
+  // Save with no visible reason anywhere. The footer surfaces the first such
+  // issue so a gated Save always says why.
+  const blockingIssue = (() => {
+    if (parsed.success) return null;
+    const issue = parsed.error.issues.find(i => !['name', 'cooldown'].includes(String(i.path[0] ?? '')));
+    if (!issue) return null;
+    const field = String(issue.path[0] ?? '');
+    return field ? `${field}: ${issue.message}` : issue.message;
+  })();
+  // A server-side name rule (reserved slug, slug already on disk) comes back as
+  // fieldErrors.name — typing a different slug is the way out, so it lands on
+  // the slug input rather than only flashing past in a toast.
+  const [serverNameError, setServerNameError] = useState<string | null>(null);
 
   const displayName = fields.label || (isEdit ? titleCase(kind) : (name ? titleCase(name) : 'New skill'));
 
@@ -264,17 +307,9 @@ export default function SkillEditModal({ mode, skill, personas, tagSuggestions, 
     if (!canSave) return;
     setBusy(true);
     try {
-      const body: Record<string, unknown> = {
-        label: fields.label.trim() || undefined,
-        cooldown: fields.cooldown.trim() || undefined,
-        context: fields.context,                 // [] resets to the default profile
-        tags: fields.tags,                       // [] clears the tags line
-        brief: fields.brief,
-      };
-      if (custom) {
-        body.window = fields.window;
-        if (requiresKey) body.requiresKey = requiresKey;  // preserve disk-authored gate
-      }
+      // `requiresKey` rides along for a custom skill so a disk-authored gate
+      // survives a save from the form.
+      const body: Record<string, unknown> = { ...fileBody };
       // Always sent when the skill declares knobs, so clearing a field clears
       // the frontmatter line. Omitted entirely for a skill with none, which the
       // controller reads as "leave whatever is on disk".
@@ -299,8 +334,15 @@ export default function SkillEditModal({ mode, skill, personas, tagSuggestions, 
           body: JSON.stringify(body),
         });
       }
-      const j = (await r.json().catch(() => ({}))) as { skills?: SkillLike[]; error?: string };
-      if (!r.ok) throw new Error(j.error || `failed (${r.status})`);
+      const j = (await r.json().catch(() => ({}))) as {
+        skills?: SkillLike[];
+        error?: string;
+        fieldErrors?: Record<string, string>;
+      };
+      if (!r.ok) {
+        if (j.fieldErrors?.name) setServerNameError(j.fieldErrors.name);
+        throw new Error(j.error || `failed (${r.status})`);
+      }
       onSkillsChange(Array.isArray(j.skills) ? j.skills : []);
 
       if (mode === 'create') {
@@ -523,8 +565,13 @@ export default function SkillEditModal({ mode, skill, personas, tagSuggestions, 
 
   const footer = (
     <EditorFooter
-      status={(dirty || flash) ? (
+      status={(dirty || flash || blockingIssue) ? (
         <>
+          {blockingIssue && (
+            <span role="alert" style={{ fontSize: 11, color: 'var(--accent)', letterSpacing: '0.02em', fontWeight: 600 }}>
+              {blockingIssue}
+            </span>
+          )}
           {dirty && (
             <span style={{ display: 'inline-flex', alignItems: 'center', gap: 7, fontSize: 10, letterSpacing: '0.18em', textTransform: 'uppercase', color: 'var(--accent)', fontWeight: 700 }}>
               <span style={{ width: 7, height: 7, borderRadius: '50%', background: 'var(--accent)' }} />UNSAVED EDITS
@@ -607,15 +654,23 @@ export default function SkillEditModal({ mode, skill, personas, tagSuggestions, 
                 style={{ ...inputBase, marginTop: 16, padding: '12px 16px', fontSize: 18, fontWeight: 800, letterSpacing: '-0.01em', width: '100%', boxSizing: 'border-box' }}
               />
               {mode === 'create' && (
-                <label style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 10, marginTop: 14 }}>
-                  <span style={{ fontSize: 10, letterSpacing: '0.18em', textTransform: 'uppercase', color: 'var(--muted)', fontWeight: 700 }}>SLUG</span>
-                  <input
-                    value={name}
-                    onChange={e => setName(e.target.value.toLowerCase())}
-                    placeholder="moon-phase"
-                    style={{ ...inputBase, padding: '8px 12px', fontSize: 13, fontWeight: 700, letterSpacing: '0.04em', width: 200, maxWidth: '100%', borderColor: name && !nameValid ? 'var(--accent)' : 'var(--ink)' }}
-                  />
-                </label>
+                <>
+                  <label style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 10, marginTop: 14 }}>
+                    <span style={{ fontSize: 10, letterSpacing: '0.18em', textTransform: 'uppercase', color: 'var(--muted)', fontWeight: 700 }}>SLUG</span>
+                    <input
+                      value={name}
+                      onChange={e => { setName(e.target.value.toLowerCase()); setServerNameError(null); }}
+                      placeholder="moon-phase"
+                      aria-invalid={(name && !nameValid) || serverNameError ? true : undefined}
+                      style={{ ...inputBase, padding: '8px 12px', fontSize: 13, fontWeight: 700, letterSpacing: '0.04em', width: 200, maxWidth: '100%', borderColor: (name && !nameValid) || serverNameError ? 'var(--accent)' : 'var(--ink)' }}
+                    />
+                  </label>
+                  {serverNameError && (
+                    <div role="alert" style={{ fontSize: 12, color: 'var(--accent)', marginTop: 8, letterSpacing: '0.01em' }}>
+                      {serverNameError}
+                    </div>
+                  )}
+                </>
               )}
             </div>
 
@@ -632,10 +687,17 @@ export default function SkillEditModal({ mode, skill, personas, tagSuggestions, 
                   value={fields.cooldown}
                   onChange={e => patch({ cooldown: e.target.value })}
                   placeholder="45m"
-                  style={{ ...inputBase, width: 128, maxWidth: '100%', padding: '11px 15px', fontSize: 15, fontWeight: 700, letterSpacing: '0.04em', fontVariantNumeric: 'tabular-nums' }}
+                  aria-label="Cooldown"
+                  aria-invalid={cooldownError ? true : undefined}
+                  style={{ ...inputBase, width: 128, maxWidth: '100%', padding: '11px 15px', fontSize: 15, fontWeight: 700, letterSpacing: '0.04em', fontVariantNumeric: 'tabular-nums', borderColor: cooldownError ? 'var(--accent)' : 'var(--ink)' }}
                 />
               </div>
-              <div style={{ fontSize: 12, color: 'var(--muted)', marginTop: 12, letterSpacing: '0.01em' }}>e.g. 45m, 6h, 2d, or a bare number (minutes).</div>
+              <div
+                role={cooldownError ? 'alert' : undefined}
+                style={{ fontSize: 12, color: cooldownError ? 'var(--accent)' : 'var(--muted)', marginTop: 12, letterSpacing: '0.01em' }}
+              >
+                {cooldownError ? `Cooldown ${cooldownError}` : 'e.g. 45m, 6h, 2d, or a bare number (minutes).'}
+              </div>
             </div>
 
             {custom && (
@@ -697,7 +759,7 @@ export default function SkillEditModal({ mode, skill, personas, tagSuggestions, 
                       style={chipStyle(on)}
                     >
                       <span style={markStyle(on)} />
-                      <span>{CONTEXT_FIELD_LABELS[field] || field}</span>
+                      <span>{CONTEXT_FIELD_LABELS[field as ContextField] || field}</span>
                     </button>
                   );
                 })}

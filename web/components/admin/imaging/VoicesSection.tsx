@@ -16,6 +16,7 @@ import { V3Alert } from '../../ui/alert';
 import { SkeletonCards } from '@/components/ui/skeleton';
 import { Btn } from '../ui';
 import { PreviewButton } from '../settings/shared';
+import { IMAGING_NAME_MAX } from '@/lib/schemas.generated';
 import type { VoiceData } from './types';
 import {
   SectionMasthead, PanelBox, PanelHead, EmptyState, DropZone, MetaLine, TabMetric, pad2,
@@ -190,6 +191,7 @@ export function VoicesSection({ voicesData, busy, uploadVoice, onDelete, adminFe
               value={importName}
               onChange={e => setImportName(e.target.value)}
               placeholder="late-night-dj"
+              maxLength={IMAGING_NAME_MAX}
             />
             <p className="mt-1.5 text-[11px] leading-[1.55] text-muted">
               Becomes the filename personas pick from. Stored as a mono{' '}

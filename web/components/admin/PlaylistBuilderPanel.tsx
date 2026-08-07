@@ -47,7 +47,6 @@ import {
   ENERGIES,
   LEN_MAX,
   LEN_STEP,
-  MOODS,
   YEAR_MAX,
   YEAR_MIN,
   fmtDur,
@@ -55,6 +54,7 @@ import {
   relTime,
   rowToDraft,
 } from './playlist-builder/types';
+import { PLAYLIST_NAME_MAX, playlistHasIntent } from '@/lib/schemas.generated';
 
 export default function PlaylistBuilderPanel() {
   const { adminFetch } = useAdminAuth();
@@ -118,6 +118,11 @@ export default function PlaylistBuilderPanel() {
   const hotTimer = useRef<number | null>(null);
   const [toast, setToast] = useState('');
 
+  // The live mood NAMES off /settings (tts.moods) — moods are operator-editable
+  // (/admin/moods), so a hand-copied vocabulary here was wrong twice over: a
+  // custom mood was unpickable and a deleted one was still offered.
+  const [liveMoods, setLiveMoods] = useState<string[]>([]);
+
   const [seedQuery, setSeedQuery] = useState('');
   const [seedResults, setSeedResults] = useState<RawTrackRow[] | null>(null);
   const [addQuery, setAddQuery] = useState('');
@@ -167,6 +172,27 @@ export default function PlaylistBuilderPanel() {
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
   }, [modal]);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const r = await adminFetch('/settings');
+        if (!r.ok || cancelled) return;
+        const j = await r.json() as { tts?: { moods?: string[] } };
+        if (!cancelled && Array.isArray(j.tts?.moods)) setLiveMoods(j.tts.moods);
+      } catch {}
+    })();
+    return () => { cancelled = true; };
+  }, [adminFetch]);
+
+  // Already-selected moods union in, so retiring a mood at /admin/moods can't
+  // make a picked chip vanish from under the operator.
+  const moodOptions = useMemo(() => {
+    const out = [...liveMoods];
+    for (const m of moods) if (!out.includes(m)) out.push(m);
+    return out;
+  }, [liveMoods, moods]);
 
   // Without this the modal is only reachable by tabbing through the page behind
   // it, and closing leaves focus on <body>.
@@ -232,12 +258,12 @@ export default function PlaylistBuilderPanel() {
     excludeTrackIds,
   }), [prompt, seeds, seedArtist, count, arc, moods, genres, energies, artists, yearFrom, yearTo, artistSpacing, excludeRecent, instrumentalOnly, capOn, minSec, maxSec, bpmOn, minBpm, maxBpm, recentlyAdded]);
 
-  const hasIntent = Boolean(
-    prompt.trim() || seeds.length || seedArtist || recentlyAdded || moods.length ||
-    genres.length || artists.length || energies.length || instrumentalOnly ||
-    yearFrom > YEAR_MIN || yearTo < YEAR_MAX ||
-    (bpmOn && (minBpm > BPM_MIN || maxBpm < BPM_MAX)),
-  );
+  // The SAME intent rule the /generate routes enforce (the schema's own
+  // refinement runs playlistHasIntent too) — the Generate button needs the
+  // answer before a request exists, which is why the predicate is exported
+  // rather than living only inside the schema. The hand copy this replaces had
+  // already diverged from the route over open-ended era windows.
+  const hasIntent = useMemo(() => playlistHasIntent(buildBody()), [buildBody]);
 
   const generating = view === 'generating';
 
@@ -695,7 +721,7 @@ export default function PlaylistBuilderPanel() {
             <div className="mb-5">
               <div className="mb-[9px]"><Eyeb>Moods</Eyeb></div>
               <div className="flex flex-wrap gap-1.5">
-                {MOODS.map(m => (
+                {moodOptions.map(m => (
                   <Tog key={m} on={moods.includes(m)} onClick={() => toggle(moods, setMoods, m)}>{m}</Tog>
                 ))}
               </div>
@@ -1277,7 +1303,23 @@ export default function PlaylistBuilderPanel() {
             <div className="grid gap-4 px-5 py-[18px]">
               <div>
                 <div className="mb-[7px]"><Eyeb>Name</Eyeb></div>
-                <input value={saveName} onChange={e => setSaveName(e.target.value)} placeholder="Untitled set" aria-label="Playlist name" className={searchInputClass} />
+                {/* Deliberately NO maxLength: the attribute truncates a pasted
+                    name with no message — the same silent repair the schema
+                    conversions replace with a visible refusal. Without dropping
+                    it this error would be structurally unreachable. */}
+                <input
+                  value={saveName}
+                  onChange={e => setSaveName(e.target.value)}
+                  placeholder="Untitled set"
+                  aria-label="Playlist name"
+                  aria-invalid={saveName.trim().length > PLAYLIST_NAME_MAX ? true : undefined}
+                  className={searchInputClass}
+                />
+                {saveName.trim().length > PLAYLIST_NAME_MAX && (
+                  <div role="alert" className="mt-1.5 font-mono text-[10px] text-[var(--accent)]">
+                    name must be 1-{PLAYLIST_NAME_MAX} chars ({saveName.trim().length} now)
+                  </div>
+                )}
               </div>
               {existingId && (
                 <div className="grid gap-2">
@@ -1321,7 +1363,12 @@ export default function PlaylistBuilderPanel() {
               </span>
               <div className="flex flex-none gap-2.5">
                 <Button variant="ghost" className="h-10" onClick={() => setModal(null)}>Cancel</Button>
-                <Button variant="accent" className="h-10" disabled={saving || !saveName.trim()} onClick={doSave}>
+                <Button
+                  variant="accent"
+                  className="h-10"
+                  disabled={saving || !saveName.trim() || saveName.trim().length > PLAYLIST_NAME_MAX}
+                  onClick={doSave}
+                >
                   {saving ? 'Saving…' : 'Save playlist'}
                 </Button>
               </div>

@@ -20,8 +20,6 @@ import {
   PIPER_VOICE_RE,
   POCKET_TTS_VOICE_RE,
   SCRIPT_LENGTHS,
-  SHOWS_LIMIT,
-  SHOW_TOPIC_MAX,
   SKILLS_PER_PERSONA_LIMIT,
   SKILL_SLUG_RE,
   SOUL_MAX,
@@ -33,23 +31,29 @@ import {
   Webhook,
   clampTtsGain,
   clampTtsSpeed,
-  coerceExcludedPlaylistIds,
-  coerceGuestPersonaIds,
-  coercePlaylistIds,
-  coerceShowEnergies,
-  coerceShowVocals,
-  coerceShowEras,
-  coerceShowGenres,
-  coerceShowMoods,
   emptyWeek,
   mintId,
   normalizeDial,
 } from './vocab.js';
-import { DEFAULTS, coerceMaxTrackSeconds, rawMaxTrackSec } from './defaults.js';
+import { DEFAULTS, coerceMaxTrackSeconds } from './defaults.js';
 // The webhook rules themselves, so this lenient path and update()'s strict one
 // cannot restate them differently — see normalizeWebhooks below.
 import { WEBHOOK_ID_RE, webhookSchema, type WebhookParsed } from '../schemas/webhook.js';
 import { resolveWebhookIds } from '../schemas/webhook-server.js';
+import {
+  SHOWS_LIMIT,
+  migrateLegacyShowFields,
+  repairShowForLoad,
+  showSchema,
+  type ShowParsed,
+  type ShowSchemaContext,
+} from '../schemas/show.js';
+import { resolveShowIds } from '../schemas/show-server.js';
+import {
+  repairScheduleForLoad,
+  scheduleSchema,
+  scheduleOverrideSchema,
+} from '../schemas/schedule.js';
 
 // ── normalizers (lenient — used by load(), clamp/default rather than throw) ──
 
@@ -230,130 +234,72 @@ export function normalizeDjPrompts(raw: unknown): DjPromptEntry[] {
 
 export function normalizeShows(raw: unknown, personaIds: string[]): NormalizedShow[] {
   if (!Array.isArray(raw)) return [];
-  const seen = new Set<string>();
-  const out: NormalizedShow[] = [];
+  // The SAME schema update() enforces, given a context that says which rules
+  // this caller is in a position to check. All three nulls are deliberate and
+  // documented on ShowSchemaContext: load runs before the mood cache exists,
+  // has no theme registry, and clamps the track-length cap to the hard bounds
+  // instead of the crossfade-derived floor. Everything else — the name and
+  // brief lengths, the era windows, the per-attribute caps, the host reference
+  // — is one rule, executed once.
+  const ctx: ShowSchemaContext = {
+    personaIds,
+    moodNames: null,
+    themeIds: null,
+    minTrackSeconds: null,
+  };
+  const schema = showSchema(ctx);
+  const rows: ShowParsed[] = [];
   for (const item of raw) {
     if (!item || typeof item !== 'object') continue;
-    const name = typeof item.name === 'string' ? item.name.trim().slice(0, 60) : '';
-    if (!name) continue;
-    if (!personaIds.includes(item.personaId)) continue; // drop dangling owner
-    // Empty moods = "Any" (the autonomous mood applies on air). Unknown mood
-    // strings are dropped rather than failing the whole show. Multi-value
-    // (#929): plural arrays are canonical; legacy singular fields migrate to
-    // one-element lists here (coerceShow* handle both shapes).
-    const moods = coerceShowMoods(item);
-    let id = typeof item.id === 'string' && ID_RE.test(item.id) ? item.id : mintId('s_');
-    if (seen.has(id)) id = mintId('s_');
-    seen.add(id);
-    // themeId is the optional per-show theme override. Lenient path: we only
-    // sanity-check the shape. A stale id (theme file deleted under our feet)
-    // is harmless — routes/public.ts (GET /themes) falls back to the station
-    // default at serve time. Empty/missing means "no
-    // override" and is stored as an empty string for round-trip cleanliness.
-    const themeId =
-      typeof item.themeId === 'string' && item.themeId.trim()
-        ? item.themeId.trim().slice(0, 64)
-        : '';
-    // Optional music-steering filters (soft lean, applied at pick time). Each
-    // is a LIST — OR within the attribute, AND across attributes (#929).
-    // Genres are free text resolved fuzzily against the live library when a
-    // pick is made (mirrors the listener-request path) — never validated
-    // against Subsonic here. Eras are decade/year windows. Energies come from
-    // the tagger's three bands. All default to "no constraint" (empty list).
-    const genres = coerceShowGenres(item);
-    const eras = coerceShowEras(item);
-    const energies = coerceShowEnergies(item);
-    // Vocal steering (#1300 FR 13): '' = no constraint, which is what every
-    // show predating the field carries, so loading one is a no-op.
-    const vocals = coerceShowVocals(item);
-    // Opt-in: hard-filter the pick pool to EVERY set music filter (mood, genre,
-    // era, energy) instead of the default soft leans. Only meaningful when at
-    // least one filter is set; defaults OFF. The legacy genre-only `genreStrict`
-    // is deliberately NOT carried over: the toggle now spans every filter, so
-    // auto-migrating an old genre-strict show would silently harden mood/era/
-    // energy too. Old shows come back soft; the operator re-opts into strict.
-    const filtersStrict = item.filtersStrict === true;
-    // Per-show track-length override (seconds). null = inherit the station-wide
-    // maxTrackSeconds; 0 = unlimited (opt this show back out of the cap so a
-    // long-form mix show can air hour-long sets); >0 = this show's own cap.
-    const maxTrackSeconds = coerceMaxTrackSeconds(rawMaxTrackSec(item), true);
-    // Optional Navidrome playlist anchor — the union of these playlists becomes
-    // the show's candidate pool. playlistStrict (default off) makes the playlist
-    // the show's ENTIRE universe; soft just lets it dominate. Both default empty
-    // so existing shows are byte-for-byte unchanged.
-    const playlistIds = coercePlaylistIds(item.playlistIds);
-    const playlistStrict = item.playlistStrict === true;
-    // Optional Navidrome playlist blocklist — tracks from these playlists are
-    // excluded from the candidate pool. Empty = no exclusions.
-    const excludedPlaylistIds = coerceExcludedPlaylistIds(item.excludedPlaylistIds);
-    // Optional guest co-hosts. Lenient path: dangling persona ids (persona
-    // deleted under our feet) and the host itself are silently dropped so the
-    // show survives with whatever roster is still real.
-    const guestPersonaIds = coerceGuestPersonaIds(item.guestPersonaIds, item.personaId, personaIds);
-    // Scripted banter breaks (multi-voice exchanges). Only meaningful with
-    // guests — stored as given, checked against the live roster at air time.
-    const banter = item.banter === true;
-    // Programme mode: the show airs as a produced episode (intro → feature →
-    // outro arc — broadcast/programme.ts). segmentSkill optionally pins the
-    // feature beat to one segment capability kind; free text, resolved against
-    // the live skill catalog at air time (a stale kind degrades to the
-    // producer's choice, same tolerance as playlistIds).
-    const programme = item.programme === true;
-    const segmentSkill = typeof item.segmentSkill === 'string' ? item.segmentSkill.trim().slice(0, 64) : '';
-    out.push({
-      id,
-      name,
-      topic: typeof item.topic === 'string' ? item.topic.trim().slice(0, SHOW_TOPIC_MAX) : '',
-      personaId: item.personaId,
-      guestPersonaIds,
-      banter,
-      programme,
-      segmentSkill,
-      moods,
-      themeId,
-      genres,
-      eras,
-      energies,
-      vocals,
-      filtersStrict,
-      maxTrackSeconds,
-      playlistIds,
-      playlistStrict,
-      excludedPlaylistIds,
+    // Legacy singular fields (#929) migrate first. The schema does this too,
+    // but the per-field repairs need the plural keys already in place.
+    const migrated = migrateLegacyShowFields(item);
+    // The repairs live in schemas/show.ts (repairShowForLoad), beside the
+    // rules they repair against — a repair restated here is a repair that can
+    // drift from the schema, and the failure mode of that drift is the parse
+    // failing and `continue` silently deleting a working show on the next
+    // boot. What stays at this call site is only what the schema module cannot
+    // own: maxTrackSeconds clamps through coerceMaxTrackSeconds, whose bounds
+    // defaults.ts derives from the schema's own ceiling. Clamp rather than
+    // reject: an out-of-range cap from a hand-edited file should bound the
+    // show, not delete it.
+    const parsed = schema.safeParse({
+      ...repairShowForLoad(migrated, personaIds),
+      maxTrackSeconds: coerceMaxTrackSeconds(migrated.maxTrackSeconds, true),
     });
-    if (out.length >= SHOWS_LIMIT) break;
+    // What survives a drop: a nameless show, one whose host no longer exists.
+    // Both are shows with no owner or no identity, which is what the
+    // hand-rolled loader dropped too.
+    if (!parsed.success) continue;
+    rows.push(parsed.data);
+    if (rows.length >= SHOWS_LIMIT) break;
   }
-  return out;
+  // Same minting and de-duplication the strict path runs, from the same module.
+  return resolveShowIds(rows) as NormalizedShow[];
 }
 
+// Lenient load-path counterpart of validateScheduleStrict. The RULES are the
+// shared schema's — the 24-entry day, the slot shape, the unknown-show check —
+// so the two paths can no longer drift. What lives here is only the LENIENCY:
+// a slot naming a show that no longer exists is blanked rather than failing the
+// boot, and the repairs themselves live beside the rules in schemas/schedule.ts
+// (repairScheduleForLoad) rather than restating them here. The schema is still
+// run on the repaired grid, so a repair that stopped landing on a valid value
+// would be caught rather than persisted.
 export function normalizeSchedule(raw: unknown, showIds: string[]) {
-  const week = emptyWeek();
-  if (!raw || typeof raw !== 'object') return week;
-  const r = raw as Record<number, unknown>;
-  for (let d = 0; d < 7; d++) {
-    const day = r[d];
-    if (!Array.isArray(day)) continue;
-    for (let h = 0; h < 24; h++) {
-      const v = day[h];
-      if (typeof v === 'string' && showIds.includes(v)) week[d][h] = v;
-    }
-  }
-  return week;
+  const repaired = repairScheduleForLoad(raw, showIds);
+  const r = scheduleSchema({ showIds }).safeParse(repaired);
+  return r.success ? r.data : emptyWeek();
 }
 
 // Lenient load-path coercion for the timed takeover (#930). Anything malformed,
 // dangling, or already expired loads as null — an override is transient state,
-// never worth failing a boot over.
+// never worth failing a boot over. Expiry is the one rule the strict path does
+// NOT share, and it travels as the schema context's `now` rather than as a
+// second check here.
 export function normalizeScheduleOverride(raw: unknown, showIds: string[]): ScheduleOverride | null {
-  if (!raw || typeof raw !== 'object') return null;
-  const o = raw as Record<string, unknown>;
-  const showId = typeof o.showId === 'string' ? o.showId : '';
-  const startedAt = typeof o.startedAt === 'number' ? o.startedAt : NaN;
-  const expiresAt = typeof o.expiresAt === 'number' ? o.expiresAt : NaN;
-  if (!showIds.includes(showId)) return null;
-  if (!Number.isFinite(startedAt) || !Number.isFinite(expiresAt)) return null;
-  if (startedAt >= expiresAt || expiresAt <= Date.now()) return null;
-  return { showId, startedAt, expiresAt };
+  const r = scheduleOverrideSchema({ showIds, now: Date.now() }).safeParse(raw);
+  return r.success ? r.data : null;
 }
 
 

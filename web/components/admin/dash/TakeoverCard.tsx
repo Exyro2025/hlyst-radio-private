@@ -15,22 +15,22 @@ import { cn } from '../../../lib/cn';
 import { Card, Btn, Pill, Seg } from '../ui';
 import { ColorChip, SlotMenu } from '../schedule/bits';
 import { SHOW_COLORS } from '../schedule/lib';
-
-/** One show pinned over the grid until `expiresAt` (epoch ms). */
-interface ScheduleOverride {
-  showId: string;
-  startedAt: number;
-  expiresAt: number;
-}
+// The pin's shape and its minute bounds come from the shared schema
+// (controller/src/schemas/schedule.ts) — POST /schedule/override runs the same
+// rule at the route, so the input's min/max and the server's answer agree by
+// construction. Both were hand-copied here under a "mirror the controller"
+// comment, which is the drift these conversions exist to delete.
+import {
+  OVERRIDE_MAX_MINUTES,
+  OVERRIDE_MIN_MINUTES,
+  type ScheduleOverride,
+} from '@/lib/schemas.generated';
 
 interface TakeoverShow {
   id: string;
   name: string;
 }
 
-// Mirror the controller's OVERRIDE_MIN/MAX_MINUTES (settings.ts).
-const MIN_MINUTES = 15;
-const MAX_MINUTES = 720;
 const PRESETS = [
   { minutes: 60, label: '1h' },
   { minutes: 120, label: '2h' },
@@ -194,8 +194,8 @@ export function TakeoverCard({ tz, locale }: { tz?: string; locale?: StationLoca
             <label className="flex items-baseline gap-1.5 border border-separator-strong px-2 py-[9px] sm:py-1">
               <input
                 type="number"
-                min={MIN_MINUTES}
-                max={MAX_MINUTES}
+                min={OVERRIDE_MIN_MINUTES}
+                max={OVERRIDE_MAX_MINUTES}
                 value={minutes}
                 onChange={(e: ChangeEvent<HTMLInputElement>) => {
                   const v = Number(e.target.value);
@@ -211,7 +211,9 @@ export function TakeoverCard({ tz, locale }: { tz?: string; locale?: StationLoca
             tone="accent"
             sm
             className="w-full"
-            disabled={busy || !pinShowId || minutes < MIN_MINUTES || minutes > MAX_MINUTES}
+            disabled={
+              busy || !pinShowId || minutes < OVERRIDE_MIN_MINUTES || minutes > OVERRIDE_MAX_MINUTES
+            }
             onClick={pin}
           >
             {busy ? 'pinning…' : 'Pin to air →'}

@@ -15,6 +15,7 @@ import { SkeletonCards } from '@/components/ui/skeleton';
 import { Btn, Seg } from '../ui';
 import { PreviewButton, type SettingsData, type SaveSettings } from '../settings/shared';
 import type { BedsData, BedsForm } from './types';
+import { IMAGING_DESCRIPTION_MAX, IMAGING_NAME_MAX, IMAGING_PROMPT_MAX } from '@/lib/schemas.generated';
 import {
   SectionMasthead, PanelBox, PanelHead, EmptyState, DropZone, MetaLine, TabMetric, pad2,
 } from './parts';
@@ -271,7 +272,7 @@ export function BedsSection({ bedsData, bedsForm, setBedsForm, busy, createBed, 
               <Label>Name</Label>
               <Input
                 value={bedsForm.name}
-                maxLength={60}
+                maxLength={IMAGING_NAME_MAX}
                 onChange={(e: ChangeEvent<HTMLInputElement>) => setBedsForm(f => ({ ...f, name: e.target.value }))}
                 placeholder="midnight-drift"
               />
@@ -294,7 +295,7 @@ export function BedsSection({ bedsData, bedsForm, setBedsForm, busy, createBed, 
             <Label>Description · optional</Label>
             <Input
               value={bedsForm.description}
-              maxLength={200}
+              maxLength={IMAGING_DESCRIPTION_MAX}
               onChange={(e: ChangeEvent<HTMLInputElement>) => setBedsForm(f => ({ ...f, description: e.target.value }))}
               placeholder="For your own reference — the DJ never reads this"
             />
@@ -304,10 +305,10 @@ export function BedsSection({ bedsData, bedsForm, setBedsForm, busy, createBed, 
             <Textarea
               rows={3}
               value={bedsForm.prompt}
-              onChange={(e: ChangeEvent<HTMLTextAreaElement>) => setBedsForm(f => ({ ...f, prompt: e.target.value.slice(0, 500) }))}
+              onChange={(e: ChangeEvent<HTMLTextAreaElement>) => setBedsForm(f => ({ ...f, prompt: e.target.value.slice(0, IMAGING_PROMPT_MAX) }))}
               placeholder="Describe the instrumental for ElevenLabs — e.g. warm lo-fi ambient pad, no drums, soft and neutral…"
             />
-            <div className="text-right font-mono text-[11px] text-muted">{bedsForm.prompt.length} / 500</div>
+            <div className="text-right font-mono text-[11px] text-muted">{bedsForm.prompt.length} / {IMAGING_PROMPT_MAX}</div>
           </div>
           <p className="m-0 text-[12px] leading-[1.55] [text-wrap:pretty] text-muted">
             Vocal-free instrumental, {minSec}–{maxGenSec}s. Each bed is trimmed to fit the link, so
@@ -336,7 +337,7 @@ export function BedsSection({ bedsData, bedsForm, setBedsForm, busy, createBed, 
             <Label>Name</Label>
             <Input
               value={importName}
-              maxLength={60}
+              maxLength={IMAGING_NAME_MAX}
               onChange={(e: ChangeEvent<HTMLInputElement>) => setImportName(e.target.value)}
               placeholder="midnight-drift"
             />
@@ -345,7 +346,7 @@ export function BedsSection({ bedsData, bedsForm, setBedsForm, busy, createBed, 
             <Label>Description · optional</Label>
             <Input
               value={importDesc}
-              maxLength={200}
+              maxLength={IMAGING_DESCRIPTION_MAX}
               onChange={(e: ChangeEvent<HTMLInputElement>) => setImportDesc(e.target.value)}
               placeholder="For your own reference — the DJ never reads this"
             />
