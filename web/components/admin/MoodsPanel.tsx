@@ -31,6 +31,7 @@ import {
   SETTINGS_MOOD_PROMPT_MAX,
 } from '@/lib/schemas.generated';
 import { VoicePreviewButton } from './tts/VoicePreviewButton';
+import { LanguageSelect } from './LanguageSelect';
 
 interface MoodEntry {
   name: string;
@@ -39,6 +40,7 @@ interface MoodEntry {
 interface Correction {
   from: string;
   to: string;
+  language: string;
 }
 interface MoodsFormValues {
   moods: MoodEntry[];
@@ -89,12 +91,14 @@ const MOODS_LIMIT = SETTINGS_MOODS_LIMIT;
 // own and there is nothing to mirror.
 const CORRECTION_FROM_MAX = 80;
 const CORRECTION_TO_MAX = 160;
+const CORRECTION_LANGUAGE_MAX = 80;
 const CORRECTIONS_LIMIT = 100;
 const correctionsSchema = z
   .array(
     z.object({
       from: z.string().max(CORRECTION_FROM_MAX),
       to: z.string().max(CORRECTION_TO_MAX),
+      language: z.string().max(CORRECTION_LANGUAGE_MAX),
     }),
   )
   .max(CORRECTIONS_LIMIT);
@@ -144,6 +148,30 @@ function WeatherMoodSelect({
   );
 }
 
+// LanguageSelect is a plain controlled component (no Field/aria contract of
+// its own), so this just bridges it onto the array control the same way
+// WeatherMoodSelect bridges the plain Radix Select above.
+function CorrectionLanguageField({
+  control,
+  index,
+  languages,
+}: {
+  control: Control<MoodsFormValues>;
+  index: number;
+  languages: string[];
+}) {
+  const { field } = useController({ control, name: `corrections.${index}.language` });
+  return (
+    <LanguageSelect
+      value={field.value ?? ''}
+      onChange={field.onChange}
+      languages={languages}
+      className="max-w-[260px]"
+      ariaLabel="Language this correction applies to"
+    />
+  );
+}
+
 export default function MoodsPanel() {
   const { adminFetch, needsAuth, hydrated } = useAdminAuth();
   const [err, setErr] = useState<string | null>(null);
@@ -163,6 +191,8 @@ export default function MoodsPanel() {
   // resolved from settings.tts on load, never edited here.
   const [previewVoice, setPreviewVoice] = useState<TestVoiceDefaults>({ engine: 'piper', voice: '' });
   const [testText, setTestText] = useState('');
+  const [testLanguage, setTestLanguage] = useState('');
+  const [speechLanguages, setSpeechLanguages] = useState<string[]>([]);
 
   // The PERSISTED mood list, deliberately not the live Vocabulary tab value:
   // it is both the vocabulary the schedule/weather cards validate against and
@@ -238,6 +268,9 @@ export default function MoodsPanel() {
             speed?: Record<string, number>;
           };
         };
+        tts?: {
+          speechLanguages?: string[];
+        };
       } | null;
       const v = j?.values || {};
       const loadedMoods = Array.isArray(v.moods) ? (v.moods as MoodEntry[]) : [];
@@ -269,6 +302,8 @@ export default function MoodsPanel() {
       // Which voice the "Test corrections" sample uses — the station's
       // configured default engine, resolved the same way tts.ts picks it.
       const rawTts = v.tts || {};
+      const loadedSpeechLanguages = Array.isArray(j?.tts?.speechLanguages)
+        ? (j!.tts!.speechLanguages as string[]) : [];
       const previewEngine = rawTts.defaultEngine || 'piper';
       const previewVoiceValue =
         previewEngine === 'kokoro' ? (rawTts.kokoro?.voice || '')
@@ -276,6 +311,7 @@ export default function MoodsPanel() {
         : previewEngine === 'pocket-tts' ? (rawTts.pocketTts?.voice || '')
         : previewEngine === 'cloud' ? (rawTts.cloud?.voice || '')
         : '';
+      setSpeechLanguages(loadedSpeechLanguages);
       setPreviewVoice({
         engine: previewEngine,
         voice: previewVoiceValue,
@@ -400,7 +436,9 @@ export default function MoodsPanel() {
     const ok = await form.trigger('corrections');
     if (!ok) return;
     const raw = getFormValue('corrections');
-    const effective = raw.map(c => ({ from: c.from.trim(), to: c.to.trim() })).filter(c => c.from);
+    const effective = raw
+      .map(c => ({ from: c.from.trim(), to: c.to.trim(), language: c.language.trim() }))
+      .filter(c => c.from);
     // The new default is the RAW value (blank scratch rows included) so the
     // dirty comparison stays structural; only the POSTED payload is filtered.
     await persistPatch('corrections', 'corrections', { tts: { corrections: effective } }, raw, 'Speech corrections saved');
@@ -430,7 +468,7 @@ export default function MoodsPanel() {
   const weatherCard = cardState('weather');
   const correctionsCard = cardState('corrections');
   const effectiveCorr = liveCorrections
-    .map(c => ({ from: (c.from ?? '').trim(), to: (c.to ?? '').trim() }))
+    .map(c => ({ from: (c.from ?? '').trim(), to: (c.to ?? '').trim(), language: (c.language ?? '').trim() }))
     .filter(c => c.from);
 
   return (
@@ -597,33 +635,40 @@ export default function MoodsPanel() {
                   {corrFields.map((field, idx) => (
                     <div
                       key={field._rhfKey}
-                      className="flex flex-col gap-2 border-b border-ink/10 pb-3 last:border-0 sm:flex-row sm:items-end sm:gap-3"
+                      className="flex flex-col gap-2 border-b border-ink/10 pb-3 last:border-0"
                     >
-                      <TextField
+                      <div className="flex flex-col gap-2 sm:flex-row sm:items-end sm:gap-3">
+                        <TextField
+                          control={arrayControl}
+                          name={`corrections.${idx}.from`}
+                          label="Text on air"
+                          placeholder="text on air (e.g. GHz)"
+                          className="sm:flex-1"
+                          maxLength={CORRECTION_FROM_MAX}
+                        />
+                        <TextField
+                          control={arrayControl}
+                          name={`corrections.${idx}.to`}
+                          label="Spoken form"
+                          placeholder="spoken form (e.g. gigahertz)"
+                          description="leave empty to drop the word"
+                          maxLength={CORRECTION_TO_MAX}
+                          className="sm:flex-1"
+                        />
+                        <Btn
+                          sm
+                          title="Remove correction"
+                          className="size-9 shrink-0 self-start sm:self-end"
+                          onClick={() => removeCorr(idx)}
+                        >
+                          <Trash2 size={12} />
+                        </Btn>
+                      </div>
+                      <CorrectionLanguageField
                         control={arrayControl}
-                        name={`corrections.${idx}.from`}
-                        label="Text on air"
-                        placeholder="text on air (e.g. GHz)"
-                        className="sm:flex-1"
-                        maxLength={CORRECTION_FROM_MAX}
+                        index={idx}
+                        languages={speechLanguages}
                       />
-                      <TextField
-                        control={arrayControl}
-                        name={`corrections.${idx}.to`}
-                        label="Spoken form"
-                        placeholder="spoken form (e.g. gigahertz)"
-                        description="leave empty to drop the word"
-                        maxLength={CORRECTION_TO_MAX}
-                        className="sm:flex-1"
-                      />
-                      <Btn
-                        sm
-                        title="Remove correction"
-                        className="size-9 shrink-0 self-start sm:self-end"
-                        onClick={() => removeCorr(idx)}
-                      >
-                        <Trash2 size={12} />
-                      </Btn>
                     </div>
                   ))}
                 </div>
@@ -632,7 +677,7 @@ export default function MoodsPanel() {
                 <Btn
                   className="min-h-9 sm:min-h-0"
                   disabled={corrFields.length >= CORRECTIONS_LIMIT}
-                  onClick={() => appendCorr({ from: '', to: '' })}
+                  onClick={() => appendCorr({ from: '', to: '', language: '' })}
                 >
                   Add correction
                 </Btn>
@@ -653,7 +698,8 @@ export default function MoodsPanel() {
               <div className="field-hint">
                 Uses the corrections list above exactly as it stands right now, unsaved
                 changes included, spoken by the station&apos;s default voice
-                ({previewVoice.engine}).
+                ({previewVoice.engine}), filtered to rules matching{' '}
+                {testLanguage ? <strong>{testLanguage}</strong> : 'all languages'}.
               </div>
               <Input
                 aria-label="Test sentence"
@@ -661,6 +707,13 @@ export default function MoodsPanel() {
                 onChange={e => setTestText(e.target.value)}
                 placeholder="Type a line using a word you corrected…"
                 maxLength={200}
+              />
+              <LanguageSelect
+                value={testLanguage}
+                onChange={setTestLanguage}
+                languages={speechLanguages}
+                className="mt-2 max-w-[260px]"
+                ariaLabel="Language to test against"
               />
               <VoicePreviewButton
                 className="mt-3"
@@ -670,6 +723,7 @@ export default function MoodsPanel() {
                 cloudModel={previewVoice.cloudModel}
                 speed={previewVoice.speed}
                 text={testText}
+                language={testLanguage}
                 corrections={effectiveCorr}
                 disabled={!testText.trim()}
                 adminFetch={adminFetch}
