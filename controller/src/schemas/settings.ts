@@ -597,3 +597,234 @@ export const scrobblePatchSchema = settingsBlockOf({
   lastfm: scrobbleLastfmSchema,
   listenbrainz: scrobbleListenbrainzSchema,
 });
+
+// --- the mood family -------------------------------------------------------
+
+export const SETTINGS_MOODS_LIMIT = 40;
+export const SETTINGS_MOOD_NAME_MAX = 40;
+export const SETTINGS_MOOD_PROMPT_MAX = 200;
+export const SETTINGS_FESTIVALS_LIMIT = 50;
+
+// The 8 fixed time-of-day slots and the 6 fixed weather conditions. Both maps
+// are REBUILT over these key sets, so an unknown key in the patch is dropped.
+export const SETTINGS_MOOD_PERIODS = [
+  'early-morning', 'morning', 'midday', 'afternoon',
+  'drive-time', 'evening', 'late-evening', 'after-hours',
+] as const;
+export const SETTINGS_WEATHER_CONDITIONS = [
+  'clear', 'cloudy', 'foggy', 'rainy', 'snowy', 'stormy',
+] as const;
+
+/** Canonical mood id form. The operator's typed string is silently rewritten. */
+export function settingsNormalizeMoodName(raw: unknown): string {
+  return String(raw ?? '')
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '');
+}
+
+/**
+ * The context the three mood MAPS validate against.
+ *
+ * `moodNames` is nullable and null means "this caller cannot check that rule" —
+ * the same convention ShowSchemaContext and ScheduleSchemaContext use. The
+ * route passes null: the effective vocabulary depends on whether `moods` is in
+ * the same patch and on what validating it produced, which is update()'s
+ * ordering to know, not the middleware's. So the route checks SHAPE and
+ * update() checks membership, one schema, two postures.
+ */
+export interface SettingsMoodContext {
+  moodNames: string[] | null;
+}
+
+export const moodsSchema = z
+  .unknown()
+  .superRefine((raw, ctx) => {
+    if (!Array.isArray(raw)) {
+      ctx.addIssue({ code: 'custom', message: 'moods must be an array' });
+      return;
+    }
+    if (raw.length < 1) {
+      ctx.addIssue({ code: 'custom', message: 'moods must have at least one entry' });
+      return;
+    }
+    if (raw.length > SETTINGS_MOODS_LIMIT) {
+      ctx.addIssue({
+        code: 'custom',
+        message: `moods must be at most ${SETTINGS_MOODS_LIMIT} entries`,
+      });
+      return;
+    }
+    const seen = new Set<string>();
+    raw.forEach((item, i) => {
+      if (!item || typeof item !== 'object') {
+        ctx.addIssue({ code: 'custom', message: `moods[${i}] must be an object`, path: [i] });
+        return;
+      }
+      const name = settingsNormalizeMoodName((item as { name?: unknown }).name);
+      if (name.length < 1 || name.length > SETTINGS_MOOD_NAME_MAX) {
+        ctx.addIssue({
+          code: 'custom',
+          message: `moods[${i}].name must be 1-${SETTINGS_MOOD_NAME_MAX} chars (letters, digits, dashes)`,
+          path: [i, 'name'],
+        });
+        return;
+      }
+      // Duplicate detection runs on the NORMALISED name, so 'Chill' + 'chill'
+      // is a refusal rather than two rows.
+      if (seen.has(name)) {
+        ctx.addIssue({
+          code: 'custom',
+          message: `moods[${i}].name "${name}" is a duplicate`,
+          path: [i, 'name'],
+        });
+        return;
+      }
+      seen.add(name);
+    });
+  })
+  .transform((raw) =>
+    (raw as Array<Record<string, unknown>>).map((item) => ({
+      name: settingsNormalizeMoodName(item.name),
+      clapPrompt:
+        typeof item.clapPrompt === 'string'
+          ? item.clapPrompt.trim().slice(0, SETTINGS_MOOD_PROMPT_MAX)
+          : '',
+    })),
+  );
+
+/**
+ * A fixed-key mood map. Both maps are rebuilt over their own key set.
+ *
+ * `allowEmpty` is the one difference between the two and it is NOT cosmetic:
+ * moodSchedule requires every one of its 8 periods (an omitted period coerces
+ * to '' and refuses), while weatherMoods treats '' as "no mood steer" — so a
+ * weatherMoods patch naming one condition silently BLANKS the other five and
+ * answers 200. Both behaviours are preserved exactly as they are.
+ */
+function settingsMoodMap(
+  keys: readonly string[],
+  label: string,
+  allowEmpty: boolean,
+  ctx: SettingsMoodContext,
+) {
+  const names = ctx.moodNames ? new Set(ctx.moodNames) : null;
+  const list = ctx.moodNames ? ctx.moodNames.join(', ') : '';
+  return z
+    .unknown()
+    .superRefine((raw, issues) => {
+      if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
+        issues.addIssue({ code: 'custom', message: `${label} must be an object` });
+        return;
+      }
+      if (!names) return; // shape-only posture — see SettingsMoodContext
+      for (const key of keys) {
+        const v = String((raw as Record<string, unknown>)[key] ?? '').trim();
+        if (allowEmpty && !v) continue;
+        if (!names.has(v)) {
+          issues.addIssue({
+            code: 'custom',
+            message: allowEmpty
+              ? `${label}.${key} must be a mood (${list}) or empty`
+              : `${label}.${key} must be one of: ${list}`,
+            path: [key],
+          });
+        }
+      }
+    })
+    .transform((raw) => {
+      const src = (raw || {}) as Record<string, unknown>;
+      const out: Record<string, string> = {};
+      for (const key of keys) out[key] = String(src[key] ?? '').trim();
+      return out;
+    });
+}
+
+export function moodScheduleSchema(ctx: SettingsMoodContext) {
+  return settingsMoodMap(SETTINGS_MOOD_PERIODS, 'moodSchedule', false, ctx);
+}
+
+export function weatherMoodsSchema(ctx: SettingsMoodContext) {
+  return settingsMoodMap(SETTINGS_WEATHER_CONDITIONS, 'weatherMoods', true, ctx);
+}
+
+export function festivalsSchema(ctx: SettingsMoodContext) {
+  const names = ctx.moodNames ? new Set(ctx.moodNames) : null;
+  const list = ctx.moodNames ? ctx.moodNames.join(', ') : '';
+  return z
+    .unknown()
+    .superRefine((raw, issues) => {
+      if (!Array.isArray(raw)) {
+        issues.addIssue({ code: 'custom', message: 'festivals must be an array' });
+        return;
+      }
+      if (raw.length > SETTINGS_FESTIVALS_LIMIT) {
+        issues.addIssue({
+          code: 'custom',
+          message: `festivals must be at most ${SETTINGS_FESTIVALS_LIMIT} entries`,
+        });
+        return;
+      }
+      raw.forEach((item, i) => {
+        const add = (message: string, field?: string) =>
+          issues.addIssue({
+            code: 'custom',
+            message,
+            path: field ? [i, field] : [i],
+          });
+        if (!item || typeof item !== 'object') {
+          add(`festivals[${i}] must be an object`);
+          return;
+        }
+        const f = item as Record<string, unknown>;
+        const name = String(f.name ?? '').trim();
+        if (name.length < 1 || name.length > 80) {
+          add(`festivals[${i}].name must be 1-80 chars`, 'name');
+          return;
+        }
+        const month = Number(f.month);
+        if (!Number.isInteger(month) || month < 1 || month > 12) {
+          add(`festivals[${i}].month must be an integer 1-12`, 'month');
+          return;
+        }
+        // Feb allows 29 — in a common year a leap-day festival fires Mar 1
+        // (Date.UTC rolls the date over in getFestivalContext). The day bound
+        // is indexed off the month, so it must stay downstream of a valid one.
+        // The `?? 31` is unreachable (month is already 1-12) but the WEB build
+        // typechecks the mirror under noUncheckedIndexedAccess, where a bare
+        // index is `number | undefined`.
+        const daysInMonth = [31, 29, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31][month - 1] ?? 31;
+        const day = Number(f.day);
+        if (!Number.isInteger(day) || day < 1 || day > daysInMonth) {
+          add(
+            `festivals[${i}].day must be an integer 1-${daysInMonth} for month ${month}`,
+            'day',
+          );
+          return;
+        }
+        const mood = String(f.mood ?? '').trim();
+        // '' is NOT allowed — every festival must name a mood, so the empty
+        // string simply fails the set membership.
+        if (names && !names.has(mood)) {
+          add(`festivals[${i}].mood must be one of: ${list}`, 'mood');
+          return;
+        }
+        const windowDays = Number(f.windowDays ?? 0);
+        if (!Number.isInteger(windowDays) || windowDays < 0 || windowDays > 14) {
+          add(`festivals[${i}].windowDays must be an integer 0-14`, 'windowDays');
+        }
+      });
+    })
+    .transform((raw) =>
+      (raw as Array<Record<string, unknown>>).map((f) => ({
+        month: Number(f.month),
+        day: Number(f.day),
+        name: String(f.name ?? '').trim(),
+        mood: String(f.mood ?? '').trim(),
+        description:
+          typeof f.description === 'string' ? f.description.trim().slice(0, 200) : '',
+        windowDays: Number(f.windowDays ?? 0),
+      })),
+    );
+}

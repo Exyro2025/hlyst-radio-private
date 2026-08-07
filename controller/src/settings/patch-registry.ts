@@ -37,10 +37,13 @@ import {
   bedsPatchSchema,
   crossfadeDurationSchema,
   djHouseRulesSchema,
+  festivalsSchema,
   jingleRatioSchema,
   likesPatchSchema,
   localeSchema,
   loudnessPatchSchema,
+  moodScheduleSchema,
+  moodsSchema,
   scrobblePatchSchema,
   searchPatchSchema,
   sfxPatchSchema,
@@ -49,6 +52,7 @@ import {
   streamPatchSchema,
   transitionsPatchSchema,
   uiPatchSchema,
+  weatherMoodsSchema,
   weatherPatchSchema,
   webhooksPolicyPatchSchema,
 } from '../schemas/settings.js';
@@ -120,13 +124,36 @@ export type SettingsPatchKey = (typeof SETTINGS_PATCH_KEYS)[number];
 const SETTINGS_PATCH_KEY_SET: ReadonlySet<string> = new Set(SETTINGS_PATCH_KEYS);
 
 /**
+ * The context a factory-shaped entry validates against.
+ *
+ * Every field is nullable and null always means "this caller cannot check that
+ * rule" — the convention ShowSchemaContext established. It travels as ONE value
+ * and is never unpacked into per-field arguments, for the reason PickerScope
+ * documents: a rule named in one list and forgotten in another silently stops
+ * being enforced on one path while the other still applies it.
+ */
+export interface SettingsPatchContext {
+  /** The EFFECTIVE mood vocabulary — the same-patch one when `moods` is in the
+   *  body. The route cannot know it (that is update()'s ordering to resolve),
+   *  so it passes null and checks shape only. */
+  moodNames: string[] | null;
+}
+
+export const SETTINGS_PATCH_SHAPE_ONLY: SettingsPatchContext = { moodNames: null };
+
+type SettingsPatchEntry = ZodType | ((ctx: SettingsPatchContext) => ZodType);
+
+/**
  * The converted keys. Everything else still lives in its hand-rolled branch.
  *
  * Adding an entry here is what moves a key onto the shared schema: update()'s
  * branch switches to parseSettingsPatchKey() and the route starts producing
  * `fieldErrors` for it, in one edit.
+ *
+ * An entry is either a plain schema or a FACTORY over SettingsPatchContext,
+ * for the shapes that cannot be validated against themselves.
  */
-export const SETTINGS_PATCH_SCHEMAS: Readonly<Partial<Record<SettingsPatchKey, ZodType>>> = {
+export const SETTINGS_PATCH_SCHEMAS: Readonly<Partial<Record<SettingsPatchKey, SettingsPatchEntry>>> = {
   jingleRatio: jingleRatioSchema,
   crossfadeDuration: crossfadeDurationSchema,
   archive: archivePatchSchema,
@@ -146,7 +173,18 @@ export const SETTINGS_PATCH_SCHEMAS: Readonly<Partial<Record<SettingsPatchKey, Z
   webhooksPolicy: webhooksPolicyPatchSchema,
   scrobble: scrobblePatchSchema,
   likes: likesPatchSchema,
+  moods: moodsSchema,
+  moodSchedule: moodScheduleSchema,
+  weatherMoods: weatherMoodsSchema,
+  festivals: festivalsSchema,
 };
+
+/** Resolve an entry against a context — a plain schema ignores it. */
+function schemaFor(key: SettingsPatchKey, ctx: SettingsPatchContext): ZodType | undefined {
+  const entry = SETTINGS_PATCH_SCHEMAS[key];
+  if (!entry) return undefined;
+  return typeof entry === 'function' ? entry(ctx) : entry;
+}
 
 /**
  * Dotted paths for `fieldErrors`, rooted at the settings key.
@@ -206,8 +244,12 @@ function flatten(err: ZodError): string {
  * A key with no schema yet is returned untouched, so a caller can route every
  * key through here as the conversion proceeds.
  */
-export function parseSettingsPatchKey<T = unknown>(key: SettingsPatchKey, value: unknown): T {
-  const schema = SETTINGS_PATCH_SCHEMAS[key];
+export function parseSettingsPatchKey<T = unknown>(
+  key: SettingsPatchKey,
+  value: unknown,
+  ctx: SettingsPatchContext = SETTINGS_PATCH_SHAPE_ONLY,
+): T {
+  const schema = schemaFor(key, ctx);
   if (!schema) return value as T;
   const r = schema.safeParse(value);
   if (!r.success) throw new Error(flatten(r.error));
@@ -250,7 +292,11 @@ export function validateSettingsPatch(patch: unknown): SettingsPatchFailure | nu
   let fieldErrors: Record<string, string> = Object.create(null);
   for (const key of SETTINGS_PATCH_KEYS) {
     if (!(key in body)) continue;
-    const schema = SETTINGS_PATCH_SCHEMAS[key];
+    // SHAPE-ONLY at the route for factory entries. The effective mood
+    // vocabulary depends on whether `moods` rides in the same body and on what
+    // validating it produced — update()'s ordering to resolve, not the
+    // middleware's. Same three-posture split PUT /schedule already uses.
+    const schema = schemaFor(key, SETTINGS_PATCH_SHAPE_ONLY);
     if (!schema) continue;
     const r = schema.safeParse(body[key]);
     if (r.success) continue;

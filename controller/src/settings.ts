@@ -103,15 +103,11 @@ import {
 import {
   assertNoOrphanMoods,
   validateDjPromptsStrict,
-  validateFestivalsStrict,
-  validateMoodScheduleStrict,
-  validateMoodsStrict,
   validatePersonasStrict,
   validateScheduleOverrideStrict,
   validateScheduleStrict,
   validateShowsStrict,
   validateTtsBlock,
-  validateWeatherMoodsStrict,
   validateWebhooksStrict,
 } from './settings/validate.js';
 import {
@@ -198,6 +194,11 @@ export {
 export {
   assertNoOrphanMoods,
   validateDjPromptsStrict,
+  // The mood family delegates to schemas/settings.ts now (#1348); update() calls
+  // the registry directly, so these are re-exported straight from the source
+  // module for the callers that still take the validator API — backup import,
+  // onboarding, and scripts/moods.test.ts.
+  validateFestivalsStrict,
   validateMoodScheduleStrict,
   validateMoodsStrict,
   validatePersonasStrict,
@@ -1206,17 +1207,21 @@ export async function update(patch) {
   // mood. The in-use removal guard (assertNoOrphanMoods) runs after shows are
   // validated below, so a same-patch show edit is seen.
   if ('moods' in patch) {
-    next.moods = validateMoodsStrict(patch.moods);
+    next.moods = parseSettingsPatchKey('moods', patch.moods);
   }
+  // The EFFECTIVE vocabulary — the same-patch one when `moods` rides along.
+  // Captured ONCE so the maps, festivals and shows below all judge against the
+  // same list; re-deriving per branch is a latent divergence.
   const moodNames = (next.moods || []).map((m: any) => m.name);
+  const moodCtx = { moodNames };
   if ('moodSchedule' in patch) {
-    next.moodSchedule = validateMoodScheduleStrict(patch.moodSchedule, moodNames);
+    next.moodSchedule = parseSettingsPatchKey('moodSchedule', patch.moodSchedule, moodCtx);
   }
   if ('weatherMoods' in patch) {
-    next.weatherMoods = validateWeatherMoodsStrict(patch.weatherMoods, moodNames);
+    next.weatherMoods = parseSettingsPatchKey('weatherMoods', patch.weatherMoods, moodCtx);
   }
   if ('festivals' in patch) {
-    next.festivals = validateFestivalsStrict(patch.festivals, moodNames);
+    next.festivals = parseSettingsPatchKey('festivals', patch.festivals, moodCtx);
   }
   // Prompt-template library. `djPrompts` replaces the whole library;
   // `activeDjPromptId` switches which entry renders ('' = built-in default).
