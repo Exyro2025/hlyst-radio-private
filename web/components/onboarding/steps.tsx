@@ -1,6 +1,7 @@
 'use client';
 
 import { useState } from 'react';
+import { llmProbeSchema } from '@/lib/schemas.generated';
 import type { WizardController } from './useWizard';
 import { ProviderSelector } from '../admin/llm/ProviderSelector';
 import { ModelCombobox } from '../admin/llm/ModelCombobox';
@@ -298,7 +299,10 @@ export function LlmStep({ w }: { w: WizardController }) {
           </span>
         </div>
         <div>
-          <Button variant="solid" onClick={onTest} disabled={busy || !w.data.llm.model}>
+          {/* The probe's own schema gates the button, so a rule the controller
+              would 400 on (openai-compatible with no base URL) holds it shut
+              instead of only answering a pressed one. */}
+          <Button variant="solid" onClick={onTest} disabled={busy || !llmProbeSchema.safeParse(w.data.llm).success}>
             {busy ? 'Asking…' : 'Send a test prompt'}
           </Button>
           <TestPill result={w.data.llmTest} />

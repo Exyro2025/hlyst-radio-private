@@ -2,6 +2,7 @@
 
 import { useCallback, useState } from 'react';
 import { useAdminAuth } from '@/lib/adminAuth';
+import { fishAudioIssue } from '@/lib/schemas.generated';
 
 // Every step reads and writes through the `set` updater rather than its own
 // state, so the Review step can show the whole picture without prop-drilling.
@@ -197,18 +198,13 @@ export function useWizard() {
         data.tts.cloud.provider === 'fish-audio' ? 'FISH_API_KEY' : '';
       if (k) apiKeys[k] = data.tts.cloud.apiKey;
     }
-    if (data.tts.cloud.enabled && data.tts.cloud.provider === 'fish-audio') {
-      // The key may already come from the root environment, so only validate
-      // fields the wizard itself must persist for a usable Fish request.
-      const model = data.tts.cloud.model.trim();
-      const voice = data.tts.cloud.voice.trim();
-      if (!model || model.length > 100 || /[\r\n]/.test(model)) {
-        return { ok: false, error: 'Fish Audio model id must be 1–100 characters with no line breaks.' };
-      }
-      if (!voice || voice.length > 100 || /[\r\n]/.test(voice)) {
-        return { ok: false, error: 'Fish Audio voice reference id must be 1–100 characters with no line breaks.' };
-      }
-    }
+    // The key may already come from the root environment, so fishAudioIssue
+    // only judges the fields the wizard itself must persist for a usable Fish
+    // request. Same helper the controller's save handler runs — the two
+    // hand-rolled copies this replaces had already drifted in the message
+    // ('1-100' vs '1–100') before they could in logic.
+    const fishIssue = fishAudioIssue(data.tts.cloud);
+    if (fishIssue) return { ok: false, error: fishIssue };
 
     const body = {
       navidrome: data.navidrome,
