@@ -5,9 +5,8 @@
 // /shows route middleware — plus the two places the strict and lenient paths
 // are deliberately allowed to differ.
 //
-// Message WORDING is not asserted except where it carries information the
-// operator needs to act (the legacy-field refusal). Accept-vs-reject and the
-// returned shape are the contract.
+// Message WORDING is not asserted. Accept-vs-reject and the returned shape are
+// the contract.
 //
 // Run: npx tsx scripts/show-schema.test.ts (auto-discovered by npm test).
 import assert from 'node:assert/strict';
@@ -25,7 +24,6 @@ const {
   SHOW_FILTER_VALUES_MAX,
   SHOW_NAME_MAX,
   SHOW_TOPIC_MAX,
-  legacyShowFieldsIn,
   migrateLegacyShowFields,
   showSchema,
 } = await import('../src/schemas/show.js');
@@ -147,50 +145,41 @@ test('duplicate ids across rows are re-minted', () => {
   assert.notEqual(out[1].id, 's_dupe01');
 });
 
-// --- legacy singular fields: refused by strict, migrated by lenient ---------
+// --- legacy singular fields: migrated by EVERY path --------------------------
 
-test('legacyShowFieldsIn reports only the keys actually carrying a value', () => {
-  assert.deepEqual(legacyShowFieldsIn({ mood: 'chill' }), ['mood']);
-  assert.deepEqual(legacyShowFieldsIn({ mood: '', genre: null }), []);
-  assert.deepEqual(legacyShowFieldsIn({ moods: ['chill'] }), []);
-  assert.deepEqual(legacyShowFieldsIn(null), []);
+test('the strict path MIGRATES a legacy singular field, as it always did', () => {
+  // A pre-#929 backup restores through settings.update() — the pre-schema
+  // validator accepted and migrated these ("a legacy singular mood from an
+  // older client still validates" was its own comment), so refusing them here
+  // would turn a working restore into a hard failure.
+  const s = strict({
+    mood: 'chill', genre: 'funk, soul', energy: 'low',
+    fromYear: 1990, toYear: 1999, maxTrackMinutes: 10,
+  });
+  assert.deepEqual(s.moods, ['chill']);
+  assert.deepEqual(s.genres, ['funk', 'soul']);
+  assert.deepEqual(s.energies, ['low']);
+  assert.deepEqual(s.eras, [{ fromYear: 1990, toYear: 1999 }]);
+  assert.equal(s.maxTrackSeconds, 600);
 });
 
-test('the strict path REFUSES a legacy singular field', () => {
-  for (const legacy of [
-    { mood: 'chill' },
-    { genre: 'funk' },
-    { energy: 'low' },
-    { fromYear: 1990 },
-    { maxTrackMinutes: 10 },
-  ]) {
-    assert.throws(() => strict(legacy), /legacy field/, JSON.stringify(legacy));
-  }
+test('a migrated legacy value is judged by the same rules as a native one', () => {
+  // Migration is not a free pass: a legacy energy outside the vocabulary fails
+  // exactly as energies: ['bogus'] would.
+  assert.throws(() => strict({ energy: 'bogus' }), /energies/);
+  assert.throws(() => strict({ mood: 'not-a-mood' }), /moods/);
 });
 
-test('the refusal names the field and says what to do instead', () => {
-  // A backup restore is the one caller that meets these, and it answers with
-  // `{ error: err.message }` — so the message IS the recovery instructions.
-  let msg = '';
-  try {
-    strict({ mood: 'chill' });
-  } catch (e) {
-    msg = (e as Error).message;
-  }
-  assert.match(msg, /mood/);
-  assert.match(msg, /moods/);
-  assert.ok(!msg.includes('\n'), `expected one line, got:\n${msg}`);
-});
-
-test('the refusal lives in the SCHEMA, so every caller gets it', () => {
-  // Regression: the check first lived in validateShowsStrict, which meant
+test('the migration lives in the SCHEMA, so POST /shows migrates too', () => {
+  // Regression: when the legacy handling lived only in validateShowsStrict,
   // POST /shows — whose middleware parses showPostSchema directly — never ran
   // it. z.object had already stripped the unknown `mood` key, so the route
   // accepted the show, dropped the mood and answered 200. Silent loss on the
-  // exact path an operator uses by hand.
+  // exact path an operator uses by hand. The in-schema preprocess folds the
+  // legacy key into the plural list BEFORE the object can strip it.
   const r = showSchema(ctx).safeParse(show({ mood: 'chill' }));
-  assert.equal(r.success, false);
-  assert.match(r.error!.issues[0].message, /legacy field/);
+  assert.equal(r.success, true);
+  assert.deepEqual(r.data!.moods, ['chill']);
 });
 
 test('the lenient path MIGRATES the same fields', () => {
@@ -315,4 +304,57 @@ test('a nested field error keeps its full path', () => {
   // 'eras.0.fromYear' is what flattenIssues emits and what react-hook-form's
   // setError expects.
   assert.deepEqual(r.error!.issues[0].path.slice(0, 2), ['eras', 0]);
+});
+
+// --- explicit null on optional fields ----------------------------------------
+
+test('explicit null reads as absent on every optional field', () => {
+  // The pre-schema validator accepted null everywhere it accepted an omission
+  // (String(x ?? ''), `!= null` guards), and serializers that write null for
+  // empty fields relied on it. Regression: zod's .default() fires only on
+  // undefined, so these all 400'd — and because update() re-validates the whole
+  // array, one null field on one show failed the entire shows/schedule save.
+  const s = strict({
+    topic: null, segmentSkill: null, themeId: null, vocals: null,
+    moods: null, genres: null, energies: null, eras: null,
+    guestPersonaIds: null, playlistIds: null, excludedPlaylistIds: null,
+  });
+  assert.equal(s.topic, '');
+  assert.equal(s.vocals, '');
+  assert.equal(s.themeId, '');
+  assert.deepEqual(s.moods, []);
+  assert.deepEqual(s.eras, []);
+  assert.deepEqual(s.guestPersonaIds, []);
+  assert.deepEqual(s.playlistIds, []);
+});
+
+// --- one bad entry must not cost the whole show on load -----------------------
+
+test('load survives one malformed entry in any list field', () => {
+  // Regression: the pre-repair only .slice()d moods/playlistIds/
+  // excludedPlaylistIds with no typeof filter, so a single non-string entry —
+  // a hand-edit, an older writer, a partial write, exactly what the lenient
+  // path exists to tolerate — failed the schema and `continue` deleted the
+  // whole show on boot; the next save persisted the loss.
+  const cases: Array<[Record<string, unknown>, (s: Record<string, any>) => void]> = [
+    [{ moods: [null, 'chill'] }, (s) => assert.deepEqual(s.moods, ['chill'])],
+    [{ playlistIds: [42, 'pl-ok'] }, (s) => assert.deepEqual(s.playlistIds, ['pl-ok'])],
+    [{ excludedPlaylistIds: [{}, 'pl-x'] }, (s) => assert.deepEqual(s.excludedPlaylistIds, ['pl-x'])],
+    [{ genres: [7, 'Funk'] }, (s) => assert.deepEqual(s.genres, ['Funk'])],
+  ];
+  for (const [over, check] of cases) {
+    const rows = normalizeShows([show(over)], personaIds);
+    assert.equal(rows.length, 1, `show dropped for ${JSON.stringify(over)}`);
+    check(rows[0]);
+  }
+});
+
+test('load survives an over-cap energies list full of duplicates', () => {
+  // Regression: energies was filtered but never capped pre-parse, and the
+  // schema's .max() runs BEFORE its dedup transform — so 16 duplicate 'low'
+  // entries dropped the show.
+  const energies = Array.from({ length: SHOW_FILTER_VALUES_MAX + 1 }, () => 'low');
+  const rows = normalizeShows([show({ energies })], personaIds);
+  assert.equal(rows.length, 1);
+  assert.deepEqual(rows[0].energies, ['low']);
 });

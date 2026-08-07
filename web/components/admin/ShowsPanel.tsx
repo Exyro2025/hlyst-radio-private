@@ -460,6 +460,7 @@ export default function ShowsPanel() {
           key={focused.id}
           show={focused}
           editorRef={editorRef}
+          ctx={showCtx}
           personas={personas}
           moods={moods}
           themes={themes}

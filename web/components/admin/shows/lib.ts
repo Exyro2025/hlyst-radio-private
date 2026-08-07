@@ -93,6 +93,22 @@ export function showContext(opts: {
   };
 }
 
+// showSchema() is a heavyweight factory (~20 field pipelines), and the panel
+// judges every row on every render — one build per CALL turned a 30-show rack
+// into 30 schema constructions per keystroke while the editor was open. The
+// context is identity-stable (ShowsPanel memoises it and hands the same object
+// to the rows AND the editor), so a one-slot cache keyed on that identity makes
+// every caller share one schema instance.
+let cachedCtx: ShowSchemaContext | null = null;
+let cachedSchema: ReturnType<typeof showSchema> | null = null;
+function schemaFor(ctx: ShowSchemaContext) {
+  if (cachedSchema == null || ctx !== cachedCtx) {
+    cachedCtx = ctx;
+    cachedSchema = showSchema(ctx);
+  }
+  return cachedSchema;
+}
+
 /**
  * Would the controller accept this show?
  *
@@ -107,12 +123,17 @@ export function showContext(opts: {
  * mood applies while the show is on air.
  */
 export function showValid(s: Show, ctx: ShowSchemaContext): boolean {
-  return showSchema(ctx).safeParse(s).success;
+  return schemaFor(ctx).safeParse(s).success;
 }
 
-/** Per-field messages for the same parse, keyed by the schema's field name. */
+/**
+ * Per-field messages for the same parse, keyed by the schema's field name.
+ * The editor footer reads the first of these when Save is gated, so the
+ * diagnosis is whatever the schema actually objected to — not a hard-coded
+ * guess about names and personas.
+ */
 export function showFieldErrors(s: Show, ctx: ShowSchemaContext): Record<string, string> {
-  const r = showSchema(ctx).safeParse(s);
+  const r = schemaFor(ctx).safeParse(s);
   if (r.success) return {};
   const out: Record<string, string> = {};
   for (const issue of r.error.issues) {

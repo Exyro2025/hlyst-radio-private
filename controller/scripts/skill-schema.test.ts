@@ -55,6 +55,23 @@ test('cooldown rejects free text', () => {
   }
 });
 
+test('explicit null reads as absent on every optional field', () => {
+  // Regression: the hand-rolled builders these schemas replaced read
+  // `typeof b.cooldown === 'string' ? … : ''`, so a client PUTting null has
+  // always meant "use the default" — a 400 here is an accept→reject change on
+  // a public admin endpoint.
+  const parsed = customSkillFileSchema.parse({
+    brief: 'b', label: null, cooldown: null, context: null, tags: null,
+    window: null, requiresKey: null,
+  });
+  assert.equal(parsed.label, undefined);
+  assert.equal(parsed.cooldown, undefined);
+  assert.equal(parsed.context, undefined);
+  assert.equal(parsed.tags, undefined);
+  assert.equal(parsed.window, undefined);
+  assert.equal(parsed.requiresKey, undefined);
+});
+
 test('SKILL_COOLDOWN_RE is what the editor tests against', () => {
   assert.ok(SKILL_COOLDOWN_RE.test('45m'));
   assert.ok(!SKILL_COOLDOWN_RE.test('45min'));
@@ -170,6 +187,18 @@ test('create requires a valid slug and lowercases it', () => {
 test('the slug pattern is the one every surface now shares', async () => {
   const { SLUG_RE } = await import('../src/skills/loader.js');
   const { SKILL_SLUG_RE: SETTINGS_RE } = await import('../src/settings/vocab.js');
+  const { validatePersonasStrict } = await import('../src/settings/validate.js');
+  // The alias swap must not let old-format entries block a roster save: the
+  // pattern this replaced (/^[a-z0-9-]{1,40}$/) accepted a leading hyphen, so a
+  // backup or older settings.json can carry one. An entry that can't name a
+  // skill can never fire — it is DROPPED (the themeId #917 tolerance), never
+  // thrown, and the valid entries around it survive.
+  const [p] = validatePersonasStrict([{
+    name: 'Kai', soul: 'warm', frequency: 'moderate',
+    tts: { engine: 'piper', cloudProvider: 'openai', voice: '' },
+    skills: ['-nope', 'weather'],
+  }]);
+  assert.deepEqual(p.skills, ['weather']);
   // loader.SLUG_RE and settings/vocab's SKILL_SLUG_RE are aliases of this one.
   // vocab's used to be a SEPARATE pattern that accepted `-nope` and rejected a
   // real 41–49-char slug, so a legally-named skill couldn't be assigned to a

@@ -101,6 +101,15 @@ export interface ShowSchemaContext {
 // always has.
 const showBool = () => z.unknown().optional().transform((v) => v === true);
 
+// Explicit null reads as "absent" on every OPTIONAL field. The pre-schema
+// validator accepted null everywhere it accepted an omission (`String(x ?? '')`,
+// `!= null` guards), and clients or serializers that write null for empty
+// fields relied on that. zod's `.default()` fires only on undefined, so without
+// this preprocess a `{topic: null}` that has always saved cleanly would 400 —
+// and because update() re-validates the whole array, one null field on one show
+// would fail the entire shows/schedule save.
+const nullToUndefined = (v: unknown) => (v == null ? undefined : v);
+
 // Trimmed, non-empty, capped, de-duplicated, in first-seen order — the shape
 // every one of a show's list filters takes. `key` is what dedup compares, so
 // genres can be case-insensitive while ids are exact.
@@ -119,34 +128,40 @@ function showStringList(opts: {
         error: `must be one of: ${(opts.values as readonly string[]).join(', ')}`,
       })
     : item;
-  return z
-    .array(base)
-    .max(opts.max, opts.overflowError)
-    .default([])
-    .transform((xs) => {
-      const seen = new Set<string>();
-      const out: string[] = [];
-      for (const v of xs) {
-        if (!v) continue;
-        const k = opts.key ? opts.key(v) : v;
-        if (seen.has(k)) continue;
-        seen.add(k);
-        out.push(v);
-      }
-      return out;
-    });
+  return z.preprocess(
+    nullToUndefined,
+    z
+      .array(base)
+      .max(opts.max, opts.overflowError)
+      .default([])
+      .transform((xs) => {
+        const seen = new Set<string>();
+        const out: string[] = [];
+        for (const v of xs) {
+          if (!v) continue;
+          const k = opts.key ? opts.key(v) : v;
+          if (seen.has(k)) continue;
+          seen.add(k);
+          out.push(v);
+        }
+        return out;
+      }),
+  );
 }
 
-// A year bound: null / '' means "open end". A numeric string is accepted
-// because that is what an <input type="number"> posts.
+// One era-window year bound, shared by the schema's own showYear pipeline and
+// the load path's repairEraWindow (below) so the two can never disagree about
+// what a valid year is. null / '' means "open end". A numeric string is
+// accepted because that is what an <input type="number"> posts.
+const eraYearOf = (v: unknown): number | null => (v == null || v === '' ? null : Number(v));
+const validEraYear = (n: number | null): boolean =>
+  n == null || (Number.isInteger(n) && n >= SHOW_YEAR_MIN && n <= SHOW_YEAR_MAX);
+
 const showYear = z
   .union([z.null(), z.literal(''), z.number(), z.string()])
   .optional()
-  .transform((v) => (v == null || v === '' ? null : Number(v)))
-  .refine(
-    (n) => n == null || (Number.isInteger(n) && n >= SHOW_YEAR_MIN && n <= SHOW_YEAR_MAX),
-    `must be an integer between ${SHOW_YEAR_MIN} and ${SHOW_YEAR_MAX}`,
-  );
+  .transform((v) => eraYearOf(v))
+  .refine(validEraYear, `must be an integer between ${SHOW_YEAR_MIN} and ${SHOW_YEAR_MAX}`);
 
 const showEra = z
   .object({ fromYear: showYear, toYear: showYear })
@@ -158,12 +173,15 @@ const showEra = z
 /**
  * The legacy singular fields #929 replaced with plural lists.
  *
- * The STRICT path rejects these outright (see rejectLegacyShowFields) and the
- * LENIENT path migrates them (migrateLegacyShowFields). Deliberately not
- * stripped-and-ignored, which is what a plain z.object() would do: the one
- * caller that really sees pre-#929 data is a backup restore, and silently
- * dropping every show's mood out of a recovery is worse than refusing it with
- * a message that says what to do.
+ * BOTH paths migrate them. The pre-schema strict validator always accepted a
+ * legacy `mood` from an older client or a pre-#929 backup and folded it into
+ * the plural list ("a legacy singular mood from an older client still
+ * validates" was its own comment), so a refusal here would turn a working
+ * backup restore through settings.update() into a hard failure. Migration runs
+ * INSIDE the schema (the preprocess in showSchema below) rather than at any
+ * call site, because z.object strips unknown keys: a route that parses the
+ * object directly would otherwise silently drop a legacy `mood` and report
+ * success — the exact silent loss #929's migration exists to prevent.
  */
 export const LEGACY_SHOW_FIELDS = [
   'mood',
@@ -174,30 +192,8 @@ export const LEGACY_SHOW_FIELDS = [
   'maxTrackMinutes',
 ] as const;
 
-/** Which legacy keys a raw show carries, if any. */
-export function legacyShowFieldsIn(raw: unknown): string[] {
-  if (!raw || typeof raw !== 'object') return [];
-  const rec = raw as Record<string, unknown>;
-  return LEGACY_SHOW_FIELDS.filter((k) => rec[k] != null && rec[k] !== '');
-}
-
 /**
- * The refusal message. Names the offending keys and the recovery, because the
- * caller most likely to see it is a backup restore answering with
- * `{ error: err.message }` — at which point the message IS the instructions.
- */
-export function legacyShowFieldsMessage(fields: string[]): string {
-  return (
-    `${fields.join(', ')} ${fields.length === 1 ? 'is a legacy field' : 'are legacy fields'} ` +
-    'replaced by moods / genres / energies / eras / maxTrackSeconds. ' +
-    'A backup written before that change restores by loading it — start the controller on it ' +
-    'and save once — rather than by importing it into a newer settings object.'
-  );
-}
-
-/**
- * Fill the plural fields from any legacy singular ones. Used by the LENIENT
- * load path only.
+ * Fill the plural fields from any legacy singular ones.
  *
  * `genre` splits on commas because operators crammed multiple genres into the
  * one free-text field ("funk, soul, jazz-funk"), which never resolved against
@@ -224,30 +220,17 @@ export function migrateLegacyShowFields(raw: unknown): Record<string, unknown> {
 }
 
 export function showSchema(ctx: ShowSchemaContext) {
-  // The legacy-field refusal has to run BEFORE the object, because z.object
-  // strips unknown keys and by the time any .check() sees the value they are
-  // already gone. Doing it here rather than at one call site is what makes the
-  // answer the same everywhere: the first version of this lived in
-  // validateShowsStrict, and POST /shows — whose middleware parses the object
-  // directly — silently dropped a legacy `mood` and reported success, which is
-  // the exact silent loss the refusal exists to prevent.
-  //
-  // The lenient load path never trips it: normalizeShows runs
-  // migrateLegacyShowFields first, which deletes these keys after folding them
-  // into the plural fields.
-  return z
-    .any()
-    .check((c) => {
-      const legacy = legacyShowFieldsIn(c.value);
-      if (legacy.length) {
-        c.issues.push({
-          code: 'custom',
-          input: c.value,
-          message: legacyShowFieldsMessage(legacy),
-        });
-      }
-    })
-    .pipe(showObjectSchema(ctx));
+  // Migration must run BEFORE the object parse — z.object strips unknown keys,
+  // so by the time any .check() or field schema sees the value the legacy keys
+  // are already gone. Running it here rather than at call sites is what makes
+  // every caller — update(), POST /shows, the lenient load, the browser — give
+  // the same answer for the same payload. A migrated value is then validated by
+  // the same field schemas as a native one, so a legacy `energy: 'bogus'` still
+  // fails exactly like `energies: ['bogus']` would.
+  return z.preprocess(
+    (raw) => (raw && typeof raw === 'object' ? migrateLegacyShowFields(raw) : raw),
+    showObjectSchema(ctx),
+  );
 }
 
 function showObjectSchema(ctx: ShowSchemaContext) {
@@ -272,33 +255,42 @@ function showObjectSchema(ctx: ShowSchemaContext) {
         .trim()
         .min(1, 'name must be 1-60 chars')
         .max(SHOW_NAME_MAX, `name must be 1-${SHOW_NAME_MAX} chars`),
-      topic: z
-        .string()
-        .trim()
-        .max(SHOW_TOPIC_MAX, `topic must be 0-${SHOW_TOPIC_MAX} chars`)
-        .default(''),
+      topic: z.preprocess(
+        nullToUndefined,
+        z
+          .string()
+          .trim()
+          .max(SHOW_TOPIC_MAX, `topic must be 0-${SHOW_TOPIC_MAX} chars`)
+          .default(''),
+      ),
       personaId: z
         .string({ error: 'Pick a host persona' })
         .refine((v) => ctx.personaIds.includes(v), 'must reference an existing persona'),
       // Host exclusion and de-duplication happen in the object transform below,
       // where the host id is in scope.
-      guestPersonaIds: z
-        .array(
-          z
-            .string()
-            .refine((v) => ctx.personaIds.includes(v), 'must reference existing personas'),
-        )
-        .max(GUESTS_PER_SHOW, `must have at most ${GUESTS_PER_SHOW} entries`)
-        .default([]),
+      guestPersonaIds: z.preprocess(
+        nullToUndefined,
+        z
+          .array(
+            z
+              .string()
+              .refine((v) => ctx.personaIds.includes(v), 'must reference existing personas'),
+          )
+          .max(GUESTS_PER_SHOW, `must have at most ${GUESTS_PER_SHOW} entries`)
+          .default([]),
+      ),
       banter: showBool(),
       programme: showBool(),
       // Free text, resolved against the live skill catalog at air time — a
       // stale kind degrades to the producer's choice rather than blocking a save.
-      segmentSkill: z
-        .string()
-        .trim()
-        .max(SHOW_SEGMENT_SKILL_MAX, `must be ${SHOW_SEGMENT_SKILL_MAX} characters or fewer`)
-        .default(''),
+      segmentSkill: z.preprocess(
+        nullToUndefined,
+        z
+          .string()
+          .trim()
+          .max(SHOW_SEGMENT_SKILL_MAX, `must be ${SHOW_SEGMENT_SKILL_MAX} characters or fewer`)
+          .default(''),
+      ),
       // Empty means "Any": the show pins no mood and the autonomous
       // dominantMood chain (festival > weather > time) applies on air.
       moods: showStringList({
@@ -312,12 +304,15 @@ function showObjectSchema(ctx: ShowSchemaContext) {
       // one retired palette id on one show, because update() re-validates the
       // whole array. Self-heals on the next save. The caller reports the drop
       // (this module stays side-effect free, so no console.warn here).
-      themeId: z
-        .string()
-        .trim()
-        .max(SHOW_THEME_ID_MAX)
-        .default('')
-        .transform((v) => (!v || !ctx.themeIds || ctx.themeIds.includes(v) ? v : '')),
+      themeId: z.preprocess(
+        nullToUndefined,
+        z
+          .string()
+          .trim()
+          .max(SHOW_THEME_ID_MAX)
+          .default('')
+          .transform((v) => (!v || !ctx.themeIds || ctx.themeIds.includes(v) ? v : '')),
+      ),
       // Free text resolved fuzzily against the live library at pick time, so
       // never checked against Subsonic here. Dedup is case-insensitive.
       genres: showStringList({
@@ -334,27 +329,30 @@ function showObjectSchema(ctx: ShowSchemaContext) {
       }),
       // Windows with no bound at all are dropped; the rest de-duplicate on the
       // pair.
-      eras: z
-        .array(showEra)
-        .max(SHOW_FILTER_VALUES_MAX, `must have at most ${SHOW_FILTER_VALUES_MAX} entries`)
-        .default([])
-        .transform((xs) => {
-          const seen = new Set<string>();
-          const out: EraWindow[] = [];
-          for (const w of xs) {
-            if (w.fromYear == null && w.toYear == null) continue;
-            const k = `${w.fromYear ?? ''}:${w.toYear ?? ''}`;
-            if (seen.has(k)) continue;
-            seen.add(k);
-            out.push({ fromYear: w.fromYear, toYear: w.toYear });
-          }
-          return out;
-        }),
+      eras: z.preprocess(
+        nullToUndefined,
+        z
+          .array(showEra)
+          .max(SHOW_FILTER_VALUES_MAX, `must have at most ${SHOW_FILTER_VALUES_MAX} entries`)
+          .default([])
+          .transform((xs) => {
+            const seen = new Set<string>();
+            const out: EraWindow[] = [];
+            for (const w of xs) {
+              if (w.fromYear == null && w.toYear == null) continue;
+              const k = `${w.fromYear ?? ''}:${w.toYear ?? ''}`;
+              if (seen.has(k)) continue;
+              seen.add(k);
+              out.push({ fromYear: w.fromYear, toYear: w.toYear });
+            }
+            return out;
+          }),
+      ),
       // One value, not a list — instrumental and vocal are mutually exclusive
       // and wanting both is wanting neither. '' is no constraint, so a show
       // predating the field round-trips unchanged.
       vocals: z
-        .union([z.literal(''), z.enum(SHOW_VOCALS)])
+        .union([z.null(), z.literal(''), z.enum(SHOW_VOCALS)])
         .optional()
         .transform((v) => v ?? ''),
       // Opt-in hard filter across every set music constraint. The legacy
@@ -418,6 +416,126 @@ export function showsSchema(ctx: ShowSchemaContext) {
 // POST /shows submits ONE show under a `show` key and merges it server-side.
 export function showPostSchema(ctx: ShowSchemaContext) {
   return z.object({ show: showSchema(ctx) });
+}
+
+// ── Lenient per-field repairs (the LOAD path) ────────────────────────────────
+//
+// settings/normalize.ts's normalizeShows repairs a stored show field-by-field
+// BEFORE running the schema, so a stale mood or a mistyped list entry costs the
+// show that one value, not the show. The repairs live HERE, beside the rules
+// they repair against, because a repair restated at the call site is a repair
+// that can drift from the schema — and the failure mode of that drift is the
+// worst one available: the lenient parse fails, `continue` drops the row, and a
+// working show silently vanishes on the next boot.
+
+/**
+ * One era window, repaired: numeric-string years accepted (same eraYearOf the
+ * schema's own showYear runs), out-of-range or backwards windows dropped as
+ * null rather than failing the show.
+ */
+export function repairEraWindow(raw: unknown): EraWindow | null {
+  if (!raw || typeof raw !== 'object') return null;
+  const rec = raw as { fromYear?: unknown; toYear?: unknown };
+  const fromYear = eraYearOf(rec.fromYear);
+  const toYear = eraYearOf(rec.toYear);
+  if (!validEraYear(fromYear) || !validEraYear(toYear)) return null;
+  if (fromYear == null && toYear == null) return null;
+  if (fromYear != null && toYear != null && fromYear > toYear) return null;
+  return { fromYear, toYear };
+}
+
+// Trimmed strings only, deduped in first-seen order, capped — the lenient twin
+// of showStringList: where the schema REJECTS (a non-string entry, an
+// over-cap list), this drops or truncates instead.
+export function repairShowStringList(
+  raw: unknown,
+  opts: { max: number; itemMax?: number; values?: readonly string[]; key?: (v: string) => string },
+): string[] | undefined {
+  if (!Array.isArray(raw)) return undefined;
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const item of raw) {
+    if (typeof item !== 'string') continue;
+    const v = opts.itemMax ? item.trim().slice(0, opts.itemMax) : item.trim();
+    if (!v) continue;
+    if (opts.values && !opts.values.includes(v)) continue;
+    const k = opts.key ? opts.key(v) : v;
+    if (seen.has(k)) continue;
+    seen.add(k);
+    out.push(v);
+    if (out.length >= opts.max) break;
+  }
+  return out;
+}
+
+/**
+ * Every per-field repair the load path applies before parsing, in one place.
+ *
+ * `undefined` lets the schema's own default apply. Each repair lands on a value
+ * the strict path would have accepted, so load and save still agree about what
+ * a valid show is — the schema itself is still run on the result.
+ *
+ * `personaIds: null` mirrors the ShowSchemaContext convention: this caller
+ * cannot check roster membership, so guest entries are kept. The load path
+ * passes the real roster and dangling guests (and the host itself) are dropped
+ * so the show survives with whatever roster is still real.
+ *
+ * maxTrackSeconds is deliberately NOT repaired here: its clamp bounds are owned
+ * by settings/defaults.ts (coerceMaxTrackSeconds), which already reads its
+ * ceiling from this module's SHOW_MAX_TRACK_SECONDS.
+ */
+export function repairShowForLoad(
+  raw: Record<string, unknown>,
+  personaIds: string[] | null,
+): Record<string, unknown> {
+  const host = typeof raw.personaId === 'string' ? raw.personaId : '';
+  return {
+    ...raw,
+    id: typeof raw.id === 'string' && SHOW_ID_RE.test(raw.id) ? raw.id : undefined,
+    name: typeof raw.name === 'string' ? raw.name.trim().slice(0, SHOW_NAME_MAX) : undefined,
+    topic: typeof raw.topic === 'string' ? raw.topic.slice(0, SHOW_TOPIC_MAX) : undefined,
+    segmentSkill: typeof raw.segmentSkill === 'string'
+      ? raw.segmentSkill.trim().slice(0, SHOW_SEGMENT_SKILL_MAX)
+      : undefined,
+    themeId: typeof raw.themeId === 'string'
+      ? raw.themeId.trim().slice(0, SHOW_THEME_ID_MAX)
+      : undefined,
+    // Anything unrecognised reads as no constraint — a steering field that
+    // silently stops applying is a far smaller failure than a show that stops
+    // playing music.
+    vocals: typeof raw.vocals === 'string' && (SHOW_VOCALS as readonly string[]).includes(raw.vocals)
+      ? raw.vocals
+      : undefined,
+    // A stale mood costs the show that one filter, not the show. Moods are NOT
+    // filtered against a vocabulary here for the same reason the load context
+    // carries moodNames: null — the mood cache doesn't exist yet.
+    moods: repairShowStringList(raw.moods, { max: SHOW_FILTER_VALUES_MAX }),
+    genres: repairShowStringList(raw.genres, {
+      max: SHOW_FILTER_VALUES_MAX,
+      itemMax: SHOW_GENRE_MAX,
+      key: (v) => v.toLowerCase(),
+    }),
+    energies: repairShowStringList(raw.energies, {
+      max: SHOW_FILTER_VALUES_MAX,
+      values: SHOW_ENERGY,
+    }),
+    eras: Array.isArray(raw.eras)
+      ? raw.eras
+          .map(repairEraWindow)
+          .filter((w): w is EraWindow => w != null)
+          .slice(0, SHOW_FILTER_VALUES_MAX)
+      : undefined,
+    guestPersonaIds: Array.isArray(raw.guestPersonaIds)
+      ? raw.guestPersonaIds
+          .filter((g): g is string =>
+            typeof g === 'string' && g !== host && (personaIds == null || personaIds.includes(g)))
+          .slice(0, GUESTS_PER_SHOW)
+      : undefined,
+    playlistIds: repairShowStringList(raw.playlistIds, { max: PLAYLISTS_PER_SHOW }),
+    excludedPlaylistIds: repairShowStringList(raw.excludedPlaylistIds, {
+      max: EXCLUDED_PLAYLISTS_PER_SHOW,
+    }),
+  };
 }
 
 // ─── from controller/src/schemas/skill.ts ────────────────────────────────
@@ -506,6 +624,14 @@ function skillTokenList(raw: unknown): string[] {
 // Messages carry no field name: firstMessage() prefixes the dotted path
 // (`cooldown: must look like …`), so restating it here reads twice.
 
+// Explicit null reads as "absent" on every optional field — the hand-rolled
+// builders these schemas replaced read `typeof b.cooldown === 'string' ? … :
+// ''`, so a client PUTting `cooldown: null` has always meant "use the
+// default". zod's .optional() accepts only undefined, so without this a null
+// would 400 an edit that used to save cleanly. (Named per-module: the mirror
+// is one flat file, so this can't share show.ts's nullToUndefined.)
+const skillNullToUndefined = (v: unknown) => (v == null ? undefined : v);
+
 export const skillSlugSchema = z
   .string({ error: 'name must be a lowercase slug (a–z, 0–9, hyphens), 1–49 chars' })
   .trim()
@@ -516,28 +642,34 @@ export const skillSlugSchema = z
 // hand-rolled builder silently ignored it (`typeof b.label === 'string' && …`),
 // the same call the webhook conversion made: a value dropped on the floor is a
 // value the operator watches disappear on the next reload.
-const skillLabelSchema = z
-  .string({ error: 'must be text' })
-  .trim()
-  .optional()
-  .transform((v) => v || undefined);
+const skillLabelSchema = z.preprocess(
+  skillNullToUndefined,
+  z
+    .string({ error: 'must be text' })
+    .trim()
+    .optional()
+    .transform((v) => v || undefined),
+);
 
-const skillCooldownSchema = z
-  .string({ error: 'must be text' })
-  .trim()
-  .optional()
-  .refine(
-    (v) => !v || SKILL_COOLDOWN_RE.test(v),
-    'must look like "45m", "6h", "2d", or a bare number (minutes)',
-  )
-  .transform((v) => v || undefined);
+const skillCooldownSchema = z.preprocess(
+  skillNullToUndefined,
+  z
+    .string({ error: 'must be text' })
+    .trim()
+    .optional()
+    .refine(
+      (v) => !v || SKILL_COOLDOWN_RE.test(v),
+      'must look like "45m", "6h", "2d", or a bare number (minutes)',
+    )
+    .transform((v) => v || undefined),
+);
 
 // An EMPTY selection is meaningful: it resets the skill to the default context
 // profile, so [] and '' both land on undefined (no `context:` line written).
 const skillContextSchema = z
-  .union([z.array(z.unknown()), z.string()])
+  .union([z.null(), z.array(z.unknown()), z.string()])
   .optional()
-  .transform((v) => (v === undefined ? undefined : skillTokenList(v)))
+  .transform((v) => (v == null ? undefined : skillTokenList(v)))
   .check((c) => {
     const toks = c.value;
     if (!toks) return;
@@ -555,9 +687,9 @@ const skillContextSchema = z
 // Strict tags — a bad tag 400s instead of vanishing. The lenient
 // normalizeSkillTags above is the disk-side twin.
 export const skillTagsSchema = z
-  .union([z.array(z.unknown()), z.string()])
+  .union([z.null(), z.array(z.unknown()), z.string()])
   .optional()
-  .transform((v) => (v === undefined ? undefined : skillTokenList(v)))
+  .transform((v) => (v == null ? undefined : skillTokenList(v)))
   .check((c) => {
     const toks = c.value;
     if (!toks) return;
@@ -592,26 +724,32 @@ const skillBriefSchema = z
 
 // 'any' is the default and writes no frontmatter line, so it lands on
 // undefined exactly like an absent value.
-const skillWindowSchema = z
-  .string({ error: 'must be "any" or "commute"' })
-  .trim()
-  .toLowerCase()
-  .optional()
-  .refine(
-    (v) => v === undefined || (SKILL_WINDOWS as readonly string[]).includes(v),
-    'must be "any" or "commute"',
-  )
-  .transform((v) => (v === 'commute' ? ('commute' as const) : undefined));
+const skillWindowSchema = z.preprocess(
+  skillNullToUndefined,
+  z
+    .string({ error: 'must be "any" or "commute"' })
+    .trim()
+    .toLowerCase()
+    .optional()
+    .refine(
+      (v) => v === undefined || (SKILL_WINDOWS as readonly string[]).includes(v),
+      'must be "any" or "commute"',
+    )
+    .transform((v) => (v === 'commute' ? ('commute' as const) : undefined)),
+);
 
-const skillRequiresKeySchema = z
-  .string({ error: 'must be an env var name (UPPER_SNAKE_CASE)' })
-  .trim()
-  .optional()
-  .refine(
-    (v) => !v || SKILL_ENV_KEY_RE.test(v),
-    'must be an env var name (UPPER_SNAKE_CASE)',
-  )
-  .transform((v) => v || undefined);
+const skillRequiresKeySchema = z.preprocess(
+  skillNullToUndefined,
+  z
+    .string({ error: 'must be an env var name (UPPER_SNAKE_CASE)' })
+    .trim()
+    .optional()
+    .refine(
+      (v) => !v || SKILL_ENV_KEY_RE.test(v),
+      'must be an env var name (UPPER_SNAKE_CASE)',
+    )
+    .transform((v) => v || undefined),
+);
 
 // The fields every skill's SKILL.md carries, built-in or custom.
 export const builtinSkillFileSchema = z.object({

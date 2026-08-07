@@ -41,21 +41,9 @@ import { DEFAULTS, coerceMaxTrackSeconds } from './defaults.js';
 import { WEBHOOK_ID_RE, webhookSchema, type WebhookParsed } from '../schemas/webhook.js';
 import { resolveWebhookIds } from '../schemas/webhook-server.js';
 import {
-  EXCLUDED_PLAYLISTS_PER_SHOW,
-  GUESTS_PER_SHOW,
-  PLAYLISTS_PER_SHOW,
-  SHOW_ENERGY,
-  SHOW_FILTER_VALUES_MAX,
-  SHOW_GENRE_MAX,
-  SHOW_NAME_MAX,
-  SHOW_SEGMENT_SKILL_MAX,
-  SHOW_THEME_ID_MAX,
-  SHOW_TOPIC_MAX,
-  SHOW_VOCALS,
-  SHOW_YEAR_MAX,
-  SHOW_YEAR_MIN,
   SHOWS_LIMIT,
   migrateLegacyShowFields,
+  repairShowForLoad,
   showSchema,
   type ShowParsed,
   type ShowSchemaContext,
@@ -258,71 +246,21 @@ export function normalizeShows(raw: unknown, personaIds: string[]): NormalizedSh
   const rows: ShowParsed[] = [];
   for (const item of raw) {
     if (!item || typeof item !== 'object') continue;
-    // Legacy singular fields (#929) are MIGRATED here and refused by the strict
-    // path. This is the caller that actually meets them: a settings.json
-    // written before the change.
+    // Legacy singular fields (#929) migrate first. The schema does this too,
+    // but the per-field repairs need the plural keys already in place.
     const migrated = migrateLegacyShowFields(item);
+    // The repairs live in schemas/show.ts (repairShowForLoad), beside the
+    // rules they repair against — a repair restated here is a repair that can
+    // drift from the schema, and the failure mode of that drift is the parse
+    // failing and `continue` silently deleting a working show on the next
+    // boot. What stays at this call site is only what the schema module cannot
+    // own: maxTrackSeconds clamps through coerceMaxTrackSeconds, whose bounds
+    // defaults.ts derives from the schema's own ceiling. Clamp rather than
+    // reject: an out-of-range cap from a hand-edited file should bound the
+    // show, not delete it.
     const parsed = schema.safeParse({
-      ...migrated,
-      // undefined lets the schema's own default apply. Repaired rather than
-      // rejected because none of these is worth losing a working show over —
-      // and each repair lands on the same value the strict path would have
-      // demanded, so load and save still agree about what a valid show is.
-      id: typeof migrated.id === 'string' && ID_RE.test(migrated.id) ? migrated.id : undefined,
-      // A stale mood or energy costs the show that one filter, not the show.
-      moods: Array.isArray(migrated.moods) ? migrated.moods.slice(0, SHOW_FILTER_VALUES_MAX) : undefined,
-      energies: Array.isArray(migrated.energies)
-        ? migrated.energies.filter((e: unknown) => typeof e === 'string' && (SHOW_ENERGY as readonly string[]).includes(e))
-        : undefined,
-      // Anything unrecognised reads as no constraint — a steering field that
-      // silently stops applying is a far smaller failure than a show that
-      // stops playing music.
-      vocals: (SHOW_VOCALS as readonly string[]).includes(migrated.vocals as string) ? migrated.vocals : undefined,
-      // Clamp rather than reject: an out-of-range cap from a hand-edited file
-      // should bound the show, not delete it.
+      ...repairShowForLoad(migrated, personaIds),
       maxTrackSeconds: coerceMaxTrackSeconds(migrated.maxTrackSeconds, true),
-      // Over-long free text is trimmed to the same ceiling the strict path
-      // enforces.
-      name: typeof migrated.name === 'string' ? migrated.name.trim().slice(0, SHOW_NAME_MAX) : undefined,
-      topic: typeof migrated.topic === 'string' ? migrated.topic.slice(0, SHOW_TOPIC_MAX) : undefined,
-      genres: Array.isArray(migrated.genres)
-        ? migrated.genres
-            .filter((g: unknown) => typeof g === 'string')
-            .map((g: string) => g.trim().slice(0, SHOW_GENRE_MAX))
-            .slice(0, SHOW_FILTER_VALUES_MAX)
-        : undefined,
-      segmentSkill: typeof migrated.segmentSkill === 'string'
-        ? migrated.segmentSkill.trim().slice(0, SHOW_SEGMENT_SKILL_MAX)
-        : undefined,
-      themeId: typeof migrated.themeId === 'string'
-        ? migrated.themeId.trim().slice(0, SHOW_THEME_ID_MAX)
-        : undefined,
-      // Dangling guests and the host itself are dropped so the show survives
-      // with whatever roster is still real; the strict path rejects both.
-      guestPersonaIds: Array.isArray(migrated.guestPersonaIds)
-        ? migrated.guestPersonaIds
-            .filter((g: unknown) => typeof g === 'string' && g !== migrated.personaId && personaIds.includes(g))
-            .slice(0, GUESTS_PER_SHOW)
-        : undefined,
-      // Era windows that can never match (from > to) are dropped rather than
-      // failing the show.
-      eras: Array.isArray(migrated.eras)
-        ? migrated.eras.filter((w: unknown) => {
-            const e = w as { fromYear?: unknown; toYear?: unknown } | null;
-            if (!e || typeof e !== 'object') return false;
-            const f = e.fromYear == null || e.fromYear === '' ? null : Number(e.fromYear);
-            const t = e.toYear == null || e.toYear === '' ? null : Number(e.toYear);
-            if (f != null && (!Number.isInteger(f) || f < SHOW_YEAR_MIN || f > SHOW_YEAR_MAX)) return false;
-            if (t != null && (!Number.isInteger(t) || t < SHOW_YEAR_MIN || t > SHOW_YEAR_MAX)) return false;
-            return f == null || t == null || f <= t;
-          }).slice(0, SHOW_FILTER_VALUES_MAX)
-        : undefined,
-      playlistIds: Array.isArray(migrated.playlistIds)
-        ? migrated.playlistIds.slice(0, PLAYLISTS_PER_SHOW)
-        : undefined,
-      excludedPlaylistIds: Array.isArray(migrated.excludedPlaylistIds)
-        ? migrated.excludedPlaylistIds.slice(0, EXCLUDED_PLAYLISTS_PER_SHOW)
-        : undefined,
     });
     // What survives a drop: a nameless show, one whose host no longer exists.
     // Both are shows with no owner or no identity, which is what the

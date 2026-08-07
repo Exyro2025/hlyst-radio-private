@@ -284,6 +284,22 @@ export default function SkillEditModal({ mode, skill, personas, tagSuggestions, 
   const nameValid = !issueFor('name');
   const cooldownError = issueFor('cooldown');
   const canSave = loaded && parsed.success && !busy;
+  // Any schema objection the form has no inline slot for — a disk-authored
+  // requiresKey that isn't UPPER_SNAKE_CASE, an unknown context token riding
+  // the hidden passthrough state, a bad tag loaded off disk — used to disable
+  // Save with no visible reason anywhere. The footer surfaces the first such
+  // issue so a gated Save always says why.
+  const blockingIssue = (() => {
+    if (parsed.success) return null;
+    const issue = parsed.error.issues.find(i => !['name', 'cooldown'].includes(String(i.path[0] ?? '')));
+    if (!issue) return null;
+    const field = String(issue.path[0] ?? '');
+    return field ? `${field}: ${issue.message}` : issue.message;
+  })();
+  // A server-side name rule (reserved slug, slug already on disk) comes back as
+  // fieldErrors.name — typing a different slug is the way out, so it lands on
+  // the slug input rather than only flashing past in a toast.
+  const [serverNameError, setServerNameError] = useState<string | null>(null);
 
   const displayName = fields.label || (isEdit ? titleCase(kind) : (name ? titleCase(name) : 'New skill'));
 
@@ -318,8 +334,15 @@ export default function SkillEditModal({ mode, skill, personas, tagSuggestions, 
           body: JSON.stringify(body),
         });
       }
-      const j = (await r.json().catch(() => ({}))) as { skills?: SkillLike[]; error?: string };
-      if (!r.ok) throw new Error(j.error || `failed (${r.status})`);
+      const j = (await r.json().catch(() => ({}))) as {
+        skills?: SkillLike[];
+        error?: string;
+        fieldErrors?: Record<string, string>;
+      };
+      if (!r.ok) {
+        if (j.fieldErrors?.name) setServerNameError(j.fieldErrors.name);
+        throw new Error(j.error || `failed (${r.status})`);
+      }
       onSkillsChange(Array.isArray(j.skills) ? j.skills : []);
 
       if (mode === 'create') {
@@ -542,8 +565,13 @@ export default function SkillEditModal({ mode, skill, personas, tagSuggestions, 
 
   const footer = (
     <EditorFooter
-      status={(dirty || flash) ? (
+      status={(dirty || flash || blockingIssue) ? (
         <>
+          {blockingIssue && (
+            <span role="alert" style={{ fontSize: 11, color: 'var(--accent)', letterSpacing: '0.02em', fontWeight: 600 }}>
+              {blockingIssue}
+            </span>
+          )}
           {dirty && (
             <span style={{ display: 'inline-flex', alignItems: 'center', gap: 7, fontSize: 10, letterSpacing: '0.18em', textTransform: 'uppercase', color: 'var(--accent)', fontWeight: 700 }}>
               <span style={{ width: 7, height: 7, borderRadius: '50%', background: 'var(--accent)' }} />UNSAVED EDITS
@@ -626,15 +654,23 @@ export default function SkillEditModal({ mode, skill, personas, tagSuggestions, 
                 style={{ ...inputBase, marginTop: 16, padding: '12px 16px', fontSize: 18, fontWeight: 800, letterSpacing: '-0.01em', width: '100%', boxSizing: 'border-box' }}
               />
               {mode === 'create' && (
-                <label style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 10, marginTop: 14 }}>
-                  <span style={{ fontSize: 10, letterSpacing: '0.18em', textTransform: 'uppercase', color: 'var(--muted)', fontWeight: 700 }}>SLUG</span>
-                  <input
-                    value={name}
-                    onChange={e => setName(e.target.value.toLowerCase())}
-                    placeholder="moon-phase"
-                    style={{ ...inputBase, padding: '8px 12px', fontSize: 13, fontWeight: 700, letterSpacing: '0.04em', width: 200, maxWidth: '100%', borderColor: name && !nameValid ? 'var(--accent)' : 'var(--ink)' }}
-                  />
-                </label>
+                <>
+                  <label style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 10, marginTop: 14 }}>
+                    <span style={{ fontSize: 10, letterSpacing: '0.18em', textTransform: 'uppercase', color: 'var(--muted)', fontWeight: 700 }}>SLUG</span>
+                    <input
+                      value={name}
+                      onChange={e => { setName(e.target.value.toLowerCase()); setServerNameError(null); }}
+                      placeholder="moon-phase"
+                      aria-invalid={(name && !nameValid) || serverNameError ? true : undefined}
+                      style={{ ...inputBase, padding: '8px 12px', fontSize: 13, fontWeight: 700, letterSpacing: '0.04em', width: 200, maxWidth: '100%', borderColor: (name && !nameValid) || serverNameError ? 'var(--accent)' : 'var(--ink)' }}
+                    />
+                  </label>
+                  {serverNameError && (
+                    <div role="alert" style={{ fontSize: 12, color: 'var(--accent)', marginTop: 8, letterSpacing: '0.01em' }}>
+                      {serverNameError}
+                    </div>
+                  )}
+                </>
               )}
             </div>
 

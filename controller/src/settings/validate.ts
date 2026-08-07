@@ -214,8 +214,18 @@ export function validatePersonasStrict(raw) {
       skills = [];
       for (const s of item.skills) {
         const v = String(s ?? '').trim();
+        // A malformed entry is DROPPED, not thrown. persona.skills is a
+        // subscription list resolved against the live skill catalog at fire
+        // time, so an entry that can't name a skill can never fire — and the
+        // OLD shape check here (/^[a-z0-9-]{1,40}$/) accepted forms the slug
+        // rule refuses (a leading hyphen), so a backup or older settings.json
+        // can legitimately carry one. Failing the whole personas save over
+        // inert junk is the themeId lesson (#917) again: all cost, no benefit.
         if (!SKILL_SLUG_RE.test(v)) {
-          throw new Error(`personas[${i}].skills entries must be slug strings`);
+          console.warn(
+            `[personas] dropping unrecognisable skills entry ${JSON.stringify(v)} from personas[${i}]`,
+          );
+          continue;
         }
         if (!seenSk.has(v)) {
           seenSk.add(v);
@@ -263,8 +273,9 @@ export function validatePersonasStrict(raw) {
 export function validateShowsStrict(raw, personas, allowedThemeIds: Set<string>, moodNames: string[] = SHOW_MOODS) {
   if (!Array.isArray(raw)) throw new Error('shows must be an array');
   // Note the legacy singular fields #929 replaced (mood / genre / …) are
-  // refused by the SCHEMA, not here, so POST /shows and a backup restore get
-  // the same answer. The lenient load path migrates them instead.
+  // migrated by the SCHEMA itself (a preprocess, so z.object can't strip them
+  // first), so POST /shows, a backup restore and the lenient load path all
+  // give the same answer the pre-schema validator did.
   const ctx: ShowSchemaContext = {
     personaIds: personas.map(p => p.id),
     moodNames,

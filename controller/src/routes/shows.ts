@@ -19,7 +19,6 @@ import { requireAdmin } from '../middleware/auth.js';
 import { validateBodyAsync } from '../middleware/validate.js';
 import { showPostSchema } from '../schemas/show.js';
 import { listThemes } from '../themes.js';
-import { minTrackSeconds } from '../settings.js';
 import { readCommunityShow } from '../shows/community.js';
 import { SLUG_RE } from '../skills/loader.js';
 import { queue } from '../broadcast/queue.js';
@@ -38,7 +37,7 @@ async function showPostContext() {
     personaIds: (s.personas || []).map((p: { id: string }) => p.id),
     moodNames: (s.moods || []).map((m: { name: string }) => m.name),
     themeIds: (await listThemes()).map((t: { id: string }) => t.id),
-    minTrackSeconds: minTrackSeconds(),
+    minTrackSeconds: settings.minTrackSeconds(),
   });
 }
 

@@ -40,12 +40,29 @@ import {
   sameEra,
 } from './types';
 import type { Persona, PlaylistIndexStatus, Show, SkillOption, ThemeOption } from './types';
-import { hasAnyMusicFilter, showContext, showValid } from './lib';
+import { hasAnyMusicFilter, showFieldErrors, showValid } from './lib';
+import type { ShowSchemaContext } from '@/lib/schemas.generated';
 import { ChipRow } from './ChipRow';
+
+// The footer names the field the schema objected to; the schema's own keys are
+// developer-facing, so the common ones get an operator-facing label.
+const FIELD_LABELS: Record<string, string> = {
+  name: 'name',
+  personaId: 'host',
+  guestPersonaIds: 'guests',
+  maxTrackSeconds: 'track length cap',
+  segmentSkill: 'feature skill',
+  playlistIds: 'playlists',
+  excludedPlaylistIds: 'excluded playlists',
+};
 
 interface ShowEditorProps {
   show: Show;
   editorRef: RefObject<HTMLDivElement | null>;
+  // The same memoised context ShowsPanel judges its rows with — sharing the
+  // object (not rebuilding it here) is what lets lib.ts cache the constructed
+  // schema on context identity instead of re-building it every keystroke.
+  ctx: ShowSchemaContext;
   personas: Persona[];
   moods: string[];
   themes: ThemeOption[];
@@ -68,24 +85,29 @@ interface ShowEditorProps {
 }
 
 export function ShowEditor({
-  show, editorRef, personas, moods, themes, skills, activeThemeId, genres, playlists,
+  show, editorRef, ctx, personas, moods, themes, skills, activeThemeId, genres, playlists,
   playlistsStatus, apiBase,
   adminFetch, minTrackSeconds, busy, isNew,
   update, onSave, onClose, onRemove,
 }: ShowEditorProps) {
   // Save show gates on THIS show only — other unsaved shows don't block it.
-  // Same schema the controller runs, given the live roster/moods/themes this
-  // editor already receives as props — so the footer's Save gate cannot
-  // disagree with the validator on the other end of the request.
-  const valid = showValid(
-    show,
-    showContext({
-      personas,
-      moods,
-      themeIds: themes.map(t => t.id),
-      minTrackSeconds: minTrackSeconds ?? null,
-    }),
-  );
+  // Same schema the controller runs, judged against the same context the panel
+  // hands its rows — so the footer's Save gate cannot disagree with the
+  // validator on the other end of the request.
+  const valid = showValid(show, ctx);
+  // What the schema actually objected to. The footer used to hard-code "needs
+  // a name and a persona", which was a wrong diagnosis for every OTHER reason
+  // the gate can now fail (a mood retired on /admin/moods, a track cap under a
+  // raised crossfade floor, a backwards era window) — a dead end for the
+  // operator, since both named fields were already set.
+  const gateIssue = (() => {
+    if (valid) return null;
+    const errs = showFieldErrors(show, ctx);
+    const [key, message] = Object.entries(errs)[0] ?? ['', 'this show fails validation'];
+    const root = key.split('.')[0] ?? '';
+    const label = FIELD_LABELS[root] ?? root;
+    return label ? `${label}: ${message}` : message;
+  })();
   // The editor is remounted per show, so this resets on switch.
   const [genreDraft, setGenreDraft] = useState('');
   const addGenre = (g: string) => {
@@ -139,8 +161,8 @@ export function ShowEditor({
                 )}
               />
               <span className="min-w-0">
-                {!valid
-                  ? <span className="text-[var(--danger)]">this show needs a name and a persona</span>
+                {gateIssue
+                  ? <span className="text-[var(--danger)]">{gateIssue}</span>
                   : 'saves this show · schedule it on the grid, then Save schedule'}
               </span>
             </>

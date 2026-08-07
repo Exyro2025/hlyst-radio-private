@@ -14,9 +14,12 @@ import {
   GUESTS_PER_SHOW,
   PLAYLISTS_PER_SHOW,
   SHOW_FILTER_VALUES_MAX,
+  SHOW_GENRE_MAX,
   SHOW_ID_RE,
   SHOW_ENERGY as SHOW_ENERGY_VALUES,
   SHOW_VOCALS as SHOW_VOCALS_VALUES,
+  migrateLegacyShowFields,
+  repairEraWindow,
   type EraWindow,
 } from '../schemas/show.js';
 import { SKILL_SLUG_RE as SKILL_SLUG_PATTERN } from '../schemas/skill.js';
@@ -914,21 +917,6 @@ export function coerceGuestPersonaIds(raw: unknown, hostId: string, personaIds: 
   return out;
 }
 
-export function coercePlaylistIds(raw: unknown): string[] {
-  if (!Array.isArray(raw)) return [];
-  const seen = new Set<string>();
-  const out: string[] = [];
-  for (const v of raw) {
-    if (typeof v !== 'string') continue;
-    const id = v.trim();
-    if (!id || seen.has(id)) continue;
-    seen.add(id);
-    out.push(id);
-    if (out.length >= PLAYLISTS_PER_SHOW) break;
-  }
-  return out;
-}
-
 // ── Multi-value music filters (#929) ────────────────────────────────────────
 // A show's Genre Lean / Mood / Energy / Era each hold a LIST of values: OR
 // within the attribute, AND across attributes, every value weighted equally.
@@ -985,27 +973,18 @@ export interface NormalizedShow {
   excludedPlaylistIds: string[];
 }
 
-function coerceEraWindow(raw: unknown): EraWindow | null {
-  if (!raw || typeof raw !== 'object') return null;
-  const r = raw as { fromYear?: unknown; toYear?: unknown };
-  const fromYear = Number.isFinite(r.fromYear) ? Math.trunc(r.fromYear as number) : null;
-  const toYear = Number.isFinite(r.toYear) ? Math.trunc(r.toYear as number) : null;
-  if (fromYear == null && toYear == null) return null;
-  if (fromYear != null && toYear != null && fromYear > toYear) return null;
-  return { fromYear, toYear };
-}
-
-// Plural-first: `item[plural]` wins when it's an array; otherwise the legacy
-// singular value (if any) becomes a one-element list. Dedup + cap.
+// Dedup + cap over one already-plural list. Legacy singular fields (`mood`,
+// `genre`, `fromYear`/`toYear`, …) are folded into the plural keys by
+// migrateLegacyShowFields — the ONE home of the #929 migration, shared with
+// the schema's own preprocess and the lenient load path — rather than by a
+// second singular-fallback here, which is how the two migrations used to
+// drift.
 function coerceShowList<T>(
-  item: unknown,
-  plural: string,
-  singular: string,
+  raw: unknown,
   coerceOne: (v: unknown) => T | null,
   keyOf: (v: T) => string,
 ): T[] {
-  const rec = item as Record<string, unknown> | null | undefined;
-  const raw: unknown[] = Array.isArray(rec?.[plural]) ? (rec?.[plural] as unknown[]) : [rec?.[singular]];
+  if (!Array.isArray(raw)) return [];
   const seen = new Set<string>();
   const out: T[] = [];
   for (const v of raw) {
@@ -1026,28 +1005,23 @@ export function coerceShowMoods(item: unknown): string[] {
   // built — filtering against the seed defaults here would strip an operator's
   // custom moods). update()'s validateShowsStrict enforces the live vocabulary
   // on save; a stale mood string just matches nothing at runtime.
-  return coerceShowList(item, 'moods', 'mood',
+  return coerceShowList(migrateLegacyShowFields(item).moods,
     (v) => (typeof v === 'string' && v.trim() ? v.trim() : null),
     (v) => v);
 }
 
 export function coerceShowGenres(item: unknown): string[] {
-  // Legacy singular `genre` was one free-text field and operators crammed
-  // multiple genres into it comma-separated ("funk, soul, jazz-funk") — which
-  // never resolved against the library as one tag. Split it on migration so
-  // each becomes a real, individually-resolvable entry. Plural-array entries
-  // are taken as-is (the UI adds them one at a time).
-  const rec = (item ?? {}) as Record<string, unknown>;
-  const raw = Array.isArray(rec.genres)
-    ? rec.genres
-    : typeof rec.genre === 'string' ? rec.genre.split(',') : [];
-  return coerceShowList({ genres: raw }, 'genres', 'genre',
-    (v) => (typeof v === 'string' && v.trim() ? v.trim().slice(0, 64) : null),
+  // The comma-split of a legacy singular `genre` ("funk, soul, jazz-funk" —
+  // which never resolved against the library as one tag) lives in
+  // migrateLegacyShowFields; each piece becomes a real, individually-resolvable
+  // entry. Plural-array entries are taken as-is (the UI adds them one at a time).
+  return coerceShowList(migrateLegacyShowFields(item).genres,
+    (v) => (typeof v === 'string' && v.trim() ? v.trim().slice(0, SHOW_GENRE_MAX) : null),
     (v) => v.toLowerCase());
 }
 
 export function coerceShowEnergies(item: unknown): string[] {
-  return coerceShowList(item, 'energies', 'energy',
+  return coerceShowList(migrateLegacyShowFields(item).energies,
     (v) => (typeof v === 'string' && SHOW_ENERGY.includes(v) ? v : null),
     (v) => v);
 }
@@ -1061,33 +1035,16 @@ export function coerceShowVocals(item: unknown): string {
 }
 
 export function coerceShowEras(item: unknown): EraWindow[] {
-  // Legacy singular is a pair of top-level keys, not one value — synthesize
-  // the window before handing off to the shared list coercer.
-  const rec = (item ?? {}) as Record<string, unknown>;
-  const raw = Array.isArray(rec.eras)
-    ? rec.eras
-    : [{ fromYear: rec.fromYear, toYear: rec.toYear }];
-  return coerceShowList({ eras: raw }, 'eras', 'era', coerceEraWindow,
+  // Window repair (year bounds, from<=to, numeric-string years) is the
+  // schema's own repairEraWindow, so this coercer can't disagree with the
+  // validator about what a valid window is.
+  return coerceShowList(migrateLegacyShowFields(item).eras, repairEraWindow,
     (e) => `${e.fromYear ?? ''}:${e.toYear ?? ''}`);
 }
 
-// A show can exclude tracks from one or more Navidrome playlists: any track
-// that appears in these playlists is dropped from the candidate pool at pick
-// time. Same shape/rules as coercePlaylistIds. Empty = no exclusions.
-export function coerceExcludedPlaylistIds(raw: unknown): string[] {
-  if (!Array.isArray(raw)) return [];
-  const seen = new Set<string>();
-  const out: string[] = [];
-  for (const v of raw) {
-    if (typeof v !== 'string') continue;
-    const id = v.trim();
-    if (!id || seen.has(id)) continue;
-    seen.add(id);
-    out.push(id);
-    if (out.length >= EXCLUDED_PLAYLISTS_PER_SHOW) break;
-  }
-  return out;
-}
+// The playlist-anchor lists have no standalone coercers any more — the lenient
+// load path repairs them through schemas/show.ts repairShowForLoad like every
+// other list field.
 
 export function clamp01(n: number): number {
   if (!Number.isFinite(n)) return 0;

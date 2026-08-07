@@ -4,12 +4,12 @@
 //
 // Why this needs a test rather than "it's just a number": the cap is enforced in
 // three independent layers that each hardcoded it at some point. The validator
-// throws above it, the loader (coercePlaylistIds / coerceExcludedPlaylistIds)
-// silently truncates at it, and the admin UI disables the checkboxes at its own
-// copy. A UI copy ABOVE the controller's turns a legal-looking save into a 400;
-// one BELOW hides anchors the operator is allowed to add. Nothing else catches
-// that — the symptom is silent, not a crash. This is the playlist twin of
-// show-filter-cap.test.ts.
+// throws above it, the loader (normalizeShows, via schemas/show.ts
+// repairShowForLoad) silently truncates at it, and the admin UI disables the
+// checkboxes at its own copy. A UI copy ABOVE the controller's turns a
+// legal-looking save into a 400; one BELOW hides anchors the operator is
+// allowed to add. Nothing else catches that — the symptom is silent, not a
+// crash. This is the playlist twin of show-filter-cap.test.ts.
 //
 // The web mirror is a single PLAYLISTS_MAX because the two controller constants
 // are the same figure, so the test also fails if they ever diverge — at which
@@ -29,10 +29,9 @@ import { dirname, resolve } from 'node:path';
 import {
   PLAYLISTS_PER_SHOW,
   EXCLUDED_PLAYLISTS_PER_SHOW,
-  coercePlaylistIds,
-  coerceExcludedPlaylistIds,
 } from '../src/settings/vocab.js';
 import { validateShowsStrict } from '../src/settings/validate.js';
+import { normalizeShows } from '../src/settings/normalize.js';
 
 let failures = 0;
 function test(name: string, fn: () => void) {
@@ -78,12 +77,18 @@ test('validator accepts exactly the cap and rejects one over — excludedPlaylis
 test('the loader truncates at the same cap it validates against', () => {
   // The LOAD path (settings.json written by an older build, or by hand). It
   // truncates silently, so a cap here below the validator's would quietly drop a
-  // legally-saved show's anchors on the next boot.
-  assert.equal(coercePlaylistIds(ids(PLAYLISTS_PER_SHOW + 5)).length, PLAYLISTS_PER_SHOW);
-  assert.equal(
-    coerceExcludedPlaylistIds(ids(EXCLUDED_PLAYLISTS_PER_SHOW + 5)).length,
-    EXCLUDED_PLAYLISTS_PER_SHOW,
+  // legally-saved show's anchors on the next boot — and an over-cap list must
+  // cost the extra anchors, never the show.
+  const [s] = normalizeShows(
+    showWith({
+      playlistIds: ids(PLAYLISTS_PER_SHOW + 5),
+      excludedPlaylistIds: ids(EXCLUDED_PLAYLISTS_PER_SHOW + 5),
+    }),
+    ['p1'],
   );
+  assert.ok(s, 'over-cap playlist lists must not drop the show on load');
+  assert.equal(s.playlistIds.length, PLAYLISTS_PER_SHOW);
+  assert.equal(s.excludedPlaylistIds.length, EXCLUDED_PLAYLISTS_PER_SHOW);
 });
 
 test('a stale id still counts against the cap', () => {

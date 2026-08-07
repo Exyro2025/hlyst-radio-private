@@ -83,6 +83,14 @@ function skillTokenList(raw: unknown): string[] {
 // Messages carry no field name: firstMessage() prefixes the dotted path
 // (`cooldown: must look like …`), so restating it here reads twice.
 
+// Explicit null reads as "absent" on every optional field — the hand-rolled
+// builders these schemas replaced read `typeof b.cooldown === 'string' ? … :
+// ''`, so a client PUTting `cooldown: null` has always meant "use the
+// default". zod's .optional() accepts only undefined, so without this a null
+// would 400 an edit that used to save cleanly. (Named per-module: the mirror
+// is one flat file, so this can't share show.ts's nullToUndefined.)
+const skillNullToUndefined = (v: unknown) => (v == null ? undefined : v);
+
 export const skillSlugSchema = z
   .string({ error: 'name must be a lowercase slug (a–z, 0–9, hyphens), 1–49 chars' })
   .trim()
@@ -93,28 +101,34 @@ export const skillSlugSchema = z
 // hand-rolled builder silently ignored it (`typeof b.label === 'string' && …`),
 // the same call the webhook conversion made: a value dropped on the floor is a
 // value the operator watches disappear on the next reload.
-const skillLabelSchema = z
-  .string({ error: 'must be text' })
-  .trim()
-  .optional()
-  .transform((v) => v || undefined);
+const skillLabelSchema = z.preprocess(
+  skillNullToUndefined,
+  z
+    .string({ error: 'must be text' })
+    .trim()
+    .optional()
+    .transform((v) => v || undefined),
+);
 
-const skillCooldownSchema = z
-  .string({ error: 'must be text' })
-  .trim()
-  .optional()
-  .refine(
-    (v) => !v || SKILL_COOLDOWN_RE.test(v),
-    'must look like "45m", "6h", "2d", or a bare number (minutes)',
-  )
-  .transform((v) => v || undefined);
+const skillCooldownSchema = z.preprocess(
+  skillNullToUndefined,
+  z
+    .string({ error: 'must be text' })
+    .trim()
+    .optional()
+    .refine(
+      (v) => !v || SKILL_COOLDOWN_RE.test(v),
+      'must look like "45m", "6h", "2d", or a bare number (minutes)',
+    )
+    .transform((v) => v || undefined),
+);
 
 // An EMPTY selection is meaningful: it resets the skill to the default context
 // profile, so [] and '' both land on undefined (no `context:` line written).
 const skillContextSchema = z
-  .union([z.array(z.unknown()), z.string()])
+  .union([z.null(), z.array(z.unknown()), z.string()])
   .optional()
-  .transform((v) => (v === undefined ? undefined : skillTokenList(v)))
+  .transform((v) => (v == null ? undefined : skillTokenList(v)))
   .check((c) => {
     const toks = c.value;
     if (!toks) return;
@@ -132,9 +146,9 @@ const skillContextSchema = z
 // Strict tags — a bad tag 400s instead of vanishing. The lenient
 // normalizeSkillTags above is the disk-side twin.
 export const skillTagsSchema = z
-  .union([z.array(z.unknown()), z.string()])
+  .union([z.null(), z.array(z.unknown()), z.string()])
   .optional()
-  .transform((v) => (v === undefined ? undefined : skillTokenList(v)))
+  .transform((v) => (v == null ? undefined : skillTokenList(v)))
   .check((c) => {
     const toks = c.value;
     if (!toks) return;
@@ -169,26 +183,32 @@ const skillBriefSchema = z
 
 // 'any' is the default and writes no frontmatter line, so it lands on
 // undefined exactly like an absent value.
-const skillWindowSchema = z
-  .string({ error: 'must be "any" or "commute"' })
-  .trim()
-  .toLowerCase()
-  .optional()
-  .refine(
-    (v) => v === undefined || (SKILL_WINDOWS as readonly string[]).includes(v),
-    'must be "any" or "commute"',
-  )
-  .transform((v) => (v === 'commute' ? ('commute' as const) : undefined));
+const skillWindowSchema = z.preprocess(
+  skillNullToUndefined,
+  z
+    .string({ error: 'must be "any" or "commute"' })
+    .trim()
+    .toLowerCase()
+    .optional()
+    .refine(
+      (v) => v === undefined || (SKILL_WINDOWS as readonly string[]).includes(v),
+      'must be "any" or "commute"',
+    )
+    .transform((v) => (v === 'commute' ? ('commute' as const) : undefined)),
+);
 
-const skillRequiresKeySchema = z
-  .string({ error: 'must be an env var name (UPPER_SNAKE_CASE)' })
-  .trim()
-  .optional()
-  .refine(
-    (v) => !v || SKILL_ENV_KEY_RE.test(v),
-    'must be an env var name (UPPER_SNAKE_CASE)',
-  )
-  .transform((v) => v || undefined);
+const skillRequiresKeySchema = z.preprocess(
+  skillNullToUndefined,
+  z
+    .string({ error: 'must be an env var name (UPPER_SNAKE_CASE)' })
+    .trim()
+    .optional()
+    .refine(
+      (v) => !v || SKILL_ENV_KEY_RE.test(v),
+      'must be an env var name (UPPER_SNAKE_CASE)',
+    )
+    .transform((v) => v || undefined),
+);
 
 // The fields every skill's SKILL.md carries, built-in or custom.
 export const builtinSkillFileSchema = z.object({
