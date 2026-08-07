@@ -1057,26 +1057,18 @@ export function mintId(prefix) {
   return prefix + randomBytes(3).toString('hex');
 }
 
-// A blank 7-day x 24-hour grid. Keys 0 (Sunday) .. 6 (Saturday) match
-// JS Date.getDay(). Each value is an array[24] of showId|null.
-export function emptyWeek() {
-  const week = {};
-  for (let d = 0; d < 7; d++) week[d] = Array(24).fill(null);
-  return week;
-}
-
-// Timed schedule takeover (#930): pin one show for a bounded window, then the
-// weekly grid resumes. Epoch-ms so no station-zone interpretation is needed.
-export interface ScheduleOverride {
-  showId: string;
-  startedAt: number;
-  expiresAt: number;
-}
-
-// Bounds for POST /schedule/override's `minutes` — long enough for an all-day
-// takeover, short enough that a forgotten pin can't shadow the grid for days.
-export const OVERRIDE_MIN_MINUTES = 15;
-export const OVERRIDE_MAX_MINUTES = 720;
+// The weekly grid + timed takeover (#930) vocabulary now lives in the shared
+// schema (controller/src/schemas/schedule.ts) so the admin UI runs the same
+// bounds — TakeoverCard carried a hand-copied OVERRIDE_MIN/MAX_MINUTES pair.
+// Re-exported here so no existing import site moved.
+export {
+  emptyWeek,
+  OVERRIDE_MIN_MINUTES,
+  OVERRIDE_MAX_MINUTES,
+  SCHEDULE_DAYS,
+  SCHEDULE_HOURS,
+} from '../schemas/schedule.js';
+export type { ScheduleOverride, ScheduleWeek } from '../schemas/schedule.js';
 
 // Seed roster — three distinct DJs shipped on a fresh install (and used as the
 // migration fallback when a legacy `dj` block carries no real souls). Distinct

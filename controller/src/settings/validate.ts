@@ -18,7 +18,6 @@ import {
   MOOD_NAME_MAX,
   MOOD_PERIODS,
   MOOD_PROMPT_MAX,
-  OVERRIDE_MAX_MINUTES,
   PERSONA_LIMIT,
   PIPER_VOICE_RE,
   POCKET_TTS_VOICE_RE,
@@ -34,7 +33,6 @@ import {
   Webhook,
   clampTtsGain,
   clampTtsSpeed,
-  emptyWeek,
   mintId,
   normalizeDial,
   normalizeMoodName,
@@ -45,6 +43,7 @@ import { webhooksSchema } from '../schemas/webhook.js';
 import { mergeWebhookSecrets } from '../schemas/webhook-server.js';
 import { showsSchema, type ShowSchemaContext } from '../schemas/show.js';
 import { resolveShowIds } from '../schemas/show-server.js';
+import { scheduleSchema, scheduleOverrideSchema } from '../schemas/schedule.js';
 import { firstMessage } from '../util/zod-error.js';
 
 // Strict validator for a `{engine, voice, cloudProvider}` voice slot. Shared by
@@ -299,53 +298,34 @@ export function validateShowsStrict(raw, personas, allowedThemeIds: Set<string>,
   return resolveShowIds(parsed.data);
 }
 
+// Strict weekly-grid validator — used by update(). Shape and the
+// unknown-show rule come from the shared schema (schemas/schedule.ts), which
+// PUT /schedule and the lenient load path also run; `shows` supplies the only
+// thing a grid cannot judge about itself.
+//
+// 'schedule' is passed as the ROOT because this schema parses the grid itself,
+// so its issue paths start at the day index ('3.14') and need the settings key
+// spliced in front to read as 'schedule.3.14'.
 export function validateScheduleStrict(raw, shows) {
-  if (!raw || typeof raw !== 'object') throw new Error('schedule must be an object keyed 0-6');
-  const showIds = shows.map(s => s.id);
-  const week = emptyWeek();
-  for (let d = 0; d < 7; d++) {
-    const day = raw[d];
-    if (day === undefined || day === null) continue;
-    if (!Array.isArray(day) || day.length !== 24) {
-      throw new Error(`schedule[${d}] must be an array of exactly 24 entries`);
-    }
-    for (let h = 0; h < 24; h++) {
-      const v = day[h];
-      if (v === null || v === undefined || v === '') {
-        week[d][h] = null;
-        continue;
-      }
-      if (typeof v !== 'string' || !showIds.includes(v)) {
-        throw new Error(`schedule[${d}][${h}] references an unknown show`);
-      }
-      week[d][h] = v;
-    }
-  }
-  return week;
+  const r = scheduleSchema({ showIds: shows.map(s => s.id) }).safeParse(raw);
+  if (!r.success) throw new Error(firstMessage(r.error, 'schedule'));
+  return r.data;
 }
 
 // Strict takeover validator — used by update(). null clears; anything else
 // must be a well-formed window over an existing show. The 12h cap is enforced
 // here (not just the route) so no caller can persist an unbounded pin.
+//
+// `now: null` — update() does not judge expiry. A window whose end has passed
+// is the operator's own takeover having simply run out, and throwing on it
+// would fail an unrelated settings save that merely carried the block along.
+// The load path passes a real clock and drops it instead.
 export function validateScheduleOverrideStrict(raw, shows): ScheduleOverride | null {
   if (raw === null || raw === undefined) return null;
-  if (typeof raw !== 'object') throw new Error('scheduleOverride must be an object or null');
-  const showId = typeof raw.showId === 'string' ? raw.showId : '';
-  if (!shows.some(s => s.id === showId)) {
-    throw new Error('scheduleOverride.showId references an unknown show');
-  }
-  const startedAt = raw.startedAt;
-  const expiresAt = raw.expiresAt;
-  if (!Number.isFinite(startedAt) || !Number.isFinite(expiresAt)) {
-    throw new Error('scheduleOverride.startedAt/expiresAt must be epoch-ms numbers');
-  }
-  if (startedAt >= expiresAt) {
-    throw new Error('scheduleOverride.expiresAt must be after startedAt');
-  }
-  if (expiresAt - startedAt > OVERRIDE_MAX_MINUTES * 60_000) {
-    throw new Error(`scheduleOverride window must be at most ${OVERRIDE_MAX_MINUTES} minutes`);
-  }
-  return { showId, startedAt, expiresAt };
+  const ctx = { showIds: shows.map(s => s.id), now: null };
+  const r = scheduleOverrideSchema(ctx).safeParse(raw);
+  if (!r.success) throw new Error(firstMessage(r.error, 'scheduleOverride'));
+  return r.data;
 }
 
 // Strict validator — used by update(). Shape and format now come from the

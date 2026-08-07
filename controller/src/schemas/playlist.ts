@@ -157,8 +157,14 @@ export const playlistAppendSchema = z.preprocess(
 );
 
 // PATCH /playlists/:id — rename / visibility. A patch that changes nothing is
-// the operator's input being wrong, so it rejects; a non-string name that IS
-// present must not silently read as "no rename".
+// the operator's input being wrong, so it rejects.
+//
+// A non-string `name` reads as ABSENT rather than as a type error, which is
+// what the hand-rolled reader did and is deliberately preserved: `{name: 42,
+// public: true}` flips the visibility and drops the rename silently. Worth
+// knowing before relying on the opposite — the only caller is the admin row
+// editor, which cannot produce a non-string, so tightening it would buy a rule
+// nothing can trip while changing an API answer somebody may depend on.
 export const playlistPatchSchema = z.preprocess(
   playlistBody,
   z
@@ -200,11 +206,21 @@ export const playlistRemoveTracksSchema = z.preprocess(
 
 /**
  * Lenient repair for one stored recipe-store row (state/playlist-recipes.json,
- * read at boot and by every sync). Returns null only for a row with no
- * identity (no playlistId); everything else is REPAIRED — the store read used
- * to keep any row carrying a string playlistId and nothing else, so a
- * hand-edited entry missing its `recipe` reached syncRecipe and threw on
- * `entry.recipe.prompt`, turning "Sync now" into a 500.
+ * read at boot and by every sync). A row is DROPPED when it has no identity
+ * (no playlistId) or no recipe at all; every other field is REPAIRED — the
+ * store read used to keep any row carrying a string playlistId and nothing
+ * else, so a hand-edited entry missing its `recipe` reached syncRecipe and
+ * threw on `entry.recipe.prompt`, turning "Sync now" into a 500.
+ *
+ * WHY A MISSING RECIPE DROPS RATHER THAN REPAIRS. An empty recipe is not a
+ * neutral value for this shape: buildCandidatePool reads an absent knob as NO
+ * FILTER, not as "match nothing", so `{seedTrackIds: [], knobs: {}, sources:
+ * {}}` is a recipe that matches the whole library. Repairing to it would turn
+ * a loud 500 into a quiet wrong result — syncRecipe would append perSyncCap
+ * arbitrary tracks added since createdAt, answer `{added: 25}` as success, and
+ * recordSync would persist the invented recipe. That also runs unattended via
+ * syncAllAfterTag() after every tagging pass. Dropping keeps the never-throws
+ * property without inventing intent the operator never expressed.
  */
 export function normalizeRecipeRow(raw: unknown): {
   playlistId: string;
@@ -218,6 +234,7 @@ export function normalizeRecipeRow(raw: unknown): {
   if (!raw || typeof raw !== 'object') return null;
   const r = raw as Record<string, unknown>;
   if (typeof r.playlistId !== 'string' || !r.playlistId.trim()) return null;
+  if (!r.recipe || typeof r.recipe !== 'object' || Array.isArray(r.recipe)) return null;
   const lastResult = r.lastResult && typeof r.lastResult === 'object'
     && Number.isInteger((r.lastResult as Record<string, unknown>).added)
     && typeof (r.lastResult as Record<string, unknown>).at === 'string'

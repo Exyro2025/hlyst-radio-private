@@ -30,6 +30,43 @@ export function validateBody(schema: ZodType) {
 }
 
 /**
+ * Same validation, LISTENER-facing error shape. For public forms only — today
+ * that is POST /request and nothing else.
+ *
+ * Two differences from validateBody, both because the reader is a listener
+ * looking at a request box in a player skin rather than an operator looking at
+ * an admin form:
+ *
+ *  - **No dotted-path prefix.** `firstMessage` prefixes unconditionally, which
+ *    is right when the operator has to find `webhooks.1.url` among nine rows,
+ *    and wrong when the string is rendered on its own: "text: Keep it under 280
+ *    characters." reads as a bug to a listener. The schema's messages are
+ *    already written to stand alone.
+ *  - **`success: false` and `message` ride along.** The web player runs the
+ *    mirrored schema as a pre-flight and never meets this 400 at all, but the
+ *    native app posts /request directly and reads `data.message` on a failure.
+ *    It ships through the app stores, so it cannot be updated in lockstep with
+ *    the controller — an already-installed build meeting a new refusal has to
+ *    have something to render, or the drawer shows an empty failure card.
+ */
+export function validatePublicBody(schema: ZodType) {
+  return (req: Request, res: Response, next: NextFunction) => {
+    const r = schema.safeParse(req.body);
+    if (!r.success) {
+      const message = r.error.issues[0]?.message || 'invalid request body';
+      return res.status(400).json({
+        success: false,
+        error: message,
+        message,
+        fieldErrors: flattenIssues(r.error),
+      });
+    }
+    req.body = r.data;
+    next();
+  };
+}
+
+/**
  * Same contract, for a schema that cannot exist until the request does.
  *
  * A show is the first shape that can't be validated against itself — its host

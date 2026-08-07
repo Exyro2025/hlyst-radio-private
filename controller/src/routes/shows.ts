@@ -16,7 +16,12 @@
 import express from 'express';
 import * as settings from '../settings.js';
 import { requireAdmin } from '../middleware/auth.js';
-import { validateBodyAsync } from '../middleware/validate.js';
+import { validateBody, validateBodyAsync } from '../middleware/validate.js';
+import {
+  resolveScheduleSlots,
+  scheduleOverrideRequestSchema,
+  scheduleSaveSchema,
+} from '../schemas/schedule.js';
 import { showPostSchema } from '../schemas/show.js';
 import { listThemes } from '../themes.js';
 import { readCommunityShow } from '../shows/community.js';
@@ -193,18 +198,11 @@ router.post('/shows', requireAdmin, validateBodyAsync(showPostContext), async (r
 // handoff (LLM + TTS) airs in the background, and the switch fully lands at
 // the next track boundary like any show change.
 // ---------------------------------------------------------------------------
-router.post('/schedule/override', requireAdmin, async (req, res) => {
-  const showId = String(req.body?.showId || '');
-  const minutes = Number(req.body?.minutes);
-  if (
-    !Number.isInteger(minutes) ||
-    minutes < settings.OVERRIDE_MIN_MINUTES ||
-    minutes > settings.OVERRIDE_MAX_MINUTES
-  ) {
-    return res.status(400).json({
-      error: `minutes must be an integer between ${settings.OVERRIDE_MIN_MINUTES} and ${settings.OVERRIDE_MAX_MINUTES}`,
-    });
-  }
+// The shape (a show id, an integer minute count inside the bounds) comes from
+// the shared schema; the roster lookup below stays here because "no such show"
+// needs server state and answers 404, not 400.
+router.post('/schedule/override', requireAdmin, validateBody(scheduleOverrideRequestSchema), async (req, res) => {
+  const { showId, minutes } = req.body as { showId: string; minutes: number };
 
   await settings.load();
   const show = (settings.get().shows || []).find((s: any) => s.id === showId);
@@ -252,25 +250,14 @@ router.delete('/schedule/override', requireAdmin, async (req, res) => {
 // rather than rejected — validateScheduleStrict would otherwise throw on an
 // unknown show. `dropped` tells the client how many slots were skipped.
 // ---------------------------------------------------------------------------
-router.put('/schedule', requireAdmin, async (req, res) => {
+// validateBody runs the shared schema with `showIds: null` — SHAPE only. The
+// ids are resolved afterwards against the live roster by resolveScheduleSlots,
+// which drops and counts rather than rejecting, because the editor can hold a
+// locally-added show the operator hasn't saved yet.
+router.put('/schedule', requireAdmin, validateBody(scheduleSaveSchema), async (req, res) => {
   await settings.load();
-  const ids = new Set((settings.get().shows || []).map((s: any) => s.id));
-  const raw = (req.body?.schedule ?? req.body) || {};
-
-  const schedule: Record<number, Array<string | null>> = {};
-  let dropped = 0;
-  for (let d = 0; d < 7; d++) {
-    const day = Array.isArray(raw[d]) ? raw[d] : [];
-    schedule[d] = Array.from({ length: 24 }, (_, h) => {
-      const v = day[h];
-      if (typeof v === 'string' && v) {
-        if (ids.has(v)) return v;
-        dropped++;
-        return null;
-      }
-      return null;
-    });
-  }
+  const ids = (settings.get().shows || []).map((s: any) => s.id);
+  const { schedule, dropped } = resolveScheduleSlots(req.body as any, ids);
 
   try {
     await settings.update({ schedule });

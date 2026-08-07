@@ -49,6 +49,11 @@ import {
   type ShowSchemaContext,
 } from '../schemas/show.js';
 import { resolveShowIds } from '../schemas/show-server.js';
+import {
+  repairScheduleForLoad,
+  scheduleSchema,
+  scheduleOverrideSchema,
+} from '../schemas/schedule.js';
 
 // ── normalizers (lenient — used by load(), clamp/default rather than throw) ──
 
@@ -273,34 +278,28 @@ export function normalizeShows(raw: unknown, personaIds: string[]): NormalizedSh
   return resolveShowIds(rows) as NormalizedShow[];
 }
 
+// Lenient load-path counterpart of validateScheduleStrict. The RULES are the
+// shared schema's — the 24-entry day, the slot shape, the unknown-show check —
+// so the two paths can no longer drift. What lives here is only the LENIENCY:
+// a slot naming a show that no longer exists is blanked rather than failing the
+// boot, and the repairs themselves live beside the rules in schemas/schedule.ts
+// (repairScheduleForLoad) rather than restating them here. The schema is still
+// run on the repaired grid, so a repair that stopped landing on a valid value
+// would be caught rather than persisted.
 export function normalizeSchedule(raw: unknown, showIds: string[]) {
-  const week = emptyWeek();
-  if (!raw || typeof raw !== 'object') return week;
-  const r = raw as Record<number, unknown>;
-  for (let d = 0; d < 7; d++) {
-    const day = r[d];
-    if (!Array.isArray(day)) continue;
-    for (let h = 0; h < 24; h++) {
-      const v = day[h];
-      if (typeof v === 'string' && showIds.includes(v)) week[d][h] = v;
-    }
-  }
-  return week;
+  const repaired = repairScheduleForLoad(raw, showIds);
+  const r = scheduleSchema({ showIds }).safeParse(repaired);
+  return r.success ? r.data : emptyWeek();
 }
 
 // Lenient load-path coercion for the timed takeover (#930). Anything malformed,
 // dangling, or already expired loads as null — an override is transient state,
-// never worth failing a boot over.
+// never worth failing a boot over. Expiry is the one rule the strict path does
+// NOT share, and it travels as the schema context's `now` rather than as a
+// second check here.
 export function normalizeScheduleOverride(raw: unknown, showIds: string[]): ScheduleOverride | null {
-  if (!raw || typeof raw !== 'object') return null;
-  const o = raw as Record<string, unknown>;
-  const showId = typeof o.showId === 'string' ? o.showId : '';
-  const startedAt = typeof o.startedAt === 'number' ? o.startedAt : NaN;
-  const expiresAt = typeof o.expiresAt === 'number' ? o.expiresAt : NaN;
-  if (!showIds.includes(showId)) return null;
-  if (!Number.isFinite(startedAt) || !Number.isFinite(expiresAt)) return null;
-  if (startedAt >= expiresAt || expiresAt <= Date.now()) return null;
-  return { showId, startedAt, expiresAt };
+  const r = scheduleOverrideSchema({ showIds, now: Date.now() }).safeParse(raw);
+  return r.success ? r.data : null;
 }
 
 

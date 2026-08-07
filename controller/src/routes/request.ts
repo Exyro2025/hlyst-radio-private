@@ -21,7 +21,7 @@ import {
   checkRateLimit, checkGlobalRateLimit, commitRateLimit, commitGlobalRateLimit, clientIp,
   REQUESTS_DISABLED,
 } from '../middleware/ratelimit.js';
-import { validateBody } from '../middleware/validate.js';
+import { validatePublicBody } from '../middleware/validate.js';
 import { listenerRequestSchema } from '../schemas/request.js';
 import { shuffle } from '../util/shuffle.js';
 
@@ -748,7 +748,10 @@ async function resolveRequest(entry) {
 // pipeline below (sanitize → strip → screen) stays route-owned: it repairs
 // rather than refuses, and needs server state the schema can't see.
 // ---------------------------------------------------------------------------
-router.post('/request', validateBody(listenerRequestSchema), async (req, res) => {
+// validatePublicBody, not validateBody: this is the one LISTENER-facing form,
+// so the 400 carries an unprefixed message plus the success/message keys the
+// shipped native app reads. See the middleware for why.
+router.post('/request', validatePublicBody(listenerRequestSchema), async (req, res) => {
   const cfg = (settings.get() as any)?.requests || {};
   if (REQUESTS_DISABLED || cfg.enabled === false) {
     return res.status(503).json({ success: false, message: 'Requests are temporarily closed.' });

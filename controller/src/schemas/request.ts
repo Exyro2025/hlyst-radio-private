@@ -35,6 +35,14 @@ const requestNullToUndefined = (v: unknown) => (v == null ? undefined : v);
 // Messages are listener-facing: the pre-flight gate in the player surfaces
 // them verbatim, so each one has to stand alone without a field prefix.
 // 'Empty request' keeps the historical wire message for API callers.
+//
+// The SERVER half of that promise is middleware/validate.ts's
+// validatePublicBody, not the ordinary validateBody — firstMessage prefixes the
+// dotted path unconditionally, so routing this schema through the operator
+// middleware would put "text: " in front of every one of these strings on the
+// wire while the browser (which reads issues[0].message) saw them bare. Two
+// sides, one schema, two different messages, is exactly what these conversions
+// exist to prevent.
 export const listenerRequestSchema = z.object({
   text: z
     .string({ error: 'Empty request' })

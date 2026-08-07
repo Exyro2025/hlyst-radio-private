@@ -111,12 +111,14 @@ test('playlistHasIntent unifies the two copies that had diverged', () => {
 
 // --- the recipe-store repair -------------------------------------------------
 
-test('a row missing its recipe is REPAIRED, not kept broken or dropped', () => {
+test("a row's OTHER missing fields are repaired rather than dropping it", () => {
   // The old read kept any row with a string playlistId and nothing else, so a
   // hand-edited entry missing `recipe` reached syncRecipe and threw on
-  // `entry.recipe.prompt` — "Sync now" answered 500.
-  const row = normalizeRecipeRow({ playlistId: 'pl-1' });
+  // `entry.recipe.prompt` — "Sync now" answered 500. Everything except the two
+  // load-bearing keys still repairs.
+  const row = normalizeRecipeRow({ playlistId: 'pl-1', recipe: { prompt: 'rainy' } });
   assert.ok(row);
+  assert.equal(row!.name, '');
   assert.deepEqual(row!.recipe.knobs, {});
   assert.deepEqual(row!.recipe.sources, {});
   assert.equal(row!.perSyncCap, 25);
@@ -124,10 +126,47 @@ test('a row missing its recipe is REPAIRED, not kept broken or dropped', () => {
   assert.equal(row!.lastResult, null);
 });
 
-test('a row with no identity is the only drop', () => {
+test('a row with no identity drops', () => {
   assert.equal(normalizeRecipeRow(null), null);
   assert.equal(normalizeRecipeRow({}), null);
   assert.equal(normalizeRecipeRow({ playlistId: '   ' }), null);
+});
+
+test('a row with no recipe is DROPPED, not repaired into a match-everything one', () => {
+  // An empty recipe is not a neutral value: buildCandidatePool reads an absent
+  // knob as NO FILTER, so repairing to {seedTrackIds: [], knobs: {}, sources:
+  // {}} would make "Sync now" append perSyncCap arbitrary library tracks and
+  // answer {added: 25} as success — then recordSync persists the invented
+  // recipe. syncAllAfterTag() runs the same path unattended after tagging.
+  // Turning a loud 500 into a quiet wrong result is the worse trade.
+  assert.equal(normalizeRecipeRow({ playlistId: 'pl-42', name: 'Late Night' }), null);
+  assert.equal(normalizeRecipeRow({ playlistId: 'pl-42', recipe: null }), null);
+  assert.equal(normalizeRecipeRow({ playlistId: 'pl-42', recipe: 'rainy' }), null);
+  assert.equal(normalizeRecipeRow({ playlistId: 'pl-42', recipe: [] }), null);
+});
+
+test('a row keeping its createdAt but losing its recipe still drops', () => {
+  // The dangerous shape specifically: with createdAt intact, `sinceIso` is a
+  // real past date, so an invented recipe would have a whole library of
+  // "recently added" tracks to append.
+  assert.equal(
+    normalizeRecipeRow({
+      playlistId: 'pl-42',
+      name: 'Late Night',
+      createdAt: '2026-01-01T00:00:00.000Z',
+      perSyncCap: 25,
+    }),
+    null,
+  );
+});
+
+test('an EMPTY recipe object is still a recipe and is kept', () => {
+  // The drop is about a row with no recipe key at all. A row that genuinely
+  // stored `{}` was already reachable through the old writer, so it keeps
+  // loading — the repair only refuses to invent one.
+  const row = normalizeRecipeRow({ playlistId: 'pl-43', recipe: {} });
+  assert.ok(row);
+  assert.deepEqual(row!.recipe.seedTrackIds, []);
 });
 
 test('a healthy row round-trips untouched', () => {

@@ -10,7 +10,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { validateBody } from '../src/middleware/validate.js';
+import { validatePublicBody } from '../src/middleware/validate.js';
 import {
   listenerRequestSchema,
   REQUEST_NAME_MAX,
@@ -107,14 +107,21 @@ test('every refusal message stands alone without a field prefix', () => {
 
 interface FakeRes {
   code: number;
-  body: { error?: string; fieldErrors?: Record<string, string> };
+  body: {
+    error?: string;
+    message?: string;
+    success?: boolean;
+    fieldErrors?: Record<string, string>;
+  };
 }
 
 function runValidate(body: unknown) {
   const res: FakeRes = { code: 0, body: {} };
   const req = { body } as { body: unknown };
   let nexted = false;
-  validateBody(listenerRequestSchema)(
+  // validatePublicBody is what POST /request actually mounts — see below for
+  // why the LISTENER-facing middleware differs from the operator one.
+  validatePublicBody(listenerRequestSchema)(
     req as never,
     {
       status(c: number) {
@@ -138,7 +145,35 @@ test('route: over-cap text 400s with fieldErrors keyed "text"', () => {
   assert.equal(nexted, false);
   assert.equal(res.code, 400);
   assert.deepEqual(Object.keys(res.body.fieldErrors ?? {}), ['text']);
-  assert.match(String(res.body.error), /^text: /);
+});
+
+test('route: the listener-facing message carries NO dotted-path prefix', () => {
+  // This is the whole reason POST /request does not use the ordinary
+  // validateBody: firstMessage prefixes the path unconditionally, so the wire
+  // said "text: Keep it under 280 characters." while the browser (reading
+  // issues[0].message) said "Keep it under 280 characters." — one schema, two
+  // different strings, which is the drift these conversions exist to remove.
+  const { res } = runValidate({ text: 'x'.repeat(REQUEST_TEXT_MAX + 1) });
+  assert.doesNotMatch(String(res.body.error), /^text: /);
+  assert.equal(res.body.error, `Keep it under ${REQUEST_TEXT_MAX} characters.`);
+  // And it must equal what the schema itself would hand the player's pre-flight.
+  const issue = listenerRequestSchema.safeParse({ text: 'x'.repeat(REQUEST_TEXT_MAX + 1) });
+  assert.equal(res.body.error, issue.error!.issues[0]!.message);
+});
+
+test('route: the 400 also carries success/message for already-shipped clients', () => {
+  // The native app posts /request directly (no pre-flight) and renders
+  // `data.message` when `!data.success`. It ships through the app stores, so a
+  // build installed today meets tomorrow's refusal — without these keys the
+  // request drawer shows an empty failure card.
+  const { res } = runValidate({ text: 'x'.repeat(REQUEST_TEXT_MAX + 1) });
+  assert.equal(res.body.success, false);
+  assert.equal(res.body.message, res.body.error);
+});
+
+test('route: an empty request keeps its historical bare wire message', () => {
+  const { res } = runValidate({ text: '   ' });
+  assert.equal(res.body.error, 'Empty request');
 });
 
 test('route: a valid body calls next() with the PARSED value on req.body', () => {
