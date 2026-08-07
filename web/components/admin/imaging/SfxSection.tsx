@@ -15,6 +15,7 @@ import { SkeletonCards } from '@/components/ui/skeleton';
 import { Btn, Seg } from '../ui';
 import { PreviewButton, type SettingsData, type SaveSettings } from '../settings/shared';
 import type { SfxData, SfxForm } from './types';
+import { IMAGING_DESCRIPTION_MAX, IMAGING_NAME_MAX, IMAGING_PROMPT_MAX, SFX_MAX_SEC, SFX_MIN_SEC } from '@/lib/schemas.generated';
 import {
   SectionMasthead, PanelBox, PanelHead, EmptyState, DropZone, MetaLine, TabMetric, pad2,
 } from './parts';
@@ -181,7 +182,7 @@ export function SfxSection({ sfxData, sfxForm, setSfxForm, busy, createSfx, uplo
               <Label>Name</Label>
               <Input
                 value={sfxForm.name}
-                maxLength={60}
+                maxLength={IMAGING_NAME_MAX}
                 onChange={(e: ChangeEvent<HTMLInputElement>) => setSfxForm(f => ({ ...f, name: e.target.value }))}
                 placeholder="tape-stop"
               />
@@ -192,8 +193,8 @@ export function SfxSection({ sfxData, sfxForm, setSfxForm, busy, createSfx, uplo
                 className="mono-num"
                 type="number"
                 step={0.1}
-                min={0.5}
-                max={22}
+                min={SFX_MIN_SEC}
+                max={SFX_MAX_SEC}
                 value={sfxForm.durationSec}
                 onChange={(e: ChangeEvent<HTMLInputElement>) => setSfxForm(f => ({ ...f, durationSec: e.target.value }))}
                 placeholder="auto"
@@ -204,7 +205,7 @@ export function SfxSection({ sfxData, sfxForm, setSfxForm, busy, createSfx, uplo
             <Label>Description · optional</Label>
             <Input
               value={sfxForm.description}
-              maxLength={200}
+              maxLength={IMAGING_DESCRIPTION_MAX}
               onChange={(e: ChangeEvent<HTMLInputElement>) => setSfxForm(f => ({ ...f, description: e.target.value }))}
               placeholder="Your DJ reads this to decide when the effect fits a line"
             />
@@ -214,10 +215,10 @@ export function SfxSection({ sfxData, sfxForm, setSfxForm, busy, createSfx, uplo
             <Textarea
               rows={3}
               value={sfxForm.prompt}
-              onChange={(e: ChangeEvent<HTMLTextAreaElement>) => setSfxForm(f => ({ ...f, prompt: e.target.value.slice(0, 500) }))}
+              onChange={(e: ChangeEvent<HTMLTextAreaElement>) => setSfxForm(f => ({ ...f, prompt: e.target.value.slice(0, IMAGING_PROMPT_MAX) }))}
               placeholder="Describe the sound for ElevenLabs…"
             />
-            <div className="text-right font-mono text-[11px] text-muted">{sfxForm.prompt.length} / 500</div>
+            <div className="text-right font-mono text-[11px] text-muted">{sfxForm.prompt.length} / {IMAGING_PROMPT_MAX}</div>
           </div>
         </div>
       </Modal>
@@ -241,7 +242,7 @@ export function SfxSection({ sfxData, sfxForm, setSfxForm, busy, createSfx, uplo
             <Label>Name</Label>
             <Input
               value={importName}
-              maxLength={60}
+              maxLength={IMAGING_NAME_MAX}
               onChange={(e: ChangeEvent<HTMLInputElement>) => setImportName(e.target.value)}
               placeholder="rain-hiss"
             />
@@ -250,7 +251,7 @@ export function SfxSection({ sfxData, sfxForm, setSfxForm, busy, createSfx, uplo
             <Label>Description · optional</Label>
             <Input
               value={importDesc}
-              maxLength={200}
+              maxLength={IMAGING_DESCRIPTION_MAX}
               onChange={(e: ChangeEvent<HTMLInputElement>) => setImportDesc(e.target.value)}
               placeholder="Your DJ reads this to decide when the effect fits a line"
             />

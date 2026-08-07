@@ -13,6 +13,7 @@ import { Badge } from '../../ui/badge';
 import { Btn } from '../ui';
 import { PreviewButton, type SettingsData, type SaveSettings } from '../settings/shared';
 import type { JingleImportFailure, JingleImportResult } from './types';
+import { IMAGING_DESCRIPTION_MAX, JINGLE_TEXT_MAX } from '@/lib/schemas.generated';
 import {
   SectionMasthead, PanelBox, PanelHead, EmptyState, DropZone, MetaLine, TabMetric, pad2,
 } from './parts';
@@ -205,10 +206,10 @@ export function JinglesSection({
           <Textarea
             rows={4}
             value={jingleText}
-            onChange={(e: ChangeEvent<HTMLTextAreaElement>) => setJingleText(e.target.value.slice(0, 500))}
+            onChange={(e: ChangeEvent<HTMLTextAreaElement>) => setJingleText(e.target.value.slice(0, JINGLE_TEXT_MAX))}
             placeholder="You’re tuned to SUB/WAVE…"
           />
-          <div className="text-right font-mono text-[11px] text-muted">{jingleText.length} / 500</div>
+          <div className="text-right font-mono text-[11px] text-muted">{jingleText.length} / {JINGLE_TEXT_MAX}</div>
         </div>
       </Modal>
 
@@ -275,7 +276,7 @@ export function JinglesSection({
               <Label>Label · optional</Label>
               <Input
                 value={importLabel}
-                maxLength={200}
+                maxLength={IMAGING_DESCRIPTION_MAX}
                 onChange={(e: ChangeEvent<HTMLInputElement>) => setImportLabel(e.target.value)}
                 placeholder="Defaults to the file’s own name"
               />
