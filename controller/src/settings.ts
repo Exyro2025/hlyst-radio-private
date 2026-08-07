@@ -1174,13 +1174,9 @@ export async function update(patch) {
     );
   }
   if ('timezone' in patch) {
-    const v = String(patch.timezone ?? '').trim();
-    // '' = back to Auto (container TZ). Anything else must be a zone ICU
-    // knows — aliases like Europe/Kiev validate, not just canonical names.
-    if (v !== '' && !isValidTimezone(v)) {
-      throw new Error(`invalid timezone "${v}" — use an IANA name like Europe/Athens`);
-    }
-    next.timezone = v;
+    // '' = back to Auto (container TZ). setStationTimezone() below pushes the
+    // accepted value into time.ts's module state — that stays here.
+    next.timezone = parseSettingsPatchKey<string>('timezone', patch.timezone);
   }
   if ('locale' in patch) {
     next.locale = parseSettingsPatchKey<string>('locale', patch.locale);
@@ -1867,32 +1863,28 @@ export async function update(patch) {
     }
   }
   if ('privacy' in patch) {
-    const pv = patch.privacy || {};
+    // Field rules on the shared schema; the lock-needs-a-password invariant
+    // below is NOT one of them — it reads the MERGED state, so a lock turned on
+    // by this patch can be satisfied by a password that was already stored.
+    const pv = parseSettingsPatchKey<Record<string, unknown>>('privacy', patch.privacy);
+    const rawPv = (patch.privacy || {}) as Record<string, unknown>;
     if (pv.privatePlayer !== undefined) {
-      next.privacy.privatePlayer = !!pv.privatePlayer;
+      next.privacy.privatePlayer = pv.privatePlayer as boolean;
     }
     // Disclosure toggle, not a lock: it is deliberately outside the
     // "a lock needs a password" invariant below, needs no mixer restart, and
     // applies live on the next public read.
     if (pv.publishPersonaSouls !== undefined) {
-      next.privacy.publishPersonaSouls = !!pv.publishPersonaSouls;
+      next.privacy.publishPersonaSouls = pv.publishPersonaSouls as boolean;
     }
     // 'set' is the redaction sentinel from getRedacted() — ignore it so a
-    // round-tripped form doesn't overwrite the stored secret.
-    if (pv.password !== undefined && pv.password !== 'set') {
-      const v = String(pv.password ?? '').trim();
-      if (v.length > 128) {
-        throw new Error('privacy.password must be 0-128 chars');
-      }
-      // The password travels in basic-auth userinfo and ?auth= query strings;
-      // whitespace/control chars only cause client-side grief there.
-      if (/[\s]/.test(v)) {
-        throw new Error('privacy.password must not contain whitespace');
-      }
-      next.privacy.password = v;
+    // round-tripped form doesn't overwrite the stored secret. Compared against
+    // the RAW value: ' set ' is NOT the sentinel and is stored as a password.
+    if (pv.password !== undefined && rawPv.password !== 'set') {
+      next.privacy.password = pv.password as string;
     }
     if (pv.listenerAuth !== undefined) {
-      const v = !!pv.listenerAuth;
+      const v = pv.listenerAuth as boolean;
       if (v !== cur.privacy.listenerAuth) {
         // Flipping the toggle adds/removes the <mount> auth blocks in
         // icecast.xml, which only re-render on a broadcast restart. Password
@@ -1914,16 +1906,24 @@ export async function update(patch) {
     }
   }
   if ('requests' in patch) {
-    const rq = patch.requests || {};
-    const cur = next.requests || DEFAULTS.requests;
+    // The schema decides "usable or absent" per field; the fallback to the
+    // CURRENT value is this spread. Same result as the old per-field ternaries,
+    // including the load-bearing part: an emptied admin input arrives as JSON
+    // null, which is UNUSABLE rather than 0, so it leaves the stored value
+    // alone instead of clamping to the field's floor and closing the request
+    // line. The rebuild keeps exactly the seven known keys.
+    const rq = parseSettingsPatchKey<Record<string, unknown>>('requests', patch.requests);
+    const curReq = next.requests || DEFAULTS.requests;
+    const pick = <K extends keyof typeof curReq>(k: K) =>
+      (rq[k as string] !== undefined ? rq[k as string] : curReq[k]) as (typeof curReq)[K];
     next.requests = {
-      enabled: typeof rq.enabled === 'boolean' ? rq.enabled : cur.enabled,
-      maxPending: intIn(rq.maxPending, cur.maxPending, 1, 50),
-      globalHourlyCap: intIn(rq.globalHourlyCap, cur.globalHourlyCap, 5, 500),
-      repeatCooldownMin: intIn(rq.repeatCooldownMin, cur.repeatCooldownMin, 0, 1440),
-      cooldownSec: intIn(rq.cooldownSec, cur.cooldownSec, 5, 600),
-      perIpHourlyCap: intIn(rq.perIpHourlyCap, cur.perIpHourlyCap, 1, 100),
-      onePendingPerIp: typeof rq.onePendingPerIp === 'boolean' ? rq.onePendingPerIp : cur.onePendingPerIp,
+      enabled: pick('enabled'),
+      maxPending: pick('maxPending'),
+      globalHourlyCap: pick('globalHourlyCap'),
+      repeatCooldownMin: pick('repeatCooldownMin'),
+      cooldownSec: pick('cooldownSec'),
+      perIpHourlyCap: pick('perIpHourlyCap'),
+      onePendingPerIp: pick('onePendingPerIp'),
     };
   }
   if ('webhooks' in patch) {

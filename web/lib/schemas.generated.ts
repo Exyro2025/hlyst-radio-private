@@ -1487,6 +1487,117 @@ export const scrobblePatchSchema = settingsBlockOf({
   listenbrainz: scrobbleListenbrainzSchema,
 });
 
+/**
+ * `''` = Auto (container TZ). Anything else must be a zone ICU knows.
+ *
+ * A try/catch probe rather than `Intl.supportedValuesOf`, so ALIASES validate
+ * too (Europe/Kiev, US/Pacific, and numeric offsets like +05:30). It is also
+ * case-insensitive, and the accepted string is stored verbatim rather than
+ * canonicalised. `Intl` exists in the browser, so this mirrors cleanly;
+ * time.ts re-exports it rather than keeping a second copy.
+ */
+export function settingsIsValidTimezone(tz: string): boolean {
+  try {
+    new Intl.DateTimeFormat('en', { timeZone: tz });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+export const timezoneSchema = z
+  .unknown()
+  .superRefine((raw, ctx) => {
+    const v = String(raw ?? '').trim();
+    if (v !== '' && !settingsIsValidTimezone(v)) {
+      ctx.addIssue({
+        code: 'custom',
+        // The dash is an EM DASH (U+2014), carried over verbatim.
+        message: `invalid timezone "${v}" — use an IANA name like Europe/Athens`,
+      });
+    }
+  })
+  .transform((raw) => String(raw ?? '').trim());
+
+/**
+ * The privacy block's FIELD rules. The lock-needs-a-password invariant is NOT
+ * here and cannot be: it reads the MERGED state (a lock may be turned on by
+ * this patch while the password comes from what is already stored), so it is a
+ * property of the result rather than of the submitted value. It stays in
+ * update(), which is also where the listenerAuth restart decision lives.
+ *
+ * `publishPersonaSouls` is deliberately outside that invariant — it is a
+ * disclosure toggle, not a lock.
+ */
+export const privacyPatchSchema = settingsBlockOf({
+  privatePlayer: settingsBoolLike(),
+  publishPersonaSouls: settingsBoolLike(),
+  listenerAuth: settingsBoolLike(),
+  password: z
+    .unknown()
+    .superRefine((raw, ctx) => {
+      const v = String(raw ?? '').trim();
+      if (v.length > 128) {
+        ctx.addIssue({ code: 'custom', message: 'privacy.password must be 0-128 chars' });
+        return;
+      }
+      // The password travels in basic-auth userinfo and ?auth= query strings;
+      // whitespace/control chars only cause client-side grief there. trim()
+      // has already stripped the ends, so this only fires on INTERIOR space.
+      if (/[\s]/.test(v)) {
+        ctx.addIssue({
+          code: 'custom',
+          message: 'privacy.password must not contain whitespace',
+        });
+      }
+    })
+    .transform((raw) => String(raw ?? '').trim()),
+});
+
+/**
+ * `requests` — every field falls back to the CURRENT stored value, so the
+ * schema's job is to decide "usable or absent" and let update() spread the
+ * result over what is stored.
+ *
+ * The usability rule is `intIn`'s and it is deliberately narrow: only a number,
+ * a bigint or a NON-BLANK string counts. `null`, `''`, `false` and `[]` all
+ * coerce to 0 under `Number()`, and without this guard an emptied admin input
+ * (which arrives as JSON null) clamped to the field's FLOOR and silently
+ * committed it — clearing the station hourly cap set it to 5/hour and closed
+ * the request line. Anything unusable is dropped here, which update() reads as
+ * "leave it alone".
+ *
+ * Note the booleans are `typeof === 'boolean'`, NOT `!!` — a truthy non-boolean
+ * is IGNORED rather than coerced, the opposite posture to ui/privacy. Both are
+ * shipping behaviour and neither may be unified onto the other.
+ */
+function settingsRequestsInt(bounds: SettingsNumericBound) {
+  return z.unknown().transform((raw) => {
+    if (typeof raw === 'string') {
+      if (!raw.trim()) return undefined;
+    } else if (typeof raw !== 'number' && typeof raw !== 'bigint') {
+      return undefined;
+    }
+    const n = Number(raw);
+    if (!Number.isFinite(n)) return undefined;
+    return Math.min(bounds.max, Math.max(bounds.min, Math.round(n)));
+  });
+}
+
+function settingsRequestsBool() {
+  return z.unknown().transform((raw) => (typeof raw === 'boolean' ? raw : undefined));
+}
+
+export const requestsPatchSchema = settingsBlockOf({
+  enabled: settingsRequestsBool(),
+  onePendingPerIp: settingsRequestsBool(),
+  maxPending: settingsRequestsInt({ min: 1, max: 50 }),
+  globalHourlyCap: settingsRequestsInt({ min: 5, max: 500 }),
+  repeatCooldownMin: settingsRequestsInt({ min: 0, max: 1440 }),
+  cooldownSec: settingsRequestsInt({ min: 5, max: 600 }),
+  perIpHourlyCap: settingsRequestsInt({ min: 1, max: 100 }),
+});
+
 // --- the mood family -------------------------------------------------------
 
 export const SETTINGS_MOODS_LIMIT = 40;

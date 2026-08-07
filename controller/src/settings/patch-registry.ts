@@ -44,12 +44,15 @@ import {
   loudnessPatchSchema,
   moodScheduleSchema,
   moodsSchema,
+  privacyPatchSchema,
+  requestsPatchSchema,
   scrobblePatchSchema,
   searchPatchSchema,
   sfxPatchSchema,
   stationDescriptionSchema,
   stationSchema,
   streamPatchSchema,
+  timezoneSchema,
   transitionsPatchSchema,
   uiPatchSchema,
   weatherMoodsSchema,
@@ -177,6 +180,9 @@ export const SETTINGS_PATCH_SCHEMAS: Readonly<Partial<Record<SettingsPatchKey, S
   moodSchedule: moodScheduleSchema,
   weatherMoods: weatherMoodsSchema,
   festivals: festivalsSchema,
+  timezone: timezoneSchema,
+  privacy: privacyPatchSchema,
+  requests: requestsPatchSchema,
 };
 
 /** Resolve an entry against a context — a plain schema ignores it. */

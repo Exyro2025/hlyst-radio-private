@@ -35,6 +35,9 @@ const {
   loudnessPatchSchema,
   moodScheduleSchema,
   moodsSchema,
+  privacyPatchSchema,
+  requestsPatchSchema,
+  timezoneSchema,
   weatherMoodsSchema,
   scrobblePatchSchema,
   searchPatchSchema,
@@ -596,8 +599,92 @@ test('the converted keys are exactly the ones with schemas', () => {
   assert.deepEqual(Object.keys(SETTINGS_PATCH_SCHEMAS).sort(), [
     'archive', 'audio', 'beds', 'crossfadeDuration', 'djHouseRules', 'festivals',
     'jingleRatio', 'likes', 'locale', 'loudness', 'moodSchedule', 'moods',
-    'scrobble', 'search', 'sfx', 'station', 'stationDescription', 'stream',
-    'transitions', 'ui', 'weather', 'weatherMoods', 'webhooksPolicy',
+    'privacy', 'requests', 'scrobble', 'search', 'sfx', 'station',
+    'stationDescription', 'stream', 'timezone', 'transitions', 'ui', 'weather',
+    'weatherMoods', 'webhooksPolicy',
+  ]);
+});
+
+// --- timezone / privacy / requests ------------------------------------------
+
+test('timezone accepts aliases and offsets, and stores them verbatim', () => {
+  // A try/catch ICU probe, not Intl.supportedValuesOf — so aliases validate.
+  assert.equal(timezoneSchema.parse('Europe/London'), 'Europe/London');
+  assert.equal(timezoneSchema.parse('Europe/Kiev'), 'Europe/Kiev');
+  assert.equal(timezoneSchema.parse('US/Pacific'), 'US/Pacific');
+  // Case-insensitive, and NOT canonicalised on the way in.
+  assert.equal(timezoneSchema.parse('europe/london'), 'europe/london');
+  // '' is Auto (container TZ), and null coerces to it.
+  assert.equal(timezoneSchema.parse(''), '');
+  assert.equal(timezoneSchema.parse(null), '');
+  const bad = timezoneSchema.safeParse('Mars/Phobos');
+  assert.equal(bad.success, false);
+  assert.equal(
+    bad.error?.issues[0]?.message,
+    'invalid timezone "Mars/Phobos" — use an IANA name like Europe/Athens',
+  );
+  assert.ok(bad.error?.issues[0]?.message.includes('—')); // EM DASH, U+2014
+});
+
+test('privacy field rules convert; the lock invariant stays in update()', () => {
+  assert.equal(privacyPatchSchema.parse({ privatePlayer: 1 }).privatePlayer, true);
+  assert.equal(privacyPatchSchema.parse({ password: '  hunter2  ' }).password, 'hunter2');
+  assert.equal(
+    privacyPatchSchema.safeParse({ password: 'a b' }).error?.issues[0]?.message,
+    'privacy.password must not contain whitespace',
+  );
+  assert.equal(privacyPatchSchema.safeParse({ password: 'x'.repeat(129) }).success, false);
+  // The schema alone never enforces "a lock needs a password" — it cannot see
+  // the merged state.
+  assert.equal(privacyPatchSchema.safeParse({ privatePlayer: true }).success, true);
+});
+
+test('update() still refuses a lock with no password behind it', async () => {
+  await settings.update({ privacy: { privatePlayer: false, listenerAuth: false, password: '' } });
+  await assert.rejects(
+    () => settings.update({ privacy: { privatePlayer: true } }),
+    /set a station password before turning on a privacy lock/,
+  );
+  // With a password in the same patch it saves.
+  const r = await settings.update({ privacy: { privatePlayer: true, password: 'hunter2' } });
+  assert.equal(r.saved.privacy.privatePlayer, true);
+  // publishPersonaSouls takes no part in the invariant.
+  await settings.update({ privacy: { privatePlayer: false, password: '' } });
+  const s = await settings.update({ privacy: { publishPersonaSouls: true } });
+  assert.equal(s.saved.privacy.publishPersonaSouls, true);
+});
+
+test('requests treats an emptied input as ABSENT, not as zero', () => {
+  // The #1 reason intIn exists: an emptied admin input arrives as JSON null,
+  // and Number(null) is 0, which used to clamp to the field's FLOOR and
+  // silently close the request line.
+  assert.equal(requestsPatchSchema.parse({ globalHourlyCap: null }).globalHourlyCap, undefined);
+  assert.equal(requestsPatchSchema.parse({ globalHourlyCap: '' }).globalHourlyCap, undefined);
+  assert.equal(requestsPatchSchema.parse({ globalHourlyCap: '  ' }).globalHourlyCap, undefined);
+  assert.equal(requestsPatchSchema.parse({ globalHourlyCap: [] }).globalHourlyCap, undefined);
+  assert.equal(requestsPatchSchema.parse({ globalHourlyCap: false }).globalHourlyCap, undefined);
+  // Usable values round and clamp SILENTLY — out of range never refuses.
+  assert.equal(requestsPatchSchema.parse({ globalHourlyCap: 9999 }).globalHourlyCap, 500);
+  assert.equal(requestsPatchSchema.parse({ globalHourlyCap: 1 }).globalHourlyCap, 5);
+  assert.equal(requestsPatchSchema.parse({ maxPending: '7' }).maxPending, 7);
+  assert.equal(requestsPatchSchema.parse({ maxPending: 2.5 }).maxPending, 3);
+  // 'x' is unusable (Number('5abc') is NaN here, unlike the parseInt family).
+  assert.equal(requestsPatchSchema.parse({ maxPending: '5abc' }).maxPending, undefined);
+  // Booleans are typeof-checked, NOT coerced — the opposite of ui/privacy.
+  assert.equal(requestsPatchSchema.parse({ enabled: 1 }).enabled, undefined);
+  assert.equal(requestsPatchSchema.parse({ enabled: false }).enabled, false);
+  // requests can never throw.
+  assert.equal(requestsPatchSchema.safeParse({ maxPending: {} }).success, true);
+});
+
+test('update() falls each requests field back to the CURRENT value', async () => {
+  await settings.update({ requests: { maxPending: 9, globalHourlyCap: 77 } });
+  const r = await settings.update({ requests: { globalHourlyCap: null, maxPending: 3 } });
+  assert.equal(r.saved.requests.maxPending, 3);
+  assert.equal(r.saved.requests.globalHourlyCap, 77); // untouched by the null
+  assert.deepEqual(Object.keys(r.saved.requests).sort(), [
+    'cooldownSec', 'enabled', 'globalHourlyCap', 'maxPending', 'onePendingPerIp',
+    'perIpHourlyCap', 'repeatCooldownMin',
   ]);
 });
 
