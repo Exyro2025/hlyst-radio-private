@@ -37,12 +37,26 @@ def new_page(pw):
 
 def assert_aria(page, locator):
     """Assertion 2's teeth: an invalid control must point at an id that is
-    really in the DOM. A dangling aria-describedby is worse than none."""
+    really in the DOM. A dangling aria-describedby is worse than none.
+
+    Resolved via an attribute selector (`[id="..."]`), never a bare `#id` CSS
+    selector: a legal DOM id can contain characters that are CSS-selector
+    metacharacters (`festivals.0.name-error` has dots, which start a class
+    selector), and `page.locator(f"#{token}")` then silently matches nothing
+    even though the element is really there (verified directly:
+    `page.set_content('<div id="foo.bar">')` then `page.locator("#foo.bar")`
+    is a 0-count match on a page that unambiguously has that id). The a11y
+    machinery that actually consumes this id at runtime — getElementById,
+    aria-describedby resolution, the accessibility tree — does plain string
+    matching, not CSS-selector parsing, so a dotted id is completely valid
+    there; only the naive selector was wrong, and `[id="..."]` matches by
+    exact attribute value with no such parsing.
+    """
     assert locator.get_attribute("aria-invalid") == "true", "aria-invalid not set"
     described = locator.get_attribute("aria-describedby")
     assert described, "aria-describedby missing on an invalid control"
     for token in described.split():
-        assert page.locator(f"#{token}").count() == 1, f"dangling id: {token}"
+        assert page.locator(f'[id="{token}"]').count() == 1, f"dangling id: {token}"
 
 
 def assert_survives_poll(page, locator, expected, seconds=35):
@@ -142,6 +156,30 @@ def festivals(page):
     name.fill("x")
     name.fill("")
     page.wait_for_selector("text=must be 1-80 chars")
+
+    # `name` is bound through TextField directly against the array path
+    # (`festivals.${idx}.name`), so its id is genuinely dotted — prove that,
+    # not just that assert_aria happens to pass. This is the harness fix's
+    # actual teeth: the OLD bare `#id` selector must fail to resolve this
+    # exact id (confirming the id really is dotted and really would have
+    # been reported dangling under the old lookup — on this id it doesn't
+    # even degrade to a silent 0-count miss, it's a straight CSS parse error,
+    # since a digit right after the dot, e.g. `.14.name`, isn't a legal
+    # unescaped class-name start either), and the NEW attribute-selector
+    # lookup assert_aria now uses must resolve it cleanly.
+    described = name.get_attribute("aria-describedby")
+    assert described and "." in described, f"expected a dotted id, got {described!r}"
+    try:
+        old_result = f"{page.locator(f'#{described}').count()} matches"
+    except Exception as e:  # noqa: BLE001 — deliberately broad, this IS the old bug
+        old_result = f"raised {type(e).__name__}"
+    assert old_result != "1 matches", (
+        f"expected the old bare #id selector to fail on a dotted id, got {old_result}"
+    )
+    new_fixed = page.locator(f'[id="{described}"]').count()
+    assert new_fixed == 1, f"expected the attribute selector to resolve the dotted id, got {new_fixed}"
+    print(f"  (dotted id confirmed: {described!r} — old selector: {old_result}, new selector: 1 match)")
+
     assert_aria(page, name)
     assert save.is_disabled(), "Save enabled with a blank name"
 

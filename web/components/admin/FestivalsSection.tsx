@@ -8,9 +8,10 @@ import { z } from 'zod';
 import { useAdminAuth } from '../../lib/adminAuth';
 import { notify, errorMessage } from '../../lib/notify';
 import { useZodForm, applyServerFieldErrors, fieldAria } from '@/lib/form';
+import { TextField, SelectField } from '@/lib/form-fields';
 import { Card, Btn } from './ui';
 import { SectionHeader } from './settings/shared';
-import { Field, FieldLabel, FieldDescription, FieldError } from '@/components/ui/field';
+import { Field, FieldLabel, FieldError } from '@/components/ui/field';
 import { Input } from '../ui/input';
 import {
   Select, SelectTrigger, SelectValue, SelectContent, SelectItem,
@@ -77,21 +78,29 @@ function festivalTiming(f: Festival, now: Date) {
 
 // The modal's fields, bound directly into the `festivals` field array at
 // `idx`. A separate component (not inline JSX in FestivalsSection) so its
-// useController calls are unconditional from ITS OWN perspective — the parent
-// only mounts it while a row is open, which is ordinary conditional
-// rendering, not a conditional hook call.
+// useController/TextField/SelectField calls are unconditional from ITS OWN
+// perspective — the parent only mounts it while a row is open, which is
+// ordinary conditional rendering, not a conditional hook call.
 //
-// IDs are `${fieldId}-<field>` — a single per-mount suffix, deliberately NOT
-// built from the RHF path (`festivals.${idx}.name`), which would embed a
-// literal dot. An unescaped `.` in a CSS `#id` selector is read as a class
-// selector, not a literal character — verified empirically
-// (`page.locator("#foo.bar")` on a real `id="foo.bar"` element returns zero
-// matches) — which is exactly how verify-forms.py's assert_aria resolves
-// `aria-describedby` tokens. WebhooksPanel sidesteps the same trap by hand
-// composing dash-joined, `_rhfKey`-based ids instead of the `TextField`/
-// `SelectField` convenience wrappers (which derive their id straight from
-// `name`); this follows that same precedent. Since only one row is ever open
-// in this modal at a time, a fixed per-mount id (no row key needed) is enough.
+// Name, description and mood bind through the shared `TextField`/
+// `SelectField` (web/lib/form-fields.tsx) against `arrayControl` (the
+// schema-output-typed cast built in FestivalsSection) — nothing about those
+// wrappers needs the schema to be a structural `z.object`/`z.array`, only a
+// concrete `Control<T>`/`FieldPath<T>` at the call site, which the cast
+// already supplies. Their ids embed the literal RHF path
+// (`festivals.${idx}.name`), including the dot — legal in a DOM id and
+// resolved correctly by real id lookups (`getElementById`,
+// `aria-describedby`, the accessibility tree); `verify-forms.py`'s
+// `assert_aria` now resolves ids via an attribute selector so it agrees.
+//
+// Month, day and windowDays stay on a hand-rolled `useController` +
+// `fieldAria` (not one of the five bound shapes): month's onValueChange also
+// clamps day, and windowDays clamps its own value — neither is expressible
+// through TextField/SelectField's plain field.onChange. Their ids are
+// `${fieldId}-<field>` (a fixed per-mount suffix) purely because there's no
+// reason to route them through the RHF path when fieldAria is being called
+// by hand anyway; since only one row is ever open in this modal, a fixed
+// per-mount id (no row key needed) is enough either way.
 function FestivalModalFields({
   idx,
   control,
@@ -103,36 +112,25 @@ function FestivalModalFields({
   moods: string[];
   fieldId: string;
 }) {
-  const nameField = useController({ control, name: `festivals.${idx}.name` });
   const monthField = useController({ control, name: `festivals.${idx}.month` });
   const dayField = useController({ control, name: `festivals.${idx}.day` });
-  const descField = useController({ control, name: `festivals.${idx}.description` });
-  const moodField = useController({ control, name: `festivals.${idx}.mood` });
   const windowField = useController({ control, name: `festivals.${idx}.windowDays` });
 
-  const nameAria = fieldAria(`${fieldId}-name`, nameField.fieldState.error);
   const monthAria = fieldAria(`${fieldId}-month`, monthField.fieldState.error);
   const dayAria = fieldAria(`${fieldId}-day`, dayField.fieldState.error);
-  const descAria = fieldAria(`${fieldId}-desc`, descField.fieldState.error, { hasDescription: true });
-  const moodAria = fieldAria(`${fieldId}-mood`, moodField.fieldState.error);
   const windowAria = fieldAria(`${fieldId}-window`, windowField.fieldState.error);
 
   const month = monthField.field.value;
+  const moodOptions = moods.map(m => ({ value: m, label: m }));
 
   return (
     <div className="grid gap-4">
-      <Field data-invalid={nameAria.invalid || undefined}>
-        <FieldLabel {...nameAria.labelProps}>Name</FieldLabel>
-        <Input
-          {...nameAria.controlProps}
-          value={nameField.field.value}
-          onChange={e => nameField.field.onChange(e.target.value)}
-          onBlur={nameField.field.onBlur}
-          ref={nameField.field.ref}
-          placeholder="e.g. New Year's Day"
-        />
-        <FieldError {...nameAria.errorProps} errors={[nameField.fieldState.error]} />
-      </Field>
+      <TextField
+        control={control}
+        name={`festivals.${idx}.name`}
+        label="Name"
+        placeholder="e.g. New Year's Day"
+      />
 
       <div className="grid grid-cols-2 gap-3">
         <Field data-invalid={monthAria.invalid || undefined}>
@@ -180,39 +178,21 @@ function FestivalModalFields({
         </Field>
       </div>
 
-      <Field data-invalid={descAria.invalid || undefined}>
-        <FieldLabel {...descAria.labelProps}>
-          Description <span className="text-muted">(optional)</span>
-        </FieldLabel>
-        <Input
-          {...descAria.controlProps}
-          value={descField.field.value}
-          onChange={e => descField.field.onChange(e.target.value)}
-          onBlur={descField.field.onBlur}
-          ref={descField.field.ref}
-          placeholder="Short note about the festival"
-        />
-        <FieldDescription {...descAria.descriptionProps}>
-          A short note your DJ can weave into its chat while the festival is on.
-        </FieldDescription>
-        <FieldError {...descAria.errorProps} errors={[descField.fieldState.error]} />
-      </Field>
+      <TextField
+        control={control}
+        name={`festivals.${idx}.description`}
+        label="Description (optional)"
+        placeholder="Short note about the festival"
+        description="A short note your DJ can weave into its chat while the festival is on."
+      />
 
       <div className="grid grid-cols-2 gap-3">
-        <Field data-invalid={moodAria.invalid || undefined}>
-          <FieldLabel {...moodAria.labelProps}>Mood</FieldLabel>
-          <Select value={moodField.field.value} onValueChange={moodField.field.onChange}>
-            <SelectTrigger {...moodAria.controlProps} onBlur={moodField.field.onBlur} ref={moodField.field.ref}>
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              {moods.map(m => (
-                <SelectItem key={m} value={m}>{m}</SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-          <FieldError {...moodAria.errorProps} errors={[moodField.fieldState.error]} />
-        </Field>
+        <SelectField
+          control={control}
+          name={`festivals.${idx}.mood`}
+          label="Mood"
+          options={moodOptions}
+        />
 
         <Field data-invalid={windowAria.invalid || undefined}>
           <FieldLabel {...windowAria.labelProps}>
