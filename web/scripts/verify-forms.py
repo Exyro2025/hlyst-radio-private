@@ -53,6 +53,40 @@ def check(fn):
     return fn
 
 
+@check
+def takeover(page):
+    page.goto(f"{WEB}/admin/dash")
+    page.wait_for_selector("text=Takeover")
+
+    minutes = page.get_by_label("Takeover minutes")
+
+    # 2. Validate — 5 is under OVERRIDE_MIN_MINUTES (15).
+    minutes.fill("5")
+    page.wait_for_selector("text=must be an integer between 15 and 720")
+    assert_aria(page, minutes)
+
+    # Save must be gated while invalid.
+    pin = page.get_by_role("button", name="Pin to air")
+    assert pin.is_disabled(), "Save enabled with an out-of-range window"
+
+    # 3. Save — pick a real show, a valid window, confirm it persists.
+    minutes.fill("60")
+    page.get_by_label("Pin a show").click()
+    page.locator("[role=menuitem], [role=option]").first.click()
+    pin.click()
+    page.wait_for_selector("text=on air")
+    assert '"expiresAt"' in api("/schedule"), "override did not persist"
+
+    # 4. Poll safety — the 30s tick must not clobber a half-typed window.
+    #    Assert the value survives a refetch rather than sleeping 30s for it.
+    page.get_by_role("button", name="Cancel takeover").click()
+    page.wait_for_selector("text=Pin a show")
+    minutes.fill("123")
+    page.evaluate("window.dispatchEvent(new Event('focus'))")
+    page.wait_for_timeout(1500)
+    assert minutes.input_value() == "123", "poll clobbered operator input"
+
+
 if __name__ == "__main__":
     names = sys.argv[1:] or list(CHECKS)
     with sync_playwright() as pw:
