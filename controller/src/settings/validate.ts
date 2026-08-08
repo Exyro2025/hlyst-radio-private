@@ -14,10 +14,6 @@ import {
   FREQUENCIES,
   ID_RE,
   KOKORO_VOICE_RE,
-  MOODS_LIMIT,
-  MOOD_NAME_MAX,
-  MOOD_PERIODS,
-  MOOD_PROMPT_MAX,
   PERSONA_LIMIT,
   PIPER_VOICE_RE,
   POCKET_TTS_VOICE_RE,
@@ -29,13 +25,11 @@ import {
   ScheduleOverride,
   TTS_CLOUD_PROVIDERS,
   TTS_ENGINES,
-  WEATHER_CONDITIONS,
   Webhook,
   clampTtsGain,
   clampTtsSpeed,
   mintId,
   normalizeDial,
-  normalizeMoodName,
 } from './vocab.js';
 
 import { minTrackSeconds } from './store.js';
@@ -44,7 +38,34 @@ import { mergeWebhookSecrets } from '../schemas/webhook-server.js';
 import { showsSchema, type ShowSchemaContext } from '../schemas/show.js';
 import { resolveShowIds } from '../schemas/show-server.js';
 import { scheduleSchema, scheduleOverrideSchema } from '../schemas/schedule.js';
+import {
+  festivalsSchema,
+  moodScheduleSchema,
+  moodsSchema,
+  weatherMoodsSchema,
+} from '../schemas/settings.js';
 import { firstMessage } from '../util/zod-error.js';
+
+/**
+ * Run a mood-family schema and rethrow as a plain Error (#1348).
+ *
+ * These four validators are now thin wrappers — the rules live once, in
+ * schemas/settings.ts, shared with the registry and the browser mirror. What
+ * stays here is the SIGNATURE (backup import, onboarding and scripts/moods
+ * .test.ts all call them) and the throw, because update() answers
+ * `{ error: err.message }` and a raw ZodError's `.message` is a ~15-line JSON
+ * blob.
+ *
+ * The message is taken verbatim rather than through `firstMessage`, for the
+ * reason patch-registry.flatten() documents: every message here already names
+ * its own indexed field ('festivals[0].month must be …'), so prefixing the
+ * issue path would double it.
+ */
+function runMoodSchema<T>(schema: { safeParse: (v: unknown) => { success: boolean; data?: unknown; error?: { issues: Array<{ message: string }> } } }, raw: unknown): T {
+  const r = schema.safeParse(raw);
+  if (!r.success) throw new Error(r.error?.issues[0]?.message || 'invalid value');
+  return r.data as T;
+}
 
 // Strict validator for a `{engine, voice, cloudProvider}` voice slot. Shared by
 // every persona's `tts` block AND the station-wide TTS fallback slot
@@ -359,55 +380,15 @@ export function validateWebhooksStrict(raw: unknown, existing: Webhook[] = []) {
 // Exported for unit tests (scripts/moods.test.ts) — the pure validation/guard
 // logic that keeps the mood system consistent on every save.
 export function validateMoodsStrict(raw: any): Array<{ name: string; clapPrompt: string }> {
-  if (!Array.isArray(raw)) throw new Error('moods must be an array');
-  if (raw.length < 1) throw new Error('moods must have at least one entry');
-  if (raw.length > MOODS_LIMIT) throw new Error(`moods must be at most ${MOODS_LIMIT} entries`);
-  const seen = new Set<string>();
-  return raw.map((item, i) => {
-    if (!item || typeof item !== 'object') throw new Error(`moods[${i}] must be an object`);
-    const name = normalizeMoodName(item.name);
-    if (name.length < 1 || name.length > MOOD_NAME_MAX) {
-      throw new Error(`moods[${i}].name must be 1-${MOOD_NAME_MAX} chars (letters, digits, dashes)`);
-    }
-    if (seen.has(name)) throw new Error(`moods[${i}].name "${name}" is a duplicate`);
-    seen.add(name);
-    const clapPrompt = typeof item.clapPrompt === 'string'
-      ? item.clapPrompt.trim().slice(0, MOOD_PROMPT_MAX)
-      : '';
-    return { name, clapPrompt };
-  });
+  return runMoodSchema(moodsSchema, raw);
 }
 
 export function validateMoodScheduleStrict(raw: any, moodNames: string[]): Record<string, string> {
-  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
-    throw new Error('moodSchedule must be an object');
-  }
-  const names = new Set(moodNames);
-  const out: Record<string, string> = {};
-  for (const period of MOOD_PERIODS) {
-    const v = String(raw[period] ?? '').trim();
-    if (!names.has(v)) {
-      throw new Error(`moodSchedule.${period} must be one of: ${moodNames.join(', ')}`);
-    }
-    out[period] = v;
-  }
-  return out;
+  return runMoodSchema(moodScheduleSchema({ moodNames }), raw);
 }
 
 export function validateWeatherMoodsStrict(raw: any, moodNames: string[]): Record<string, string> {
-  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
-    throw new Error('weatherMoods must be an object');
-  }
-  const names = new Set(moodNames);
-  const out: Record<string, string> = {};
-  for (const cond of WEATHER_CONDITIONS) {
-    const v = String(raw[cond] ?? '').trim();
-    if (v && !names.has(v)) {
-      throw new Error(`weatherMoods.${cond} must be a mood (${moodNames.join(', ')}) or empty`);
-    }
-    out[cond] = v;
-  }
-  return out;
+  return runMoodSchema(weatherMoodsSchema({ moodNames }), raw);
 }
 
 // Reject a vocabulary edit that would orphan a mood still referenced by the
@@ -437,39 +418,8 @@ export function assertNoOrphanMoods(next: any): void {
   }
 }
 
-const FESTIVALS_LIMIT = 50;
-
 export function validateFestivalsStrict(raw, moodNames: string[] = SHOW_MOODS) {
-  if (!Array.isArray(raw)) throw new Error('festivals must be an array');
-  if (raw.length > FESTIVALS_LIMIT) {
-    throw new Error(`festivals must be at most ${FESTIVALS_LIMIT} entries`);
-  }
-  return raw.map((item, i) => {
-    if (!item || typeof item !== 'object') throw new Error(`festivals[${i}] must be an object`);
-    const name = String(item.name ?? '').trim();
-    if (name.length < 1 || name.length > 80) throw new Error(`festivals[${i}].name must be 1-80 chars`);
-    const month = Number(item.month);
-    if (!Number.isInteger(month) || month < 1 || month > 12) {
-      throw new Error(`festivals[${i}].month must be an integer 1-12`);
-    }
-    const day = Number(item.day);
-    // Feb allows 29 — in common years a leap-day festival fires Mar 1
-    // (Date.UTC rolls the date over in getFestivalContext).
-    const daysInMonth = [31, 29, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31][month - 1];
-    if (!Number.isInteger(day) || day < 1 || day > daysInMonth) {
-      throw new Error(`festivals[${i}].day must be an integer 1-${daysInMonth} for month ${month}`);
-    }
-    const mood = String(item.mood ?? '').trim();
-    if (!moodNames.includes(mood)) {
-      throw new Error(`festivals[${i}].mood must be one of: ${moodNames.join(', ')}`);
-    }
-    const description = typeof item.description === 'string' ? item.description.trim().slice(0, 200) : '';
-    const windowDays = Number(item.windowDays ?? 0);
-    if (!Number.isInteger(windowDays) || windowDays < 0 || windowDays > 14) {
-      throw new Error(`festivals[${i}].windowDays must be an integer 0-14`);
-    }
-    return { month, day, name, mood, description, windowDays };
-  });
+  return runMoodSchema(festivalsSchema({ moodNames }), raw);
 }
 
 // Validate + persist. Returns { saved, requiresRestart } so the UI can react.

@@ -115,8 +115,19 @@ export default function ImagingPanel() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(patch),
       });
-      const j = (await r.json().catch(() => ({}))) as { error?: string; requiresRestart?: boolean };
-      if (!r.ok) throw new Error(j.error || `failed (${r.status})`);
+      const j = (await r.json().catch(() => ({}))) as {
+        error?: string;
+        fieldErrors?: Record<string, string>;
+        requiresRestart?: boolean;
+      };
+      // POST /settings answers with `fieldErrors` for the keys on the shared
+      // schema (#1348). These toggles are inline controls rather than a
+      // react-hook-form form, so there is no applyServerFieldErrors to call —
+      // the field message is simply the more specific of the two strings.
+      if (!r.ok) {
+        const field = Object.values(j.fieldErrors || {})[0];
+        throw new Error(field || j.error || `failed (${r.status})`);
+      }
       // A jingle-ratio change needs a mixer restart (control in Settings → Danger zone).
       notify.ok(j.requiresRestart ? 'saved, restart the mixer to apply' : 'saved');
       await refresh();
