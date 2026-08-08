@@ -22,7 +22,27 @@ import { V3AlertDialog } from '../../ui/alert-dialog';
 import { SkeletonRows } from '@/components/ui/skeleton';
 import { EmptyState } from '@/components/ui/empty-state';
 import { cn } from '../../../lib/cn';
+import { FieldError } from '../../ui/field';
+import { RULE_TEXT_MAX, blockRuleSchema } from '@/lib/schemas.generated';
+import type { ZodError } from 'zod';
 import type { BlockRuleStat, RuleField, SeasonWindow } from './types';
+
+/**
+ * Flatten a client-side parse into the same dotted-path map the controller
+ * sends, so one piece of rendering serves both sources.
+ *
+ * Mirrors util/zod-error.ts's flattenIssues, including the null-prototype
+ * accumulator: a rule value is operator data, and on a `{}` literal a path of
+ * `__proto__` would be dropped outright rather than stored.
+ */
+function schemaFieldErrors(error: ZodError): Record<string, string> {
+  const out: Record<string, string> = Object.create(null);
+  for (const issue of error.issues) {
+    const key = issue.path.join('.');
+    if (!(key in out)) out[key] = issue.message;
+  }
+  return out;
+}
 
 const MONTH_NAMES = [
   'January', 'February', 'March', 'April', 'May', 'June',
@@ -133,6 +153,9 @@ export function BlockRulesCard({ onChanged }: { onChanged?: () => void }) {
   const [editing, setEditing] = useState<RuleForm | null>(null);
   const [editId, setEditId] = useState<string | null>(null);
   const [confirmDelete, setConfirmDelete] = useState<string | null>(null);
+  // Keyed by the schema's own dotted path ('label', 'values'), which is what
+  // both the pre-flight and the controller's fieldErrors produce.
+  const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
   // Picker vocab, loaded once alongside the rules. Failures degrade to free
   // text (genres) / an empty list with a hint (shows, playlists).
   const [genres, setGenres] = useState<string[]>([]);
@@ -183,15 +206,40 @@ export function BlockRulesCard({ onChanged }: { onChanged?: () => void }) {
 
   const save = async () => {
     if (!editing) return;
+    // Pre-flight against the SAME schema the route and the store run, so a
+    // missing label or an empty value list is refused here rather than after a
+    // round trip. The card keeps its own state machine — the chip input and the
+    // two month/day pickers are not react-hook-form shaped — but the rules it
+    // gates on are no longer its own.
+    const preflight = blockRuleSchema.safeParse(editing);
+    if (!preflight.success) {
+      setFieldErrors(schemaFieldErrors(preflight.error));
+      return;
+    }
+    setFieldErrors({});
     setBusy(true);
     try {
       const r = await adminFetch(editId ? `/library/blocklist/rules/${encodeURIComponent(editId)}` : '/library/blocklist/rules', {
         method: editId ? 'PUT' : 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(editing),
+        // The PARSED value, not the raw form: trimmed label, blank values
+        // dropped, duplicates collapsed — so what the operator sees accepted is
+        // what gets stored.
+        body: JSON.stringify(preflight.data),
       });
-      const j = await r.json().catch(() => ({})) as { rule?: BlockRuleStat; purged?: number; error?: string };
-      if (!r.ok) throw new Error(j.error || `failed (${r.status})`);
+      const j = await r.json().catch(() => ({})) as {
+        rule?: BlockRuleStat;
+        purged?: number;
+        error?: string;
+        fieldErrors?: Record<string, string>;
+      };
+      if (!r.ok) {
+        // Both sides run one schema, so this should be unreachable for a body
+        // the pre-flight accepted — but the server stays authoritative, and a
+        // controller a version ahead can refuse something this build allows.
+        if (j.fieldErrors) setFieldErrors(j.fieldErrors);
+        throw new Error(j.error || `failed (${r.status})`);
+      }
       setEditing(null);
       setEditId(null);
       notify.ok(`Rule ${editId ? 'updated' : 'added'}${j.purged ? ` — ${j.purged} queued track${j.purged === 1 ? '' : 's'} dropped` : ''}`);
@@ -250,11 +298,11 @@ export function BlockRulesCard({ onChanged }: { onChanged?: () => void }) {
         right={
           <div className="flex items-center gap-2">
             {rows.length === 0 && rules !== null && (
-              <Btn sm onClick={() => { setEditing({ ...XMAS_PRESET }); setEditId(null); }} title="Prefill: tracks tagged christmas only air Dec 1–26">
+              <Btn sm onClick={() => { setEditing({ ...XMAS_PRESET }); setEditId(null); setFieldErrors({}); }} title="Prefill: tracks tagged christmas only air Dec 1–26">
                 <Snowflake size={11} /> Seasonal preset
               </Btn>
             )}
-            <Btn sm tone="accent" onClick={() => { setEditing({ ...EMPTY_RULE }); setEditId(null); }} disabled={rules === null}>
+            <Btn sm tone="accent" onClick={() => { setEditing({ ...EMPTY_RULE }); setEditId(null); setFieldErrors({}); }} disabled={rules === null}>
               <Plus size={11} /> Add rule
             </Btn>
           </div>
@@ -318,7 +366,7 @@ export function BlockRulesCard({ onChanged }: { onChanged?: () => void }) {
 
       <Modal
         open={editing !== null}
-        onOpenChange={o => { if (!o) { setEditing(null); setEditId(null); } }}
+        onOpenChange={o => { if (!o) { setEditing(null); setEditId(null); setFieldErrors({}); } }}
         title={editId ? 'edit rule' : 'new rule'}
         sub={editId && editing ? editing.label : undefined}
         width={560}
@@ -330,7 +378,7 @@ export function BlockRulesCard({ onChanged }: { onChanged?: () => void }) {
               </Btn>
             ) : <span />}
             <div className="flex items-center gap-2">
-              <Btn sm className="min-h-9 sm:min-h-0" onClick={() => { setEditing(null); setEditId(null); }} disabled={busy}>Cancel</Btn>
+              <Btn sm className="min-h-9 sm:min-h-0" onClick={() => { setEditing(null); setEditId(null); setFieldErrors({}); }} disabled={busy}>Cancel</Btn>
               <Btn
                 sm
                 tone="accent"
@@ -353,8 +401,13 @@ export function BlockRulesCard({ onChanged }: { onChanged?: () => void }) {
                 value={editing.label}
                 onChange={e => patch({ label: e.target.value })}
                 placeholder="e.g. Christmas songs"
-                maxLength={64}
+                maxLength={RULE_TEXT_MAX}
+                aria-invalid={!!fieldErrors.label || undefined}
+                aria-describedby={fieldErrors.label ? `${fieldId}-label-error` : undefined}
               />
+              {fieldErrors.label && (
+                <FieldError id={`${fieldId}-label-error`} errors={[{ message: fieldErrors.label }]} />
+              )}
             </div>
 
             <div className="field">
@@ -410,6 +463,12 @@ export function BlockRulesCard({ onChanged }: { onChanged?: () => void }) {
                   placeholder={editing.field === 'genre' ? 'e.g. Death Metal' : editing.field === 'tag' ? 'e.g. christmas' : 'add a value…'}
                   suggestions={editing.field === 'genre' || editing.field === 'tag' ? genres : undefined}
                 />
+                {fieldErrors.values && (
+                  <FieldError
+                    id={`${fieldId}-values-error`}
+                    errors={[{ message: fieldErrors.values }]}
+                  />
+                )}
               </div>
             )}
 
