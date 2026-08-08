@@ -2711,6 +2711,17 @@ export function weatherMoodsSchema(ctx: SettingsMoodContext) {
   return settingsMoodMap(SETTINGS_WEATHER_CONDITIONS, 'weatherMoods', true, ctx);
 }
 
+// Festival field bounds. Named rather than left as literals inside the schema
+// because the admin editor needs the same numbers for its maxLength / min / max
+// attributes, and it was hard-coding them — the drift that had already bitten
+// the persona editor.
+export const SETTINGS_FESTIVAL_NAME_MAX = 80;
+export const SETTINGS_FESTIVAL_DESCRIPTION_MAX = 200;
+// Days either side of the date on which the festival's mood applies. The
+// ceiling is deliberately low: past a fortnight a "festival window" is just a
+// season, which is what moodSchedule is for.
+export const SETTINGS_FESTIVAL_WINDOW_DAYS_MAX = 14;
+
 export function festivalsSchema(ctx: SettingsMoodContext) {
   const names = ctx.moodNames ? new Set(ctx.moodNames) : null;
   const list = ctx.moodNames ? ctx.moodNames.join(', ') : '';
@@ -2741,8 +2752,8 @@ export function festivalsSchema(ctx: SettingsMoodContext) {
         }
         const f = item as Record<string, unknown>;
         const name = String(f.name ?? '').trim();
-        if (name.length < 1 || name.length > 80) {
-          add(`festivals[${i}].name must be 1-80 chars`, 'name');
+        if (name.length < 1 || name.length > SETTINGS_FESTIVAL_NAME_MAX) {
+          add(`festivals[${i}].name must be 1-${SETTINGS_FESTIVAL_NAME_MAX} chars`, 'name');
           return;
         }
         const month = Number(f.month);
@@ -2773,8 +2784,15 @@ export function festivalsSchema(ctx: SettingsMoodContext) {
           return;
         }
         const windowDays = Number(f.windowDays ?? 0);
-        if (!Number.isInteger(windowDays) || windowDays < 0 || windowDays > 14) {
-          add(`festivals[${i}].windowDays must be an integer 0-14`, 'windowDays');
+        if (
+          !Number.isInteger(windowDays)
+          || windowDays < 0
+          || windowDays > SETTINGS_FESTIVAL_WINDOW_DAYS_MAX
+        ) {
+          add(
+            `festivals[${i}].windowDays must be an integer 0-${SETTINGS_FESTIVAL_WINDOW_DAYS_MAX}`,
+            'windowDays',
+          );
         }
       });
     })
@@ -2785,7 +2803,9 @@ export function festivalsSchema(ctx: SettingsMoodContext) {
         name: String(f.name ?? '').trim(),
         mood: String(f.mood ?? '').trim(),
         description:
-          typeof f.description === 'string' ? f.description.trim().slice(0, 200) : '',
+          typeof f.description === 'string'
+            ? f.description.trim().slice(0, SETTINGS_FESTIVAL_DESCRIPTION_MAX)
+            : '',
         windowDays: Number(f.windowDays ?? 0),
       })),
     );

@@ -19,6 +19,11 @@ import { cn } from '../../lib/cn';
 import ArchivesPanel from './ArchivesPanel';
 import BackupPanel from './BackupPanel';
 import {
+  SETTINGS_AAC_BITRATES,
+  SETTINGS_MP3_BITRATES,
+  SETTINGS_OPUS_BITRATES,
+} from '@/lib/schemas.generated';
+import {
   Radio, Palette, Cpu, Mic, Library, Search,
   Activity, Archive, Save, AlertTriangle, Heart, Music2,
 } from 'lucide-react';
@@ -54,12 +59,14 @@ const SECTIONS = [
 
 type SectionId = (typeof SECTIONS)[number]['id'];
 
-// Keep in sync with MP3_BITRATES in controller/src/settings.ts — radio.liq
-// has a literal `%mp3(bitrate=…)` branch per value, so this set is fixed.
-const MP3_BITRATES = [64, 96, 128, 160, 192, 320] as const;
-// Keep in sync with OPUS_BITRATES / AAC_BITRATES in controller/src/settings.ts.
-const OPUS_BITRATES = [96, 128, 192, 256, 320] as const;
-const AAC_BITRATES = [128, 192, 256] as const;
+// The three encoder vocabularies, from the mirror rather than re-typed. radio.liq
+// has a literal `%mp3(bitrate=…)` branch per value, so each set is genuinely
+// fixed — but "fixed" is why a hand-copied list is dangerous rather than safe:
+// it drifts silently the one time a value IS added, offering the operator a
+// bitrate the schema then refuses (or hiding one it would have accepted).
+const MP3_BITRATES = SETTINGS_MP3_BITRATES;
+const OPUS_BITRATES = SETTINGS_OPUS_BITRATES;
+const AAC_BITRATES = SETTINGS_AAC_BITRATES;
 
 /**
  * Replace exactly the errors belonging to the keys this patch carried.
