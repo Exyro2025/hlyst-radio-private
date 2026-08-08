@@ -543,6 +543,8 @@ export function StationSection({ data, form, setForm, busy, saveSettings, fieldE
         busy={busy}
         onSave={save}
         saveLabel="Save station settings"
+        errors={fieldErrors}
+        ownedKeys={['station', 'stationDescription', 'timezone', 'locale', 'weather', 'privacy', 'requests']}
       />
     </>
   );
