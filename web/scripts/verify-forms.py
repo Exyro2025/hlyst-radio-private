@@ -124,6 +124,35 @@ def takeover(page):
     assert_survives_poll(page, minutes, "123")
 
 
+@check
+def festivals(page):
+    page.goto(f"{WEB}/admin/moods?tab=festivals")
+    page.wait_for_selector("text=Festival calendar")
+
+    page.get_by_role("button", name="Add festival").click()
+    dialog = page.get_by_role("dialog")
+    dialog.wait_for()
+
+    name = dialog.get_by_label("Name")
+    save = dialog.get_by_role("button", name="Add festival")
+
+    # 2. Validate — a blank name. The row is appended blank already, but
+    #    mode: 'onChange' only reacts to a real change event, so fill a
+    #    value first and then clear it to force one.
+    name.fill("x")
+    name.fill("")
+    page.wait_for_selector("text=must be 1-80 chars")
+    assert_aria(page, name)
+    assert save.is_disabled(), "Save enabled with a blank name"
+
+    # 3. Save — a valid name (month/day/mood default to valid values), confirm
+    #    it lands in /settings.
+    name.fill("Verify Festival")
+    save.click()
+    dialog.wait_for(state="detached")
+    assert '"Verify Festival"' in api("/settings"), "festival did not persist"
+
+
 if __name__ == "__main__":
     names = sys.argv[1:] or list(CHECKS)
     with sync_playwright() as pw:
