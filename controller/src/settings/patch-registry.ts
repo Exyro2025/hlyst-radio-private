@@ -59,6 +59,26 @@ import {
   weatherPatchSchema,
   webhooksPolicyPatchSchema,
 } from '../schemas/settings.js';
+import {
+  activeDjPromptIdSchema,
+  djPromptTextSchema,
+  maxTrackSecondsSchema,
+  themePatchSchema,
+} from '../schemas/settings.js';
+import {
+  DJ_PROMPT_TEXT_MAX,
+  DJ_PROMPT_TEXT_MIN,
+  djPromptsSchema,
+  personasSchema,
+} from '../schemas/persona.js';
+import { scheduleOverrideSchema, scheduleSchema } from '../schemas/schedule.js';
+import { SHOW_MAX_TRACK_SECONDS, showsSchema } from '../schemas/show.js';
+import { webhooksSchema } from '../schemas/webhook.js';
+
+// Mirrors settings/defaults.ts's BOUNDS.maxTrackSeconds, which reads its ceiling
+// from the same SHOW_MAX_TRACK_SECONDS — a mirrored module may not import a
+// non-mirrored one, so the bound is composed here rather than imported.
+const MAX_TRACK_SECONDS_BOUNDS = { min: 0, max: SHOW_MAX_TRACK_SECONDS };
 import { firstMessage, flattenIssues } from '../util/zod-error.js';
 
 /**
@@ -140,9 +160,16 @@ export interface SettingsPatchContext {
    *  body. The route cannot know it (that is update()'s ordering to resolve),
    *  so it passes null and checks shape only. */
   moodNames: string[] | null;
+  /** The EFFECTIVE show roster, for `scheduleOverride`'s "must name a real
+   *  show" rule. Null for the same reason as moodNames: `shows` may ride in the
+   *  same body, and only update() has applied it by the time this is judged. */
+  showIds: string[] | null;
 }
 
-export const SETTINGS_PATCH_SHAPE_ONLY: SettingsPatchContext = { moodNames: null };
+export const SETTINGS_PATCH_SHAPE_ONLY: SettingsPatchContext = {
+  moodNames: null,
+  showIds: null,
+};
 
 type SettingsPatchEntry = ZodType | ((ctx: SettingsPatchContext) => ZodType);
 
@@ -183,6 +210,53 @@ export const SETTINGS_PATCH_SCHEMAS: Readonly<Partial<Record<SettingsPatchKey, S
   timezone: timezoneSchema,
   privacy: privacyPatchSchema,
   requests: requestsPatchSchema,
+  // Both are validated by the SAME schema update() reaches through
+  // validatePersonasStrict / validateDjPromptsStrict. Their branches are NOT
+  // switched to parseSettingsPatchKey, because both need a server-only step the
+  // schema deliberately cannot do — resolvePersonaIds / resolveDjPromptIds mint
+  // and de-duplicate ids, which is a side effect. Registering them here is what
+  // gives the Personas panel its `fieldErrors` channel; the strict validators
+  // stay the authoritative chokepoint, and both run one implementation.
+  personas: personasSchema,
+  djPrompts: djPromptsSchema,
+  // Shape and bounds only — each of these keeps a genuinely stateful half in
+  // update(), named on its schema: theme's async "does this id exist" fallback,
+  // maxTrackSeconds' crossfade-derived floor, activeDjPromptId's membership in a
+  // library the same patch may be replacing, and djPrompt's mapping onto that
+  // library. Registering the pure half is still worth it: it is what gives these
+  // inputs a `fieldErrors` key, and it moves the refusal to the boundary.
+  theme: themePatchSchema,
+  maxTrackSeconds: maxTrackSecondsSchema(MAX_TRACK_SECONDS_BOUNDS),
+  activeDjPromptId: activeDjPromptIdSchema,
+  djPrompt: djPromptTextSchema({ min: DJ_PROMPT_TEXT_MIN, max: DJ_PROMPT_TEXT_MAX }),
+  // A FACTORY over the show roster — null at the route (shows may ride in the
+  // same body), the real list inside update(). Nullable because clearing the
+  // pin is how a takeover is cancelled.
+  scheduleOverride: (ctx) =>
+    scheduleOverrideSchema({ showIds: ctx.showIds, now: null }).nullable(),
+  // These three were already on a shared schema before this registry existed —
+  // update() reaches them through validateShowsStrict / validateScheduleStrict /
+  // validateWebhooksStrict, which is where their server-only halves live (id
+  // resolution, the redacted-secret merge, the drop-and-count posture). What
+  // they lacked was a ROUTE, so a panel posting them to /settings got a flat
+  // 400 and no `fieldErrors`. Registering the pure half closes that without
+  // touching their branches.
+  //
+  // Every context field is null: the route cannot know the roster, the mood
+  // vocabulary, the theme registry or the crossfade-derived floor, any of which
+  // the same body may be changing. Shape and per-field rules still apply.
+  shows: (ctx) =>
+    showsSchema({
+      // personaIds is NOT nullable on ShowSchemaContext — a show with no owner
+      // has none on either path — so the route passes the empty roster, which
+      // makes host membership unresolvable and therefore unchecked here.
+      personaIds: [],
+      moodNames: ctx.moodNames,
+      themeIds: null,
+      minTrackSeconds: null,
+    }),
+  schedule: (ctx) => scheduleSchema({ showIds: ctx.showIds }),
+  webhooks: webhooksSchema,
 };
 
 /** Resolve an entry against a context — a plain schema ignores it. */
@@ -240,6 +314,42 @@ function flatten(err: ZodError): string {
 }
 
 /**
+ * The keys whose messages are NOT self-locating, and therefore need the path
+ * prefixed after all.
+ *
+ * The verbatim rule above holds for a BLOCK ('beds.thresholdSec must be …') and
+ * for a scalar, because there is exactly one place the failure can be. It
+ * breaks for an ARRAY: the persona schema's message is 'name must be 1-40
+ * chars', and on a 20-persona roster that names no row at all — which is the
+ * precise failure `firstMessage` was written to fix, and which
+ * validatePersonasStrict already avoids by rooting at its settings key. Rooting
+ * these here is what keeps the route's flat string identical to the one
+ * update() throws for the same body, rather than a less useful second opinion.
+ *
+ * A key belongs here when its schema is an array (or otherwise reports issues
+ * at a path), NOT when its messages merely happen to omit the key name.
+ */
+const SETTINGS_PATCH_ROOTED_KEYS: ReadonlySet<string> = new Set<SettingsPatchKey>([
+  'personas',
+  'djPrompts',
+  // A nested object rather than an array, but the same reason: its messages
+  // ('must be a show id', 'must be an object') are phrased WITHOUT the key,
+  // because validateScheduleOverrideStrict has always rooted them here. Adding
+  // the key to the text instead would double it on that path.
+  'scheduleOverride',
+  // The same three validate*Strict functions already root at their settings
+  // key, so the route must too or the two disagree about the same body.
+  'shows',
+  'schedule',
+  'webhooks',
+]);
+
+/** Root the flat message at its settings key when that key needs it. */
+function flattenFor(key: SettingsPatchKey, err: ZodError): string {
+  return SETTINGS_PATCH_ROOTED_KEYS.has(key) ? firstMessage(err, key) : flatten(err);
+}
+
+/**
  * Strict posture — parse ONE key's value, or throw a plain Error.
  *
  * Used inside update(), which answers `{ error: err.message }`. A raw ZodError
@@ -258,7 +368,7 @@ export function parseSettingsPatchKey<T = unknown>(
   const schema = schemaFor(key, ctx);
   if (!schema) return value as T;
   const r = schema.safeParse(value);
-  if (!r.success) throw new Error(flatten(r.error));
+  if (!r.success) throw new Error(flattenFor(key, r.error));
   return r.data as T;
 }
 
@@ -308,7 +418,7 @@ export function validateSettingsPatch(patch: unknown): SettingsPatchFailure | nu
     if (r.success) continue;
     // First failure in BRANCH order owns the flat string, so the route and
     // update() agree on which problem to name.
-    if (!error) error = flatten(r.error);
+    if (!error) error = flattenFor(key, r.error);
     fieldErrors = { ...fieldErrors, ...prefixed(key, flattenIssues(r.error)) };
   }
   return error ? { error, fieldErrors } : null;

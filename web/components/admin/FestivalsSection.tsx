@@ -15,6 +15,13 @@ import { V3AlertDialog } from '../ui/alert-dialog';
 import { SkeletonRows } from '@/components/ui/skeleton';
 import { EmptyState } from '@/components/ui/empty-state';
 import { ErrorState } from '@/components/ui/error-state';
+// Bounds from the mirror rather than re-typed literals — the festival window
+// in particular was hard-coded as a bare 14 in two places here.
+import {
+  SETTINGS_FESTIVAL_DESCRIPTION_MAX,
+  SETTINGS_FESTIVAL_NAME_MAX,
+  SETTINGS_FESTIVAL_WINDOW_DAYS_MAX,
+} from '@/lib/schemas.generated';
 
 interface Festival {
   month: number;
@@ -308,7 +315,7 @@ export default function FestivalsSection() {
                 value={editing.name}
                 onChange={e => updateField('name', e.target.value)}
                 placeholder="e.g. New Year's Day"
-                maxLength={80}
+                maxLength={SETTINGS_FESTIVAL_NAME_MAX}
               />
             </div>
 
@@ -364,7 +371,7 @@ export default function FestivalsSection() {
                 value={editing.description || ''}
                 onChange={e => updateField('description', e.target.value)}
                 placeholder="Short note about the festival"
-                maxLength={200}
+                maxLength={SETTINGS_FESTIVAL_DESCRIPTION_MAX}
               />
               <div className="field-hint mt-1">
                 A short note your DJ can weave into its chat while the festival is on.
@@ -395,9 +402,12 @@ export default function FestivalsSection() {
                   id={`${fieldId}-window`}
                   type="number"
                   min={0}
-                  max={14}
+                  max={SETTINGS_FESTIVAL_WINDOW_DAYS_MAX}
                   value={String(editing.windowDays ?? 0)}
-                  onChange={e => updateField('windowDays', Math.max(0, Math.min(14, Number(e.target.value) || 0)))}
+                  onChange={e => updateField(
+                    'windowDays',
+                    Math.max(0, Math.min(SETTINGS_FESTIVAL_WINDOW_DAYS_MAX, Number(e.target.value) || 0)),
+                  )}
                 />
               </div>
             </div>

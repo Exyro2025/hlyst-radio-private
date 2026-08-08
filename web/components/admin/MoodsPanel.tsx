@@ -15,6 +15,11 @@ import {
 import { SkeletonCards } from '@/components/ui/skeleton';
 import { ErrorState } from '@/components/ui/error-state';
 import FestivalsSection from './FestivalsSection';
+import {
+  SETTINGS_MOODS_LIMIT,
+  SETTINGS_MOOD_NAME_MAX,
+  SETTINGS_MOOD_PROMPT_MAX,
+} from '@/lib/schemas.generated';
 
 interface MoodEntry {
   name: string;
@@ -52,7 +57,9 @@ const CONDITIONS: Array<{ id: string; label: string }> = [
 // option rides a sentinel that maps back to '' on save.
 const NONE = '__none__';
 
-const MOODS_LIMIT = 40; // mirrors the server MOODS_LIMIT
+// From the mirror, not re-typed: a bare literal beside a "mirrors the
+// server" comment is exactly what had already drifted in the persona editor.
+const MOODS_LIMIT = SETTINGS_MOODS_LIMIT;
 
 type TabId = 'vocab' | 'moments' | 'festivals' | 'speech';
 const TAB_IDS: TabId[] = ['vocab', 'moments', 'festivals', 'speech'];
@@ -240,7 +247,7 @@ export default function MoodsPanel() {
                       onChange={e => setMoods(list =>
                         (list ?? []).map((row, i) => i === idx ? { ...row, name: e.target.value } : row))}
                       placeholder="id (e.g. mellow)"
-                      maxLength={40}
+                      maxLength={SETTINGS_MOOD_NAME_MAX}
                       className="col-start-1 row-start-1 min-w-0"
                     />
                     <Input
@@ -249,7 +256,7 @@ export default function MoodsPanel() {
                       onChange={e => setMoods(list =>
                         (list ?? []).map((row, i) => i === idx ? { ...row, clapPrompt: e.target.value } : row))}
                       placeholder="sound description for audio tagging (optional)"
-                      maxLength={200}
+                      maxLength={SETTINGS_MOOD_PROMPT_MAX}
                       className="col-span-2 col-start-1 row-start-2 min-w-0 sm:col-span-1 sm:col-start-2 sm:row-start-1"
                     />
                     <Btn

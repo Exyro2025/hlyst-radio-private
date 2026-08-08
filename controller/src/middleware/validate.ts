@@ -16,12 +16,42 @@ import type { ZodType } from 'zod';
 import { validateSettingsPatch } from '../settings/patch-registry.js';
 import { firstMessage, flattenIssues } from '../util/zod-error.js';
 
-export function validateBody(schema: ZodType) {
+export interface ValidateBodyOptions {
+  /**
+   * How the flat `error` string is built.
+   *
+   * `'prefixed'` (the default) puts the dotted path in front, because zod's
+   * built-in messages name a CONSTRAINT and never a location — 'expected array,
+   * received string' is useless without 'webhooks.1.url' ahead of it.
+   *
+   * `'verbatim'` takes the first issue's message as written. Use it ONLY for a
+   * schema whose every message already names its own field, where prefixing
+   * doubles the location: `POST /library/blocklist/rules` would otherwise
+   * answer 'label: rule.label is required'. This is the same narrow exception
+   * settings/patch-registry.ts documents, and for the same reason — these
+   * strings are what the store's own chokepoint throws, so the route and the
+   * chokepoint must not report the same body two different ways.
+   *
+   * `fieldErrors` is unaffected either way: it always carries the dotted path,
+   * which is where a form needs it.
+   */
+  messages?: 'prefixed' | 'verbatim';
+}
+
+function flatError(error: Parameters<typeof flattenIssues>[0], opts?: ValidateBodyOptions): string {
+  // firstMessage remains the fallback for an issue carrying no message at all,
+  // so a future schema cannot produce a bare 400.
+  return opts?.messages === 'verbatim'
+    ? error.issues[0]?.message || firstMessage(error)
+    : firstMessage(error);
+}
+
+export function validateBody(schema: ZodType, opts?: ValidateBodyOptions) {
   return (req: Request, res: Response, next: NextFunction) => {
     const r = schema.safeParse(req.body);
     if (!r.success) {
       return res.status(400).json({
-        error: firstMessage(r.error),
+        error: flatError(r.error, opts),
         fieldErrors: flattenIssues(r.error),
       });
     }
@@ -103,7 +133,10 @@ export function validateSettingsBody() {
   };
 }
 
-export function validateBodyAsync(resolve: (req: Request) => Promise<ZodType> | ZodType) {
+export function validateBodyAsync(
+  resolve: (req: Request) => Promise<ZodType> | ZodType,
+  opts?: ValidateBodyOptions,
+) {
   return async (req: Request, res: Response, next: NextFunction) => {
     let schema: ZodType;
     try {
@@ -114,7 +147,7 @@ export function validateBodyAsync(resolve: (req: Request) => Promise<ZodType> | 
     const r = schema.safeParse(req.body);
     if (!r.success) {
       return res.status(400).json({
-        error: firstMessage(r.error),
+        error: flatError(r.error, opts),
         fieldErrors: flattenIssues(r.error),
       });
     }

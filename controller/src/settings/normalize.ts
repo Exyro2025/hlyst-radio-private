@@ -5,35 +5,15 @@
 // Part of the settings/ split — see ../settings.ts for the public barrel.
 
 import {
-  AVATAR_FILENAME_RE,
-  CHATTERBOX_VOICE_RE,
   DJ_PROMPT_LIMIT,
-  DJ_PROMPT_NAME_MAX,
-  DJ_PROMPT_TEXT_MAX,
-  DJ_PROMPT_TEXT_MIN,
   DjPromptEntry,
-  FREQUENCIES,
-  ID_RE,
-  KOKORO_VOICE_RE,
   NormalizedShow,
   PERSONA_LIMIT,
-  PIPER_VOICE_RE,
-  POCKET_TTS_VOICE_RE,
-  SCRIPT_LENGTHS,
-  SKILLS_PER_PERSONA_LIMIT,
-  SKILL_SLUG_RE,
-  SOUL_MAX,
   ScheduleOverride,
-  TTS_CLOUD_PROVIDERS,
-  TTS_ENGINES,
   WEBHOOKS_LIMIT,
   WEBHOOK_EVENTS,
   Webhook,
-  clampTtsGain,
-  clampTtsSpeed,
   emptyWeek,
-  mintId,
-  normalizeDial,
 } from './vocab.js';
 import { DEFAULTS, coerceMaxTrackSeconds } from './defaults.js';
 // The webhook rules themselves, so this lenient path and update()'s strict one
@@ -49,6 +29,16 @@ import {
   type ShowSchemaContext,
 } from '../schemas/show.js';
 import { resolveShowIds } from '../schemas/show-server.js';
+// The persona + prompt-library rules themselves, so this lenient path and
+// update()'s strict one cannot restate them differently.
+import {
+  djPromptSchema,
+  personaSchema,
+  repairDjPromptForLoad,
+  repairPersonaForLoad,
+  repairTtsVoiceSlot,
+} from '../schemas/persona.js';
+import { resolveDjPromptIds, resolvePersonaIds } from '../schemas/persona-server.js';
 import {
   repairScheduleForLoad,
   scheduleSchema,
@@ -85,69 +75,17 @@ export function normalizeArchiveRetentionDays(archive: any): number {
 export const SKILL_RENAMES: Record<string, string> = {
   'random-facts': 'curiosity',
 };
-function normalizeSkills(raw: unknown) {
-  if (!Array.isArray(raw)) return null;
-  const seen = new Set<string>();
-  const out: string[] = [];
-  for (const item of raw) {
-    if (typeof item !== 'string') continue;
-    const v = SKILL_RENAMES[item.trim()] || item.trim();
-    if (!SKILL_SLUG_RE.test(v) || seen.has(v)) continue;
-    seen.add(v);
-    out.push(v);
-    if (out.length >= SKILLS_PER_PERSONA_LIMIT) break;
-  }
-  return out;
-}
-
-// Lenient normaliser for a `{engine, voice, cloudProvider}` voice slot. Shared
-// by every persona's `tts` block AND the station-wide TTS fallback slot
-// (`settings.tts.fallback`) — the two carry the same shape by design, because a
-// fallback slot is handed to speakWith() as a synthetic persona (the same trick
-// synthesizeSample() uses for previews). Keeping one normaliser is what stops
-// the per-engine voice rules drifting between the two.
-export function normalizeTts(raw: unknown) {
-  const r = (raw ?? {}) as Record<string, unknown>;
-  const engine = TTS_ENGINES.includes(r.engine as string) ? (r.engine as string) : 'piper';
-  const cloudProvider = TTS_CLOUD_PROVIDERS.includes(r.cloudProvider as string)
-    ? (r.cloudProvider as string)
-    : 'openai';
-  let voice =
-    typeof r.voice === 'string' && r.voice.trim() ? r.voice.trim().slice(0, 100) : '';
-  if (engine === 'kokoro' && !KOKORO_VOICE_RE.test(voice)) voice = 'bf_isabella';
-  // Chatterbox voices are reference-WAV filenames in config.chatterbox.voiceDir.
-  // Empty is legitimate ("use built-in default"), invalid filenames get reset
-  // to empty rather than rewritten to a Kokoro id.
-  if (engine === 'chatterbox' && voice && !CHATTERBOX_VOICE_RE.test(voice)) voice = '';
-  // PocketTTS accepts a built-in voice id (alba, anna, …) OR a .wav filename
-  // in the shared voice folder for zero-shot cloning (issue #213). Anything
-  // that matches neither shape resets to the default; the worker also guards
-  // against unknown ids, but normalising here keeps the persisted form clean.
-  if (
-    engine === 'pocket-tts'
-    && (!voice
-      || (!POCKET_TTS_VOICE_RE.test(voice) && !CHATTERBOX_VOICE_RE.test(voice)))
-  ) {
-    voice = 'alba';
-  }
-  // Piper voices are `.onnx` filenames in the shared voice folder (issue #230).
-  // Empty is legitimate ("use the baked-in default voice"); invalid filenames
-  // reset to empty. A Kokoro-shaped id is preserved, not wiped: the seed roster
-  // carries one per persona under piper so switching to Kokoro yields distinct
-  // voices without re-editing, and resolvePiperVoice() falls back gracefully for
-  // it at render time. Wiping it here would silently break that on first reload
-  // after a save (issue #454).
-  if (engine === 'piper' && voice && !PIPER_VOICE_RE.test(voice) && !KOKORO_VOICE_RE.test(voice))
-    voice = '';
-  // openai-compatible voices are server-specific (often arbitrary cloning ref
-  // names) — no canonical default; leave empty so generateSpeech omits the
-  // field and the server picks its own. Remote engine voices likewise:
-  // server-specific (id, reference-wav filename, or VoiceDesign prompt), no
-  // Subwave-side default.
-  if (!voice && engine === 'cloud' && cloudProvider !== 'openai-compatible') voice = 'alloy';
-  if (!voice && engine !== 'cloud' && engine !== 'chatterbox' && engine !== 'piper' && engine !== 'remote') voice = 'bf_isabella';
-  return { engine, cloudProvider, voice, gainDb: clampTtsGain(r.gainDb), speed: clampTtsSpeed(r.speed) };
-}
+/**
+ * Lenient normaliser for a `{engine, voice, cloudProvider}` voice slot.
+ *
+ * Shared by every persona's `tts` block AND the station-wide TTS fallback slot
+ * (`settings.tts.fallback`) — the two carry the same shape by design, because a
+ * fallback slot is handed to speakWith() as a synthetic persona. The rules now
+ * live once, in schemas/persona.ts's repairTtsVoiceSlot, beside the strict ones
+ * they repair against — a repair restated at the call site is a repair that can
+ * drift from the schema.
+ */
+export const normalizeTts = repairTtsVoiceSlot;
 
 // Load-time shape for `settings.tts.fallback` — the station's operator-chosen
 // rescue voice. The voice slot itself goes through normalizeTts() (one set of
@@ -163,73 +101,64 @@ export function normalizeTtsFallback(raw: unknown) {
   return { enabled: typeof r.enabled === 'boolean' ? r.enabled : false, engine, voice, cloudProvider };
 }
 
+/**
+ * One persona, repaired then validated by the SAME schema update() enforces.
+ *
+ * repairPersonaForLoad lands every field on a value the strict path accepts, so
+ * load and save cannot disagree about what a valid persona is. What stays here
+ * is only the LENIENCY: a row that cannot be repaired into validity (no name,
+ * no soul) returns null and the caller drops it, where update() would throw.
+ *
+ * SKILL_RENAMES travels as an argument because schemas/persona.ts may import
+ * nothing but zod — and because a rename is a migration of stored data, not a
+ * rule a submitted value has to satisfy, which is why the strict path has never
+ * applied one.
+ */
 export function normalizePersona(raw: unknown) {
   if (!raw || typeof raw !== 'object') return null;
-  const r = raw as Record<string, unknown>;
-  const name = typeof r.name === 'string' ? r.name.trim().slice(0, 40) : '';
-  const soul = typeof r.soul === 'string' ? r.soul.trim().slice(0, SOUL_MAX) : '';
-  if (!name || !soul) return null;
-  // Avatar — stored as a bare basename. Reset to '' if the persisted value
-  // doesn't match the strict basename shape, so a hand-edited settings.json
-  // can never point /persona-avatar/:id at an arbitrary path.
-  const rawAvatar = typeof r.avatar === 'string' ? r.avatar.trim() : '';
-  const avatar = rawAvatar && AVATAR_FILENAME_RE.test(rawAvatar) ? rawAvatar : '';
-  return {
-    id: typeof r.id === 'string' && ID_RE.test(r.id) ? r.id : mintId('p_'),
-    name,
-    tagline: typeof r.tagline === 'string' ? r.tagline.trim().slice(0, 80) : '',
-    frequency: FREQUENCIES.includes(r.frequency as string) ? (r.frequency as string) : 'moderate',
-    scriptLength: SCRIPT_LENGTHS.includes(r.scriptLength as string) ? (r.scriptLength as string) : 'concise',
-    djMode: r.djMode === true,
-    humour: normalizeDial(r.humour),
-    localColour: normalizeDial(r.localColour),
-    warmth: normalizeDial(r.warmth),
-    soul,
-    language: typeof r.language === 'string' ? r.language.trim().slice(0, 60) : '',
-    avatar,
-    tts: normalizeTts(r.tts),
-    skills: normalizeSkills(r.skills),
-  };
+  const repaired = repairPersonaForLoad(raw as Record<string, unknown>, SKILL_RENAMES);
+  const parsed = personaSchema.safeParse(repaired);
+  return parsed.success ? parsed.data : null;
 }
 
 export function normalizePersonaArray(raw: unknown) {
   if (!Array.isArray(raw)) return null;
-  const seen = new Set<string>();
   const out: NonNullable<ReturnType<typeof normalizePersona>>[] = [];
   for (const item of raw) {
     const p = normalizePersona(item);
     if (!p) continue;
-    if (seen.has(p.id)) p.id = mintId('p_');
-    seen.add(p.id);
     out.push(p);
     if (out.length >= PERSONA_LIMIT) break;
   }
-  return out.length ? out : null;
+  // Ids are minted and de-duplicated by the same server-only helper the strict
+  // path uses, so a roster that round-trips through load never renumbers.
+  return out.length ? resolvePersonaIds(out) : null;
 }
 
-// Lenient load-time path for the prompt-template library: drop entries that
-// can't render (bad text) rather than failing the whole settings load. A
-// missing/duplicate name degrades to "Prompt N" instead of dropping the entry —
-// the text is the part the operator can't afford to lose.
+/**
+ * Lenient load-time path for the prompt-template library: drop entries that
+ * can't render (bad text) rather than failing the whole settings load.
+ *
+ * A missing/duplicate name degrades to "Prompt N" instead of dropping the
+ * entry — the text is the part the operator can't afford to lose. That fallback
+ * numbers by SURVIVING row, which is why it is computed here and handed to the
+ * repair rather than derived inside it.
+ */
 export function normalizeDjPrompts(raw: unknown): DjPromptEntry[] {
   if (!Array.isArray(raw)) return [];
-  const seen = new Set<string>();
   const out: DjPromptEntry[] = [];
   for (const item of raw) {
     if (!item || typeof item !== 'object') continue;
-    const text = typeof item.text === 'string' ? item.text.trim() : '';
-    if (text.length < DJ_PROMPT_TEXT_MIN || text.length > DJ_PROMPT_TEXT_MAX) continue;
-    if (!text.includes('{name}')) continue;
-    let id = typeof item.id === 'string' && ID_RE.test(item.id) ? item.id : mintId('dp_');
-    if (seen.has(id)) id = mintId('dp_');
-    seen.add(id);
-    const name =
-      (typeof item.name === 'string' ? item.name.trim().slice(0, DJ_PROMPT_NAME_MAX) : '') ||
-      `Prompt ${out.length + 1}`;
-    out.push({ id, name, text });
+    const repaired = repairDjPromptForLoad(
+      item as Record<string, unknown>,
+      `Prompt ${out.length + 1}`,
+    );
+    const parsed = djPromptSchema.safeParse(repaired);
+    if (!parsed.success) continue;
+    out.push(parsed.data as DjPromptEntry);
     if (out.length >= DJ_PROMPT_LIMIT) break;
   }
-  return out;
+  return resolveDjPromptIds(out) as DjPromptEntry[];
 }
 
 export function normalizeShows(raw: unknown, personaIds: string[]): NormalizedShow[] {

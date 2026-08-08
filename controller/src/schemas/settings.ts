@@ -860,6 +860,17 @@ export function weatherMoodsSchema(ctx: SettingsMoodContext) {
   return settingsMoodMap(SETTINGS_WEATHER_CONDITIONS, 'weatherMoods', true, ctx);
 }
 
+// Festival field bounds. Named rather than left as literals inside the schema
+// because the admin editor needs the same numbers for its maxLength / min / max
+// attributes, and it was hard-coding them — the drift that had already bitten
+// the persona editor.
+export const SETTINGS_FESTIVAL_NAME_MAX = 80;
+export const SETTINGS_FESTIVAL_DESCRIPTION_MAX = 200;
+// Days either side of the date on which the festival's mood applies. The
+// ceiling is deliberately low: past a fortnight a "festival window" is just a
+// season, which is what moodSchedule is for.
+export const SETTINGS_FESTIVAL_WINDOW_DAYS_MAX = 14;
+
 export function festivalsSchema(ctx: SettingsMoodContext) {
   const names = ctx.moodNames ? new Set(ctx.moodNames) : null;
   const list = ctx.moodNames ? ctx.moodNames.join(', ') : '';
@@ -890,8 +901,8 @@ export function festivalsSchema(ctx: SettingsMoodContext) {
         }
         const f = item as Record<string, unknown>;
         const name = String(f.name ?? '').trim();
-        if (name.length < 1 || name.length > 80) {
-          add(`festivals[${i}].name must be 1-80 chars`, 'name');
+        if (name.length < 1 || name.length > SETTINGS_FESTIVAL_NAME_MAX) {
+          add(`festivals[${i}].name must be 1-${SETTINGS_FESTIVAL_NAME_MAX} chars`, 'name');
           return;
         }
         const month = Number(f.month);
@@ -922,8 +933,15 @@ export function festivalsSchema(ctx: SettingsMoodContext) {
           return;
         }
         const windowDays = Number(f.windowDays ?? 0);
-        if (!Number.isInteger(windowDays) || windowDays < 0 || windowDays > 14) {
-          add(`festivals[${i}].windowDays must be an integer 0-14`, 'windowDays');
+        if (
+          !Number.isInteger(windowDays)
+          || windowDays < 0
+          || windowDays > SETTINGS_FESTIVAL_WINDOW_DAYS_MAX
+        ) {
+          add(
+            `festivals[${i}].windowDays must be an integer 0-${SETTINGS_FESTIVAL_WINDOW_DAYS_MAX}`,
+            'windowDays',
+          );
         }
       });
     })
@@ -934,8 +952,142 @@ export function festivalsSchema(ctx: SettingsMoodContext) {
         name: String(f.name ?? '').trim(),
         mood: String(f.mood ?? '').trim(),
         description:
-          typeof f.description === 'string' ? f.description.trim().slice(0, 200) : '',
+          typeof f.description === 'string'
+            ? f.description.trim().slice(0, SETTINGS_FESTIVAL_DESCRIPTION_MAX)
+            : '',
         windowDays: Number(f.windowDays ?? 0),
       })),
     );
+}
+
+
+// ── theme ────────────────────────────────────────────────────────────────────
+
+/**
+ * `theme` — only `active` is a settings value; everything else in the block is
+ * derived at serve time.
+ *
+ * A NON-OBJECT block is a silent no-op (`patch.theme || {}`), so it is coerced
+ * rather than refused — the settingsBlockOf posture. And `active` is optional
+ * BECAUSE the branch acts only `if (t.active !== undefined)`: a patch of
+ * `{theme: {}}` has always been a legal no-op.
+ *
+ * What stays in update(): the "is this a theme id that actually exists" check.
+ * It is async (the registry reads the themes dir) and it FALLS BACK to the
+ * built-in default rather than refusing (#917 — throwing there aborted the whole
+ * restore for any install whose active theme id had since been retired), which
+ * is a repair only the server can make.
+ */
+export const themePatchSchema = z.preprocess(
+  (v) => (v && typeof v === 'object' && !Array.isArray(v) ? v : {}),
+  z.object({
+    active: z
+      .unknown()
+      .optional()
+      .transform((raw, ctx) => {
+        if (raw === undefined) return undefined;
+        const v = String(raw ?? '').trim();
+        if (!v) {
+          ctx.addIssue({ code: 'custom', message: 'theme.active must be a theme id' });
+          return z.NEVER;
+        }
+        return v;
+      }),
+  }),
+);
+
+// ── maxTrackSeconds ──────────────────────────────────────────────────────────
+
+/**
+ * The station-wide track-length cap. 0 = unlimited.
+ *
+ * BOUNDS ONLY. The crossfade-derived FLOOR ("a non-zero cap must leave solo
+ * airtime") stays in update(), for the reason ShowSchemaContext's
+ * `minTrackSeconds: null` documents: the floor is a function of the crossfade,
+ * which the SAME patch may be changing, so only update() — which applies the
+ * crossfade first — can judge it.
+ *
+ * The legacy `maxTrackMinutes` alias is deliberately NOT registered beside this.
+ * One branch serves both keys through `rawMaxTrackSec`, whose precedence rule is
+ * "seconds wins whenever it is present and non-empty" — so when both ride along,
+ * an unusable minutes value is IGNORED today, and a schema on that key would
+ * refuse a body that currently saves. An empty/absent seconds value passes here
+ * for the same reason: precedence hands off to minutes, and update() is still
+ * the authoritative chokepoint for whatever it resolves.
+ */
+export function maxTrackSecondsValueSchema(bounds: SettingsNumericBound) {
+  return settingsIntLike(
+    bounds,
+    `maxTrackSeconds must be int in [${bounds.min}, ${bounds.max}]`,
+  );
+}
+
+/**
+ * The REGISTRY entry — the same rule, one posture looser.
+ *
+ * `rawMaxTrackSec`'s precedence is "seconds wins whenever it is present and
+ * non-empty", so an absent or empty `maxTrackSeconds` beside a `maxTrackMinutes`
+ * is a legal body that hands off rather than a failure. update() validates the
+ * RESOLVED value with maxTrackSecondsValueSchema above, which is why the bound
+ * itself is written once.
+ *
+ * The legacy `maxTrackMinutes` alias is deliberately NOT registered: when both
+ * ride along, an unusable minutes value is IGNORED today, and a schema on that
+ * key would refuse a body that currently saves.
+ */
+export function maxTrackSecondsSchema(bounds: SettingsNumericBound) {
+  const value = maxTrackSecondsValueSchema(bounds);
+  return z.unknown().superRefine((raw, ctx) => {
+    if (raw == null || raw === '') return;
+    const r = value.safeParse(raw);
+    if (!r.success) {
+      for (const issue of r.error.issues) ctx.addIssue({ code: 'custom', message: issue.message });
+    }
+  });
+}
+
+// ── the DJ prompt selection ──────────────────────────────────────────────────
+
+/**
+ * `activeDjPromptId` — '' selects the built-in default, otherwise the id of a
+ * djPrompts entry.
+ *
+ * Coercion ONLY: `String(x ?? '').trim()` is the whole of what the branch does
+ * to this value. Whether the id resolves is a cross-key question answered after
+ * `djPrompts` has been applied, and it stays in update() — the same patch may be
+ * replacing the library the id has to name.
+ */
+export const activeDjPromptIdSchema = z
+  .unknown()
+  .optional()
+  .transform((raw) => String(raw ?? '').trim());
+
+/**
+ * `djPrompt` — the legacy single-field prompt (onboarding, older clients).
+ *
+ * Its two rules are pure and convert; what stays in update() is the MAPPING onto
+ * the library — '' selects the default, and custom text reuses the entry with
+ * identical text or appends a new "Custom prompt" — which reads and writes
+ * `next.djPrompts` and can hit the library cap.
+ */
+export function djPromptTextSchema(bounds: { min: number; max: number }) {
+  return z
+    .unknown()
+    .optional()
+    .transform((raw, ctx) => {
+      const v = String(raw ?? '').trim();
+      if (v === '') return v;
+      if (v.length < bounds.min || v.length > bounds.max) {
+        ctx.addIssue({
+          code: 'custom',
+          message: `djPrompt must be empty (use the default) or ${bounds.min}-${bounds.max} chars`,
+        });
+        return z.NEVER;
+      }
+      if (!v.includes('{name}')) {
+        ctx.addIssue({ code: 'custom', message: 'djPrompt must contain the {name} placeholder' });
+        return z.NEVER;
+      }
+      return v;
+    });
 }

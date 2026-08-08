@@ -23,6 +23,36 @@ import {
   type EraWindow,
 } from '../schemas/show.js';
 import { SKILL_SLUG_RE as SKILL_SLUG_PATTERN } from '../schemas/skill.js';
+// The persona shape's rules — and the TTS voice slot's, which the station-wide
+// rescue slot shares — now live in the shared schema the admin form runs too.
+// Aliased below under the names the controller already used, so no call site
+// moved when this landed.
+import {
+  DJ_PROMPT_LIMIT as DJ_PROMPT_LIMIT_VALUE,
+  DJ_PROMPT_NAME_MAX as DJ_PROMPT_NAME_MAX_VALUE,
+  DJ_PROMPT_TEXT_MAX as DJ_PROMPT_TEXT_MAX_VALUE,
+  DJ_PROMPT_TEXT_MIN as DJ_PROMPT_TEXT_MIN_VALUE,
+  PERSONA_AVATAR_FILENAME_RE,
+  PERSONA_DIAL_NEUTRAL,
+  PERSONA_FREQUENCIES,
+  PERSONA_LIMIT as PERSONA_LIMIT_VALUE,
+  PERSONA_SCRIPT_LENGTHS,
+  PERSONA_SKILLS_LIMIT,
+  PERSONA_SOUL_MAX,
+  TTS_CHATTERBOX_VOICE_RE,
+  TTS_CLOUD_PROVIDERS as TTS_CLOUD_PROVIDER_VALUES,
+  TTS_ENGINES as TTS_ENGINE_VALUES,
+  TTS_GAIN_CLAMP_DB as TTS_GAIN_CLAMP_DB_VALUE,
+  TTS_KOKORO_VOICE_RE,
+  TTS_PIPER_VOICE_RE,
+  TTS_POCKET_VOICE_RE,
+  TTS_SPEED_DEFAULT as TTS_SPEED_DEFAULT_VALUE,
+  TTS_SPEED_MAX as TTS_SPEED_MAX_VALUE,
+  TTS_SPEED_MIN as TTS_SPEED_MIN_VALUE,
+  clampPersonaDial,
+  clampTtsGain as clampTtsGainFn,
+  clampTtsSpeed as clampTtsSpeedFn,
+} from '../schemas/persona.js';
 import {
   SETTINGS_AAC_BITRATES,
   SETTINGS_LOUDNESS_SOURCES,
@@ -61,13 +91,13 @@ export const DJ_SOULS = [
 // hourlies, banter or segments) — only manual /dj/segment triggers, listener
 // requests and programme beats still speak. 'chatty' sits between the
 // historical moderate and aggressive.
-export const FREQUENCIES = ['silent', 'quiet', 'moderate', 'chatty', 'aggressive'];
+export const FREQUENCIES: readonly string[] = PERSONA_FREQUENCIES;
 
 // Per-persona verbosity, ascending. 'concise' is the historical default;
 // 'one-liner' cuts every segment to a single quick line, 'extended' roughly
 // doubles, 'storyteller' roughly triples for long-form monologues.
 // See llm/internal/prompts/system.ts LENGTH_PHRASES for the actual directives.
-export const SCRIPT_LENGTHS = ['one-liner', 'concise', 'extended', 'storyteller'];
+export const SCRIPT_LENGTHS: readonly string[] = PERSONA_SCRIPT_LENGTHS;
 
 // Per-persona tone dials. Each is 0-10 with 5 (DIAL_NEUTRAL) the default. A
 // model can't distinguish humour=6 from 7, so rather than inject a raw "7/10"
@@ -75,7 +105,7 @@ export const SCRIPT_LENGTHS = ['one-liner', 'concise', 'extended', 'storyteller'
 // away from neutral appends a style directive (personaToneDirectives below), so
 // a persona left at the defaults renders a byte-identical prompt to before.
 export const TONE_DIALS = ['humour', 'localColour', 'warmth'] as const;
-export const DIAL_NEUTRAL = 5;
+export const DIAL_NEUTRAL = PERSONA_DIAL_NEUTRAL;
 
 const TONE_DIAL_PHRASES: Record<string, { low: string; high: string }> = {
   humour: {
@@ -93,11 +123,9 @@ const TONE_DIAL_PHRASES: Record<string, { low: string; high: string }> = {
 };
 
 // Clamp any input to an integer 0-10, defaulting to neutral when unparseable.
-// The single chokepoint used by both normalizePersona and the seed roster.
-export function normalizeDial(v: unknown): number {
-  const n = Math.round(Number(v));
-  return Number.isFinite(n) ? Math.min(10, Math.max(0, n)) : DIAL_NEUTRAL;
-}
+// The single chokepoint used by both normalizePersona and the seed roster —
+// now defined in the shared schema, so the admin form clamps identically.
+export const normalizeDial = clampPersonaDial;
 
 // Pure: persona in, prompt fragment out. Returns '' when every dial sits in the
 // neutral band, so renderDjPrompt appends nothing and the default prompt is
@@ -131,7 +159,7 @@ export function personaToneDirectives(persona: unknown): string {
 // docker/Dockerfile.controller) to include the runtime. The dispatcher gates
 // each engine on isAvailable() so settings can reference it safely even when
 // the runtime is absent (the engine just falls back to Piper).
-export const TTS_ENGINES = ['piper', 'kokoro', 'chatterbox', 'pocket-tts', 'cloud', 'remote'];
+export const TTS_ENGINES: readonly string[] = TTS_ENGINE_VALUES;
 
 // DJ-voice level trim, in dB. A per-engine gain levels the loudness gap between
 // TTS engines (only PocketTTS self-normalises today, so it sits quieter than
@@ -140,17 +168,12 @@ export const TTS_ENGINES = ['piper', 'kokoro', 'chatterbox', 'pocket-tts', 'clou
 // annotation on say.txt/intro.txt (see audio/tts.ts:voiceGainDb +
 // broadcast/queue.ts) — the same mechanism the music loudness path uses. A
 // manual dial, not auto-normalisation, so the range is generous (±12 dB).
-export const TTS_GAIN_CLAMP_DB = 12;
+export const TTS_GAIN_CLAMP_DB = TTS_GAIN_CLAMP_DB_VALUE;
 
 // Coerce any value to a clean gain: finite number, clamped to ±TTS_GAIN_CLAMP_DB,
 // rounded to 0.1 dB (finer is inaudible and just bloats the annotate string).
 // Garbage / non-finite → 0 (unity, i.e. today's behaviour).
-export function clampTtsGain(v: unknown): number {
-  const n = Number(v);
-  if (!Number.isFinite(n)) return 0;
-  const c = Math.max(-TTS_GAIN_CLAMP_DB, Math.min(TTS_GAIN_CLAMP_DB, n));
-  return Math.round(c * 10) / 10;
-}
+export const clampTtsGain = clampTtsGainFn;
 
 // Normalise a per-engine gain map to exactly one clean gain per known engine
 // (default 0). Drops unknown keys so a hand-edited settings.json can't smuggle
@@ -171,22 +194,14 @@ export function normalizeTtsGainMap(raw: unknown): Record<string, number> {
 // MULTIPLIER where 1.0 = no change (today's behaviour); lower = slower. Only
 // Piper/Kokoro/cloud honour it — chatterbox/pocket-tts workers ignore speed,
 // so their map entries are inert (kept for symmetry with the gain map).
-export const TTS_SPEED_MIN = 0.5;
-export const TTS_SPEED_MAX = 2.0;
-export const TTS_SPEED_DEFAULT = 1.0;
+export const TTS_SPEED_MIN = TTS_SPEED_MIN_VALUE;
+export const TTS_SPEED_MAX = TTS_SPEED_MAX_VALUE;
+export const TTS_SPEED_DEFAULT = TTS_SPEED_DEFAULT_VALUE;
 
 // Coerce any value to a clean speed multiplier: finite number, clamped to
 // [TTS_SPEED_MIN, TTS_SPEED_MAX], rounded to 0.05. Garbage / non-finite →
 // 1.0 (unity, i.e. today's behaviour).
-export function clampTtsSpeed(v: unknown): number {
-  // Treat unset (null/undefined/'') as unity, NOT as 0 — unlike gain, 0 is not
-  // this dial's default and would clamp to the 0.5 floor instead of no-change.
-  if (v === null || v === undefined || v === '') return TTS_SPEED_DEFAULT;
-  const n = Number(v);
-  if (!Number.isFinite(n)) return TTS_SPEED_DEFAULT;
-  const c = Math.max(TTS_SPEED_MIN, Math.min(TTS_SPEED_MAX, n));
-  return Math.round(c * 20) / 20;
-}
+export const clampTtsSpeed = clampTtsSpeedFn;
 
 // Normalise a per-engine speed map to exactly one clean multiplier per known
 // engine (default 1.0). Drops unknown keys, mirroring normalizeTtsGainMap.
@@ -571,7 +586,7 @@ export function normalizeLlmProviderBaseUrls(
 // any self-hosted OpenAI-compatible speech server (Chatterbox, Qwen3 TTS,
 // VibeVoice, etc.) via the operator-supplied `tts.cloud.baseUrl` — mirrors the
 // LLM provider of the same name.
-export const TTS_CLOUD_PROVIDERS = ['openai', 'elevenlabs', 'fish-audio', 'openai-compatible'];
+export const TTS_CLOUD_PROVIDERS: readonly string[] = TTS_CLOUD_PROVIDER_VALUES;
 
 // Web-search backends for the segment director's `web-search` capability.
 // `duckduckgo` is the homelab default — DuckDuckGo's Instant Answer API is free
@@ -761,7 +776,7 @@ export const KOKORO_VOICE_LANGUAGES: Record<string, string> = {
   'z': 'Mandarin Chinese',
 };
 
-export const KOKORO_VOICE_RE = /^[a-z]{2}_[a-z0-9]+$/;
+export const KOKORO_VOICE_RE = TTS_KOKORO_VOICE_RE;
 
 // Kokoro language override — the set of phonemizer languages the worker accepts.
 // The worker builds an espeak.EspeakG2P for the chosen language (see _phonemize
@@ -805,18 +820,18 @@ export const POCKET_TTS_VOICES = [
   { id: 'lola', label: 'Lola (ES, F)' },
   { id: 'rafael', label: 'Rafael (PT, M)' },
 ];
-export const POCKET_TTS_VOICE_RE = /^[a-z][a-z0-9_-]{0,39}$/;
+export const POCKET_TTS_VOICE_RE = TTS_POCKET_VOICE_RE;
 // Reference-WAV filenames live in the shared voice folder (config.voices.dir,
 // formerly config.chatterbox.voiceDir). Loose check — basename only, no path
 // separators, conservative character set, ends in .wav. Empty is also valid
 // (means "use the built-in default voice"). Used by both chatterbox and
 // pocket-tts since issue #213.
-export const CHATTERBOX_VOICE_RE = /^[A-Za-z0-9_.-]{1,80}\.wav$/;
+export const CHATTERBOX_VOICE_RE = TTS_CHATTERBOX_VOICE_RE;
 // Per-persona Piper voice — an `.onnx` model filename in the shared voice folder
 // (config.voices.dir), e.g. `en_US-amy-medium.onnx`, dropped alongside its
 // `.onnx.json` manifest. Basename only, no path separators. Empty is valid and
 // means "use the baked-in default voice" (issue #230).
-export const PIPER_VOICE_RE = /^[A-Za-z0-9_.-]{1,100}\.onnx$/;
+export const PIPER_VOICE_RE = TTS_PIPER_VOICE_RE;
 // The entity-id pattern shows, personas and skill assignments all share. Its
 // one definition is SHOW_ID_RE in the shared show schema — a mirrored module
 // cannot import a common one (gen-schemas.ts rejects every specifier but
@@ -826,7 +841,7 @@ export const ID_RE = SHOW_ID_RE;
 // Persona avatar filename — `<personaId>.(png|jpg|jpeg|webp)`. The id segment
 // reuses ID_RE's shape so an avatar field can never reference a basename
 // outside the persona-avatars directory. Empty is also valid (no avatar set).
-export const AVATAR_FILENAME_RE = /^[a-z0-9_]{3,32}\.(png|jpe?g|webp)$/;
+export const AVATAR_FILENAME_RE = PERSONA_AVATAR_FILENAME_RE;
 // Skill slugs (e.g. 'weather', 'random-facts'). The skills registry is the
 // source of truth for which slugs exist; settings only checks the shape — and
 // now checks the SAME shape, aliasing the pattern in the shared skill schema
@@ -839,7 +854,7 @@ export const SKILL_SLUG_RE = SKILL_SLUG_PATTERN;
 
 // Exported for the community-persona install route (routes/personas.ts), which
 // gives a friendly 409 before settings.update() would throw on an oversize roster.
-export const PERSONA_LIMIT = 48;
+export const PERSONA_LIMIT = PERSONA_LIMIT_VALUE;
 // Persona `soul` — the character sketch injected into EVERY free-text DJ
 // generation call, so each char is a recurring per-call token cost. Bounded
 // rather than unbounded for that reason alone; nothing structural depends on
@@ -849,7 +864,7 @@ export const PERSONA_LIMIT = 48;
 // is NOT the speaking seat (the multi-voice cast blocks, the cloud-TTS
 // delivery hint) clamp it further at their own boundary — see soulBrief() in
 // llm/internal/core/pure.ts.
-export const SOUL_MAX = 2000;
+export const SOUL_MAX = PERSONA_SOUL_MAX;
 export { SHOWS_LIMIT } from '../schemas/show.js';
 // Show `topic` — the standing brief the DJ works from while the show is on air.
 // Injected into the pick prompts (picker.ts / dj-agent schemas) and the
@@ -886,14 +901,14 @@ export { SHOW_FILTER_VALUES_MAX };
 // Must comfortably exceed a realistic skill library: unticking one skill on an
 // "all skills" (null) persona materialises the FULL catalog minus one, so a cap
 // near the library size would make that first untick fail (#skill-organization).
-export const SKILLS_PER_PERSONA_LIMIT = 64;
+export const SKILLS_PER_PERSONA_LIMIT = PERSONA_SKILLS_LIMIT;
 // Prompt-template library (djPrompts). Text bounds match the historical
 // single-djPrompt rule — keep them in lockstep with PROMPT_MIN/PROMPT_MAX in
 // web/components/admin/personas/constants.ts.
-export const DJ_PROMPT_LIMIT = 20;
-export const DJ_PROMPT_NAME_MAX = 60;
-export const DJ_PROMPT_TEXT_MIN = 50;
-export const DJ_PROMPT_TEXT_MAX = 4000;
+export const DJ_PROMPT_LIMIT = DJ_PROMPT_LIMIT_VALUE;
+export const DJ_PROMPT_NAME_MAX = DJ_PROMPT_NAME_MAX_VALUE;
+export const DJ_PROMPT_TEXT_MIN = DJ_PROMPT_TEXT_MIN_VALUE;
+export const DJ_PROMPT_TEXT_MAX = DJ_PROMPT_TEXT_MAX_VALUE;
 // Station house rules (djHouseRules) — operator rules appended to BOTH prompt
 // paths (renderDjPrompt and agentPersonaPreamble), unlike the djPrompt
 // template which only the scripted-talk path renders (issue #1182). No
