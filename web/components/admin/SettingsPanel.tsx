@@ -23,7 +23,7 @@ import {
   Activity, Archive, Save, AlertTriangle, Heart, Music2,
 } from 'lucide-react';
 import {
-  SectionHeader, ELEVENLABS_VS_DEFAULTS, FISH_TTS_DEFAULTS,
+  SectionHeader, SettingsFieldError, ELEVENLABS_VS_DEFAULTS, FISH_TTS_DEFAULTS,
   type FormState, type FormUpdater, type SettingsData, type SaveSettings,
   type LoudnessSource, type LlmForm, type LlmFallbackForm,
 } from './settings/shared';
@@ -61,6 +61,31 @@ const MP3_BITRATES = [64, 96, 128, 160, 192, 320] as const;
 const OPUS_BITRATES = [96, 128, 192, 256, 320] as const;
 const AAC_BITRATES = [128, 192, 256] as const;
 
+/**
+ * Replace exactly the errors belonging to the keys this patch carried.
+ *
+ * Scoped by TOP-LEVEL key, because that is the unit a save button posts and the
+ * unit the controller reports against: a `{beds: …}` save owns every
+ * `beds.*` error and nothing else. Merging blindly would let a fixed field keep
+ * showing its old message; clearing everything would wipe an unrelated
+ * section's unresolved error the moment any other control saved.
+ */
+function mergePatchErrors(
+  prev: Record<string, string>,
+  patch: Record<string, unknown>,
+  next: Record<string, string> | undefined,
+): Record<string, string> {
+  const owned = Object.keys(patch);
+  const isOwned = (path: string) =>
+    owned.some((key) => path === key || path.startsWith(`${key}.`));
+  const out: Record<string, string> = {};
+  for (const [path, message] of Object.entries(prev)) {
+    if (!isOwned(path)) out[path] = message;
+  }
+  for (const [path, message] of Object.entries(next || {})) out[path] = message;
+  return out;
+}
+
 export default function SettingsPanel() {
   const { adminFetch, needsAuth, hydrated } = useAdminAuth();
   const [data, setData] = useState<SettingsData | null>(null);
@@ -71,6 +96,7 @@ export default function SettingsPanel() {
   const [confirmRestart, setConfirmRestart] = useState(false);
   const [confirmStop, setConfirmStop] = useState(false);
   const [activeSection, setActiveSection] = useState<SectionId>('station');
+  const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
   const router = useRouter();
 
   const refresh = async () => {
@@ -345,8 +371,24 @@ export default function SettingsPanel() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(patch),
       });
-      const j = (await r.json().catch(() => ({}))) as { error?: string; requiresRestart?: boolean };
-      if (!r.ok) throw new Error(j.error || `failed (${r.status})`);
+      const j = (await r.json().catch(() => ({}))) as {
+        error?: string;
+        requiresRestart?: boolean;
+        fieldErrors?: Record<string, string>;
+      };
+      if (!r.ok) {
+        // Land the failure on the inputs it belongs to. The toast still fires —
+        // a save button can be off-screen from the control that failed — but
+        // the operator now also sees WHICH field, without decoding a dotted
+        // path out of a sentence.
+        //
+        // Only the keys THIS patch carried are replaced, so a stale error from
+        // an unrelated section can't linger and a section that saved cleanly
+        // can't be blamed for another's failure.
+        setFieldErrors((prev) => mergePatchErrors(prev, patch, j.fieldErrors));
+        throw new Error(j.error || `failed (${r.status})`);
+      }
+      setFieldErrors((prev) => mergePatchErrors(prev, patch, undefined));
       if (j.requiresRestart) setPendingRestart(true);
       notify.ok(j.requiresRestart ? 'saved, restart the mixer to apply' : 'saved');
       await refresh();
@@ -460,31 +502,31 @@ export default function SettingsPanel() {
             {activeSection === 'tts' && data.tts && (
               <TtsSection
                 data={data} form={form} setForm={updateForm} busy={busy}
-                saveSettings={saveSettings} adminFetch={adminFetch} refresh={refresh}
+                saveSettings={saveSettings} fieldErrors={fieldErrors} adminFetch={adminFetch} refresh={refresh}
               />
             )}
             {activeSection === 'llm' && data.llm && (
               <LlmSection
                 data={data} form={form} setForm={updateForm} busy={busy}
-                saveSettings={saveSettings} adminFetch={adminFetch} refresh={refresh}
+                saveSettings={saveSettings} fieldErrors={fieldErrors} adminFetch={adminFetch} refresh={refresh}
               />
             )}
             {activeSection === 'search' && (
               <SearchSection
                 data={data} form={form} setForm={updateForm} busy={busy}
-                saveSettings={saveSettings} adminFetch={adminFetch}
+                saveSettings={saveSettings} fieldErrors={fieldErrors} adminFetch={adminFetch}
               />
             )}
             {activeSection === 'library' && (
               <LibrarySection
                 data={data} form={form} setForm={updateForm} busy={busy}
-                saveSettings={saveSettings} adminFetch={adminFetch} refresh={refresh}
+                saveSettings={saveSettings} fieldErrors={fieldErrors} adminFetch={adminFetch} refresh={refresh}
               />
             )}
             {activeSection === 'station' && (
               <StationSection
                 data={data} form={form} setForm={updateForm} busy={busy}
-                saveSettings={saveSettings}
+                saveSettings={saveSettings} fieldErrors={fieldErrors}
               />
             )}
             {activeSection === 'music' && (
@@ -492,20 +534,20 @@ export default function SettingsPanel() {
             )}
             {activeSection === 'theme' && (
               <ThemeSection
-                data={data} busy={busy} saveSettings={saveSettings}
+                data={data} busy={busy} saveSettings={saveSettings} fieldErrors={fieldErrors}
                 adminFetch={adminFetch}
               />
             )}
             {activeSection === 'scrobble' && (
               <ScrobbleSection
                 data={data} form={form} setForm={updateForm} busy={busy}
-                saveSettings={saveSettings} adminFetch={adminFetch} refresh={refresh}
+                saveSettings={saveSettings} fieldErrors={fieldErrors} adminFetch={adminFetch} refresh={refresh}
               />
             )}
             {activeSection === 'likes' && (
               <LikesSection
                 data={data} form={form} setForm={updateForm} busy={busy}
-                saveSettings={saveSettings}
+                saveSettings={saveSettings} fieldErrors={fieldErrors}
               />
             )}
           </>
@@ -547,6 +589,7 @@ export default function SettingsPanel() {
                         Save
                       </Btn>
                     </div>
+                    <SettingsFieldError path="archive.enabled" errors={fieldErrors} />
                     <div className="field-hint">
                       The archive runs a second MP3 encoder 24/7 and is the biggest constant
                       CPU cost in the broadcast container. Turn it off if you don't replay
@@ -769,6 +812,7 @@ export default function SettingsPanel() {
                       Save crossfade
                     </Btn>
                   </div>
+                  <SettingsFieldError path="crossfadeDuration" errors={fieldErrors} />
                   <div className="field-hint">
                     Seconds of overlap between tracks (current: {data?.values?.crossfadeDuration}s).
                     Saving flags a pending restart. Apply it with the Mixer card below.
@@ -959,6 +1003,7 @@ export default function SettingsPanel() {
                       Save limit
                     </Btn>
                   </div>
+                  <SettingsFieldError path="maxTrackSeconds" errors={fieldErrors} />
                   <div className="field-hint">
                     The DJ won&rsquo;t auto-pick tracks longer than this, handy for hour-long
                     album mixes or DJ sets that keep landing in rotation. Listener requests still
@@ -1110,6 +1155,7 @@ export default function SettingsPanel() {
                         Save
                       </Btn>
                     </div>
+                    <SettingsFieldError path="stream.opusEnabled" errors={fieldErrors} />
                     <div className="field-hint">
                       Off by default. Only Chrome/Edge listeners ever pick Opus (Safari, iOS and
                       Firefox stay on the universal MP3 mount); for them it&apos;s equal-or-better
@@ -1154,6 +1200,7 @@ export default function SettingsPanel() {
                         Save bitrate
                       </Btn>
                     </div>
+                    <SettingsFieldError path="stream.opusBitrate" errors={fieldErrors} />
                     <div className="field-hint">
                       96 kbps is transparent for most music; 256/320 suits hifi listeners
                       (current: {data?.values?.stream?.opusBitrate ?? '—'} kbps). Raising it
@@ -1195,6 +1242,7 @@ export default function SettingsPanel() {
                       Save
                     </Btn>
                   </div>
+                  <SettingsFieldError path="stream.flacEnabled" errors={fieldErrors} />
                   {form.stream.flacEnabled && (
                     <div className="field-hint">
                       Point a player at{' '}
@@ -1248,6 +1296,7 @@ export default function SettingsPanel() {
                       Save
                     </Btn>
                   </div>
+                  <SettingsFieldError path="stream.oggIcyMetadata" errors={fieldErrors} />
                   <div className="field-hint">
                     On by default. Sends each track&apos;s title out-of-band (ICY) on the Opus and
                     FLAC mounts, which most internet-radio players and Cast receivers need: they
@@ -1292,6 +1341,7 @@ export default function SettingsPanel() {
                         Save
                       </Btn>
                     </div>
+                    <SettingsFieldError path="stream.aacEnabled" errors={fieldErrors} />
                     {form.stream.aacEnabled && (
                       <div className="field-hint">
                         Point a player at{' '}
@@ -1343,6 +1393,7 @@ export default function SettingsPanel() {
                         Save bitrate
                       </Btn>
                     </div>
+                    <SettingsFieldError path="stream.aacBitrate" errors={fieldErrors} />
                     <div className="field-hint">
                       AAC-LC is transparent around 256 kbps (current:{' '}
                       {data?.values?.stream?.aacBitrate ?? '—'} kbps).
@@ -1389,6 +1440,7 @@ export default function SettingsPanel() {
                       Save bitrate
                     </Btn>
                   </div>
+                  <SettingsFieldError path="stream.bitrate" errors={fieldErrors} />
                   <div className="field-hint">
                     Higher bitrate = better quality, more listener bandwidth
                     (current: {data?.values?.stream?.bitrate ?? '—'} kbps). 192 kbps is the

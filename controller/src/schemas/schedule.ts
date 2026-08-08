@@ -248,11 +248,18 @@ export interface ScheduleOverrideContext {
 
 export function scheduleOverrideSchema(ctx: ScheduleOverrideContext) {
   return z
-    .object({
-      showId: z.string({ error: 'must be a show id' }).min(1, 'must be a show id'),
-      startedAt: z.number({ error: 'must be an epoch-ms number' }).finite('must be an epoch-ms number'),
-      expiresAt: z.number({ error: 'must be an epoch-ms number' }).finite('must be an epoch-ms number'),
-    })
+    .object(
+      {
+        showId: z.string({ error: 'must be a show id' }).min(1, 'must be a show id'),
+        startedAt: z.number({ error: 'must be an epoch-ms number' }).finite('must be an epoch-ms number'),
+        expiresAt: z.number({ error: 'must be an epoch-ms number' }).finite('must be an epoch-ms number'),
+      },
+      // Explicit, so a non-object never reaches an operator as zod's own
+      // 'Invalid input: expected object, received number'. Phrased WITHOUT the
+      // key, like the field messages above, because every caller roots this
+      // schema at 'scheduleOverride' — self-naming here would double it.
+      { error: 'must be an object' },
+    )
     .check((c) => {
       const { showId, startedAt, expiresAt } = c.value;
       if (ctx.showIds && !ctx.showIds.includes(showId)) {

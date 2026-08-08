@@ -23,6 +23,11 @@ const {
   BEDS_CROSS_SEC_BOUNDS,
   BEDS_THRESHOLD_SEC_BOUNDS,
   JINGLE_RATIO_BOUNDS,
+  activeDjPromptIdSchema,
+  djPromptTextSchema,
+  maxTrackSecondsSchema,
+  maxTrackSecondsValueSchema,
+  themePatchSchema,
   archivePatchSchema,
   audioPatchSchema,
   bedsPatchSchema,
@@ -597,12 +602,160 @@ test('the converted keys are exactly the ones with schemas', () => {
   // resists a stateless schema (clamps that fall back to the CURRENT value,
   // post-merge cross-field rules, write-throughs into another key).
   assert.deepEqual(Object.keys(SETTINGS_PATCH_SCHEMAS).sort(), [
-    'archive', 'audio', 'beds', 'crossfadeDuration', 'djHouseRules', 'festivals',
-    'jingleRatio', 'likes', 'locale', 'loudness', 'moodSchedule', 'moods',
-    'privacy', 'requests', 'scrobble', 'search', 'sfx', 'station',
-    'stationDescription', 'stream', 'timezone', 'transitions', 'ui', 'weather',
-    'weatherMoods', 'webhooksPolicy',
+    'activeDjPromptId', 'archive', 'audio', 'beds', 'crossfadeDuration',
+    'djHouseRules', 'djPrompt', 'djPrompts', 'festivals', 'jingleRatio', 'likes',
+    'locale', 'loudness', 'maxTrackSeconds', 'moodSchedule', 'moods', 'personas',
+    'privacy', 'requests', 'schedule', 'scheduleOverride', 'scrobble', 'search',
+    'sfx', 'shows', 'station', 'stationDescription', 'stream', 'theme',
+    'timezone', 'transitions', 'ui', 'weather', 'weatherMoods', 'webhooks',
+    'webhooksPolicy',
   ]);
+});
+
+test('the SIX unconverted keys are the ones CLAUDE.md documents as resistant', () => {
+  // Each resists for the same reason: the rule is a function of state the patch
+  // does not contain (a clamp that falls back to the CURRENT stored value, a
+  // cross-field rule read POST-merge, a write-through into another key, or an
+  // intentionally OPEN map). Plus two that are not "resistant" so much as
+  // deliberately left alone — see below.
+  const unconverted = SETTINGS_PATCH_KEYS.filter((k) => !(k in SETTINGS_PATCH_SCHEMAS));
+  assert.deepEqual([...unconverted].sort(), [
+    // No pure rule exists: the only check is membership in a roster the same
+    // patch may be replacing, so a schema would have nothing to say.
+    'activePersonaId',
+    'embedding',
+    'llm',
+    // The legacy alias, whose value is consulted ONLY when maxTrackSeconds is
+    // absent — a schema on it would refuse a body today's precedence ignores.
+    'maxTrackMinutes',
+    'skills',
+    'tts',
+  ]);
+});
+
+test('theme converts its SHAPE; the does-it-exist fallback stays in update()', () => {
+  assert.equal(themePatchSchema.parse({ active: '  midnight  ' }).active, 'midnight');
+  // A patch of {theme: {}} has always been a legal no-op, and a non-object
+  // block a silent one.
+  assert.equal(themePatchSchema.parse({}).active, undefined);
+  assert.equal(themePatchSchema.parse('nonsense').active, undefined);
+  assert.equal(themePatchSchema.safeParse({ active: '' }).success, false);
+  assert.equal(
+    themePatchSchema.safeParse({ active: '  ' }).error?.issues[0]?.message,
+    'theme.active must be a theme id',
+  );
+  // An unknown-but-non-empty id PASSES here: update() falls back to the default
+  // rather than refusing (#917), and that repair needs the theme registry.
+  assert.equal(themePatchSchema.safeParse({ active: 'retired-theme' }).success, true);
+});
+
+test('maxTrackSeconds: bounds convert, and the precedence handoff is preserved', () => {
+  const bounds = { min: 0, max: 36000 };
+  const registry = maxTrackSecondsSchema(bounds);
+  const value = maxTrackSecondsValueSchema(bounds);
+
+  // The resolved-value posture, which update() applies.
+  assert.equal(value.parse('600'), 600, 'parseInt, so a numeric string still saves');
+  assert.equal(value.parse(600.7), 600, 'and a float still truncates');
+  assert.equal(value.safeParse(-1).success, false);
+  assert.equal(value.safeParse(36001).success, false);
+  assert.equal(value.safeParse('nonsense').success, false);
+  assert.equal(
+    value.safeParse(-1).error?.issues[0]?.message,
+    'maxTrackSeconds must be int in [0, 36000]',
+  );
+
+  // The registry posture: one step looser, because an absent/empty seconds
+  // value hands off to the legacy maxTrackMinutes rather than failing.
+  assert.equal(registry.safeParse(undefined).success, true);
+  assert.equal(registry.safeParse(null).success, true);
+  assert.equal(registry.safeParse('').success, true);
+  assert.equal(registry.safeParse(-1).success, false);
+  // Both postures report the same string, because the bound is written once.
+  assert.equal(
+    registry.safeParse(99999).error?.issues[0]?.message,
+    value.safeParse(99999).error?.issues[0]?.message,
+  );
+  // maxTrackMinutes deliberately carries NO schema — a body where seconds wins
+  // ignores an unusable minutes value today, and must keep doing so.
+  assert.equal('maxTrackMinutes' in SETTINGS_PATCH_SCHEMAS, false);
+  assert.equal(validateSettingsPatch({ maxTrackSeconds: 600, maxTrackMinutes: 'junk' }), null);
+});
+
+test('the djPrompt trio: pure rules convert, cross-key ones stay in update()', () => {
+  const schema = djPromptTextSchema({ min: 50, max: 4000 });
+  const good = `You are {name}, on air tonight. ${'x'.repeat(50)}`;
+  assert.equal(schema.parse(good), good);
+  // '' is the "use the built-in default" selection, not an empty value.
+  assert.equal(schema.parse(''), '');
+  assert.equal(schema.parse(null), '');
+  assert.equal(schema.safeParse('too short').success, false);
+  assert.match(
+    schema.safeParse('too short').error!.issues[0].message,
+    /^djPrompt must be empty \(use the default\) or 50-4000 chars$/,
+  );
+  assert.equal(schema.safeParse(good.replace('{name}', 'Nova')).success, false);
+  assert.equal(
+    schema.safeParse(good.replace('{name}', 'Nova')).error?.issues[0]?.message,
+    'djPrompt must contain the {name} placeholder',
+  );
+  // activeDjPromptId is coercion only — whether the id RESOLVES is decided
+  // after djPrompts has been applied, and stays in update().
+  assert.equal(activeDjPromptIdSchema.parse('  dp_abc  '), 'dp_abc');
+  assert.equal(activeDjPromptIdSchema.parse(null), '');
+  assert.equal(activeDjPromptIdSchema.parse(undefined), '');
+  assert.equal(validateSettingsPatch({ activeDjPromptId: 'dp_nonexistent' }), null);
+});
+
+test('scheduleOverride validates SHAPE at the route, roster membership in update()', () => {
+  // Clearing the pin is how a takeover is cancelled, so null is legal.
+  assert.equal(validateSettingsPatch({ scheduleOverride: null }), null);
+  const bad = validateSettingsPatch({
+    scheduleOverride: { showId: '', startedAt: 1, expiresAt: 2 },
+  });
+  assert.equal(bad?.fieldErrors['scheduleOverride.showId'], 'must be a show id');
+  // A backwards window is a pure rule and IS caught at the route.
+  assert.equal(
+    validateSettingsPatch({ scheduleOverride: { showId: 's_a', startedAt: 9, expiresAt: 2 } })
+      ?.fieldErrors['scheduleOverride.expiresAt'] != null,
+    true,
+  );
+  // But "names a real show" is not — shows may ride in the same body.
+  assert.equal(
+    validateSettingsPatch({ scheduleOverride: { showId: 's_ghost', startedAt: 1, expiresAt: 2 } }),
+    null,
+  );
+});
+
+test('an ARRAY key roots its flat message; a block key still reports verbatim', () => {
+  // personas/djPrompts are registered but their branches deliberately stay on
+  // validatePersonasStrict / validateDjPromptsStrict, because both need a
+  // server-only id-minting step. What must NOT differ is the string the two
+  // report for the same body — hence SETTINGS_PATCH_ROOTED_KEYS.
+  const bad = validateSettingsPatch({ personas: [{ name: '', soul: 'x', frequency: 'moderate' }] });
+  assert.match(bad!.error, /^personas\.0\.name: /, 'the row is named, not just the field');
+  assert.equal(bad!.fieldErrors['personas.0.name'], 'name must be 1-40 chars');
+  // A block key is self-locating already and keeps its verbatim string.
+  const block = validateSettingsPatch({ beds: { crossSec: 999 } });
+  assert.equal(block!.error.startsWith('beds.'), true);
+  assert.equal(block!.error.includes(': '), false, 'no prefix doubling on a block key');
+});
+
+test('the route and update() name the SAME first failure for a persona roster', async () => {
+  const validate = await import('../src/settings/validate.js');
+  const roster = [
+    { name: 'Ok', soul: 'x', frequency: 'moderate', tts: { engine: 'piper', cloudProvider: 'openai' } },
+    { name: '', soul: 'x', frequency: 'moderate', tts: { engine: 'piper', cloudProvider: 'openai' } },
+  ];
+  const routeError = validateSettingsPatch({ personas: roster })!.error;
+  let updateError = '';
+  try {
+    validate.validatePersonasStrict(roster);
+  } catch (err) {
+    updateError = (err as Error).message;
+  }
+  assert.equal(routeError, updateError);
+  assert.match(routeError, /^personas\.1\.name: /);
 });
 
 // --- timezone / privacy / requests ------------------------------------------

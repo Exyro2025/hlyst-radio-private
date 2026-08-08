@@ -4,39 +4,15 @@
 //
 // Part of the settings/ split — see ../settings.ts for the public barrel.
 
-import {
-  AVATAR_FILENAME_RE,
-  CHATTERBOX_VOICE_RE,
-  DJ_PROMPT_LIMIT,
-  DJ_PROMPT_NAME_MAX,
-  DJ_PROMPT_TEXT_MAX,
-  DJ_PROMPT_TEXT_MIN,
-  FREQUENCIES,
-  ID_RE,
-  KOKORO_VOICE_RE,
-  PERSONA_LIMIT,
-  PIPER_VOICE_RE,
-  POCKET_TTS_VOICE_RE,
-  SCRIPT_LENGTHS,
-  SHOW_MOODS,
-  SKILLS_PER_PERSONA_LIMIT,
-  SKILL_SLUG_RE,
-  SOUL_MAX,
-  ScheduleOverride,
-  TTS_CLOUD_PROVIDERS,
-  TTS_ENGINES,
-  Webhook,
-  clampTtsGain,
-  clampTtsSpeed,
-  mintId,
-  normalizeDial,
-} from './vocab.js';
+import { SHOW_MOODS, ScheduleOverride, Webhook } from './vocab.js';
 
 import { minTrackSeconds } from './store.js';
 import { webhooksSchema } from '../schemas/webhook.js';
 import { mergeWebhookSecrets } from '../schemas/webhook-server.js';
 import { showsSchema, type ShowSchemaContext } from '../schemas/show.js';
 import { resolveShowIds } from '../schemas/show-server.js';
+import { djPromptsSchema, personasSchema, ttsVoiceSlotSchema } from '../schemas/persona.js';
+import { resolveDjPromptIds, resolvePersonaIds } from '../schemas/persona-server.js';
 import { scheduleSchema, scheduleOverrideSchema } from '../schemas/schedule.js';
 import {
   festivalsSchema,
@@ -67,231 +43,54 @@ function runMoodSchema<T>(schema: { safeParse: (v: unknown) => { success: boolea
   return r.data as T;
 }
 
-// Strict validator for a `{engine, voice, cloudProvider}` voice slot. Shared by
-// every persona's `tts` block AND the station-wide TTS fallback slot
-// (`settings.tts.fallback`) — same shape, same per-engine voice rules, one
-// implementation. `where` is the settings path prefix used in error messages,
-// so a bad fallback voice reads `tts.fallback.voice must ...`.
+/**
+ * Strict validator for a `{engine, voice, cloudProvider}` voice slot.
+ *
+ * A thin wrapper over schemas/persona.ts's ttsVoiceSlotSchema — shared by every
+ * persona's `tts` block AND the station-wide TTS fallback slot
+ * (`settings.tts.fallback`), same shape, same per-engine voice rules, one
+ * implementation. `where` is the settings path prefix baked into the messages,
+ * so a bad fallback voice still reads `tts.fallback.voice must ...`.
+ *
+ * The message is taken VERBATIM rather than through `firstMessage`: the schema
+ * already names its own full path in the text, so prefixing would double it.
+ */
 export function validateTtsBlock(raw, where) {
-  const t = raw || {};
-  if (!TTS_ENGINES.includes(t.engine)) {
-    throw new Error(`${where}.engine must be one of: ${TTS_ENGINES.join(', ')}`);
-  }
-  if (!TTS_CLOUD_PROVIDERS.includes(t.cloudProvider)) {
-    throw new Error(`${where}.cloudProvider must be one of: ${TTS_CLOUD_PROVIDERS.join(', ')}`);
-  }
-  let voice = String(t.voice ?? '').trim();
-  if (t.engine === 'kokoro') {
-    if (!KOKORO_VOICE_RE.test(voice)) {
-      throw new Error(
-        `${where}.voice must match <lang><gender>_<name> for kokoro, e.g. bf_isabella`,
-      );
-    }
-  } else if (t.engine === 'chatterbox') {
-    // Empty = use built-in default voice. Otherwise the value must be a plain
-    // .wav filename — no path separators — referencing a file the operator has
-    // uploaded into config.chatterbox.voiceDir.
-    if (voice && !CHATTERBOX_VOICE_RE.test(voice)) {
-      throw new Error(
-        `${where}.voice for chatterbox must be a .wav filename (no path), or empty for the default voice`,
-      );
-    }
-  } else if (t.engine === 'pocket-tts') {
-    // Two accepted forms (issue #213):
-    //   - A built-in voice id (alba, anna, charles, …). Curated set lives in
-    //     POCKET_TTS_VOICES; anything passing POCKET_TTS_VOICE_RE is also
-    //     accepted (the worker falls back to the default for unknown ids).
-    //   - A `.wav` filename in the shared voice folder → zero-shot cloning.
-    //     Same shape as the chatterbox value.
-    if (!voice) voice = 'alba';
-    if (!POCKET_TTS_VOICE_RE.test(voice) && !CHATTERBOX_VOICE_RE.test(voice)) {
-      throw new Error(
-        `${where}.voice for pocket-tts must be a built-in voice id (e.g. alba) or a .wav filename`,
-      );
-    }
-  } else if (t.engine === 'cloud') {
-    // openai-compatible voices are server-specific; an empty voice lets the
-    // server use its own default. openai/elevenlabs both require a voice id.
-    if (t.cloudProvider === 'openai-compatible') {
-      if (voice.length > 100) throw new Error(`${where}.voice must be 0-100 chars`);
-    } else if (voice.length < 1 || voice.length > 100) {
-      throw new Error(`${where}.voice must be 1-100 chars`);
-    }
-  } else if (t.engine === 'remote') {
-    // Remote engine voices are server-specific — the sidecar interprets them
-    // (built-in id, reference-wav filename, or VoiceDesign prompt). Empty is
-    // valid: the sidecar picks its own default.
-    if (voice.length > 100) throw new Error(`${where}.voice must be 0-100 chars`);
-  } else {
-    // piper: empty = use the baked-in default voice. Otherwise the value must
-    // be an .onnx filename (no path separators) referencing a model the operator
-    // dropped into the shared voice folder (issue #230). A Kokoro-shaped id is
-    // also accepted: the seed roster carries a distinct Kokoro voice per persona
-    // under the piper engine so switching to Kokoro yields different-sounding
-    // DJs with no extra editing (see SEED_PERSONAS). resolvePiperVoice() falls
-    // back to the default for it at render time, so it is harmless under piper
-    // and must not block saving the shipped roster (issue #454).
-    if (voice && !PIPER_VOICE_RE.test(voice) && !KOKORO_VOICE_RE.test(voice)) {
-      throw new Error(
-        `${where}.voice for piper must be an .onnx filename (no path), or empty for the default voice`,
-      );
-    }
-  }
-  return { engine: t.engine, cloudProvider: t.cloudProvider, voice, gainDb: clampTtsGain(t.gainDb), speed: clampTtsSpeed(t.speed) };
+  const parsed = ttsVoiceSlotSchema(where).safeParse(raw);
+  if (!parsed.success) throw new Error(parsed.error.issues[0]?.message || `${where} is invalid`);
+  return parsed.data;
 }
 
-// Strict update-time path for the prompt-template library — any bad entry
-// rejects the whole patch so the operator sees the error instead of silently
-// losing a prompt.
+/**
+ * Strict update-time path for the prompt-template library.
+ *
+ * Any bad entry rejects the whole patch so the operator sees the error instead
+ * of silently losing a prompt. Ids are minted/de-duplicated by the server-only
+ * sibling, shared with the lenient load path.
+ */
 export function validateDjPromptsStrict(raw) {
-  if (!Array.isArray(raw) || raw.length > DJ_PROMPT_LIMIT) {
-    throw new Error(`djPrompts must be an array of 0-${DJ_PROMPT_LIMIT} entries`);
-  }
-  const seen = new Set();
-  return raw.map((item, i) => {
-    if (!item || typeof item !== 'object') throw new Error(`djPrompts[${i}] must be an object`);
-    const name = String(item.name ?? '').trim();
-    if (name.length < 1 || name.length > DJ_PROMPT_NAME_MAX) {
-      throw new Error(`djPrompts[${i}].name must be 1-${DJ_PROMPT_NAME_MAX} chars`);
-    }
-    const text = String(item.text ?? '').trim();
-    if (text.length < DJ_PROMPT_TEXT_MIN || text.length > DJ_PROMPT_TEXT_MAX) {
-      throw new Error(
-        `djPrompts[${i}].text must be ${DJ_PROMPT_TEXT_MIN}-${DJ_PROMPT_TEXT_MAX} chars`,
-      );
-    }
-    if (!text.includes('{name}')) {
-      throw new Error(`djPrompts[${i}].text must contain the {name} placeholder`);
-    }
-    let id = typeof item.id === 'string' && ID_RE.test(item.id) ? item.id : mintId('dp_');
-    if (seen.has(id)) id = mintId('dp_');
-    seen.add(id);
-    return { id, name, text };
-  });
+  const parsed = djPromptsSchema.safeParse(raw);
+  if (!parsed.success) throw new Error(firstMessage(parsed.error, 'djPrompts'));
+  return resolveDjPromptIds(parsed.data);
 }
 
+/**
+ * Strict update-time path for the persona roster.
+ *
+ * The SAME schema settings/normalize.ts runs on load and the browser runs in the
+ * Personas editor — what differs is only the consequence: this throws, the load
+ * path repairs-or-drops. Id minting and cross-row de-duplication live in
+ * persona-server.ts because neither is a pure function of one submitted value.
+ */
 export function validatePersonasStrict(raw) {
-  if (!Array.isArray(raw) || raw.length < 1 || raw.length > PERSONA_LIMIT) {
-    throw new Error(`personas must be an array of 1-${PERSONA_LIMIT} entries`);
-  }
-  const seen = new Set();
-  return raw.map((item, i) => {
-    if (!item || typeof item !== 'object') throw new Error(`personas[${i}] must be an object`);
-    const name = String(item.name ?? '').trim();
-    if (name.length < 1 || name.length > 40)
-      throw new Error(`personas[${i}].name must be 1-40 chars`);
-    const soul = String(item.soul ?? '').trim();
-    if (soul.length < 1 || soul.length > SOUL_MAX)
-      throw new Error(`personas[${i}].soul must be 1-${SOUL_MAX} chars`);
-    const tagline = String(item.tagline ?? '').trim();
-    if (tagline.length > 80) throw new Error(`personas[${i}].tagline must be 0-80 chars`);
-    // language — optional free text ("Turkish", "Türkçe", …). Absent/empty →
-    // '' (English, no directive injected — the historical behaviour).
-    let language = '';
-    if (item.language !== undefined && item.language !== null) {
-      if (typeof item.language !== 'string') {
-        throw new Error(`personas[${i}].language must be a string`);
-      }
-      language = item.language.trim();
-      if (language.length > 60) throw new Error(`personas[${i}].language must be 0-60 chars`);
-    }
-    if (!FREQUENCIES.includes(item.frequency)) {
-      throw new Error(`personas[${i}].frequency must be one of: ${FREQUENCIES.join(', ')}`);
-    }
-    // scriptLength — optional. Absent → 'concise' (the default and the
-    // historical behaviour); present must be a known value.
-    let scriptLength = 'concise';
-    if (item.scriptLength !== undefined && item.scriptLength !== null) {
-      if (!SCRIPT_LENGTHS.includes(item.scriptLength)) {
-        throw new Error(`personas[${i}].scriptLength must be one of: ${SCRIPT_LENGTHS.join(', ')}`);
-      }
-      scriptLength = item.scriptLength;
-    }
-    // djMode — optional boolean. Absent → false (a plain narrator persona, the
-    // historical behaviour). When true the persona behaves like a working DJ
-    // (forward-tease, callbacks, more presence) — see effectiveFrequency above.
-    let djMode = false;
-    if (item.djMode !== undefined && item.djMode !== null) {
-      if (typeof item.djMode !== 'boolean') {
-        throw new Error(`personas[${i}].djMode must be a boolean`);
-      }
-      djMode = item.djMode;
-    }
-    const tts = validateTtsBlock(item.tts, `personas[${i}].tts`);
-    // skills — optional. Absent → null ("all skills", legacy/default). Present
-    // → an explicit slug array (the UI always sends one once edited).
-    let skills: string[] | null = null;
-    if (item.skills !== undefined && item.skills !== null) {
-      if (!Array.isArray(item.skills)) {
-        throw new Error(`personas[${i}].skills must be an array of skill names`);
-      }
-      if (item.skills.length > SKILLS_PER_PERSONA_LIMIT) {
-        throw new Error(
-          `personas[${i}].skills must be at most ${SKILLS_PER_PERSONA_LIMIT} entries`,
-        );
-      }
-      const seenSk = new Set<string>();
-      skills = [];
-      for (const s of item.skills) {
-        const v = String(s ?? '').trim();
-        // A malformed entry is DROPPED, not thrown. persona.skills is a
-        // subscription list resolved against the live skill catalog at fire
-        // time, so an entry that can't name a skill can never fire — and the
-        // OLD shape check here (/^[a-z0-9-]{1,40}$/) accepted forms the slug
-        // rule refuses (a leading hyphen), so a backup or older settings.json
-        // can legitimately carry one. Failing the whole personas save over
-        // inert junk is the themeId lesson (#917) again: all cost, no benefit.
-        if (!SKILL_SLUG_RE.test(v)) {
-          console.warn(
-            `[personas] dropping unrecognisable skills entry ${JSON.stringify(v)} from personas[${i}]`,
-          );
-          continue;
-        }
-        if (!seenSk.has(v)) {
-          seenSk.add(v);
-          skills.push(v);
-        }
-      }
-    }
-    let id = typeof item.id === 'string' && ID_RE.test(item.id) ? item.id : mintId('p_');
-    if (seen.has(id)) id = mintId('p_');
-    seen.add(id);
-    // Avatar — optional. Absent/empty → '' (no avatar). Present must be a
-    // bare basename matching AVATAR_FILENAME_RE. The dedicated upload route
-    // is the only writer that creates the file on disk; this validator just
-    // checks the persisted string. The post-patch sweep below garbage-
-    // collects orphaned files when the persona itself is removed.
-    let avatar = '';
-    if (item.avatar !== undefined && item.avatar !== null && item.avatar !== '') {
-      const a = String(item.avatar).trim();
-      if (!AVATAR_FILENAME_RE.test(a)) {
-        throw new Error(
-          `personas[${i}].avatar must be a basename like <id>.png|jpg|jpeg|webp`,
-        );
-      }
-      avatar = a;
-    }
-    return {
-      id,
-      name,
-      tagline,
-      frequency: item.frequency,
-      scriptLength,
-      djMode,
-      humour: normalizeDial(item.humour),
-      localColour: normalizeDial(item.localColour),
-      warmth: normalizeDial(item.warmth),
-      soul,
-      language,
-      avatar,
-      tts,
-      skills,
-    };
-  });
+  const parsed = personasSchema.safeParse(raw);
+  if (!parsed.success) throw new Error(firstMessage(parsed.error, 'personas'));
+  return resolvePersonaIds(parsed.data);
 }
 
 export function validateShowsStrict(raw, personas, allowedThemeIds: Set<string>, moodNames: string[] = SHOW_MOODS) {
-  if (!Array.isArray(raw)) throw new Error('shows must be an array');
+  // The non-array refusal is the SCHEMA's now, not a pre-check here — so this
+  // path and the route report the same string for the same body.
   // Note the legacy singular fields #929 replaced (mood / genre / …) are
   // migrated by the SCHEMA itself (a preprocess, so z.object can't strip them
   // first), so POST /shows, a backup restore and the lenient load path all

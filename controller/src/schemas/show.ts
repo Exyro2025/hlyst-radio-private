@@ -399,7 +399,13 @@ export type ShowParsed = z.output<ReturnType<typeof showSchema>>;
 export type Show = ShowParsed & { id: string };
 
 export function showsSchema(ctx: ShowSchemaContext) {
-  return z.array(showSchema(ctx)).max(SHOWS_LIMIT, `must be at most ${SHOWS_LIMIT} entries`);
+  // The array-level error is explicit so a non-array never reaches an operator
+  // as zod's own 'Invalid input: expected array, received number'. Phrased
+  // WITHOUT the key, like every other message here, because both callers root
+  // this schema at 'shows'.
+  return z
+    .array(showSchema(ctx), { error: 'must be an array' })
+    .max(SHOWS_LIMIT, `must be at most ${SHOWS_LIMIT} entries`);
 }
 
 // POST /shows submits ONE show under a `show` key and merges it server-side.

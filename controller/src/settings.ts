@@ -34,8 +34,6 @@ import {
   DEFAULT_DJ_PROMPT_TEMPLATE,
   DJ_HOUSE_RULES_MAX,
   DJ_PROMPT_LIMIT,
-  DJ_PROMPT_TEXT_MAX,
-  DJ_PROMPT_TEXT_MIN,
   DjPromptEntry,
   FESTIVAL_DEFAULTS,
   KOKORO_LANGS,
@@ -88,6 +86,7 @@ import {
 } from './settings/defaults.js';
 import { validateCompatParams } from './settings/compat-params.js';
 import { parseSettingsPatchKey } from './settings/patch-registry.js';
+import { maxTrackSecondsValueSchema } from './schemas/settings.js';
 import { minTrackSeconds, peek, setCache } from './settings/store.js';
 import {
   SKILL_RENAMES,
@@ -1045,12 +1044,14 @@ export async function update(patch) {
     }
   }
   if ('maxTrackSeconds' in patch || 'maxTrackMinutes' in patch) {
-    const v = parseInt(rawMaxTrackSec(patch) as string, 10);
-    if (!Number.isFinite(v) || v < BOUNDS.maxTrackSeconds.min || v > BOUNDS.maxTrackSeconds.max) {
-      throw new Error(
-        `maxTrackSeconds must be int in [${BOUNDS.maxTrackSeconds.min}, ${BOUNDS.maxTrackSeconds.max}]`,
-      );
-    }
+    // The bound lives once, in the shared schema — this applies it to the
+    // RESOLVED value (seconds, or the legacy minutes alias × 60), which is the
+    // figure the precedence rule actually selected.
+    const parsedCap = maxTrackSecondsValueSchema(BOUNDS.maxTrackSeconds).safeParse(
+      rawMaxTrackSec(patch),
+    );
+    if (!parsedCap.success) throw new Error(parsedCap.error.issues[0].message);
+    const v = parsedCap.data;
     // Non-zero caps must clear the crossfade-relative floor (0 = unlimited stays
     // allowed): the track crossfades out starting crossfadeDuration before the
     // cap, so a shorter cap is degenerate / leaves no solo airtime. Uses next's
@@ -1182,10 +1183,9 @@ export async function update(patch) {
     next.locale = parseSettingsPatchKey<string>('locale', patch.locale);
   }
   if ('theme' in patch) {
-    const t = patch.theme || {};
+    const t = parseSettingsPatchKey<{ active?: string }>('theme', patch.theme);
     if (t.active !== undefined) {
-      const v = String(t.active ?? '').trim();
-      if (!v) throw new Error('theme.active must be a theme id');
+      const v = t.active;
       // A stale active theme (a retired built-in renamed in 58c3782b, or a
       // custom theme that isn't on disk) falls back to the built-in default
       // rather than failing the save — same tolerance as shows[].themeId above
@@ -1209,7 +1209,9 @@ export async function update(patch) {
   // Captured ONCE so the maps, festivals and shows below all judge against the
   // same list; re-deriving per branch is a latent divergence.
   const moodNames = (next.moods || []).map((m: any) => m.name);
-  const moodCtx = { moodNames };
+  // The mood family needs only the vocabulary; `showIds: null` says this branch
+  // is not in a position to check roster membership — shows are validated below.
+  const moodCtx = { moodNames, showIds: null };
   if ('moodSchedule' in patch) {
     next.moodSchedule = parseSettingsPatchKey('moodSchedule', patch.moodSchedule, moodCtx);
   }
@@ -1228,21 +1230,18 @@ export async function update(patch) {
     next.djPrompts = validateDjPromptsStrict(patch.djPrompts);
   }
   if ('activeDjPromptId' in patch) {
-    next.activeDjPromptId = String(patch.activeDjPromptId ?? '').trim();
+    next.activeDjPromptId = parseSettingsPatchKey<string>(
+      'activeDjPromptId',
+      patch.activeDjPromptId,
+    );
   }
   if ('djPrompt' in patch) {
-    const v = String(patch.djPrompt ?? '').trim();
+    // The length + placeholder rules come from the shared schema; what stays
+    // here is the MAPPING onto the library, which reads and writes next.djPrompts.
+    const v = parseSettingsPatchKey<string>('djPrompt', patch.djPrompt);
     if (v === '') {
       next.activeDjPromptId = '';
     } else {
-      if (v.length < DJ_PROMPT_TEXT_MIN || v.length > DJ_PROMPT_TEXT_MAX) {
-        throw new Error(
-          `djPrompt must be empty (use the default) or ${DJ_PROMPT_TEXT_MIN}-${DJ_PROMPT_TEXT_MAX} chars`,
-        );
-      }
-      if (!v.includes('{name}')) {
-        throw new Error('djPrompt must contain the {name} placeholder');
-      }
       let entry = next.djPrompts.find((p: DjPromptEntry) => p.text === v);
       if (!entry) {
         if (next.djPrompts.length >= DJ_PROMPT_LIMIT) {

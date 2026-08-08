@@ -10,6 +10,7 @@ import type { EngineAvailability } from '../tts/engineMeta';
 import { Play } from 'lucide-react';
 import { Btn, Eyebrow, Metric } from '../ui';
 import { Button } from '../../ui/button';
+import { FieldError } from '../../ui/field';
 
 export const KEY_HINTS: Record<string, string> = {
   ANTHROPIC_API_KEY: 'sk-ant-...',
@@ -437,12 +438,85 @@ export type SaveSettings = (patch: Patch) => Promise<boolean>;
 
 export type FormUpdater = (updater: (f: FormState) => FormState) => void;
 
+/**
+ * Server-side validation errors from the last `/settings` save, keyed by the
+ * controller's dotted path ('beds.crossSec', 'personas.0.name').
+ *
+ * `POST /settings` has answered with a `fieldErrors` payload since the patch
+ * registry landed, and until now the panel threw it away and showed a toast
+ * instead — which lib/notify's own header calls out as the wrong surface for
+ * field-level validation. This is the channel that fixes that.
+ *
+ * There is deliberately NO client-side pre-flight for these. The registry that
+ * maps a settings key to its schema is not itself a schema module, so it is not
+ * in the mirror, and hand-rebuilding that map in the browser would be exactly
+ * the drift the mirror exists to prevent. The server is the one source, and its
+ * answer lands on the input.
+ */
+export type SettingsFieldErrors = Record<string, string>;
+
+export type FormUpdaterOrErrors = SettingsFieldErrors;
+
 export interface SectionProps {
   data: SettingsData;
   form: FormState;
   setForm: FormUpdater;
   busy: boolean;
   saveSettings: SaveSettings;
+  fieldErrors: SettingsFieldErrors;
+}
+
+/**
+ * ARIA + rendering for one settings input's server error.
+ *
+ * Mirrors lib/form.ts's `fieldAria` — deliberately, since these sections are
+ * NOT react-hook-form shaped (each control owns its own save button posting a
+ * one-key patch, so there is no single submit to bind) and cannot use it
+ * directly. The ids and the `-error` suffix follow the same convention, so an
+ * operator gets the same behaviour whichever admin form they are on.
+ */
+/**
+ * One settings input's server error, or nothing.
+ *
+ * Wraps the same vendored `FieldError` primitive the react-hook-form-bound
+ * panels use, so the message looks and announces identically (`role="alert"`)
+ * whichever admin form the operator is on — these sections just get their error
+ * shape from the controller instead of from a resolver.
+ *
+ * `path` is the controller's dotted key, so the JSX names the exact string the
+ * server sends and a rename on either side is visible at the call site.
+ */
+export function SettingsFieldError({
+  path,
+  errors,
+  id,
+}: {
+  path: string;
+  errors: SettingsFieldErrors;
+  id?: string;
+}) {
+  const message = errors[path];
+  if (!message) return null;
+  return <FieldError id={id} errors={[{ message }]} />;
+}
+
+export function settingsFieldAria(baseId: string, message?: string) {
+  const invalid = !!message;
+  return {
+    invalid,
+    message,
+    labelProps: { htmlFor: baseId },
+    controlProps: {
+      id: baseId,
+      // Absent rather than aria-invalid="false" — the attribute only carries
+      // meaning when set.
+      'aria-invalid': invalid || undefined,
+      // Reference the id only when it is really in the DOM: a dangling
+      // aria-describedby is handled inconsistently across screen readers.
+      'aria-describedby': invalid ? `${baseId}-error` : undefined,
+    },
+    errorProps: { id: `${baseId}-error` },
+  } as const;
 }
 
 interface MetricSpec {
