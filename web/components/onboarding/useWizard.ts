@@ -211,9 +211,13 @@ export function useWizard() {
       llm: {
         provider: data.llm.provider,
         model: data.llm.model,
-        // Cloud keys go to apiKeys (state/secrets.env); settings.json keeps only
-        // the provider/model/url, never the key.
-        apiKey: '',
+        // Deliberately NO apiKey field. Cloud keys go to apiKeys
+        // (state/secrets.env), so the wizard has none to offer here — but
+        // settings.llm.apiKey does not mean "no key", it means "CLEAR the
+        // stored key for this provider" (applyInlineKey, #657). This block sent
+        // '' on every save, so re-running onboarding deleted the inline key of
+        // whichever provider it selected (#1351). Absent = leave it alone; the
+        // admin LLM panel omits the field the same way unless one is typed.
         baseUrl: data.llm.baseUrl,
         ollamaUrl: data.llm.ollamaUrl,
       },
