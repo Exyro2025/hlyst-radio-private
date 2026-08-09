@@ -748,6 +748,17 @@ def imaging(page):
     stack that does have credit. Import needs no external API — a real WAV
     upload through /sfx/upload — and shares the same imagingImportSchema
     name/description fields.
+
+    Also covers ImagingPanel's own 3s poll (`setInterval(…, 3000)` — ten times
+    faster than TakeoverCard's 30s, and the panel most likely to exhibit the
+    clobber bug `assert_survives_poll` exists to catch). The Jingle ratio
+    input is the right target: it's a real on-page control fed by the SAME
+    `data` state the poll refetches, guarded by `jingleRatio == null` in
+    ImagingPanel's hydrate-once effect so an in-progress edit is meant to
+    survive every tick. `seconds=3` matches THIS panel's real interval —
+    `assert_survives_poll`'s `seconds=35` default is calibrated for
+    TakeoverCard's 30s poll and would prove nothing here (it'd fast-forward
+    past 11 ticks instead of exercising one real one).
     """
     def find_effect():
         data = json.loads(api("/sfx"))
@@ -761,7 +772,23 @@ def imaging(page):
         api_write("DELETE", f"/sfx/{SFX_FIXTURE_NAME}", ok_statuses=(200, 400, 404))
 
     try:
-        page.goto(f"{WEB}/admin/imaging?tab=sfx")
+        # Installed BEFORE goto — like takeover()'s clock — so the poll's
+        # setInterval is one this test controls from the moment ImagingPanel
+        # mounts, not one already ticking on real wall-clock time.
+        page.clock.install()
+        page.goto(f"{WEB}/admin/imaging?tab=jingles")
+        page.wait_for_selector("text=how often")
+
+        ratio = page.get_by_label("Jingle ratio")
+        original = ratio.input_value()
+        ratio.fill("77")
+        assert_survives_poll(page, ratio, "77", seconds=3)
+        # Revert so this check leaves no dirty, unsaved edit behind — the
+        # ratio was never actually saved (that would need a mixer restart to
+        # matter), so restoring the input value alone makes the run repeatable.
+        ratio.fill(original)
+
+        page.get_by_role("tab", name="SFX").click()
         page.wait_for_selector("text=Sound effects")
 
         # 1. Create modal — duration above SFX_MAX_SEC (10s) refuses on the
