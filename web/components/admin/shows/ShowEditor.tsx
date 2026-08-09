@@ -6,7 +6,7 @@
 // the call site, so switching shows remounts this component (which resets the
 // AiFill box and the local genreDraft buffer — neither is form data).
 
-import type { ChangeEvent, RefObject } from 'react';
+import type { ChangeEvent, ReactNode, RefObject } from 'react';
 import { useEffect, useId, useMemo, useState } from 'react';
 import { useController, type Control, type FieldErrors, type UseFormTrigger } from 'react-hook-form';
 import { Input } from '../../ui/input';
@@ -584,14 +584,21 @@ export function ShowEditor({
           </span>
 
           <Field>
-            <Label>playlist anchor</Label>
-            <span className="field-hint">
-              Pin one or more Navidrome playlists and their combined tracks
-              become this show&apos;s pool. The AI DJ still sequences and talks
-              over them. Pick none to let genre/era/mood drive selection
-              (up to 10).
-            </span>
-            <PlaylistIdsField control={control} name={path('playlistIds')} playlists={playlists} status={playlistsStatus} max={PLAYLISTS_MAX} />
+            <PlaylistIdsField
+              control={control}
+              name={path('playlistIds')}
+              playlists={playlists}
+              status={playlistsStatus}
+              max={PLAYLISTS_MAX}
+              label="playlist anchor"
+            >
+              <span className="field-hint">
+                Pin one or more Navidrome playlists and their combined tracks
+                become this show&apos;s pool. The AI DJ still sequences and talks
+                over them. Pick none to let genre/era/mood drive selection
+                (up to 10).
+              </span>
+            </PlaylistIdsField>
           </Field>
 
           {show.playlistIds.length > 0 && (
@@ -604,14 +611,21 @@ export function ShowEditor({
           )}
 
           <Field>
-            <Label>excluded playlists</Label>
-            <span className="field-hint">
-              Tracks from these playlists never play during this show, whatever
-              the other filters say. Handy for blocking genres or moods that
-              don&apos;t fit: gather them in a Navidrome playlist and exclude it
-              here (up to 10).
-            </span>
-            <PlaylistIdsField control={control} name={path('excludedPlaylistIds')} playlists={playlists} status={playlistsStatus} max={EXCLUDED_PLAYLISTS_MAX} />
+            <PlaylistIdsField
+              control={control}
+              name={path('excludedPlaylistIds')}
+              playlists={playlists}
+              status={playlistsStatus}
+              max={EXCLUDED_PLAYLISTS_MAX}
+              label="excluded playlists"
+            >
+              <span className="field-hint">
+                Tracks from these playlists never play during this show, whatever
+                the other filters say. Handy for blocking genres or moods that
+                don&apos;t fit: gather them in a Navidrome playlist and exclude it
+                here (up to 10).
+              </span>
+            </PlaylistIdsField>
           </Field>
 
           {scopedRuleCount > 0 && (
@@ -673,27 +687,33 @@ export function ShowEditor({
 // ARIA. A tiny local component rather than repeating the useController +
 // fieldAria boilerplate twice inline.
 function PlaylistIdsField({
-  control, name, playlists, status, max,
+  control, name, playlists, status, max, label, children,
 }: {
   control: Control<ShowsFormValues>;
   name: `shows.${number}.playlistIds` | `shows.${number}.excludedPlaylistIds`;
   playlists: { id: string; name: string; songCount: number | null }[];
   status: PlaylistIndexStatus;
   max: number;
+  label: string;
+  children?: ReactNode;
 }) {
   const uid = useId();
   const { field, fieldState } = useController({ control, name });
   const aria = fieldAria(`${uid}-${name}`, fieldState.error);
   return (
-    <div {...aria.groupProps}>
-      <PlaylistPicker
-        playlists={playlists}
-        status={status}
-        selected={field.value ?? []}
-        max={max}
-        onChange={field.onChange}
-      />
-      <FieldError {...aria.errorProps} errors={fieldState.error ? [fieldState.error] : undefined} />
-    </div>
+    <>
+      <FieldTitle {...aria.labelledByProps}>{label}</FieldTitle>
+      {children}
+      <div {...aria.groupProps}>
+        <PlaylistPicker
+          playlists={playlists}
+          status={status}
+          selected={field.value ?? []}
+          max={max}
+          onChange={field.onChange}
+        />
+        <FieldError {...aria.errorProps} errors={fieldState.error ? [fieldState.error] : undefined} />
+      </div>
+    </>
   );
 }

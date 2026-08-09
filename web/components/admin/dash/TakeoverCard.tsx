@@ -21,7 +21,12 @@ import { SHOW_COLORS } from '../schedule/lib';
 // (controller/src/schemas/schedule.ts) — POST /schedule/override runs the same
 // rule at the route, so the form's validation and the server's answer agree by
 // construction.
-import { scheduleOverrideRequestSchema, type ScheduleOverride } from '@/lib/schemas.generated';
+import {
+  scheduleOverrideRequestSchema,
+  OVERRIDE_MIN_MINUTES,
+  OVERRIDE_MAX_MINUTES,
+  type ScheduleOverride,
+} from '@/lib/schemas.generated';
 
 interface TakeoverShow {
   id: string;
@@ -226,6 +231,8 @@ export function TakeoverCard({ tz, locale }: { tz?: string; locale?: StationLoca
               label="Takeover minutes"
               numeric
               className="max-w-32"
+              min={OVERRIDE_MIN_MINUTES}
+              max={OVERRIDE_MAX_MINUTES}
             />
           </div>
           <Btn

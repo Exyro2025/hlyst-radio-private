@@ -96,11 +96,14 @@ export function useZodForm<S extends z.ZodType<FieldValues, FieldValues>>(
 // ARIA wiring for one field, derived from a single base id.
 //
 // The Field primitives in components/ui/field.tsx are presentational: their
-// `data-invalid` turns the field red, and FieldError renders role="alert" so a
-// message is ANNOUNCED the moment it appears. Neither of those associates the
-// message with the control, which is what a screen-reader user needs when they
-// tab BACK to the input — without it the field is an unlabelled-as-invalid box
-// whose explanation was read once and is now unreachable.
+// `data-invalid` turns the LABEL red (fieldVariants in ui/field.tsx is
+// `data-[invalid=true]:text-destructive` — the control's own border is not
+// styled by it, identically for Input and Textarea), and FieldError renders
+// role="alert" so a message is ANNOUNCED the moment it appears. Neither of
+// those associates the message with the control, which is what a
+// screen-reader user needs when they tab BACK to the input — without it the
+// field is an unlabelled-as-invalid box whose explanation was read once and
+// is now unreachable.
 //
 // Returned as spreadable groups so no form open-codes the id suffixes. Two
 // forms deriving `-error` differently is exactly the drift this shared

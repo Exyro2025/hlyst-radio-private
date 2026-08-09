@@ -102,7 +102,7 @@ function BedsCreateModal({
         )}
         <div className="grid grid-cols-[1fr_120px] gap-3">
           <TextField control={control} name="name" label="Name" placeholder="midnight-drift" maxLength={IMAGING_NAME_MAX} />
-          <TextField control={control} name="durationSec" label="Length · s" numeric placeholder="45" />
+          <TextField control={control} name="durationSec" label="Length · s" numeric placeholder="45" step={1} min={minSec} max={maxGenSec} />
         </div>
         <TextField
           control={control}

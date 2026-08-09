@@ -13,6 +13,7 @@ import subprocess
 import sys
 import tempfile
 import time
+import traceback
 from pathlib import Path
 
 from playwright.sync_api import sync_playwright
@@ -80,7 +81,8 @@ def new_page(pw):
 
 def assert_aria(page, locator):
     """Assertion 2's teeth: an invalid control must point at an id that is
-    really in the DOM. A dangling aria-describedby is worse than none.
+    really in the DOM. A dangling aria-describedby (or aria-labelledby) is
+    worse than none.
 
     Resolved via an attribute selector (`[id="..."]`), never a bare `#id` CSS
     selector: a legal DOM id can contain characters that are CSS-selector
@@ -90,16 +92,28 @@ def assert_aria(page, locator):
     `page.set_content('<div id="foo.bar">')` then `page.locator("#foo.bar")`
     is a 0-count match on a page that unambiguously has that id). The a11y
     machinery that actually consumes this id at runtime — getElementById,
-    aria-describedby resolution, the accessibility tree — does plain string
-    matching, not CSS-selector parsing, so a dotted id is completely valid
-    there; only the naive selector was wrong, and `[id="..."]` matches by
-    exact attribute value with no such parsing.
+    aria-describedby/aria-labelledby resolution, the accessibility tree —
+    does plain string matching, not CSS-selector parsing, so a dotted id is
+    completely valid there; only the naive selector was wrong, and
+    `[id="..."]` matches by exact attribute value with no such parsing.
+
+    Checks BOTH aria-describedby and aria-labelledby — a group control (chips,
+    checkboxes) names itself via aria-labelledby (fieldAria's groupProps),
+    since htmlFor can't point at a <div>. A group that spreads groupProps but
+    never renders the paired `-label` id (fieldAria's labelledByProps on a
+    FieldTitle/Label) is exactly as broken as a dangling aria-describedby —
+    two checkbox groups in ShowEditor shipped that way and survived twelve
+    reviews because this function only ever looked at aria-describedby.
     """
     assert locator.get_attribute("aria-invalid") == "true", "aria-invalid not set"
     described = locator.get_attribute("aria-describedby")
     assert described, "aria-describedby missing on an invalid control"
     for token in described.split():
         assert page.locator(f'[id="{token}"]').count() == 1, f"dangling id: {token}"
+    labelled = locator.get_attribute("aria-labelledby")
+    if labelled:
+        for token in labelled.split():
+            assert page.locator(f'[id="{token}"]').count() == 1, f"dangling id: {token}"
 
 
 def assert_survives_poll(page, locator, expected, seconds=35):
@@ -223,57 +237,101 @@ def takeover(page):
         api_write("DELETE", f"/shows/{seeded['id']}", ok_statuses=(200, 404))
 
 
+FESTIVAL_VERIFY_NAME = "Verify Festival"
+
+
+def _festivals():
+    return json.loads(api("/settings")).get("values", {}).get("festivals", [])
+
+
+def _strip_verify_festival():
+    """Whole-array replace, like FestivalsSection.persist itself — festivals
+    have no per-row DELETE endpoint. Best-effort: called both as a pre-clean
+    (a prior run crashed before its own teardown) and as the real teardown."""
+    current = _festivals()
+    without = [f for f in current if f.get("name") != FESTIVAL_VERIFY_NAME]
+    if len(without) != len(current):
+        api_write("POST", "/settings", {"festivals": without})
+
+
 @check
 def festivals(page):
-    page.goto(f"{WEB}/admin/moods?tab=festivals")
-    page.wait_for_selector("text=Festival calendar")
+    """Pre-clean + try/finally, same pattern as shows()/skills()/blockrules()/
+    imaging()/personas(). Without it the final assertion is vacuous from the
+    SECOND run onward: festivals is a whole-array field with no per-row
+    delete, so a leftover "Verify Festival" row from a prior run satisfies a
+    bare `'"Verify Festival"' in api("/settings")` substring check whether or
+    not THIS run's save did anything — and left unbounded, repeated runs walk
+    the array straight into SETTINGS_FESTIVALS_LIMIT (50), which fails as a
+    seeming form regression rather than what it actually is (a fixture leak).
+    The fixed assertion counts entries named FESTIVAL_VERIFY_NAME before and
+    after this run's save, so it proves THIS save added exactly one, not that
+    a row with that name exists somewhere in the blob.
+    """
+    _strip_verify_festival()
+    before_count = sum(1 for f in _festivals() if f.get("name") == FESTIVAL_VERIFY_NAME)
+    assert before_count == 0, f"pre-clean left {before_count} leftover Verify Festival rows"
 
-    page.get_by_role("button", name="Add festival").click()
-    dialog = page.get_by_role("dialog")
-    dialog.wait_for()
-
-    name = dialog.get_by_label("Name")
-    save = dialog.get_by_role("button", name="Add festival")
-
-    # 2. Validate — a blank name. The row is appended blank already, but
-    #    mode: 'onChange' only reacts to a real change event, so fill a
-    #    value first and then clear it to force one.
-    name.fill("x")
-    name.fill("")
-    page.wait_for_selector("text=must be 1-80 chars")
-
-    # `name` is bound through TextField directly against the array path
-    # (`festivals.${idx}.name`), so its id is genuinely dotted — prove that,
-    # not just that assert_aria happens to pass. This is the harness fix's
-    # actual teeth: the OLD bare `#id` selector must fail to resolve this
-    # exact id (confirming the id really is dotted and really would have
-    # been reported dangling under the old lookup — on this id it doesn't
-    # even degrade to a silent 0-count miss, it's a straight CSS parse error,
-    # since a digit right after the dot, e.g. `.14.name`, isn't a legal
-    # unescaped class-name start either), and the NEW attribute-selector
-    # lookup assert_aria now uses must resolve it cleanly.
-    described = name.get_attribute("aria-describedby")
-    assert described and "." in described, f"expected a dotted id, got {described!r}"
     try:
-        old_result = f"{page.locator(f'#{described}').count()} matches"
-    except Exception as e:  # noqa: BLE001 — deliberately broad, this IS the old bug
-        old_result = f"raised {type(e).__name__}"
-    assert old_result != "1 matches", (
-        f"expected the old bare #id selector to fail on a dotted id, got {old_result}"
-    )
-    new_fixed = page.locator(f'[id="{described}"]').count()
-    assert new_fixed == 1, f"expected the attribute selector to resolve the dotted id, got {new_fixed}"
-    print(f"  (dotted id confirmed: {described!r} — old selector: {old_result}, new selector: 1 match)")
+        page.goto(f"{WEB}/admin/moods?tab=festivals")
+        page.wait_for_selector("text=Festival calendar")
 
-    assert_aria(page, name)
-    assert save.is_disabled(), "Save enabled with a blank name"
+        page.get_by_role("button", name="Add festival").click()
+        dialog = page.get_by_role("dialog")
+        dialog.wait_for()
 
-    # 3. Save — a valid name (month/day/mood default to valid values), confirm
-    #    it lands in /settings.
-    name.fill("Verify Festival")
-    save.click()
-    dialog.wait_for(state="detached")
-    assert '"Verify Festival"' in api("/settings"), "festival did not persist"
+        name = dialog.get_by_label("Name")
+        save = dialog.get_by_role("button", name="Add festival")
+
+        # 2. Validate — a blank name. The row is appended blank already, but
+        #    mode: 'onChange' only reacts to a real change event, so fill a
+        #    value first and then clear it to force one.
+        name.fill("x")
+        name.fill("")
+        page.wait_for_selector("text=must be 1-80 chars")
+
+        # `name` is bound through TextField directly against the array path
+        # (`festivals.${idx}.name`), so its id is genuinely dotted — prove that,
+        # not just that assert_aria happens to pass. This is the harness fix's
+        # actual teeth: the OLD bare `#id` selector must fail to resolve this
+        # exact id (confirming the id really is dotted and really would have
+        # been reported dangling under the old lookup — on this id it doesn't
+        # even degrade to a silent 0-count miss, it's a straight CSS parse error,
+        # since a digit right after the dot, e.g. `.14.name`, isn't a legal
+        # unescaped class-name start either), and the NEW attribute-selector
+        # lookup assert_aria now uses must resolve it cleanly.
+        described = name.get_attribute("aria-describedby")
+        assert described and "." in described, f"expected a dotted id, got {described!r}"
+        try:
+            old_result = f"{page.locator(f'#{described}').count()} matches"
+        except Exception as e:  # noqa: BLE001 — deliberately broad, this IS the old bug
+            old_result = f"raised {type(e).__name__}"
+        assert old_result != "1 matches", (
+            f"expected the old bare #id selector to fail on a dotted id, got {old_result}"
+        )
+        new_fixed = page.locator(f'[id="{described}"]').count()
+        assert new_fixed == 1, f"expected the attribute selector to resolve the dotted id, got {new_fixed}"
+        print(f"  (dotted id confirmed: {described!r} — old selector: {old_result}, new selector: 1 match)")
+
+        assert_aria(page, name)
+        assert save.is_disabled(), "Save enabled with a blank name"
+
+        # 3. Save — a valid name (month/day/mood default to valid values), confirm
+        #    THIS run's save actually added it: exactly one row named
+        #    FESTIVAL_VERIFY_NAME now exists, where the pre-clean above proved
+        #    zero existed a moment ago. A stale row from a prior crashed run
+        #    could satisfy a bare substring-in-the-whole-blob check; it cannot
+        #    satisfy a before/after count tied to a fresh pre-clean.
+        name.fill(FESTIVAL_VERIFY_NAME)
+        save.click()
+        dialog.wait_for(state="detached")
+        after_count = sum(1 for f in _festivals() if f.get("name") == FESTIVAL_VERIFY_NAME)
+        assert after_count == 1, f"expected exactly 1 Verify Festival row after save, found {after_count}"
+    finally:
+        # Runs whether the assertions above passed or raised — a failed run
+        # must not leave the fixture behind to poison the NEXT run (or, over
+        # ~40 runs, walk the array into SETTINGS_FESTIVALS_LIMIT).
+        _strip_verify_festival()
 
 
 @check
@@ -1675,13 +1733,90 @@ def playlists(page):
     )
 
 
+VERIFY_STACK_PERSONAS = {"Marlowe", "Wren", "Hale"}
+
+
+def assert_throwaway_stack():
+    """Refuses to run a single check until it's confident `API`/`WEB` are the
+    isolated verify stack, not a real station.
+
+    Every check in this file does destructive, whole-array-replace writes —
+    60-minute takeovers via `POST /schedule/override`, a full `POST /settings`
+    personas-roster replace, show/rule/skill/festival create-and-delete — and
+    they all authenticate as `test`/`test` (AUTH, above). Pointed at a real
+    operator's station (a stale `SUBWAVE_HOME`, a command copy-pasted into the
+    wrong shell) this would scribble over their actual configuration with no
+    confirmation prompt anywhere in the file.
+
+    Two signals, both required, neither sufficient alone:
+      1. `test`/`test` must actually authenticate against `API` — the `verify`
+         skill's documented isolated-controller boot
+         (`.claude/skills/verify/SKILL.md`) always sets `ADMIN_USER=test
+         ADMIN_PASS=test`. A real station almost certainly rejects it, which
+         is caught here in one place rather than every check below failing
+         unreadably, one at a time, on its own first `adminFetch`.
+      2. The persona roster must contain the verify stack's own seeded names
+         — Marlowe, Wren and Hale (personas() and shows() already depend on
+         these three existing by name, seeded fresh by the isolated
+         controller boot). Credentials alone aren't enough: an operator could
+         plausibly leave `ADMIN_USER`/`ADMIN_PASS` at `test`/`test` on a real,
+         low-stakes personal station. A real roster coincidentally named
+         exactly Marlowe/Wren/Hale is not a real scenario — the two signals
+         together are what "throwaway" means here.
+    """
+    try:
+        settings = json.loads(api("/settings"))
+    except Exception as e:  # noqa: BLE001 — any failure here means "not our stack"
+        print(
+            f"ABORT: could not read {API}/settings with test/test admin "
+            f"credentials. Refusing to run — this does not look like the "
+            f"isolated verify stack (see .claude/skills/verify/SKILL.md), and "
+            f"every check in this file does destructive writes. ({type(e).__name__}: {e})",
+            file=sys.stderr,
+        )
+        raise SystemExit(1)
+    persona_names = {p.get("name") for p in settings.get("values", {}).get("personas", [])}
+    if not VERIFY_STACK_PERSONAS.issubset(persona_names):
+        print(
+            f"ABORT: {API}'s persona roster is {sorted(n for n in persona_names if n)!r}, "
+            f"not a superset of the verify stack's seeded {sorted(VERIFY_STACK_PERSONAS)!r}. "
+            f"This does not look like a throwaway stack — refusing to run "
+            f"destructive checks (takeovers, whole-roster replaces, show/rule/"
+            f"skill/festival writes) against it.",
+            file=sys.stderr,
+        )
+        raise SystemExit(1)
+
+
 if __name__ == "__main__":
+    assert_throwaway_stack()
     names = sys.argv[1:] or list(CHECKS)
+    results = []  # (name, passed, error) — the runner used to abort on the
+    # FIRST failure (no try/except around CHECKS[name](page), no tally), so
+    # "11/11 PASS" was only ever observable when every single check passed;
+    # one failure hid the pass/fail status of everything after it in the
+    # list. Now every check runs regardless of earlier failures, and the
+    # process still exits non-zero if any of them failed, so CI-style
+    # consumption (`&& echo ok`) still works.
     with sync_playwright() as pw:
         for name in names:
             browser, page = new_page(pw)
             try:
                 CHECKS[name](page)
                 print(f"PASS {name}")
+                results.append((name, True, None))
+            except Exception as e:  # noqa: BLE001 — record and keep going
+                print(f"FAIL {name}: {e}")
+                traceback.print_exc()
+                results.append((name, False, e))
             finally:
                 browser.close()
+
+    passed = sum(1 for _, ok, _ in results if ok)
+    total = len(results)
+    print(f"\n{passed}/{total} PASS" if passed == total else f"\n{passed}/{total} PASS, {total - passed} FAILED")
+    if passed != total:
+        for name, ok, e in results:
+            if not ok:
+                print(f"  FAILED: {name}: {e}")
+        sys.exit(1)

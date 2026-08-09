@@ -17,6 +17,8 @@ import {
   IMAGING_DESCRIPTION_MAX,
   IMAGING_NAME_MAX,
   IMAGING_PROMPT_MAX,
+  SFX_MIN_SEC,
+  SFX_MAX_SEC,
   sfxCreateSchema,
   imagingImportSchema,
 } from '@/lib/schemas.generated';
@@ -97,7 +99,7 @@ function SfxCreateModal({
         )}
         <div className="grid grid-cols-[1fr_120px] gap-3">
           <TextField control={control} name="name" label="Name" placeholder="tape-stop" maxLength={IMAGING_NAME_MAX} />
-          <TextField control={control} name="durationSec" label="Duration · s" numeric placeholder="auto" />
+          <TextField control={control} name="durationSec" label="Duration · s" numeric placeholder="auto" step={0.1} min={SFX_MIN_SEC} max={SFX_MAX_SEC} />
         </div>
         <TextField
           control={control}
