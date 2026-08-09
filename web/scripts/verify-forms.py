@@ -1,18 +1,52 @@
-# web/scripts/verify-forms.py
-#
-# Drives the isolated verify stack (controller :7791, web :7793) through every
-# form converted to react-hook-form. Not part of CI — web/ has no test suite and
-# the merge gate is lint. This is the evidence for the PR.
-#
-# Every check here does DESTRUCTIVE writes (takeovers, whole-array replaces,
-# create/delete fixtures) authenticated as test/test, so running this file
-# requires an explicit opt-in — set SUBWAVE_VERIFY_ALLOW_DESTRUCTIVE=1, and
-# only after confirming API/WEB below really point at the isolated verify
-# stack from .claude/skills/verify/SKILL.md, never a real station. See
-# assert_throwaway_stack() for why this is a plain env-var opt-in rather than
-# an inferred check.
-#
-# Usage: SUBWAVE_VERIFY_ALLOW_DESTRUCTIVE=1 python3 web/scripts/verify-forms.py [form_name ...]
+"""web/scripts/verify-forms.py
+
+Drives the isolated verify stack (controller :7791, web :7793) through every
+form converted to react-hook-form. Not part of CI — web/ has no test suite
+and the merge gate is lint. This is the evidence for a forms PR; run it
+after touching any converted form.
+
+Usage: SUBWAVE_VERIFY_ALLOW_DESTRUCTIVE=1 python3 web/scripts/verify-forms.py [check ...]
+Every check in CHECKS runs with no args; name one or more to run a subset.
+Every check does DESTRUCTIVE writes (takeovers, whole-array replaces,
+create/delete fixtures) authenticated as test/test — see
+assert_throwaway_stack() for why the guard is a plain env-var opt-in
+(SUBWAVE_VERIFY_ALLOW_DESTRUCTIVE=1) rather than an inferred check.
+
+THE FOUR-STEP SHAPE. Most @check functions drive the same rough arc, though
+not every step applies to every form:
+  1. Load — navigate, wait for hydration from a real GET, confirm a stored
+     value actually reached the bound field.
+  2. Validate — drive an actual value through an actual input to trip a
+     real client-side rule, and confirm Save/submit disables.
+  3. Save — a valid value clears the refusal and a REAL round trip
+     persists it, confirmed by reading it back through api() — never trust
+     a client-side state flip alone. A server-only rule (an orphan guard,
+     a duplicate slug) gets driven for real too, and its refusal must land
+     on the right field via assert_field_error/applyServerFieldErrors, not
+     a toast standing in for a field message.
+  4. Poll-safety — ONLY for panels with a live polling refresh. Call
+     page.clock.install() as the FIRST line of the check, before
+     page.goto — installed later, the poll's setInterval is created
+     outside the fake clock's control and fast_forward can't reach it.
+     Always pass assert_survives_poll an explicit seconds= matching the
+     panel's REAL interval: its seconds=35 default is calibrated for
+     TakeoverCard's 30s poll and proves nothing against a different one
+     (see the imaging check's 3s coverage).
+
+SEED AND TEARDOWN. A check that creates a named fixture must best-effort
+pre-clean that same name at the top (a prior run may have crashed before
+its own teardown) and delete it in a `finally:` (so THIS run can't leave
+litter either). Use find_by_name/find_show for the lookup — don't hand-roll
+another loop-and-compare.
+
+ID-SCOPED ASSERTIONS, the one convention in this file. Never wait on a bare
+page-wide `[aria-invalid="true"]` or `text=must be…` selector — both pass
+just as easily when a DIFFERENT field broke. Every wait on invalid state
+goes through wait_for_invalid(page, locator), and every message check
+through assert_field_error(page, locator, text), both scoped to the
+locator's OWN id (a plain field) or aria-labelledby (a group control —
+fieldAria's groupProps carries no id, see lib/form.ts).
+"""
 import base64
 import json
 import os
@@ -155,6 +189,88 @@ def assert_survives_poll(page, locator, expected, seconds=35):
     )
 
 
+def wait_for_invalid(page, locator, invalid=True, timeout=None):
+    """Waits for THIS specific control (or group) to reach the given
+    aria-invalid state — the module's one convention for waiting on invalid
+    state (see the module docstring). Never a bare page-wide
+    `[aria-invalid="true"]` (matches ANY invalid field on the page, not
+    necessarily `locator`) or a `text=must be…` match (matches the message
+    wherever it renders, which proves nothing about attribution) — both of
+    those used to coexist with this scoped form and two others across the
+    file; this is the one that survived.
+
+    Scopes off whichever real attribute `locator` actually carries: a plain
+    field's `id` (fieldAria's `controlProps` — always present, invalid or
+    not), or a group control's `aria-labelledby` (fieldAria's `groupProps`,
+    which carries no `id` at all — see the comment on `fieldAria` in
+    `lib/form.ts`). Both are read live off `locator`, so a caller may hand
+    this a suffix-selector locator (`dialog.locator('[aria-labelledby$="-values-label"]')`)
+    just as well as an exact one; only the CURRENT match's own attribute
+    value is used to build the poll selector.
+    """
+    field_id = locator.get_attribute("id")
+    if field_id:
+        scope = f'[id="{field_id}"]'
+    else:
+        labelledby = locator.get_attribute("aria-labelledby")
+        assert labelledby, "locator has neither an id nor aria-labelledby to scope the wait on"
+        scope = f'[aria-labelledby="{labelledby}"]'
+    state = "attached" if invalid else "detached"
+    kwargs = {"state": state}
+    if timeout is not None:
+        kwargs["timeout"] = timeout
+    page.wait_for_selector(f'{scope}[aria-invalid="true"]', **kwargs)
+
+
+def assert_field_error(page, locator, expected_text):
+    """Reads the `-error` id off `locator`'s OWN `aria-describedby` and
+    asserts its rendered text contains `expected_text` — the "read the
+    -error id off aria-describedby, then assert its text" idiom that used
+    to be copied out by hand at 8 call sites across this file (a duplicate:
+    `remove temp` chip work, a slug refusal, a persona tts refusal, a show
+    host/track-length/guest refusal, a playlist name cap…). Proves the
+    message is attributed to THIS control, never a bare page-wide
+    `text=…` match, which passes just as easily if a different field
+    happens to render the same string. Returns the resolved error id for a
+    caller that wants to chain a further assertion on it (see festivals()'s
+    dotted-id proof, which needs the raw `aria-describedby` value itself,
+    not just this helper's pass/fail).
+    """
+    described = locator.get_attribute("aria-describedby")
+    assert described, "aria-describedby missing on an invalid control"
+    error_ids = [t for t in described.split() if t.endswith("-error")]
+    assert error_ids, f"no -error id in aria-describedby: {described!r}"
+    error_id = error_ids[0]
+    text = page.locator(f'[id="{error_id}"]').inner_text()
+    assert expected_text in text, f"expected {expected_text!r} in error text, got {text!r}"
+    return error_id
+
+
+def find_by_name(path, list_path, name, name_key="name"):
+    """Generic 'find the fixture I seeded, by name' finder — the shape that
+    used to be hand-rolled per check (a GET, a walk into a nested list, a
+    linear scan comparing one field) for shows, personas, sound effects and
+    blocklist rules alike. `list_path` is a dot-separated walk into the
+    JSON response to the list being searched (e.g. `"values.shows"`,
+    `"sfx"`, `"rules"`); `name_key` is the field compared against `name`
+    (blocklist rules are keyed by `label`, not `name`). Returns the whole
+    matched item, or None.
+    """
+    data = json.loads(api(path))
+    for key in list_path.split("."):
+        data = data.get(key) if isinstance(data, dict) else None
+    for item in data or []:
+        if item.get(name_key) == name:
+            return item
+    return None
+
+
+def find_show(name):
+    """Shared by takeover() and shows() — both used to carry a byte-
+    identical nested `find_show` closure."""
+    return find_by_name("/settings", "values.shows", name)
+
+
 CHECKS = {}
 
 
@@ -179,13 +295,6 @@ def takeover(page):
     the same try/finally pattern shows()/skills()/imaging() use, so this
     check is self-contained and order-independent within the file.
     """
-    def find_show(name):
-        data = json.loads(api("/settings"))
-        for s in data.get("values", {}).get("shows", []):
-            if s.get("name") == name:
-                return s
-        return None
-
     # Best-effort cleanup from a run that crashed before its own teardown.
     leftover = find_show(TAKEOVER_SHOW_NAME)
     if leftover:
@@ -216,8 +325,9 @@ def takeover(page):
 
         # 2. Validate — 5 is under OVERRIDE_MIN_MINUTES (15).
         minutes.fill("5")
-        page.wait_for_selector("text=must be an integer between 15 and 720")
+        wait_for_invalid(page, minutes)
         assert_aria(page, minutes)
+        assert_field_error(page, minutes, "must be an integer between 15 and 720")
 
         # Save must be gated while invalid.
         pin = page.get_by_role("button", name="Pin to air")
@@ -296,7 +406,7 @@ def festivals(page):
         #    value first and then clear it to force one.
         name.fill("x")
         name.fill("")
-        page.wait_for_selector("text=must be 1-80 chars")
+        wait_for_invalid(page, name)
 
         # `name` is bound through TextField directly against the array path
         # (`festivals.${idx}.name`), so its id is genuinely dotted — prove that,
@@ -322,6 +432,7 @@ def festivals(page):
         print(f"  (dotted id confirmed: {described!r} — old selector: {old_result}, new selector: 1 match)")
 
         assert_aria(page, name)
+        assert_field_error(page, name, "must be 1-80 chars")
         assert save.is_disabled(), "Save enabled with a blank name"
 
         # 3. Save — a valid name (month/day/mood default to valid values), confirm
@@ -368,8 +479,9 @@ def moods(page):
     #    through the arrayControl cast, real dotted ids (`moods.N.name`).
     save = page.get_by_role("button", name="Save vocabulary")
     target.fill("")
-    page.wait_for_selector("text=must be 1-40 chars")
+    wait_for_invalid(page, target)
     assert_aria(page, target)
+    assert_field_error(page, target, "must be 1-40 chars")
     assert save.is_disabled(), "Save enabled with a blank mood id"
 
     # 2. Rename (not delete) the mood the early-morning slot points at, to
@@ -378,7 +490,7 @@ def moods(page):
     #    from the server, proving this is really a round trip.
     renamed = f"{early_morning_mood}-orphantest"
     target.fill(renamed)
-    page.wait_for_selector("text=must be 1-40 chars", state="detached")
+    wait_for_invalid(page, target, invalid=False)
     assert not save.is_disabled(), "Save stayed disabled on a valid rename"
 
     save.click()
@@ -416,7 +528,7 @@ def moods(page):
 
     # Revert the rename so the check is repeatable against the same seed.
     target.fill(early_morning_mood)
-    page.wait_for_selector("text=must be 1-40 chars", state="detached")
+    wait_for_invalid(page, target, invalid=False)
 
 
 @check
@@ -451,7 +563,7 @@ def moods_unsaved_vocab_gap(page):
     # id), and nothing is posted to the server.
     renamed = f"{midday_mood}-liveonly"
     target.fill(renamed)
-    page.wait_for_selector("text=must be 1-40 chars", state="detached")
+    wait_for_invalid(page, target, invalid=False)
 
     # Switch tabs via the real tab control — a page.goto here would hard-
     # reload the page and discard the in-memory rename, which would not
@@ -478,8 +590,9 @@ def moods_unsaved_vocab_gap(page):
     # server-side) so the check is repeatable.
     page.get_by_role("tab", name="Vocabulary").click()
     page.wait_for_selector("text=Mood vocabulary")
-    page.get_by_label("Mood id").nth(target_idx).fill(midday_mood)
-    page.wait_for_selector("text=must be 1-40 chars", state="detached")
+    target = page.get_by_label("Mood id").nth(target_idx)
+    target.fill(midday_mood)
+    wait_for_invalid(page, target, invalid=False)
 
 
 SKILLS_FIXTURE_SLUG = "verify-dup-skill"
@@ -534,7 +647,7 @@ def skills(page):
         assert not create.is_disabled(), "Create stayed disabled on a well-formed, if colliding, slug"
 
         create.click()
-        page.wait_for_selector('[role="dialog"] :text("already exists")')
+        wait_for_invalid(page, slug)
         assert_aria(page, slug)
 
         # The dialog must still be open — a real refusal, not a swallowed error
@@ -544,9 +657,7 @@ def skills(page):
         # And the refusal really did attribute to THIS input, not just render an
         # aria-describedby pointing at unrelated text — the associated node's own
         # text must be the "already exists" message.
-        described = slug.get_attribute("aria-describedby")
-        error_id = [t for t in described.split() if t.endswith("-error")][0]
-        assert "already exists" in page.locator(f'[id="{error_id}"]').inner_text()
+        assert_field_error(page, slug, "already exists")
     finally:
         # Runs whether the assertions above passed or raised — a failed run
         # must not leave the fixture behind to poison the NEXT run. 200 is
@@ -581,10 +692,12 @@ def blockrules(page):
     not just that assert_aria passes on whatever the caller happened to hand
     it.
 
-    Message assertions read off the invalid control's OWN aria-describedby
-    (like skills()'s duplicate-slug check does), never a bare page-wide
-    `text=...` match — Fix round 1's Minor 1: the message being unique in
-    the app today isn't a property this check should depend on.
+    Message + invalid-state assertions go through the module's shared
+    wait_for_invalid/assert_field_error helpers (Fix round 1's Minor 1: the
+    message being unique in the app today isn't a property this check
+    should depend on) — scoped to the ONE group locator below, which stays
+    valid across both the tag-mode and playlist-mode branches since both
+    render through the same `-values-label` suffix.
 
     GET /dj/playlists is mocked to return one fixture playlist regardless of
     whether this verify stack has real Navidrome connectivity (it usually
@@ -595,11 +708,8 @@ def blockrules(page):
     aria-describedby bug in that branch would have nothing to catch it on.
     """
     def find_rule_id():
-        data = json.loads(api("/library/blocklist"))
-        for r in data.get("rules", []):
-            if r["label"] == BLOCKRULE_LABEL:
-                return r["id"]
-        return None
+        rule = find_by_name("/library/blocklist", "rules", BLOCKRULE_LABEL, name_key="label")
+        return rule["id"] if rule else None
 
     # Best-effort cleanup from a run that crashed before its own teardown —
     # same posture as skills()'s pre-seed delete.
@@ -634,6 +744,12 @@ def blockrules(page):
         match_on = dialog.get_by_label("Match on")
 
         name.fill(BLOCKRULE_LABEL)
+        # Same group locator for both the tag-mode and playlist-mode
+        # branches below — `values` (the chip input, and the playlist
+        # checkbox list) is one field with two render branches keyed on
+        # `field`, both naming themselves via the same `-values-label`
+        # suffix (fieldAria's groupProps; see the docstring).
+        group = dialog.locator('[aria-labelledby$="-values-label"]')
 
         # 1. Validate (tag mode) — a label with no values. The default field
         #    is 'tag' (EMPTY_RULE), whose chip input carries the "e.g.
@@ -646,15 +762,11 @@ def blockrules(page):
         chip_input.fill("temp")
         chip_input.press("Enter")
         dialog.get_by_role("button", name="remove temp").click()
-        page.wait_for_selector('[aria-labelledby$="-values-label"][aria-invalid="true"]')
+        wait_for_invalid(page, group)
         assert save.is_disabled(), "Add rule enabled with an empty values list"
-
-        values_group = dialog.locator('[aria-labelledby$="-values-label"]')
-        assert values_group.count() == 1, f"expected exactly one values group, found {values_group.count()}"
-        assert_aria(page, values_group)
-        described = values_group.get_attribute("aria-describedby")
-        error_id = [t for t in described.split() if t.endswith("-error")][0]
-        assert "must have at least one entry" in page.locator(f'[id="{error_id}"]').inner_text()
+        assert group.count() == 1, f"expected exactly one values group, found {group.count()}"
+        assert_aria(page, group)
+        assert_field_error(page, group, "must have at least one entry")
 
         # 1b. Validate (playlist mode) — Fix round 1's finding: switching
         #     Match-on resets `values` to [] (see the field Controller's
@@ -665,21 +777,17 @@ def blockrules(page):
         #     check ever switched into Playlist mode to notice.
         match_on.click()
         page.get_by_role("option", name="Playlist").click()
-        page.wait_for_selector('[aria-labelledby$="-values-label"][aria-invalid="true"]')
+        wait_for_invalid(page, group)
         assert save.is_disabled(), "Add rule enabled with no playlists selected"
-
-        playlist_group = dialog.locator('[aria-labelledby$="-values-label"]')
-        assert playlist_group.count() == 1, f"expected exactly one values group, found {playlist_group.count()}"
-        assert_aria(page, playlist_group)
-        described = playlist_group.get_attribute("aria-describedby")
-        error_id = [t for t in described.split() if t.endswith("-error")][0]
-        assert "must have at least one entry" in page.locator(f'[id="{error_id}"]').inner_text()
+        assert group.count() == 1, f"expected exactly one values group, found {group.count()}"
+        assert_aria(page, group)
+        assert_field_error(page, group, "must have at least one entry")
 
         # Tick the mocked playlist — the group must actually leave its
         # invalid state once `values` is non-empty again, not just report
         # invalid forever regardless of content.
-        playlist_group.get_by_text("Verify Playlist").click()
-        page.wait_for_selector('[aria-labelledby$="-values-label"][aria-invalid="true"]', state="detached")
+        group.get_by_text("Verify Playlist").click()
+        wait_for_invalid(page, group, invalid=False)
         assert not save.is_disabled(), "Add rule stayed disabled with a playlist selected"
 
         # Switch back to `tag` before the real save below — this check's
@@ -688,14 +796,14 @@ def blockrules(page):
         # empty starting point step 2 below already expects.
         match_on.click()
         page.get_by_role("option", name="Any tag").click()
-        page.wait_for_selector('[aria-labelledby$="-values-label"][aria-invalid="true"]')
+        wait_for_invalid(page, group)
 
         # 2. Save — a valid value clears the refusal, and the round trip
         #    really persists (not just a client-side state flip): confirmed
         #    against GET /library/blocklist afterward.
         chip_input.fill("verify-tag")
         chip_input.press("Enter")
-        page.wait_for_selector('[aria-labelledby$="-values-label"][aria-invalid="true"]', state="detached")
+        wait_for_invalid(page, group, invalid=False)
         assert not save.is_disabled(), "Add rule stayed disabled on a valid rule"
 
         save.click()
@@ -761,11 +869,7 @@ def imaging(page):
     past 11 ticks instead of exercising one real one).
     """
     def find_effect():
-        data = json.loads(api("/sfx"))
-        for s in data.get("sfx", []):
-            if s["name"] == SFX_FIXTURE_NAME:
-                return s
-        return None
+        return find_by_name("/sfx", "sfx", SFX_FIXTURE_NAME)
 
     # Best-effort cleanup from a run that crashed before its own teardown.
     if find_effect():
@@ -809,8 +913,9 @@ def imaging(page):
         # page-wide text= match — see blockrules()/skills()), proving the
         # message is really attributed to THIS input.
         duration.fill("999")
-        page.wait_for_selector('[id$="-durationSec-error"]:text("is capped at 10s")')
+        wait_for_invalid(page, duration)
         assert_aria(page, duration)
+        assert_field_error(page, duration, "is capped at 10s")
         assert create_save.is_disabled(), "Create enabled with an out-of-range duration"
 
         # A valid duration clears the refusal. FieldError (components/ui/
@@ -820,7 +925,7 @@ def imaging(page):
         # actually leaves the DOM — scoped the same way the initial assertion
         # above is, not a bare page-wide text= match.
         duration.fill("1")
-        page.wait_for_selector('[id$="-durationSec-error"]', state="detached")
+        wait_for_invalid(page, duration, invalid=False)
         assert duration.get_attribute("aria-invalid") is None, "duration still marked invalid"
         assert not create_save.is_disabled(), "Create stayed disabled on a valid duration"
 
@@ -1076,12 +1181,13 @@ def onboarding(page):
         station = page.get_by_label("Station name")
         dj_next = page.get_by_role("button", name="Next →")
         station.fill("x" * 81)
-        page.wait_for_selector("text=station name must be 80 chars or fewer", timeout=5000)
+        wait_for_invalid(page, station, timeout=5000)
         assert_aria(page, station)
+        assert_field_error(page, station, "station name must be 80 chars or fewer")
         assert dj_next.is_disabled(), "DJ Next stayed enabled with an over-length station name"
 
         station.fill("Verify Station")
-        page.wait_for_selector("text=station name must be 80 chars or fewer", state="detached", timeout=5000)
+        wait_for_invalid(page, station, invalid=False, timeout=5000)
         assert station.get_attribute("aria-invalid") is None, "station name still marked invalid"
         assert not dj_next.is_disabled(), "DJ Next stayed disabled on a valid station name"
 
@@ -1186,11 +1292,7 @@ def personas(page):
     client nor the server does any index remapping of its own.
     """
     def find_verify_persona():
-        data = json.loads(api("/settings"))
-        for p in data.get("values", {}).get("personas", []):
-            if p.get("name") == PERSONA_VERIFY_NAME:
-                return p
-        return None
+        return find_by_name("/settings", "values.personas", PERSONA_VERIFY_NAME)
 
     # Best-effort cleanup from a run that crashed before finishing. Personas
     # have no per-row DELETE endpoint (the roster is one whole-array `POST
@@ -1220,14 +1322,15 @@ def personas(page):
     save = dialog.get_by_role("button", name="Save persona")
     name.fill("x")
     name.fill("")  # mode: 'onChange' needs a real change event, not a starting-blank value
-    page.wait_for_selector("text=name must be 1-40 chars")
+    wait_for_invalid(page, name)
     assert_aria(page, name)
+    assert_field_error(page, name, "name must be 1-40 chars")
     assert save.is_disabled(), "Save persona enabled with a blank name"
 
     # Restore — nothing was ever saved this invalid, so putting the value
     # back is just clearing the local edit, not reverting server state.
     name.fill("Wren")
-    page.wait_for_selector("text=name must be 1-40 chars", state="detached")
+    wait_for_invalid(page, name, invalid=False)
     assert not save.is_disabled(), "Save persona stayed disabled once the name was restored"
 
     # Close (Wren is now byte-identical to what the server has, so no
@@ -1289,11 +1392,9 @@ def personas(page):
 
         voice_group = dialog.locator('[aria-labelledby$="-tts-label"]')
         voice_group.wait_for()
-        page.wait_for_selector('[aria-labelledby$="-tts-label"][aria-invalid="true"]')
+        wait_for_invalid(page, voice_group)
         assert_aria(page, voice_group)
-        described = voice_group.get_attribute("aria-describedby")
-        error_id = [t for t in described.split() if t.endswith("-error")][0]
-        assert "tts.voice must be 1-100 chars" in page.locator(f'[id="{error_id}"]').inner_text()
+        assert_field_error(page, voice_group, "tts.voice must be 1-100 chars")
 
         # The dialog must still be on WREN — a real refusal, not a swallowed
         # error that quietly closed or advanced the editor.
@@ -1432,13 +1533,6 @@ def shows(page):
     correctly flags the host field and refuses to save — proving the wiring
     works even though the current server can never trigger it honestly.
     """
-    def find_show(name):
-        data = json.loads(api("/settings"))
-        for s in data.get("values", {}).get("shows", []):
-            if s.get("name") == name:
-                return s
-        return None
-
     # Best-effort cleanup from a run that crashed before its own teardown.
     for leftover_name in (SHOW_VERIFY_NAME, GHOST_SHOW_NAME):
         leftover = find_show(leftover_name)
@@ -1477,14 +1571,9 @@ def shows(page):
         dialog.wait_for()
 
         host_field = dialog.get_by_label("persona owner")
-        page.wait_for_selector('[aria-invalid="true"]')
-        assert host_field.get_attribute("aria-invalid") == "true", (
-            "host field not flagged invalid for a personaId absent from the roster"
-        )
+        wait_for_invalid(page, host_field)
         assert_aria(page, host_field)
-        described = host_field.get_attribute("aria-describedby")
-        error_id = [t for t in described.split() if t.endswith("-error")][0]
-        assert "must reference an existing persona" in page.locator(f'[id="{error_id}"]').inner_text()
+        assert_field_error(page, host_field, "must reference an existing persona")
 
         save = dialog.get_by_role("button", name="Save show")
         assert save.is_disabled(), "Save show enabled with a host that names no live persona"
@@ -1528,20 +1617,16 @@ def shows(page):
         #    assertions 1 and 3 — never a bare page-wide `text=` match.
         maxlen = dialog.get_by_label("max track length (seconds)")
         maxlen.fill("5")
-        page.wait_for_selector('[aria-invalid="true"]')
-        assert maxlen.get_attribute("aria-invalid") == "true", (
-            "track length field not flagged invalid under the crossfade floor"
-        )
+        wait_for_invalid(page, maxlen)
         assert_aria(page, maxlen)
-        described = maxlen.get_attribute("aria-describedby")
-        error_id = [t for t in described.split() if t.endswith("-error")][0]
-        assert "must be 0 (inherit/unlimited) or at least the station's minimum track length" \
-            in page.locator(f'[id="{error_id}"]').inner_text()
+        assert_field_error(
+            page, maxlen,
+            "must be 0 (inherit/unlimited) or at least the station's minimum track length",
+        )
         assert save.is_disabled(), "Save show enabled with a track cap under the crossfade floor"
 
-        maxlen_id = maxlen.get_attribute("id")
         maxlen.fill("")  # blank = inherit the station default, always valid
-        page.wait_for_selector(f'[id="{maxlen_id}"][aria-invalid="true"]', state="detached")
+        wait_for_invalid(page, maxlen, invalid=False)
 
         # 3. Validate — a guest who is also the host. The pre-RHF editor
         #    auto-cleared an overlapping guest when the host changed, which made
@@ -1556,18 +1641,16 @@ def shows(page):
         host_field.click()
         page.get_by_role("option", name="Wren").click()
 
-        page.wait_for_selector('[aria-labelledby$=".guestPersonaIds-label"][aria-invalid="true"]')
+        wait_for_invalid(page, guest_group)
         assert save.is_disabled(), "Save show enabled with a guest who is also the host"
         assert_aria(page, guest_group)
-        described = guest_group.get_attribute("aria-describedby")
-        error_id = [t for t in described.split() if t.endswith("-error")][0]
-        assert "must not include the show's host persona" in page.locator(f'[id="{error_id}"]').inner_text()
+        assert_field_error(page, guest_group, "must not include the show's host persona")
 
         # Fix — host back to Marlowe (clears the overlap; Wren stays selected as
         # a guest, which is fine, but untoggle her too for a clean fixture).
         host_field.click()
         page.get_by_role("option", name="Marlowe").click()
-        page.wait_for_selector('[aria-labelledby$=".guestPersonaIds-label"][aria-invalid="true"]', state="detached")
+        wait_for_invalid(page, guest_group, invalid=False)
         guest_group.get_by_role("button", name="Wren").click()
 
         assert not save.is_disabled(), "Save show stayed disabled once the overlap was fixed"
@@ -1703,21 +1786,16 @@ def playlists(page):
 
     # 2. Validate — a name over PLAYLIST_NAME_MAX refuses on the name field.
     name_field.fill("x" * (PLAYLIST_NAME_MAX + 1))
-    page.wait_for_selector('[aria-invalid="true"]')
-    assert name_field.get_attribute("aria-invalid") == "true", (
-        "name field not flagged invalid over PLAYLIST_NAME_MAX"
-    )
+    wait_for_invalid(page, name_field)
     assert_aria(page, name_field)
-    described = name_field.get_attribute("aria-describedby")
-    error_id = [t for t in described.split() if t.endswith("-error")][0]
-    assert f"1-{PLAYLIST_NAME_MAX}" in page.locator(f'[id="{error_id}"]').inner_text()
+    assert_field_error(page, name_field, f"1-{PLAYLIST_NAME_MAX}")
     assert save_btn.is_disabled(), "Save playlist enabled with a name over PLAYLIST_NAME_MAX"
 
     # 3. Save — a valid build submits the real wire body (mocked response —
     #    see the docstring) and the client applies it (modal closes).
     name_field.fill("")
     name_field.fill(PLAYLIST_VERIFY_NAME)
-    page.wait_for_selector(f'[id="{name_field.get_attribute("id")}"][aria-invalid="true"]', state="detached")
+    wait_for_invalid(page, name_field, invalid=False)
 
     posted = {}
 
