@@ -332,6 +332,50 @@ def moods_unsaved_vocab_gap(page):
     page.wait_for_selector("text=must be 1-40 chars", state="detached")
 
 
+@check
+def skills(page):
+    """SkillEditModal (#1358 follow-on): a create whose slug already exists on
+    disk is a SERVER-only rule (skillSlugSchema only checks shape) — traced
+    routes/dj.ts's POST /dj/skills: it DOES answer with
+    `fieldErrors: { name: … }` on both the reserved-slug and already-exists
+    branches, unlike Task 4's persona-orphan guard, which threw a fieldless
+    Error. So this modal is a genuine round trip: client-side validation
+    passes (the slug is well-formed), and the refusal that lands is the
+    server's, attributed to the right input via applyServerFieldErrors.
+
+    Requires a custom skill named "verify-dup-skill" to already exist —
+    seeded once via `curl -u test:test -X POST /dj/skills` before this runs.
+    """
+    page.goto(f"{WEB}/admin/skills")
+    page.get_by_role("button", name="New skill").click()
+
+    dialog = page.get_by_role("dialog")
+    dialog.wait_for()
+
+    slug = dialog.get_by_label("SLUG")
+    brief = dialog.get_by_label("The brief")
+    create = dialog.get_by_role("button", name="Create", exact=True)
+
+    slug.fill("verify-dup-skill")   # valid shape, but already exists on disk
+    brief.fill("Playwright dup-slug probe — should never actually save.")
+    assert not create.is_disabled(), "Create stayed disabled on a well-formed, if colliding, slug"
+
+    create.click()
+    page.wait_for_selector('[role="dialog"] :text("already exists")')
+    assert_aria(page, slug)
+
+    # The dialog must still be open — a real refusal, not a swallowed error
+    # that quietly closed the modal.
+    assert dialog.is_visible(), "dialog closed despite the server refusal"
+
+    # And the refusal really did attribute to THIS input, not just render an
+    # aria-describedby pointing at unrelated text — the associated node's own
+    # text must be the "already exists" message.
+    described = slug.get_attribute("aria-describedby")
+    error_id = [t for t in described.split() if t.endswith("-error")][0]
+    assert "already exists" in page.locator(f'[id="{error_id}"]').inner_text()
+
+
 if __name__ == "__main__":
     names = sys.argv[1:] or list(CHECKS)
     with sync_playwright() as pw:

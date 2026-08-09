@@ -11,8 +11,13 @@
 // The on/off toggle and Run now are LIVE operator actions (/dj/skill-toggle,
 // /dj/skill) — they don't participate in the Save/dirty flow, which only writes
 // the SKILL.md file fields.
-import { useEffect, useState } from 'react';
+import { useEffect, useId, useState } from 'react';
 import type { CSSProperties } from 'react';
+import {
+  Controller, useWatch,
+  type Control, type DefaultValues, type FieldValues,
+} from 'react-hook-form';
+import type { z } from 'zod';
 import { notify, errorMessage } from '../../../lib/notify';
 import { useAdminAuth } from '../../../lib/adminAuth';
 import { V3AlertDialog } from '../../ui/alert-dialog';
@@ -28,6 +33,8 @@ import {
   skillFileSchema,
 } from '@/lib/schemas.generated';
 import { skillSubmitUrl } from '../../../lib/repo';
+import { useZodForm, applyServerFieldErrors, fieldAria } from '@/lib/form';
+import { TextField, TextareaField } from '@/lib/form-fields';
 
 // Only what this modal needs from GET /dj/skills; the full list type lives in
 // SkillsPanel.
@@ -104,21 +111,23 @@ interface SkillFileResponse {
 
 const COOLDOWN_PRESETS = ['15m', '25m', '45m', '1h', '6h'];
 
-// Snapshotted so "dirty" can be computed and edits reverted.
-interface FileFields {
+// The RHF-bound shape of the SKILL.md fields (what `useZodForm`'s schema
+// validates). `name` is create-only — the edit-mode schema (skillFileSchema)
+// has no such field, so it just rides along unused there. `config` (the
+// skill's own declared knobs) is deliberately NOT here: those are runtime
+// data from the skill's own tool.mjs, validated separately by
+// skills/config-fields.ts on the controller, so they stay their own
+// useState below rather than joining the shared schema — same reasoning as
+// the schema file's own header comment.
+interface SkillFormValues {
+  name?: string;
   label: string;
   cooldown: string;
   context: string[];
-  window: 'any' | 'commute';
-  /** Values for the skill's own declared knobs, keyed by field key. Strings
-   *  throughout — the controller coerces and validates against the declaration. */
-  config: Record<string, string>;
   tags: string[];
   brief: string;
-}
-
-function emptyFields(): FileFields {
-  return { label: '', cooldown: '', context: [], window: 'any', config: {}, tags: [], brief: '' };
+  window: 'any' | 'commute';
+  requiresKey: string;
 }
 
 // The skill's current knob values as form strings (the controller sends numbers
@@ -129,18 +138,34 @@ function configValues(j: SkillFileResponse): Record<string, string> {
   );
 }
 
-// Comparison key for the tracked fields. Tags keep their order (an authored list,
-// not a set); only context is order-free. Config is normalised — a knob the
-// controller reports as unset is ABSENT, so typing into an empty field and
-// clearing it again must not read as an unsaved change.
-function fieldsKey(f: FileFields): string {
-  const config = Object.fromEntries(
-    Object.entries(f.config)
-      .map(([k, v]) => [k, (v || '').trim()] as const)
-      .filter(([, v]) => v)
-      .sort(([a], [b]) => a.localeCompare(b)),
+// Comparison key for `config` alone — the one file field that stays outside
+// the RHF form (see SkillFormValues above) and therefore needs its own
+// dirty tracking. A knob the controller reports as unset is ABSENT, so
+// typing into an empty field and clearing it again must not read as an
+// unsaved change.
+function configKey(config: Record<string, string>): string {
+  return JSON.stringify(
+    Object.fromEntries(
+      Object.entries(config)
+        .map(([k, v]) => [k, (v || '').trim()] as const)
+        .filter(([, v]) => v)
+        .sort(([a], [b]) => a.localeCompare(b)),
+    ),
   );
-  return JSON.stringify({ ...f, config, context: [...f.context].sort() });
+}
+
+// GET /dj/skills/:kind/file → the RHF defaultValues shape. Shared by the load
+// effect and Reset to default so the two can't map the response differently.
+function fileToFormValues(j: SkillFileResponse) {
+  return {
+    label: j.label || '',
+    cooldown: j.cooldown || '',
+    context: splitContext(j.context),
+    window: (j.window === 'commute' ? 'commute' : 'any') as 'any' | 'commute',
+    tags: Array.isArray(j.tags) ? j.tags : [],
+    brief: j.brief || '',
+    requiresKey: j.requiresKey || '',
+  };
 }
 
 function titleCase(slug: string): string {
@@ -156,16 +181,17 @@ export default function SkillEditModal({ mode, skill, personas, tagSuggestions, 
   const fileId = skill ? (skill.kind || skill.name) : '';
 
   const [loaded, setLoaded] = useState(!isEdit);   // create starts ready
-  const [name, setName] = useState('');            // slug — create only
   const [kind, setKind] = useState(skill?.kind || skill?.name || '');
   const [custom, setCustom] = useState(mode === 'create' ? true : !!skill?.custom);
   const [configFields, setConfigFields] = useState<SkillConfigField[]>([]);
   const [hasTool, setHasTool] = useState(false);
-  const [requiresKey, setRequiresKey] = useState('');   // hidden passthrough
   const [knownContext, setKnownContext] = useState<string[]>(CONTEXT_FIELDS_FALLBACK);
 
-  const [fields, setFields] = useState<FileFields>(emptyFields());
-  const [snapshot, setSnapshot] = useState<string>(fieldsKey(emptyFields()));
+  // The skill's own declared knobs (news' feed/feedMaxItems, …) — runtime data
+  // read off tool.mjs, not part of the shared schema, so it keeps its own
+  // state + dirty snapshot outside the RHF form (see SkillFormValues above).
+  const [config, setConfig] = useState<Record<string, string>>({});
+  const [configSnapshot, setConfigSnapshot] = useState<string>(() => configKey({}));
   const [tagDraft, setTagDraft] = useState('');   // the tag input's in-progress text
 
   // Seeded from the roster at mount (a `skills: null` persona runs everything);
@@ -184,23 +210,53 @@ export default function SkillEditModal({ mode, skill, personas, tagSuggestions, 
   const [confirmDelete, setConfirmDelete] = useState(false);  // delete confirm dialog
   const [defaults, setDefaults] = useState<SkillDefaults | null>(null); // built-in shipped defaults
 
-  const patch = (p: Partial<FileFields>) => setFields(f => ({ ...f, ...p }));
+  // The same schema the controller runs (controller/src/schemas/skill.ts via
+  // the generated mirror) — so a bad cooldown is caught at the input instead of
+  // coming back as a 400 after the operator hits Save. Declared as the widened
+  // ZodType rather than the literal create/edit union: several of its fields
+  // (label/cooldown/window/requiresKey) are z.preprocess-wrapped, whose
+  // z.input is `unknown`, so the union's input type collapses the same way a
+  // factory schema's does (see FestivalsSection/MoodsPanel) — worked around
+  // the same way, with one cast on `control` below instead of fighting the
+  // union at every call site.
+  const schema: z.ZodType<FieldValues, FieldValues> =
+    mode === 'create' ? skillCreateSchema : skillFileSchema(custom);
 
-  const addTag = (raw: string) => {
+  const form = useZodForm(
+    schema,
+    (mode === 'create'
+      ? { name: '', label: '', cooldown: '', context: [], tags: [], brief: '', window: 'any', requiresKey: '' }
+      : { label: '', cooldown: '', context: [], tags: [], brief: '', window: 'any', requiresKey: '' }
+    ) as DefaultValues<z.input<typeof schema>>,
+  );
+  const control = form.control as unknown as Control<SkillFormValues>;
+  const uid = useId();
+
+  // `custom` can flip after mount (edit mode's initial guess comes from the
+  // skills-list row; the file GET below is the source of truth), which swaps
+  // `schema` to a different singleton. react-hook-form picks up a changed
+  // resolver on the next render, but it doesn't retroactively re-run it
+  // against already-computed error state — only the next trigger does. Same
+  // pattern as MoodsPanel's schedule/weather schema, which also depends on
+  // state resolved after mount.
+  useEffect(() => {
+    void form.trigger();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [schema]);
+
+  const addTag = (raw: string, tags: string[], onChange: (next: string[]) => void) => {
     const tag = raw.trim().toLowerCase();
     if (!tag) return;
     if (!SKILL_TAG_RE.test(tag)) {
       notify.err(`"${tag}" isn't a valid tag — lowercase letters, digits, hyphens, max 24 chars`);
       return;
     }
-    setFields(f => {
-      if (f.tags.includes(tag)) return f;
-      if (f.tags.length >= TAGS_PER_SKILL_LIMIT) {
-        notify.err(`At most ${TAGS_PER_SKILL_LIMIT} tags per skill`);
-        return f;
-      }
-      return { ...f, tags: [...f.tags, tag] };
-    });
+    if (tags.includes(tag)) { setTagDraft(''); return; }
+    if (tags.length >= TAGS_PER_SKILL_LIMIT) {
+      notify.err(`At most ${TAGS_PER_SKILL_LIMIT} tags per skill`);
+      return;
+    }
+    onChange([...tags, tag]);
     setTagDraft('');
   };
 
@@ -219,22 +275,14 @@ export default function SkillEditModal({ mode, skill, personas, tagSuggestions, 
         const j = (await r.json().catch(() => ({}))) as SkillFileResponse;
         if (!r.ok) throw new Error(j.error || `failed (${r.status})`);
         if (cancelled) return;
-        const next: FileFields = {
-          label: j.label || '',
-          cooldown: j.cooldown || '',
-          context: splitContext(j.context),
-          window: j.window === 'commute' ? 'commute' : 'any',
-          config: configValues(j),
-          tags: Array.isArray(j.tags) ? j.tags : [],
-          brief: j.brief || '',
-        };
-        setFields(next);
-        setSnapshot(fieldsKey(next));
+        form.reset(fileToFormValues(j) as DefaultValues<z.input<typeof schema>>);
+        const cfg = configValues(j);
+        setConfig(cfg);
+        setConfigSnapshot(configKey(cfg));
         setKind(j.kind || fileId);
         setCustom(!!j.custom);
         setConfigFields(Array.isArray(j.configFields) ? j.configFields : []);
         setHasTool(!!j.hasTool);
-        setRequiresKey(j.requiresKey || '');
         setDefaults(j.defaults || null);
         setKnownContext(
           Array.isArray(j.knownContextFields) && j.knownContextFields.length
@@ -256,72 +304,53 @@ export default function SkillEditModal({ mode, skill, personas, tagSuggestions, 
   // listener: that is what lets the nested delete confirm get Escape first.
 
   const assignDirty = isEdit && JSON.stringify([...assigned].sort()) !== assignSnapshot;
-  const dirty = loaded && (fieldsKey(fields) !== snapshot || assignDirty);
+  const configDirty = configKey(config) !== configSnapshot;
+  const dirty = loaded && (form.formState.isDirty || configDirty || assignDirty);
 
-  // The SKILL.md fields exactly as the controller will receive them. Built once
-  // and used by BOTH the save gate and the request, so the form can never
-  // validate one shape and post another.
-  //
-  // `config` is deliberately outside it: the knobs a skill declares in its own
-  // tool.mjs are runtime data (validated by skills/config-fields.ts against
-  // that declaration), which is why the shared schema doesn't own them either.
-  const fileBody = {
-    label: fields.label.trim() || undefined,
-    cooldown: fields.cooldown.trim() || undefined,
-    context: fields.context,          // [] resets to the default profile
-    tags: fields.tags,                // [] clears the tags line
-    brief: fields.brief,
-    ...(custom ? { window: fields.window, requiresKey: requiresKey || undefined } : {}),
-  };
-
-  // The same schema the controller runs (controller/src/schemas/skill.ts via
-  // the generated mirror) — so a bad cooldown is caught at the input instead of
-  // coming back as a 400 after the operator hits Save.
-  const parsed = (mode === 'create' ? skillCreateSchema : skillFileSchema(custom))
-    .safeParse(mode === 'create' ? { ...fileBody, name: name.trim().toLowerCase() } : fileBody);
-  const issueFor = (key: string): string | undefined =>
-    (parsed.success ? undefined : parsed.error.issues.find(i => i.path[0] === key)?.message);
-  const nameValid = !issueFor('name');
-  const cooldownError = issueFor('cooldown');
-  const canSave = loaded && parsed.success && !busy;
+  const canSave = loaded && form.formState.isValid && !busy;
   // Any schema objection the form has no inline slot for — a disk-authored
   // requiresKey that isn't UPPER_SNAKE_CASE, an unknown context token riding
   // the hidden passthrough state, a bad tag loaded off disk — used to disable
   // Save with no visible reason anywhere. The footer surfaces the first such
   // issue so a gated Save always says why.
   const blockingIssue = (() => {
-    if (parsed.success) return null;
-    const issue = parsed.error.issues.find(i => !['name', 'cooldown'].includes(String(i.path[0] ?? '')));
-    if (!issue) return null;
-    const field = String(issue.path[0] ?? '');
-    return field ? `${field}: ${issue.message}` : issue.message;
+    const entry = Object.entries(form.formState.errors).find(
+      ([key, err]) => err && !['name', 'cooldown'].includes(key),
+    );
+    if (!entry) return null;
+    const [field, err] = entry;
+    return err?.message ? `${field}: ${err.message}` : null;
   })();
-  // A server-side name rule (reserved slug, slug already on disk) comes back as
-  // fieldErrors.name — typing a different slug is the way out, so it lands on
-  // the slug input rather than only flashing past in a toast.
-  const [serverNameError, setServerNameError] = useState<string | null>(null);
 
-  const displayName = fields.label || (isEdit ? titleCase(kind) : (name ? titleCase(name) : 'New skill'));
+  const labelValue = (useWatch({ control, name: 'label' }) as string | undefined) || '';
+  const nameValue = (useWatch({ control, name: 'name' }) as string | undefined) || '';
+  const briefValue = (useWatch({ control, name: 'brief' }) as string | undefined) || '';
+  const cooldownValue = (useWatch({ control, name: 'cooldown' }) as string | undefined) || '';
+  const contextValue = (useWatch({ control, name: 'context' }) as string[] | undefined) || [];
+  const windowValue = (useWatch({ control, name: 'window' }) as 'any' | 'commute' | undefined) || 'any';
+  const displayName = labelValue || (isEdit ? titleCase(kind) : (nameValue ? titleCase(nameValue) : 'New skill'));
 
-  const save = async () => {
-    if (!canSave) return;
+  const onSubmit = form.handleSubmit(async (values) => {
     setBusy(true);
     try {
-      // `requiresKey` rides along for a custom skill so a disk-authored gate
-      // survives a save from the form.
-      const body: Record<string, unknown> = { ...fileBody };
+      // `requiresKey` (and, for a custom skill, `window`) ride along in `values`
+      // whenever the schema in force declares them — a built-in edit's schema
+      // (builtinSkillFileSchema) doesn't, so zod has already stripped them from
+      // the parsed output, same as the old `...(custom ? {…} : {})` spread.
+      const body: Record<string, unknown> = { ...values };
       // Always sent when the skill declares knobs, so clearing a field clears
       // the frontmatter line. Omitted entirely for a skill with none, which the
-      // controller reads as "leave whatever is on disk".
+      // controller reads as "leave whatever is on disk". `config` is read off
+      // the raw body server-side (routes/dj.ts's resolveConfig), never off the
+      // parsed schema output, so it travels outside `values` here too.
       if (configFields.length) {
         body.config = Object.fromEntries(
-          configFields.map(f => [f.key, (fields.config[f.key] || '').trim()]),
+          configFields.map(f => [f.key, (config[f.key] || '').trim()]),
         );
       }
 
       let r: Response;
       if (mode === 'create') {
-        body.name = name.trim().toLowerCase();
         r = await adminFetch('/dj/skills', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -340,16 +369,21 @@ export default function SkillEditModal({ mode, skill, personas, tagSuggestions, 
         fieldErrors?: Record<string, string>;
       };
       if (!r.ok) {
-        if (j.fieldErrors?.name) setServerNameError(j.fieldErrors.name);
+        // A server-side name rule (reserved slug, slug already on disk) comes
+        // back as fieldErrors.name — typing a different slug is the way out,
+        // so it lands on the slug input rather than only flashing past in a
+        // toast.
+        applyServerFieldErrors(form, j.fieldErrors);
         throw new Error(j.error || `failed (${r.status})`);
       }
       onSkillsChange(Array.isArray(j.skills) ? j.skills : []);
 
       if (mode === 'create') {
-        notify.ok(`Created “${name}” — disabled until you enable it`);
+        notify.ok(`Created "${values.name}" — disabled until you enable it`);
         onClose();
       } else {
-        setSnapshot(fieldsKey(fields));   // edits are now the saved baseline
+        form.reset(values as DefaultValues<z.input<typeof schema>>);   // edits are now the saved baseline
+        setConfigSnapshot(configKey(config));
         // A separate resource (personas[].skills): the file save above already
         // stood, so a failure here reports on its own.
         if (assignDirty && skill) {
@@ -374,7 +408,7 @@ export default function SkillEditModal({ mode, skill, personas, tagSuggestions, 
     } finally {
       setBusy(false);
     }
-  };
+  });
 
   const toggleEnabled = async () => {
     if (!isEdit || !skill) return;
@@ -461,11 +495,11 @@ export default function SkillEditModal({ mode, skill, personas, tagSuggestions, 
   const shareToCommunity = () => {
     const url = skillSubmitUrl({
       'skill-name': kind,
-      label: fields.label,
-      brief: fields.brief,
-      cooldown: fields.cooldown,
-      context: fields.context.join(', '),
-      window: fields.window === 'commute' ? 'commute' : '',
+      label: labelValue,
+      brief: briefValue,
+      cooldown: cooldownValue,
+      context: contextValue.join(', '),
+      window: windowValue === 'commute' ? 'commute' : '',
     });
     window.open(url, '_blank', 'noopener,noreferrer');
   };
@@ -485,17 +519,10 @@ export default function SkillEditModal({ mode, skill, personas, tagSuggestions, 
       const fr = await adminFetch(`/dj/skills/${fileId}/file`);
       const fj = (await fr.json().catch(() => ({}))) as SkillFileResponse;
       if (fr.ok) {
-        const next: FileFields = {
-          label: fj.label || '',
-          cooldown: fj.cooldown || '',
-          context: splitContext(fj.context),
-          window: fj.window === 'commute' ? 'commute' : 'any',
-          config: configValues(fj),
-          tags: Array.isArray(fj.tags) ? fj.tags : [],
-          brief: fj.brief || '',
-        };
-        setFields(next);
-        setSnapshot(fieldsKey(next));
+        form.reset(fileToFormValues(fj) as DefaultValues<z.input<typeof schema>>);
+        const cfg = configValues(fj);
+        setConfig(cfg);
+        setConfigSnapshot(configKey(cfg));
         setConfigFields(Array.isArray(fj.configFields) ? fj.configFields : []);
         setHasTool(!!fj.hasTool);
       }
@@ -623,7 +650,7 @@ export default function SkillEditModal({ mode, skill, personas, tagSuggestions, 
             ? (mode === 'create' ? 'Creating…' : 'Saving…')
             : (mode === 'create' ? 'Create' : 'Save'),
           tone: 'solid',
-          onClick: save,
+          onClick: () => { void onSubmit(); },
           disabled: !canSave,
         },
       ]}
@@ -646,69 +673,96 @@ export default function SkillEditModal({ mode, skill, personas, tagSuggestions, 
 
             <div className="sw-section">
               <div style={sectionLabel}>SKILL NAME</div>
-              <input
-                value={fields.label}
-                onChange={e => patch({ label: e.target.value })}
+              <TextField
+                control={control}
+                name="label"
+                label="Skill name"
                 placeholder={displayName}
-                aria-label="Skill name"
-                style={{ ...inputBase, marginTop: 16, padding: '12px 16px', fontSize: 18, fontWeight: 800, letterSpacing: '-0.01em', width: '100%', boxSizing: 'border-box' }}
+                className="mt-4"
               />
               {mode === 'create' && (
-                <>
-                  <label style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 10, marginTop: 14 }}>
-                    <span style={{ fontSize: 10, letterSpacing: '0.18em', textTransform: 'uppercase', color: 'var(--muted)', fontWeight: 700 }}>SLUG</span>
-                    <input
-                      value={name}
-                      onChange={e => { setName(e.target.value.toLowerCase()); setServerNameError(null); }}
-                      placeholder="moon-phase"
-                      aria-invalid={(name && !nameValid) || serverNameError ? true : undefined}
-                      style={{ ...inputBase, padding: '8px 12px', fontSize: 13, fontWeight: 700, letterSpacing: '0.04em', width: 200, maxWidth: '100%', borderColor: (name && !nameValid) || serverNameError ? 'var(--accent)' : 'var(--ink)' }}
-                    />
-                  </label>
-                  {serverNameError && (
-                    <div role="alert" style={{ fontSize: 12, color: 'var(--accent)', marginTop: 8, letterSpacing: '0.01em' }}>
-                      {serverNameError}
-                    </div>
-                  )}
-                </>
+                <Controller
+                  control={control}
+                  name="name"
+                  render={({ field, fieldState }) => {
+                    const baseId = `${uid}-name`;
+                    const aria = fieldAria(baseId, fieldState.error);
+                    return (
+                      <>
+                        <label
+                          {...aria.labelProps}
+                          style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 10, marginTop: 14 }}
+                        >
+                          <span style={{ fontSize: 10, letterSpacing: '0.18em', textTransform: 'uppercase', color: 'var(--muted)', fontWeight: 700 }}>SLUG</span>
+                          <input
+                            {...aria.controlProps}
+                            value={field.value || ''}
+                            onChange={e => field.onChange(e.target.value.toLowerCase())}
+                            onBlur={field.onBlur}
+                            ref={field.ref}
+                            placeholder="moon-phase"
+                            style={{ ...inputBase, padding: '8px 12px', fontSize: 13, fontWeight: 700, letterSpacing: '0.04em', width: 200, maxWidth: '100%', borderColor: fieldState.error ? 'var(--accent)' : 'var(--ink)' }}
+                          />
+                        </label>
+                        {fieldState.error && (
+                          <div {...aria.errorProps} role="alert" style={{ fontSize: 12, color: 'var(--accent)', marginTop: 8, letterSpacing: '0.01em' }}>
+                            {fieldState.error.message}
+                          </div>
+                        )}
+                      </>
+                    );
+                  }}
+                />
               )}
             </div>
 
             <div className="sw-section">
               <div style={sectionLabel}>COOLDOWN · MINIMUM GAP BETWEEN AIRINGS</div>
               <div style={{ display: 'flex', alignItems: 'center', gap: 18, flexWrap: 'wrap', marginTop: 16 }}>
-                <div style={{ display: 'flex', flexWrap: 'wrap' }}>
-                  {COOLDOWN_PRESETS.map((v, i) => (
-                    <button key={v} type="button" onClick={() => patch({ cooldown: v })} style={presetStyle(fields.cooldown === v, i)}>{v}</button>
-                  ))}
-                </div>
-                <span style={{ fontSize: 10, letterSpacing: '0.18em', textTransform: 'uppercase', color: 'var(--muted)', fontWeight: 600 }}>OR TYPE</span>
-                <input
-                  value={fields.cooldown}
-                  onChange={e => patch({ cooldown: e.target.value })}
-                  placeholder="45m"
-                  aria-label="Cooldown"
-                  aria-invalid={cooldownError ? true : undefined}
-                  style={{ ...inputBase, width: 128, maxWidth: '100%', padding: '11px 15px', fontSize: 15, fontWeight: 700, letterSpacing: '0.04em', fontVariantNumeric: 'tabular-nums', borderColor: cooldownError ? 'var(--accent)' : 'var(--ink)' }}
+                <Controller
+                  control={control}
+                  name="cooldown"
+                  render={({ field }) => (
+                    <div style={{ display: 'flex', flexWrap: 'wrap' }}>
+                      {COOLDOWN_PRESETS.map((v, i) => (
+                        <button key={v} type="button" onClick={() => field.onChange(v)} style={presetStyle(field.value === v, i)}>{v}</button>
+                      ))}
+                    </div>
+                  )}
                 />
-              </div>
-              <div
-                role={cooldownError ? 'alert' : undefined}
-                style={{ fontSize: 12, color: cooldownError ? 'var(--accent)' : 'var(--muted)', marginTop: 12, letterSpacing: '0.01em' }}
-              >
-                {cooldownError ? `Cooldown ${cooldownError}` : 'e.g. 45m, 6h, 2d, or a bare number (minutes).'}
+                <span style={{ fontSize: 10, letterSpacing: '0.18em', textTransform: 'uppercase', color: 'var(--muted)', fontWeight: 600 }}>OR TYPE</span>
+                <TextField
+                  control={control}
+                  name="cooldown"
+                  label="Cooldown"
+                  placeholder="45m"
+                  description="e.g. 45m, 6h, 2d, or a bare number (minutes)."
+                  className="w-32"
+                />
               </div>
             </div>
 
             {custom && (
               <div className="sw-section">
-                <div style={sectionLabel}>WHEN IT CAN AIR</div>
-                <div style={{ display: 'flex', flexWrap: 'wrap', marginTop: 16 }}>
-                  {([['any', 'ANY TIME'], ['commute', 'COMMUTE ONLY']] as const).map(([w, lbl], i) => (
-                    <button key={w} type="button" onClick={() => patch({ window: w })} style={presetStyle(fields.window === w, i)}>{lbl}</button>
-                  ))}
-                </div>
-                <div style={{ fontSize: 12, color: 'var(--muted)', marginTop: 12 }}>Commute-only restricts this segment to the morning and evening commute hours.</div>
+                <Controller
+                  control={control}
+                  name="window"
+                  render={({ field, fieldState }) => {
+                    const baseId = `${uid}-window`;
+                    const aria = fieldAria(baseId, fieldState.error);
+                    return (
+                      <>
+                        <div {...aria.labelledByProps} style={sectionLabel}>WHEN IT CAN AIR</div>
+                        <div {...aria.groupProps} style={{ display: 'flex', flexWrap: 'wrap', marginTop: 16 }}>
+                          {([['any', 'ANY TIME'], ['commute', 'COMMUTE ONLY']] as const).map(([w, lbl], i) => (
+                            <button key={w} type="button" onClick={() => field.onChange(w)} style={presetStyle(field.value === w, i)}>{lbl}</button>
+                          ))}
+                        </div>
+                        <div style={{ fontSize: 12, color: 'var(--muted)', marginTop: 12 }}>Commute-only restricts this segment to the morning and evening commute hours.</div>
+                      </>
+                    );
+                  }}
+                />
               </div>
             )}
 
@@ -724,8 +778,8 @@ export default function SkillEditModal({ mode, skill, personas, tagSuggestions, 
                         min={f.type === 'number' ? f.min : undefined}
                         max={f.type === 'number' ? f.max : undefined}
                         step={f.type === 'number' ? (f.integer ? 1 : 'any') : undefined}
-                        value={fields.config[f.key] || ''}
-                        onChange={e => patch({ config: { ...fields.config, [f.key]: e.target.value } })}
+                        value={config[f.key] || ''}
+                        onChange={e => setConfig(c => ({ ...c, [f.key]: e.target.value }))}
                         placeholder={f.placeholder || ''}
                         style={{
                           ...inputBase,
@@ -747,71 +801,106 @@ export default function SkillEditModal({ mode, skill, personas, tagSuggestions, 
             )}
 
             <div className="sw-section">
-              <div style={sectionLabel}>CONTEXT THE DJ MAY MENTION</div>
-              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10, marginTop: 16 }}>
-                {knownContext.map(field => {
-                  const on = fields.context.includes(field);
+              <Controller
+                control={control}
+                name="context"
+                render={({ field, fieldState }) => {
+                  const baseId = `${uid}-context`;
+                  const aria = fieldAria(baseId, fieldState.error);
                   return (
-                    <button
-                      key={field}
-                      type="button"
-                      onClick={() => patch({ context: on ? fields.context.filter(f => f !== field) : [...fields.context, field] })}
-                      style={chipStyle(on)}
-                    >
-                      <span style={markStyle(on)} />
-                      <span>{CONTEXT_FIELD_LABELS[field as ContextField] || field}</span>
-                    </button>
+                    <>
+                      <div {...aria.labelledByProps} style={sectionLabel}>CONTEXT THE DJ MAY MENTION</div>
+                      <div {...aria.groupProps} style={{ display: 'flex', flexWrap: 'wrap', gap: 10, marginTop: 16 }}>
+                        {knownContext.map(cf => {
+                          const on = field.value.includes(cf);
+                          return (
+                            <button
+                              key={cf}
+                              type="button"
+                              onClick={() => field.onChange(on ? field.value.filter(x => x !== cf) : [...field.value, cf])}
+                              style={chipStyle(on)}
+                            >
+                              <span style={markStyle(on)} />
+                              <span>{CONTEXT_FIELD_LABELS[cf as ContextField] || cf}</span>
+                            </button>
+                          );
+                        })}
+                      </div>
+                      {fieldState.error && (
+                        <div {...aria.errorProps} role="alert" style={{ fontSize: 12, color: 'var(--accent)', marginTop: 14 }}>
+                          {fieldState.error.message}
+                        </div>
+                      )}
+                      <div style={{ fontSize: 12, color: 'var(--muted)', marginTop: 14, lineHeight: 1.6, maxWidth: '78ch' }}>
+                        Switch on only what&apos;s topical for this segment. A context left dark stays out of the prompt, so the DJ stops working it into every break.
+                      </div>
+                    </>
                   );
-                })}
-              </div>
-              <div style={{ fontSize: 12, color: 'var(--muted)', marginTop: 14, lineHeight: 1.6, maxWidth: '78ch' }}>
-                Switch on only what&apos;s topical for this segment. A context left dark stays out of the prompt, so the DJ stops working it into every break.
-              </div>
+                }}
+              />
             </div>
 
             <div className="sw-section">
-              <div style={sectionLabel}>TAGS · ORGANISE THE SKILL LIST</div>
-              <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 10, marginTop: 16 }}>
-                {fields.tags.map(t => (
-                  <button
-                    key={t}
-                    type="button"
-                    title={`Remove tag "${t}"`}
-                    onClick={() => patch({ tags: fields.tags.filter(x => x !== t) })}
-                    style={chipStyle(true)}
-                  >
-                    <span>#{t}</span>
-                    <span aria-hidden>×</span>
-                  </button>
-                ))}
-                <input
-                  value={tagDraft}
-                  onChange={e => setTagDraft(e.target.value)}
-                  onKeyDown={e => {
-                    if (e.key === 'Enter' || e.key === ',') {
-                      e.preventDefault();
-                      addTag(tagDraft);
-                    }
-                  }}
-                  onBlur={() => addTag(tagDraft)}
-                  placeholder={fields.tags.length ? 'add tag…' : 'late-night, factual…'}
-                  aria-label="Add tag"
-                  style={{ ...inputBase, width: 160, padding: '9px 12px', fontSize: 13 }}
-                />
-              </div>
-              {(tagSuggestions || []).filter(t => !fields.tags.includes(t)).length > 0 && (
-                <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 8, marginTop: 12 }}>
-                  <span style={{ fontSize: 10, letterSpacing: '0.18em', textTransform: 'uppercase', color: 'var(--muted)', fontWeight: 600 }}>IN USE</span>
-                  {(tagSuggestions || []).filter(t => !fields.tags.includes(t)).map(t => (
-                    <button key={t} type="button" onClick={() => addTag(t)} style={chipStyle(false)}>
-                      #{t}
-                    </button>
-                  ))}
-                </div>
-              )}
-              <div style={{ fontSize: 12, color: 'var(--muted)', marginTop: 12 }}>
-                Freeform: tag by show, mood, type, whatever helps you filter. Tags travel with the skill when exported or shared.
-              </div>
+              <Controller
+                control={control}
+                name="tags"
+                render={({ field, fieldState }) => {
+                  const baseId = `${uid}-tags`;
+                  const aria = fieldAria(baseId, fieldState.error);
+                  const suggestions = (tagSuggestions || []).filter(t => !field.value.includes(t));
+                  return (
+                    <>
+                      <div {...aria.labelledByProps} style={sectionLabel}>TAGS · ORGANISE THE SKILL LIST</div>
+                      <div {...aria.groupProps} style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 10, marginTop: 16 }}>
+                        {field.value.map(t => (
+                          <button
+                            key={t}
+                            type="button"
+                            title={`Remove tag "${t}"`}
+                            onClick={() => field.onChange(field.value.filter(x => x !== t))}
+                            style={chipStyle(true)}
+                          >
+                            <span>#{t}</span>
+                            <span aria-hidden>×</span>
+                          </button>
+                        ))}
+                        <input
+                          value={tagDraft}
+                          onChange={e => setTagDraft(e.target.value)}
+                          onKeyDown={e => {
+                            if (e.key === 'Enter' || e.key === ',') {
+                              e.preventDefault();
+                              addTag(tagDraft, field.value, field.onChange);
+                            }
+                          }}
+                          onBlur={() => addTag(tagDraft, field.value, field.onChange)}
+                          placeholder={field.value.length ? 'add tag…' : 'late-night, factual…'}
+                          aria-label="Add tag"
+                          style={{ ...inputBase, width: 160, padding: '9px 12px', fontSize: 13 }}
+                        />
+                      </div>
+                      {fieldState.error && (
+                        <div {...aria.errorProps} role="alert" style={{ fontSize: 12, color: 'var(--accent)', marginTop: 12 }}>
+                          {fieldState.error.message}
+                        </div>
+                      )}
+                      {suggestions.length > 0 && (
+                        <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 8, marginTop: 12 }}>
+                          <span style={{ fontSize: 10, letterSpacing: '0.18em', textTransform: 'uppercase', color: 'var(--muted)', fontWeight: 600 }}>IN USE</span>
+                          {suggestions.map(t => (
+                            <button key={t} type="button" onClick={() => addTag(t, field.value, field.onChange)} style={chipStyle(false)}>
+                              #{t}
+                            </button>
+                          ))}
+                        </div>
+                      )}
+                      <div style={{ fontSize: 12, color: 'var(--muted)', marginTop: 12 }}>
+                        Freeform: tag by show, mood, type, whatever helps you filter. Tags travel with the skill when exported or shared.
+                      </div>
+                    </>
+                  );
+                }}
+              />
             </div>
 
             {isEdit && roster.length > 0 && (
@@ -860,16 +949,16 @@ export default function SkillEditModal({ mode, skill, personas, tagSuggestions, 
               <p className="sw-dropcap" style={{ fontSize: 13, lineHeight: 1.65, color: 'var(--muted)', margin: '14px 0', maxWidth: '74ch' }}>
                 Write it the way the DJ would read it on air: one or two lines, in character. Say plainly when the segment is better left unaired.
               </p>
-              <textarea
-                value={fields.brief}
-                onChange={e => patch({ brief: e.target.value })}
+              <TextareaField
+                control={control}
+                name="brief"
+                label="The brief"
                 rows={7}
                 placeholder="What should the DJ say — and when should it stay quiet?"
-                style={{ ...inputBase, width: '100%', boxSizing: 'border-box', minHeight: 200, borderLeft: '3px solid var(--accent)', padding: '16px 18px', fontSize: 15, lineHeight: 1.7, resize: 'vertical' }}
               />
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 10 }}>
                 <span style={{ fontSize: 10, letterSpacing: '0.2em', textTransform: 'uppercase', color: 'var(--muted)', fontWeight: 600 }}>DJ VOICE · IN CHARACTER</span>
-                <span style={{ fontSize: 10, letterSpacing: '0.16em', textTransform: 'uppercase', color: 'var(--muted)', fontWeight: 600, fontVariantNumeric: 'tabular-nums' }}>{fields.brief.length} CHARS</span>
+                <span style={{ fontSize: 10, letterSpacing: '0.16em', textTransform: 'uppercase', color: 'var(--muted)', fontWeight: 600, fontVariantNumeric: 'tabular-nums' }}>{briefValue.length} CHARS</span>
               </div>
               {hasTool && (
                 <div style={{ marginTop: 14, border: '1px solid color-mix(in oklab, var(--ink) 24%, transparent)', borderLeft: '3px solid var(--accent)', padding: '12px 14px', fontSize: 12, lineHeight: 1.6, color: 'var(--muted)' }}>
