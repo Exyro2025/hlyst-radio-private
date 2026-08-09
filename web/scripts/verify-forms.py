@@ -1246,12 +1246,18 @@ def shows(page):
     `maxTrackSeconds` itself; the guest-is-host rule is a `.check()` on the
     whole object that explicitly pushes its issue at `path: ['guestPersonaIds']`
     — all three root at a real, distinct, field-addressable path (unlike Task
-    9's `tts` slot, which rooted at the whole object). That's why ShowEditor
-    binds `personaId` through the plain `SelectField` wrapper (no cross-field
-    work survives once the host-changes-clear-overlapping-guests side effect
-    is DELIBERATELY dropped — see below) and `maxTrackSeconds`/
-    `guestPersonaIds` each through their own single `useController`, rather
-    than needing anything rooted deeper.
+    9's `tts` slot, which rooted at the whole object). Despite that, ShowEditor
+    binds `personaId` through a raw `useController` + a plain `<Select>`, NOT
+    the `SelectField` wrapper — not because the error roots anywhere deeper,
+    but because switching the host has to explicitly `trigger()` the SIBLING
+    `guestPersonaIds` path (react-hook-form's lazy error population is keyed
+    per PATH, not per field-that-changed — a plain `field.onChange` from
+    `SelectField` can't fire that re-trigger, and without it Save reads as
+    enabled off a stale `errors` tree even though `isValid` already disagrees;
+    see ShowEditor.tsx's `personaIdCtl` comment for the full trace).
+    `maxTrackSeconds`/`guestPersonaIds` each get their own single
+    `useController` too (a clamping onChange and a chip-array onChange,
+    respectively — real work by the same header rule).
 
     Assertion 3 (guest-is-host) needed one real behaviour change to become
     reachable through the UI at all: the pre-RHF editor's host picker cleared
@@ -1259,8 +1265,9 @@ def shows(page):
     can't also sit in the guest chairs"), which is a nice UX default but also
     made the invalid state structurally unreachable by driving the UI
     honestly — selecting a host always vacated that seat first. Dropped, and
-    documented in ShowEditor's SelectField comment: Save now refuses instead
-    and names the guests field, which is what this assertion actually proves.
+    documented in ShowEditor's personaId Controller comment: Save now refuses
+    instead and names the guests field, which is what this assertion actually
+    proves.
 
     Assertion 1 (host not a live persona) turned out to be UNREACHABLE by any
     real API call, and that took an actual failed attempt to discover, not a
@@ -1357,70 +1364,92 @@ def shows(page):
         page.unroute("**/settings", mock_settings_get)
 
     # 2 & 3, and the final valid save — one continuous "Add show" session,
-    # against the REAL (unmocked) controller.
-    page.goto(f"{WEB}/admin/shows")
-    page.wait_for_selector("text=Build your shows here.")
+    # against the REAL (unmocked) controller. Wrapped in try/finally like
+    # skills()/blockrules()/imaging()/personas() — a real, persisted show is
+    # created in step 4 below, and a run that fails partway through must not
+    # leave it behind to poison the next run.
+    try:
+        page.goto(f"{WEB}/admin/shows")
+        page.wait_for_selector("text=Build your shows here.")
 
-    page.get_by_role("button", name="+ Add show").click()
-    dialog = page.get_by_role("dialog")
-    dialog.wait_for()
+        page.get_by_role("button", name="+ Add show").click()
+        dialog = page.get_by_role("dialog")
+        dialog.wait_for()
 
-    name = dialog.get_by_label("show name")
-    name.fill("")
-    name.fill(SHOW_VERIFY_NAME)  # mode: 'onChange' needs a real change event
-    save = dialog.get_by_role("button", name="Save show")
+        name = dialog.get_by_label("show name")
+        name.fill("")
+        name.fill(SHOW_VERIFY_NAME)  # mode: 'onChange' needs a real change event
+        save = dialog.get_by_role("button", name="Save show")
 
-    # Host defaults to the roster's first persona; pin it explicitly so the
-    # guest-overlap scenario below is deterministic regardless of roster order.
-    host_field = dialog.get_by_label("persona owner")
-    host_field.click()
-    page.get_by_role("option", name="Marlowe").click()
+        # Host defaults to the roster's first persona; pin it explicitly so the
+        # guest-overlap scenario below is deterministic regardless of roster order.
+        host_field = dialog.get_by_label("persona owner")
+        host_field.click()
+        page.get_by_role("option", name="Marlowe").click()
 
-    # 2. Validate — maxTrackSeconds under the crossfade-derived floor (30s by
-    #    default on this verify stack: max(30, ceil(2 * crossfadeDuration))).
-    maxlen = dialog.get_by_label("max track length (seconds)")
-    maxlen.fill("5")
-    page.wait_for_selector("text=must be 0 (inherit/unlimited) or at least the station's minimum track length")
-    assert_aria(page, maxlen)
-    assert save.is_disabled(), "Save show enabled with a track cap under the crossfade floor"
+        # 2. Validate — maxTrackSeconds under the crossfade-derived floor (30s
+        #    by default on this verify stack: max(30, ceil(2 * crossfadeDuration))).
+        #    Scoped to the field's own aria-describedby -error id, like
+        #    assertions 1 and 3 — never a bare page-wide `text=` match.
+        maxlen = dialog.get_by_label("max track length (seconds)")
+        maxlen.fill("5")
+        page.wait_for_selector('[aria-invalid="true"]')
+        assert maxlen.get_attribute("aria-invalid") == "true", (
+            "track length field not flagged invalid under the crossfade floor"
+        )
+        assert_aria(page, maxlen)
+        described = maxlen.get_attribute("aria-describedby")
+        error_id = [t for t in described.split() if t.endswith("-error")][0]
+        assert "must be 0 (inherit/unlimited) or at least the station's minimum track length" \
+            in page.locator(f'[id="{error_id}"]').inner_text()
+        assert save.is_disabled(), "Save show enabled with a track cap under the crossfade floor"
 
-    maxlen.fill("")  # blank = inherit the station default, always valid
-    page.wait_for_selector("text=must be 0 (inherit/unlimited)", state="detached")
+        maxlen_id = maxlen.get_attribute("id")
+        maxlen.fill("")  # blank = inherit the station default, always valid
+        page.wait_for_selector(f'[id="{maxlen_id}"][aria-invalid="true"]', state="detached")
 
-    # 3. Validate — a guest who is also the host. The pre-RHF editor
-    #    auto-cleared an overlapping guest when the host changed, which made
-    #    this state unreachable by honest UI interaction; that side effect is
-    #    deliberately gone now (see ShowEditor's SelectField comment), so
-    #    picking a guest and then switching the host onto her really does
-    #    reach it.
-    guest_group = dialog.locator('[aria-labelledby$=".guestPersonaIds-label"]')
-    guest_group.wait_for()
-    guest_group.get_by_role("button", name="Wren").click()
+        # 3. Validate — a guest who is also the host. The pre-RHF editor
+        #    auto-cleared an overlapping guest when the host changed, which made
+        #    this state unreachable by honest UI interaction; that side effect is
+        #    deliberately gone now (see ShowEditor's personaIdCtl comment), so
+        #    picking a guest and then switching the host onto her really does
+        #    reach it.
+        guest_group = dialog.locator('[aria-labelledby$=".guestPersonaIds-label"]')
+        guest_group.wait_for()
+        guest_group.get_by_role("button", name="Wren").click()
 
-    host_field.click()
-    page.get_by_role("option", name="Wren").click()
+        host_field.click()
+        page.get_by_role("option", name="Wren").click()
 
-    page.wait_for_selector('[aria-labelledby$=".guestPersonaIds-label"][aria-invalid="true"]')
-    assert save.is_disabled(), "Save show enabled with a guest who is also the host"
-    assert_aria(page, guest_group)
-    described = guest_group.get_attribute("aria-describedby")
-    error_id = [t for t in described.split() if t.endswith("-error")][0]
-    assert "must not include the show's host persona" in page.locator(f'[id="{error_id}"]').inner_text()
+        page.wait_for_selector('[aria-labelledby$=".guestPersonaIds-label"][aria-invalid="true"]')
+        assert save.is_disabled(), "Save show enabled with a guest who is also the host"
+        assert_aria(page, guest_group)
+        described = guest_group.get_attribute("aria-describedby")
+        error_id = [t for t in described.split() if t.endswith("-error")][0]
+        assert "must not include the show's host persona" in page.locator(f'[id="{error_id}"]').inner_text()
 
-    # Fix — host back to Marlowe (clears the overlap; Wren stays selected as
-    # a guest, which is fine, but untoggle her too for a clean fixture).
-    host_field.click()
-    page.get_by_role("option", name="Marlowe").click()
-    page.wait_for_selector('[aria-labelledby$=".guestPersonaIds-label"][aria-invalid="true"]', state="detached")
-    guest_group.get_by_role("button", name="Wren").click()
+        # Fix — host back to Marlowe (clears the overlap; Wren stays selected as
+        # a guest, which is fine, but untoggle her too for a clean fixture).
+        host_field.click()
+        page.get_by_role("option", name="Marlowe").click()
+        page.wait_for_selector('[aria-labelledby$=".guestPersonaIds-label"][aria-invalid="true"]', state="detached")
+        guest_group.get_by_role("button", name="Wren").click()
 
-    assert not save.is_disabled(), "Save show stayed disabled once the overlap was fixed"
+        assert not save.is_disabled(), "Save show stayed disabled once the overlap was fixed"
 
-    # 4. Save — a genuinely valid show persists through a real POST /shows
-    #    round trip.
-    save.click()
-    dialog.wait_for(state="detached")
-    assert SHOW_VERIFY_NAME in api("/settings"), "new show did not persist"
+        # 4. Save — a genuinely valid show persists through a real POST /shows
+        #    round trip.
+        save.click()
+        dialog.wait_for(state="detached")
+        assert SHOW_VERIFY_NAME in api("/settings"), "new show did not persist"
+    finally:
+        # Runs whether the assertions above passed or raised — a failed run
+        # must not leave "Verify Show" behind to poison the NEXT run, and a
+        # successful run must not leave it in the shared stack forever either
+        # (Task 13 runs this whole file against a freshly booted stack).
+        leftover = find_show(SHOW_VERIFY_NAME)
+        if leftover:
+            api_write("DELETE", f"/shows/{leftover['id']}", ok_statuses=(200, 404))
 
 
 if __name__ == "__main__":
