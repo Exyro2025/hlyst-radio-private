@@ -239,6 +239,17 @@ function warnDroppedField(key: string): void {
 // Wraps `values` in a Proxy that fires `warnDroppedField` the first time
 // application code reads one of `phantomKeys` BY NAME. Enumeration (spread,
 // Object.keys, JSON.stringify) never triggers it — see the design note above.
+//
+// One caveat, not a false positive but worth knowing: `structuredClone(values)`
+// throws `DataCloneError` on this Proxy (a plain object clones fine — the
+// structured clone algorithm doesn't support arbitrary exotic objects, and a
+// Proxy is one). Nothing in `web/` calls `structuredClone` on a submit
+// handler's parsed values today, and react-hook-form's own internals clone
+// via `cloneObject` (a plain recursive copy), not `structuredClone`, so this
+// is latent rather than live — but it would equally bite `postMessage`ing
+// `values` to a worker/window or storing them in IndexedDB, so don't reach
+// for either on the object handleSubmit hands you without unwrapping it
+// (`{ ...values }` first is enough — a spread already returns a plain object).
 function wrapWithPhantomFieldWarnings(
   values: unknown,
   phantomKeys: readonly string[],
@@ -268,31 +279,77 @@ type AnyHandleSubmit = (
   onInvalid?: (errors: unknown, event?: unknown) => unknown,
 ) => (event?: unknown) => Promise<unknown>;
 
-const PHANTOM_PROBE_INSTALLED = Symbol('useZodForm.phantomProbeInstalled');
+const PHANTOM_PROBE_STATE = Symbol('useZodForm.phantomProbeState');
+
+// Fix round 1 (code review): the marker used to be a plain boolean, set only
+// once phantoms were FOUND, and never revisited. That's wrong whenever a
+// bound schema changes IDENTITY after mount without the component
+// remounting — SkillEditModal.tsx is exactly this shape: `custom` starts as
+// the list row's guess and is corrected by the file GET (`setCustom(!!j.custom)`),
+// which swaps the bound schema between `builtinSkillFileSchema` (no
+// `window`/`requiresKey`) and `customSkillFileSchema` (declares both). Two
+// failure directions from a boolean-and-never-again marker: (1) a schema that
+// starts WITH phantoms arms a wrapper closing over that phantom set, then
+// swaps to a schema that legitimately declares those same keys — the boolean
+// short-circuits before ever re-deriving anything, so the stale wrapper keeps
+// firing on what is now a CORRECT `values.thatField` read; (2) the opposite
+// swap (starts phantom-free, the early return before the marker is ever set
+// happens to self-heal) is what made this look fine in earlier manual
+// testing, but only by accident of which direction was tried. The fix: key
+// the marker on the SCHEMA REFERENCE actually walked last, not a boolean, and
+// redo the derivation whenever it differs. Every schema in this codebase that
+// changes shape after mount is either a module-level constant (referentially
+// stable while its own shape doesn't change) or built fresh each render by a
+// factory call whose result identity tracks the inputs that matter
+// (`showsFormSchema(showCtx)`/`festivalsSchema({moodNames})` behind
+// `useMemo`, `skillFileSchema(custom)` returning one of two module
+// constants) — so `!==` is the right comparison, no deep-equality needed.
+type PhantomProbeState = { schema: z.ZodType; original: AnyHandleSubmit };
 
 // `form` is typed down to just the one property this touches — the real
 // argument is always the full `UseFormReturn` `useZodForm` just built, whose
 // object identity is stable for the component's lifetime (react-hook-form
-// caches it in a ref and returns the same object every render), so wrapping
-// `handleSubmit` once here persists across re-renders without needing a
-// `useRef` of our own.
+// caches it in a ref and returns the same object every render), so state
+// stashed on it here persists across re-renders without needing a `useRef`
+// of our own.
 function installPhantomFieldProbe(
   form: { handleSubmit: unknown },
   schema: z.ZodType,
   defaultValues: unknown,
 ): void {
-  const marker = form as unknown as Record<symbol, boolean>;
-  if (marker[PHANTOM_PROBE_INSTALLED]) return;
+  const marker = form as unknown as Record<symbol, PhantomProbeState | undefined>;
+  const state = marker[PHANTOM_PROBE_STATE];
+
+  // Same schema reference as last time this form rendered — already derived
+  // (or already proven undecidable) for it, nothing to redo. This is also
+  // what keeps a phantom-free form (21 of the 23 call sites) from re-walking
+  // its schema on every render past the first: the walk still runs once, but
+  // `state.schema === schema` short-circuits every render after.
+  if (state && state.schema === schema) return;
+
+  // The PRISTINE react-hook-form `handleSubmit`, captured once and reused as
+  // the rebuild base every time the schema changes — never the possibly
+  // already-wrapped `form.handleSubmit`, or a second schema swap would wrap
+  // an existing wrapper instead of replacing it, stacking Proxies and
+  // re-firing warnings for keys the current schema doesn't even drop.
+  const original = state ? state.original : (form.handleSubmit as unknown as AnyHandleSubmit);
+  marker[PHANTOM_PROBE_STATE] = { schema, original };
 
   const declared = declaredTopLevelKeys(schema);
-  if (!declared) return; // can't prove anything is dropped — stay silent
+  const phantomKeys = declared
+    ? Object.keys((defaultValues as Record<string, unknown> | undefined) ?? {})
+      .filter((key) => !declared.has(key))
+    : []; // can't prove anything is dropped — stay silent
 
-  const phantomKeys = Object.keys((defaultValues as Record<string, unknown> | undefined) ?? {})
-    .filter((key) => !declared.has(key));
-  if (phantomKeys.length === 0) return;
+  if (phantomKeys.length === 0) {
+    // Nothing (or nothing provable) is dropped by the CURRENT schema. Restore
+    // the pristine handleSubmit unconditionally — not a no-op skip — so a
+    // schema swap that makes a previously-armed wrapper stale actually
+    // un-arms it, rather than leaving yesterday's phantom set live.
+    form.handleSubmit = original as unknown as typeof form.handleSubmit;
+    return;
+  }
 
-  marker[PHANTOM_PROBE_INSTALLED] = true;
-  const original = form.handleSubmit as unknown as AnyHandleSubmit;
   const warned = new Set<string>();
   const wrapped: AnyHandleSubmit = (onValid, onInvalid) =>
     original(
