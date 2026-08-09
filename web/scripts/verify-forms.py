@@ -593,6 +593,125 @@ def blockrules(page):
             api_write("DELETE", f"/library/blocklist/rules/{rid}", ok_statuses=(204, 404))
 
 
+SFX_FIXTURE_NAME = "verify-sfx-effect"
+
+
+def _write_silent_wav(path, seconds=0.3, rate=8000):
+    """A minimal, real (not just well-formed-header) mono WAV — importAudio
+    transcodes it through ffmpeg when available, so the bytes have to survive
+    an actual decode, not merely pass a header sniff."""
+    import wave
+    with wave.open(path, "wb") as w:
+        w.setnchannels(1)
+        w.setsampwidth(2)
+        w.setframerate(rate)
+        w.writeframes(b"\x00\x00" * int(rate * seconds))
+
+
+@check
+def imaging(page):
+    """SfxSection's create + import modals (Task 7, imaging/{Sfx,Beds,Jingles,
+    Voices}Section).
+
+    POST /sfx runs validateBody(sfxCreateSchema) (controller routes/sfx.ts) —
+    the SAME schema the create modal's zodResolver runs (imported from
+    lib/schemas.generated.ts) — so the duration-over-SFX_MAX_SEC refusal
+    proven below is a genuine mirror of the server rule, not a UI-only
+    constraint invented for this check.
+
+    The real routes are `/sfx` (create) and `/sfx/upload` (import), never
+    `/imaging/...` — confirmed by grepping ImagingPanel.tsx's adminFetch
+    calls; `/imaging` is only the admin PAGE path (`/admin/imaging?tab=sfx`),
+    never an API prefix.
+
+    The persistence round trip is proven through the IMPORT modal, not a real
+    generation — this verify stack's ElevenLabs key reports `generatorReady:
+    true` but has 0 credits remaining (confirmed by actually attempting a
+    create: POST /sfx answered 500 `quota_exceeded`), so a real create() call
+    cannot succeed here and would be a flaky, costed round trip even on a
+    stack that does have credit. Import needs no external API — a real WAV
+    upload through /sfx/upload — and shares the same imagingImportSchema
+    name/description fields.
+    """
+    def find_effect():
+        data = json.loads(api("/sfx"))
+        for s in data.get("sfx", []):
+            if s["name"] == SFX_FIXTURE_NAME:
+                return s
+        return None
+
+    # Best-effort cleanup from a run that crashed before its own teardown.
+    if find_effect():
+        api_write("DELETE", f"/sfx/{SFX_FIXTURE_NAME}", ok_statuses=(200, 400, 404))
+
+    try:
+        page.goto(f"{WEB}/admin/imaging?tab=sfx")
+        page.wait_for_selector("text=Sound effects")
+
+        # 1. Create modal — duration above SFX_MAX_SEC (10s) refuses on the
+        #    duration field itself.
+        page.get_by_role("button", name="+ Create").click()
+        create_dialog = page.get_by_role("dialog")
+        create_dialog.wait_for()
+
+        name = create_dialog.get_by_label("Name")
+        prompt = create_dialog.get_by_label("Generation prompt")
+        duration = create_dialog.get_by_label("Duration · s")
+        create_save = create_dialog.get_by_role("button", name="Create", exact=True)
+
+        name.fill(SFX_FIXTURE_NAME)
+        prompt.fill("Playwright duration-over-max probe — should never actually generate.")
+
+        # Scoped to the duration field's own aria-describedby (not a bare
+        # page-wide text= match — see blockrules()/skills()), proving the
+        # message is really attributed to THIS input.
+        duration.fill("999")
+        page.wait_for_selector('[id$="-durationSec-error"]:text("is capped at 10s")')
+        assert_aria(page, duration)
+        assert create_save.is_disabled(), "Create enabled with an out-of-range duration"
+
+        # A valid duration clears the refusal. FieldError (components/ui/
+        # field.tsx) keeps its own (now-empty) id in the DOM even once valid
+        # — only the input's aria-describedby stops naming it — so "the
+        # message went away" is proven by the rendered TEXT detaching, same
+        # pattern moods()/blockrules() use for their state="detached" waits,
+        # plus the aria-invalid attribute assert_aria itself targets.
+        duration.fill("1")
+        page.wait_for_selector('text=is capped at 10s', state="detached")
+        assert duration.get_attribute("aria-invalid") is None, "duration still marked invalid"
+        assert not create_save.is_disabled(), "Create stayed disabled on a valid duration"
+
+        # Close without submitting — see the docstring for why a real create()
+        # is not exercised on this stack.
+        page.get_by_role("button", name="Cancel").click()
+        create_dialog.wait_for(state="detached")
+
+        # 2. Import modal — a real file upload persists, proving the round
+        #    trip end to end (not just a client-side state flip): confirmed
+        #    against GET /sfx afterward, same as blockrules()/festivals()'s
+        #    save step.
+        wav_path = "/tmp/verify-sfx-fixture.wav"
+        _write_silent_wav(wav_path)
+
+        page.get_by_role("button", name="Import", exact=True).click()
+        import_dialog = page.get_by_role("dialog")
+        import_dialog.wait_for()
+
+        import_dialog.get_by_label("Name").fill(SFX_FIXTURE_NAME)
+        import_dialog.locator('input[aria-label="Import SFX audio file"]').set_input_files(wav_path)
+        import_save = import_dialog.get_by_role("button", name="Import", exact=True)
+        assert not import_save.is_disabled(), "Import stayed disabled with a name and a file chosen"
+
+        import_save.click()
+        import_dialog.wait_for(state="detached")
+        assert find_effect(), "sound effect did not persist"
+    finally:
+        # Runs whether the assertions above passed or raised — a failed run
+        # must not leave the fixture behind to poison the NEXT run.
+        if find_effect():
+            api_write("DELETE", f"/sfx/{SFX_FIXTURE_NAME}", ok_statuses=(200, 400, 404))
+
+
 if __name__ == "__main__":
     names = sys.argv[1:] or list(CHECKS)
     with sync_playwright() as pw:
