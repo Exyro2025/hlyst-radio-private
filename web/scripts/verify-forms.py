@@ -1466,7 +1466,11 @@ def playlists(page):
     conversion; see the split comment at the top of PlaylistBuilderPanel.tsx).
     The save modal is a second, separate form bound to playlistSaveSchema
     itself: `name` is the ONE real rule in the whole playlist schema module
-    (1-120 chars), which is what assertion 2 below exercises.
+    (1-120 chars), which is what assertion 2 below exercises. `saveMode`
+    rides in this form too but is NOT a schema key — assertion 4 pins the
+    Fix round 1 regression where reading it off handleSubmit's (schema-
+    parsed, `saveMode`-stripping) output made every "Overwrite existing"
+    save silently create a duplicate instead.
 
     Reaching the deck (tracks.length > 0) needs a generation result, which in
     the real app comes from POST /playlists/generate/jobs over a live
@@ -1599,6 +1603,34 @@ def playlists(page):
 
     assert posted.get("name") == PLAYLIST_VERIFY_NAME, f"posted body carried the wrong name: {posted}"
     assert posted.get("songIds") == ["verify-track-1"], f"posted body did not carry the deck's track ids: {posted}"
+    assert posted.get("playlistId") is None, f"a CREATE save carried a playlistId: {posted}"
+
+    # 4. Save (overwrite) — Fix round 1 regression coverage. `saveMode` is not
+    #    a key of playlistSaveSchema, so zodResolver's parsed output (what
+    #    `handleSubmit`'s callback receives) silently drops it; reading it
+    #    from there always saw `undefined`, so `overwrite` was always false
+    #    and "Overwrite existing" created a duplicate instead of updating.
+    #    The deck now holds `existingId` from assertion 3's save, so
+    #    reopening Save defaults `saveMode` to 'overwrite' (openSave's own
+    #    rule) — click it explicitly too, then assert the posted body
+    #    actually carries `playlistId`.
+    page.get_by_role("button", name="Update", exact=True).click()
+    dialog = page.get_by_role("dialog")
+    dialog.wait_for()
+    dialog.get_by_role("button", name="Overwrite existing").click()
+    save_btn = dialog.get_by_role("button", name="Save playlist")
+
+    posted.clear()
+    page.route("**/playlists", mock_save)
+    try:
+        save_btn.click()
+        dialog.wait_for(state="detached")
+    finally:
+        page.unroute("**/playlists", mock_save)
+
+    assert posted.get("playlistId") == "verify-playlist-1", (
+        f"Overwrite existing did not carry playlistId — saveMode was dropped: {posted}"
+    )
 
 
 if __name__ == "__main__":

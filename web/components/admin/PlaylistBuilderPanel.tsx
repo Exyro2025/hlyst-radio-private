@@ -587,7 +587,18 @@ export default function PlaylistBuilderPanel() {
   const onSaveSubmit = saveForm.handleSubmit(async (values) => {
     setSaving(true);
     try {
-      const overwrite = values.saveMode === 'overwrite' && existingId;
+      // `saveMode` is NOT a key of playlistSaveSchema (only name/songIds/
+      // playlistId/keepInSync/recipe are), so zodResolver's parsed OUTPUT —
+      // what `values` above actually is — silently drops it: z.object()
+      // strips unknown keys and this schema is never `.passthrough()`d.
+      // Reading `values.saveMode` here always saw `undefined`, so `overwrite`
+      // was always false and every "Overwrite existing" save created a new
+      // playlist instead (Fix round 1 — see task-11-report.md). `saveMode`
+      // isn't part of the wire body at all, only a local UI choice, so it's
+      // read straight off the form's raw state instead — the same place
+      // `existingId`/`tracks` already come from.
+      const saveMode = saveForm.getValues('saveMode');
+      const overwrite = saveMode === 'overwrite' && existingId;
       const r = await adminFetch('/playlists', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
