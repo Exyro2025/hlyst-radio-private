@@ -548,7 +548,17 @@ export default function MoodsPanel() {
               <Btn
                 className="min-h-9 sm:min-h-0"
                 disabled={moodFields.length >= MOODS_LIMIT}
-                onClick={() => appendMood({ name: '', clapPrompt: '' })}
+                onClick={() => {
+                  appendMood({ name: '', clapPrompt: '' });
+                  // formState.errors is populated per-field, lazily — a
+                  // freshly appended row carries no error until touched,
+                  // even though the Save button's `moodsCard.invalid` gate
+                  // reads that same errors map. Without this, "Save
+                  // vocabulary" enables on a blank row and the click just
+                  // silently no-ops against form.trigger('moods') inside
+                  // saveMoods. Force the refresh here instead.
+                  void form.trigger('moods');
+                }}
               >
                 Add mood
               </Btn>
