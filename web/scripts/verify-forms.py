@@ -191,6 +191,84 @@ def festivals(page):
     assert '"Verify Festival"' in api("/settings"), "festival did not persist"
 
 
+@check
+def moods(page):
+    # No page.clock.install() — MoodsPanel has no poll (one GET /settings on
+    # mount, like FestivalsSection); assert_survives_poll doesn't apply here.
+    page.goto(f"{WEB}/admin/moods?tab=vocab")
+    page.wait_for_selector("text=Mood vocabulary")
+
+    # Find which mood the early-morning slot currently points at (server
+    # seed: 'morning'), so the rename below is guaranteed to orphan a real
+    # reference rather than assuming a fixed seed name.
+    settings_before = api("/settings")
+    import json as _json  # local import: this script has no top-level json use elsewhere
+    early_morning_mood = _json.loads(settings_before)["values"]["moodSchedule"]["early-morning"]
+
+    name_inputs = page.get_by_label("Mood id")
+    target_idx = None
+    for i in range(name_inputs.count()):
+        if name_inputs.nth(i).input_value() == early_morning_mood:
+            target_idx = i
+            break
+    assert target_idx is not None, f"could not find a vocab row named {early_morning_mood!r}"
+    target = name_inputs.nth(target_idx)
+
+    # 1. Client-side validation still runs first: TextField/SelectField wired
+    #    through the arrayControl cast, real dotted ids (`moods.N.name`).
+    save = page.get_by_role("button", name="Save vocabulary")
+    target.fill("")
+    page.wait_for_selector("text=must be 1-40 chars")
+    assert_aria(page, target)
+    assert save.is_disabled(), "Save enabled with a blank mood id"
+
+    # 2. Rename (not delete) the mood the early-morning slot points at, to
+    #    something not already in the vocabulary. Client-side validation
+    #    passes (a valid, non-duplicate id) — the refusal below can only come
+    #    from the server, proving this is really a round trip.
+    renamed = f"{early_morning_mood}-orphantest"
+    target.fill(renamed)
+    page.wait_for_selector("text=must be 1-40 chars", state="detached")
+    assert not save.is_disabled(), "Save stayed disabled on a valid rename"
+
+    save.click()
+    # 3. The controller's in-use removal guard (assertNoOrphanMoods) refuses:
+    #    the early-morning moodSchedule slot still names the OLD mood id, and
+    #    that check runs inside settings.update() over the FULL patch, not
+    #    the route's shape-only pre-flight — so it throws a plain Error with
+    #    no field path, not a fieldErrors entry. Confirmed by reading
+    #    settings/validate.ts (assertNoOrphanMoods) and routes/settings/
+    #    core.ts's POST handler (`res.status(400).json({ error: err.message
+    #    })`, no fieldErrors passed through on that branch) — MoodsPanel's
+    #    persistPatch still WIRES applyServerFieldErrors (real, and load-
+    #    bearing for a shape-level failure, asserted in step 1's server-shape
+    #    twin below), but this specific rule structurally can't land on one
+    #    input, so the proof here is: the refusal surfaces somewhere the
+    #    operator will see it (a toast), AND it does NOT falsely mark the
+    #    renamed field invalid (no orphan-guard aria-invalid).
+    toast = page.locator('[data-sonner-toast]:has-text("still used by")')
+    toast.wait_for(timeout=6000)
+    assert "early-morning" in toast.inner_text(), toast.inner_text()
+
+    # The save must have been REJECTED, not silently accepted — confirm the
+    # controller's stored vocabulary still has the OLD name, not the rename.
+    settings_after = api("/settings")
+    stored_names = [m["name"] for m in _json.loads(settings_after)["values"]["moods"]]
+    assert early_morning_mood in stored_names, "orphan-guard refusal did not actually block the save"
+    assert renamed not in stored_names, "rename persisted despite the orphan-guard refusal"
+
+    # And the refusal did NOT get attributed to the (perfectly valid) rename
+    # input — no aria-invalid was set on it by this failure.
+    assert target.get_attribute("aria-invalid") != "true", (
+        "orphan-guard refusal incorrectly marked the input aria-invalid — "
+        "it has no field to attach to, see the comment above"
+    )
+
+    # Revert the rename so the check is repeatable against the same seed.
+    target.fill(early_morning_mood)
+    page.wait_for_selector("text=must be 1-40 chars", state="detached")
+
+
 if __name__ == "__main__":
     names = sys.argv[1:] or list(CHECKS)
     with sync_playwright() as pw:
