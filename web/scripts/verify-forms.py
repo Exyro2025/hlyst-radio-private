@@ -6,6 +6,7 @@
 #
 # Usage: python3 web/scripts/verify-forms.py [form_name ...]
 import base64
+import json
 import subprocess
 import sys
 
@@ -202,8 +203,7 @@ def moods(page):
     # seed: 'morning'), so the rename below is guaranteed to orphan a real
     # reference rather than assuming a fixed seed name.
     settings_before = api("/settings")
-    import json as _json  # local import: this script has no top-level json use elsewhere
-    early_morning_mood = _json.loads(settings_before)["values"]["moodSchedule"]["early-morning"]
+    early_morning_mood = json.loads(settings_before)["values"]["moodSchedule"]["early-morning"]
 
     name_inputs = page.get_by_label("Mood id")
     target_idx = None
@@ -253,7 +253,7 @@ def moods(page):
     # The save must have been REJECTED, not silently accepted — confirm the
     # controller's stored vocabulary still has the OLD name, not the rename.
     settings_after = api("/settings")
-    stored_names = [m["name"] for m in _json.loads(settings_after)["values"]["moods"]]
+    stored_names = [m["name"] for m in json.loads(settings_after)["values"]["moods"]]
     assert early_morning_mood in stored_names, "orphan-guard refusal did not actually block the save"
     assert renamed not in stored_names, "rename persisted despite the orphan-guard refusal"
 
@@ -266,6 +266,69 @@ def moods(page):
 
     # Revert the rename so the check is repeatable against the same seed.
     target.fill(early_morning_mood)
+    page.wait_for_selector("text=must be 1-40 chars", state="detached")
+
+
+@check
+def moods_unsaved_vocab_gap(page):
+    """Fix round 1 finding: the Moments dropdowns (and the schema context
+    validating them) must be built from the PERSISTED mood vocabulary, not
+    the live, possibly-unsaved content of the Vocabulary tab. The two cards
+    are not symmetric server-side: saveSchedule/saveWeather never carry
+    `moods` in their own patch, so settings.ts always judges them against
+    what's actually stored (settings.ts:1205-1219) — an unsaved rename that
+    the LIVE list would have allowed through client validation is a save the
+    server structurally cannot accept. Drives the exact repro from the
+    finding: rename a mood in Vocabulary without saving, switch to Moments,
+    and confirm the stale rename is not even offered as a choice there.
+    """
+    page.goto(f"{WEB}/admin/moods?tab=vocab")
+    page.wait_for_selector("text=Mood vocabulary")
+
+    settings_before = json.loads(api("/settings"))
+    midday_mood = settings_before["values"]["moodSchedule"]["midday"]
+
+    name_inputs = page.get_by_label("Mood id")
+    target_idx = None
+    for i in range(name_inputs.count()):
+        if name_inputs.nth(i).input_value() == midday_mood:
+            target_idx = i
+            break
+    assert target_idx is not None, f"could not find a vocab row named {midday_mood!r}"
+    target = name_inputs.nth(target_idx)
+
+    # Rename without saving — client validation passes (valid, non-duplicate
+    # id), and nothing is posted to the server.
+    renamed = f"{midday_mood}-liveonly"
+    target.fill(renamed)
+    page.wait_for_selector("text=must be 1-40 chars", state="detached")
+
+    # Switch tabs via the real tab control — a page.goto here would hard-
+    # reload the page and discard the in-memory rename, which would not
+    # reproduce the finding (confirmed the hard way in manual testing: an
+    # earlier ad hoc script that used page.goto for a tab switch looked like
+    # a data-loss bug and was actually just a bad test).
+    page.get_by_role("tab", name="Moments").click()
+    page.wait_for_selector("text=Time of day")
+
+    midday_select = page.get_by_label("Midday", exact=False)
+    midday_select.click()
+    options_text = page.locator("[role=option]").all_inner_texts()
+    page.keyboard.press("Escape")
+
+    assert renamed not in options_text, (
+        f"unsaved vocab rename {renamed!r} was offered as a Moments option — "
+        f"the client/server vocabulary gap is open. Options were: {options_text}"
+    )
+    assert midday_mood in options_text, (
+        f"the real persisted mood {midday_mood!r} should still be offered — got {options_text}"
+    )
+
+    # Revert the in-progress rename (never saved, so nothing to revert
+    # server-side) so the check is repeatable.
+    page.get_by_role("tab", name="Vocabulary").click()
+    page.wait_for_selector("text=Mood vocabulary")
+    page.get_by_label("Mood id").nth(target_idx).fill(midday_mood)
     page.wait_for_selector("text=must be 1-40 chars", state="detached")
 
 

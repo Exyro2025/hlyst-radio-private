@@ -4,7 +4,7 @@ import { useCallback, useEffect, useId, useMemo, useState } from 'react';
 import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 import { Trash2, Palette, Clock, CalendarDays, Volume2 } from 'lucide-react';
 import {
-  useController, useFieldArray, useWatch, type Control,
+  useController, useFieldArray, type Control,
 } from 'react-hook-form';
 import { z } from 'zod';
 import { useAdminAuth } from '../../lib/adminAuth';
@@ -157,28 +157,50 @@ export default function MoodsPanel() {
   const rawTab = searchParams.get('tab');
   const tab: TabId = (TAB_IDS as string[]).includes(rawTab ?? '') ? (rawTab as TabId) : 'vocab';
 
-  // The vocabulary the moments/speech… well, moments maps validate against is
-  // the CURRENT FORM VALUE of the vocab tab (below), not a separately-fetched
-  // "last saved" list — moods is itself one of the four collections this same
-  // form edits, unlike FestivalsSection (a sibling section that only READS
-  // the vocabulary via `tts.moods`). But the schema fed to useZodForm has to
-  // exist before the form does, and the live vocabulary can only be read via
-  // useWatch(form.control) AFTER the form exists — so this settles one render
-  // behind: a state+effect pair mirrors the watched names into
-  // `moodNamesForSchema`, which is what the schema is actually built from.
-  // `form.trigger()` below (keyed on the resulting `schema` reference) is
-  // what makes the moments tab re-validate once the rebuilt schema lands.
-  const [moodNamesForSchema, setMoodNamesForSchema] = useState<string[]>([]);
+  // The vocabulary moodSchedule/weatherMoods validate against — and the
+  // dropdown OPTIONS those two cards' Selects offer — is the PERSISTED
+  // (last-saved) mood list, not the live, possibly-unsaved content of the
+  // Vocabulary tab. This looks like it should be the opposite (moods is
+  // itself one of the four collections this same form edits, so "use the
+  // live form value" was the first thing tried — see Fix round 1 in the task
+  // report for the full story), but the two cards are NOT symmetric on the
+  // server: `saveMoods` posts `{ moods }` alone, so settings.ts's moodCtx
+  // (settings.ts:1211, `next.moods`) is built from what THIS patch carries —
+  // live is correct for that card, and it's why `moodsSchema` itself needs
+  // no such context. `saveSchedule`/`saveWeather` post `{ moodSchedule }` /
+  // `{ weatherMoods }` alone — `moods` never rides in their patch, so the
+  // server ALWAYS judges them against whatever's actually persisted
+  // (settings.ts:1205-1219, the `'moods' in patch` branch only runs for the
+  // moods card's own save). Sourcing their dropdown options and their
+  // validation context from the live watch meant an operator could rename a
+  // mood on the Vocabulary tab without saving, assign the new (unsaved) name
+  // to a time-of-day/weather slot on the Moments tab — client validation
+  // passed, because it was checking the same live list — and have the save
+  // rejected by the server with a confusing generic-error round trip, a
+  // click path the pre-refactor UI (built from `savedMoodNames`) could not
+  // produce. Fixed by making `savedMoodNames` real, separate state — set at
+  // load and again only when the MOODS card's own save actually succeeds
+  // (with the server-normalised names from the response, not the raw
+  // payload) — rather than anything read live off the form. This also
+  // removes the circular-dependency problem the live-watch version had
+  // (schema needs form.control, form needs schema): `savedMoodNames` doesn't
+  // depend on the form at all, so the schema can be built before the form
+  // exists, no settle-one-render-behind dance required.
+  const [savedMoodNames, setSavedMoodNames] = useState<string[]>([]);
+  const moodOptions: Option[] = useMemo(
+    () => savedMoodNames.map(m => ({ value: m, label: m })),
+    [savedMoodNames],
+  );
 
   const schema = useMemo(
     () =>
       z.object({
         moods: moodsSchema,
-        schedule: moodScheduleSchema({ moodNames: moodNamesForSchema }),
-        weather: weatherMoodsSchema({ moodNames: moodNamesForSchema }),
+        schedule: moodScheduleSchema({ moodNames: savedMoodNames }),
+        weather: weatherMoodsSchema({ moodNames: savedMoodNames }),
         corrections: correctionsSchema,
       }),
-    [moodNamesForSchema],
+    [savedMoodNames],
   );
   const form = useZodForm(schema, { moods: [], schedule: {}, weather: {}, corrections: [] });
   // form.control's declared field-values type collapses to `unknown` for
@@ -207,25 +229,11 @@ export default function MoodsPanel() {
     keyName: '_rhfKey',
   });
 
-  const watchedMoods = useWatch({ control: arrayControl, name: 'moods' });
-  const moodNames = useMemo(
-    () => Array.from(new Set((watchedMoods ?? []).map(m => (m?.name ?? '').trim()).filter(Boolean))),
-    [watchedMoods],
-  );
-  const moodOptions: Option[] = useMemo(() => moodNames.map(m => ({ value: m, label: m })), [moodNames]);
-
-  // Settle moodNamesForSchema from the live watch — functional update bails
-  // out (no re-render) once content stops changing, so this can't loop.
-  useEffect(() => {
-    setMoodNamesForSchema(prev => {
-      if (prev.length === moodNames.length && prev.every((v, i) => v === moodNames[i])) return prev;
-      return moodNames;
-    });
-  }, [moodNames]);
-
-  // Re-validate once the schema has actually been rebuilt with the settled
-  // vocabulary (not on every `moodNames` tick — the schema lags one render
-  // behind that, per the comment above `moodNamesForSchema`).
+  // Re-validate once the schema has actually been rebuilt against a fresh
+  // `savedMoodNames` (after load, and again after the moods card's own save
+  // succeeds) — a stale-schema-in-closure guard: changing the `resolver`
+  // react-hook-form is holding doesn't retroactively re-run it against
+  // already-computed error state, only the next validation trigger does.
   useEffect(() => {
     void form.trigger();
   }, [schema, form]);
@@ -269,6 +277,7 @@ export default function MoodsPanel() {
         corrections: loadedCorr,
       };
       form.reset(next);
+      setSavedMoodNames(loadedMoods.map(m => m.name));
       setLoaded(true);
       setErr(null);
     } catch (e) {
@@ -329,6 +338,10 @@ export default function MoodsPanel() {
       patch: Record<string, unknown>,
       nextValue: MoodsFormValues[keyof MoodsFormValues],
       okMsg: string,
+      // Only the moods card uses this — see saveMoods — to re-baseline
+      // savedMoodNames from the server's own (normalised) response rather
+      // than the raw payload we sent.
+      onSuccess?: (saved: Record<string, unknown> | undefined) => void,
     ) => {
       setBusy(card);
       try {
@@ -340,6 +353,7 @@ export default function MoodsPanel() {
         const j = (await r.json().catch(() => ({}))) as {
           error?: string;
           fieldErrors?: Record<string, string>;
+          saved?: Record<string, unknown>;
         };
         if (!r.ok) {
           // Only meaningful for a SHAPE-level failure (e.g. a duplicate/
@@ -354,6 +368,7 @@ export default function MoodsPanel() {
         }
         const current = form.getValues() as unknown as MoodsFormValues;
         form.reset({ ...current, [key]: nextValue });
+        onSuccess?.(j.saved);
         notify.ok(okMsg);
       } catch (e) {
         notify.err(`Save failed: ${errorMessage(e)}`);
@@ -386,6 +401,16 @@ export default function MoodsPanel() {
       { moods: payload },
       raw,
       `${raw.length} mood${raw.length === 1 ? '' : 's'} saved`,
+      // The only place savedMoodNames advances — see the comment above its
+      // declaration. Prefer the server's own normalised names (settings.ts
+      // runs every mood id through settingsNormalizeMoodName) over the raw
+      // payload, so a not-yet-lowercased/dashed id typed by the operator
+      // doesn't leak into the Moments dropdowns as a name the server would
+      // never actually store that way.
+      saved => {
+        const savedMoods = Array.isArray(saved?.moods) ? (saved.moods as MoodEntry[]) : payload;
+        setSavedMoodNames(savedMoods.map(m => m.name));
+      },
     );
   };
 
@@ -425,7 +450,11 @@ export default function MoodsPanel() {
   // moments/speech Save buttons despite those cards being independently fine.
   // Deferred /settings section work inherits this shape: one form per
   // section, one Save per card within it, each card gated on ITS OWN slice
-  // of formState.errors/dirtyFields rather than the form-wide flags.
+  // of formState.errors/dirtyFields rather than the form-wide flags. Note
+  // this direct-index lookup (`errors[key]`) only generalises as-is for
+  // TOP-LEVEL keys, which is all four cards here are — a card keyed on a
+  // NESTED settings path (e.g. a future `llm.baseUrl` card) will need a
+  // `get(errors, path)`-style accessor instead of a bare index.
   const cardState = (key: keyof MoodsFormValues) => {
     const errors = form.formState.errors as Record<string, unknown>;
     const dirty = form.formState.dirtyFields as Record<string, unknown>;
