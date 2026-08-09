@@ -9,6 +9,10 @@
 
 import { useCallback, useEffect, useId, useState } from 'react';
 import { CalendarRange, Plus, ShieldBan, Snowflake } from 'lucide-react';
+import {
+  Controller, useWatch, type Control, type DefaultValues,
+} from 'react-hook-form';
+import type { z } from 'zod';
 import { useAdminAuth } from '../../../lib/adminAuth';
 import { notify, errorMessage } from '../../../lib/notify';
 import { Card, Btn } from '../ui';
@@ -23,26 +27,10 @@ import { SkeletonRows } from '@/components/ui/skeleton';
 import { EmptyState } from '@/components/ui/empty-state';
 import { cn } from '../../../lib/cn';
 import { FieldError } from '../../ui/field';
-import { RULE_TEXT_MAX, blockRuleSchema } from '@/lib/schemas.generated';
-import type { ZodError } from 'zod';
+import { blockRuleSchema } from '@/lib/schemas.generated';
+import { useZodForm, applyServerFieldErrors, fieldAria } from '@/lib/form';
+import { TextField } from '@/lib/form-fields';
 import type { BlockRuleStat, RuleField, SeasonWindow } from './types';
-
-/**
- * Flatten a client-side parse into the same dotted-path map the controller
- * sends, so one piece of rendering serves both sources.
- *
- * Mirrors util/zod-error.ts's flattenIssues, including the null-prototype
- * accumulator: a rule value is operator data, and on a `{}` literal a path of
- * `__proto__` would be dropped outright rather than stored.
- */
-function schemaFieldErrors(error: ZodError): Record<string, string> {
-  const out: Record<string, string> = Object.create(null);
-  for (const issue of error.issues) {
-    const key = issue.path.join('.');
-    if (!(key in out)) out[key] = issue.message;
-  }
-  return out;
-}
 
 const MONTH_NAMES = [
   'January', 'February', 'March', 'April', 'May', 'June',
@@ -66,6 +54,14 @@ const FIELD_OPTIONS: Array<{ value: RuleField; label: string; hint: string }> = 
   { value: 'playlist', label: 'Playlist', hint: 'blocks every member of the selected Navidrome playlists' },
 ];
 
+// The RHF-bound shape of one rule form — matches blockRuleSchema's OUTPUT
+// (z.output), which is also close enough to its input to serve as
+// defaultValues: every field that isn't structurally typed in the schema
+// (label/values/season/showIds are z.unknown()/z.preprocess() so the schema
+// coerces and reports rather than requiring a shaped input) collapses to
+// `unknown` on the input side, same as FestivalsSection/SkillEditModal — so
+// `form.control` is cast to `Control<RuleForm>` once below rather than fought
+// at every call site.
 interface RuleForm {
   label: string;
   field: RuleField;
@@ -150,18 +146,26 @@ export function BlockRulesCard({ onChanged }: { onChanged?: () => void }) {
   const { adminFetch, needsAuth, hydrated } = useAdminAuth();
   const [rules, setRules] = useState<BlockRuleStat[] | null>(null);
   const [busy, setBusy] = useState(false);
-  const [editing, setEditing] = useState<RuleForm | null>(null);
+  // Whether the editor modal is open — separate from the form's own state
+  // now that the rule being edited lives in react-hook-form rather than a
+  // `RuleForm | null` useState.
+  const [formOpen, setFormOpen] = useState(false);
   const [editId, setEditId] = useState<string | null>(null);
   const [confirmDelete, setConfirmDelete] = useState<string | null>(null);
-  // Keyed by the schema's own dotted path ('label', 'values'), which is what
-  // both the pre-flight and the controller's fieldErrors produce.
-  const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
   // Picker vocab, loaded once alongside the rules. Failures degrade to free
   // text (genres) / an empty list with a hint (shows, playlists).
   const [genres, setGenres] = useState<string[]>([]);
   const [shows, setShows] = useState<Array<{ id: string; name: string }>>([]);
   const [playlists, setPlaylists] = useState<Array<{ id: string; name: string; songCount: number | null }>>([]);
   const fieldId = useId();
+
+  const form = useZodForm(
+    blockRuleSchema,
+    EMPTY_RULE as DefaultValues<z.input<typeof blockRuleSchema>>,
+  );
+  const control = form.control as unknown as Control<RuleForm>;
+  const fieldWatch = useWatch({ control, name: 'field' });
+  const labelWatch = useWatch({ control, name: 'label' });
 
   const load = useCallback(async () => {
     try {
@@ -204,28 +208,27 @@ export function BlockRulesCard({ onChanged }: { onChanged?: () => void }) {
     })();
   }, [hydrated, needsAuth, load, adminFetch]);
 
-  const save = async () => {
-    if (!editing) return;
-    // Pre-flight against the SAME schema the route and the store run, so a
-    // missing label or an empty value list is refused here rather than after a
-    // round trip. The card keeps its own state machine — the chip input and the
-    // two month/day pickers are not react-hook-form shaped — but the rules it
-    // gates on are no longer its own.
-    const preflight = blockRuleSchema.safeParse(editing);
-    if (!preflight.success) {
-      setFieldErrors(schemaFieldErrors(preflight.error));
-      return;
-    }
-    setFieldErrors({});
+  // The form is bound to blockRuleSchema via react-hook-form/zodResolver —
+  // the SAME schema the route runs (validateBody(blockRuleSchema) on both
+  // POST and PUT) — so the FORM is react-hook-form shaped now. The
+  // individual CONTROLS underneath it still mostly aren't: the "Match on"
+  // picker needs a side effect plain SelectField can't express (clearing
+  // `values` when the field type changes — see its own comment below), and
+  // the chip `values` input plus the two month/day season pickers stay on
+  // raw `Controller` because ValuesInput's commit-on-Enter/blur behaviour and
+  // the season toggle/month-day cascade are real work none of the five bound
+  // field components expose. Form: react-hook-form shaped. Controls: mostly
+  // not, same as before.
+  const onSubmit = form.handleSubmit(async (values) => {
     setBusy(true);
     try {
       const r = await adminFetch(editId ? `/library/blocklist/rules/${encodeURIComponent(editId)}` : '/library/blocklist/rules', {
         method: editId ? 'PUT' : 'POST',
         headers: { 'Content-Type': 'application/json' },
-        // The PARSED value, not the raw form: trimmed label, blank values
-        // dropped, duplicates collapsed — so what the operator sees accepted is
-        // what gets stored.
-        body: JSON.stringify(preflight.data),
+        // `values` is the TRANSFORMED (z.output) payload — trimmed label,
+        // blank values dropped, duplicates collapsed — so what the operator
+        // sees accepted is what gets stored.
+        body: JSON.stringify(values),
       });
       const j = await r.json().catch(() => ({})) as {
         rule?: BlockRuleStat;
@@ -234,13 +237,14 @@ export function BlockRulesCard({ onChanged }: { onChanged?: () => void }) {
         fieldErrors?: Record<string, string>;
       };
       if (!r.ok) {
-        // Both sides run one schema, so this should be unreachable for a body
-        // the pre-flight accepted — but the server stays authoritative, and a
-        // controller a version ahead can refuse something this build allows.
-        if (j.fieldErrors) setFieldErrors(j.fieldErrors);
+        // Both sides run the same schema (client via zodResolver, server via
+        // validateBody), so this should be unreachable for a body the client
+        // accepted — but the server stays authoritative, and a controller a
+        // version ahead can refuse something this build allows.
+        applyServerFieldErrors(form, j.fieldErrors);
         throw new Error(j.error || `failed (${r.status})`);
       }
-      setEditing(null);
+      setFormOpen(false);
       setEditId(null);
       notify.ok(`Rule ${editId ? 'updated' : 'added'}${j.purged ? ` — ${j.purged} queued track${j.purged === 1 ? '' : 's'} dropped` : ''}`);
       await load();
@@ -250,14 +254,14 @@ export function BlockRulesCard({ onChanged }: { onChanged?: () => void }) {
     } finally {
       setBusy(false);
     }
-  };
+  });
 
   const remove = async (id: string) => {
     setBusy(true);
     try {
       const r = await adminFetch(`/library/blocklist/rules/${encodeURIComponent(id)}`, { method: 'DELETE' });
       if (!r.ok && r.status !== 404) throw new Error(`failed (${r.status})`);
-      setEditing(null);
+      setFormOpen(false);
       setEditId(null);
       notify.ok('Rule removed');
       await load();
@@ -270,7 +274,7 @@ export function BlockRulesCard({ onChanged }: { onChanged?: () => void }) {
   };
 
   const startEdit = (rule: BlockRuleStat) => {
-    setEditing({
+    form.reset({
       label: rule.label,
       field: rule.field,
       values: [...rule.values],
@@ -278,11 +282,9 @@ export function BlockRulesCard({ onChanged }: { onChanged?: () => void }) {
       showIds: [...rule.showIds],
     });
     setEditId(rule.id);
+    setFormOpen(true);
   };
 
-  const patch = (p: Partial<RuleForm>) => setEditing(cur => (cur ? { ...cur, ...p } : cur));
-
-  const fieldOpt = FIELD_OPTIONS.find(f => f.value === editing?.field);
   const playlistNameOf = (id: string) => playlists.find(p => p.id === id)?.name || `(missing) ${id}`;
   const showNameOf = (id: string) => shows.find(s => s.id === id)?.name || `(deleted show) ${id}`;
 
@@ -298,11 +300,20 @@ export function BlockRulesCard({ onChanged }: { onChanged?: () => void }) {
         right={
           <div className="flex items-center gap-2">
             {rows.length === 0 && rules !== null && (
-              <Btn sm onClick={() => { setEditing({ ...XMAS_PRESET }); setEditId(null); setFieldErrors({}); }} title="Prefill: tracks tagged christmas only air Dec 1–26">
+              <Btn
+                sm
+                onClick={() => { form.reset(XMAS_PRESET); setEditId(null); setFormOpen(true); }}
+                title="Prefill: tracks tagged christmas only air Dec 1–26"
+              >
                 <Snowflake size={11} /> Seasonal preset
               </Btn>
             )}
-            <Btn sm tone="accent" onClick={() => { setEditing({ ...EMPTY_RULE }); setEditId(null); setFieldErrors({}); }} disabled={rules === null}>
+            <Btn
+              sm
+              tone="accent"
+              onClick={() => { form.reset(EMPTY_RULE); setEditId(null); setFormOpen(true); }}
+              disabled={rules === null}
+            >
               <Plus size={11} /> Add rule
             </Btn>
           </div>
@@ -365,10 +376,10 @@ export function BlockRulesCard({ onChanged }: { onChanged?: () => void }) {
       </Card>
 
       <Modal
-        open={editing !== null}
-        onOpenChange={o => { if (!o) { setEditing(null); setEditId(null); setFieldErrors({}); } }}
+        open={formOpen}
+        onOpenChange={o => { if (!o) { setFormOpen(false); setEditId(null); } }}
         title={editId ? 'edit rule' : 'new rule'}
-        sub={editId && editing ? editing.label : undefined}
+        sub={editId ? labelWatch : undefined}
         width={560}
         footer={
           <div className="flex w-full flex-wrap items-center justify-between gap-2">
@@ -378,13 +389,20 @@ export function BlockRulesCard({ onChanged }: { onChanged?: () => void }) {
               </Btn>
             ) : <span />}
             <div className="flex items-center gap-2">
-              <Btn sm className="min-h-9 sm:min-h-0" onClick={() => { setEditing(null); setEditId(null); setFieldErrors({}); }} disabled={busy}>Cancel</Btn>
+              <Btn
+                sm
+                className="min-h-9 sm:min-h-0"
+                onClick={() => { setFormOpen(false); setEditId(null); }}
+                disabled={busy}
+              >
+                Cancel
+              </Btn>
               <Btn
                 sm
                 tone="accent"
                 className="min-h-9 sm:min-h-0"
-                onClick={save}
-                disabled={busy || !editing?.label.trim() || !editing?.values.length}
+                onClick={() => { void onSubmit(); }}
+                disabled={busy || !form.formState.isValid}
               >
                 {busy ? 'Saving…' : editId ? 'Save changes' : 'Add rule'}
               </Btn>
@@ -392,178 +410,212 @@ export function BlockRulesCard({ onChanged }: { onChanged?: () => void }) {
           </div>
         }
       >
-        {editing && (
+        {formOpen && (
           <div className="grid gap-4">
-            <div className="field">
-              <Label htmlFor={`${fieldId}-label`}>Name</Label>
-              <Input
-                id={`${fieldId}-label`}
-                value={editing.label}
-                onChange={e => patch({ label: e.target.value })}
-                placeholder="e.g. Christmas songs"
-                maxLength={RULE_TEXT_MAX}
-                aria-invalid={!!fieldErrors.label || undefined}
-                aria-describedby={fieldErrors.label ? `${fieldId}-label-error` : undefined}
-              />
-              {fieldErrors.label && (
-                <FieldError id={`${fieldId}-label-error`} errors={[{ message: fieldErrors.label }]} />
-              )}
-            </div>
+            <TextField control={control} name="label" label="Name" placeholder="e.g. Christmas songs" />
 
-            <div className="field">
-              <Label htmlFor={`${fieldId}-field`}>Match on</Label>
-              <Select
-                value={editing.field}
-                onValueChange={v => patch({ field: v as RuleField, values: [] })}
-              >
-                <SelectTrigger id={`${fieldId}-field`} aria-label="Match on">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  {FIELD_OPTIONS.map(f => (
-                    <SelectItem key={f.value} value={f.value}>{f.label}</SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-              {fieldOpt && <div className="field-hint mt-1">{fieldOpt.hint}</div>}
-            </div>
-
-            {editing.field === 'playlist' ? (
-              <div className="field">
-                <Label>Playlists</Label>
-                {playlists.length === 0 ? (
-                  <div className="field-hint">No Navidrome playlists found (or Navidrome unreachable) — reopen this dialog to retry.</div>
-                ) : (
-                  <div className="grid max-h-44 gap-1 overflow-auto">
-                    {playlists.map(pl => (
-                      <label key={pl.id} className="flex cursor-pointer items-center gap-2 text-[12px]">
-                        <input
-                          type="checkbox"
-                          checked={editing.values.includes(pl.id)}
-                          onChange={() => patch({
-                            values: editing.values.includes(pl.id)
-                              ? editing.values.filter(v => v !== pl.id)
-                              : [...editing.values, pl.id],
-                          })}
-                        />
-                        <span className="truncate">{pl.name}</span>
-                        {pl.songCount != null && <span className="mono-num text-[10px] text-muted">{pl.songCount}</span>}
-                      </label>
-                    ))}
+            {/* Raw Controller, not SelectField: switching "Match on" has to clear
+                `values` too. Without it, leftover chip values from one field type
+                (e.g. genre names) would silently ride along as extra, meaningless
+                entries in a rule that's now scoped to `playlist` — the playlist
+                checkbox branch below only ever ADDS to `values`, so nothing else
+                would ever clear the stale ones. That's real work SelectField's
+                plain field.onChange passthrough doesn't expose. */}
+            <Controller
+              control={control}
+              name="field"
+              render={({ field: rhfField, fieldState }) => {
+                const baseId = `${fieldId}-field`;
+                const aria = fieldAria(baseId, fieldState.error);
+                const fieldOpt = FIELD_OPTIONS.find(f => f.value === rhfField.value);
+                return (
+                  <div className="field">
+                    <Label {...aria.labelProps}>Match on</Label>
+                    <Select
+                      value={rhfField.value}
+                      onValueChange={v => {
+                        rhfField.onChange(v as RuleField);
+                        form.setValue('values', [], { shouldValidate: true, shouldDirty: true });
+                      }}
+                    >
+                      <SelectTrigger {...aria.controlProps} onBlur={rhfField.onBlur} ref={rhfField.ref} aria-label="Match on">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {FIELD_OPTIONS.map(f => (
+                          <SelectItem key={f.value} value={f.value}>{f.label}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                    {fieldOpt && <div className="field-hint mt-1">{fieldOpt.hint}</div>}
+                    {fieldState.error && <FieldError {...aria.errorProps} errors={[fieldState.error]} />}
                   </div>
-                )}
-              </div>
-            ) : (
-              <div className="field">
-                <Label htmlFor={`${fieldId}-values`}>Values <span className="text-muted">(any of, Enter to add)</span></Label>
-                <ValuesInput
-                  id={`${fieldId}-values`}
-                  values={editing.values}
-                  onChange={values => patch({ values })}
-                  placeholder={editing.field === 'genre' ? 'e.g. Death Metal' : editing.field === 'tag' ? 'e.g. christmas' : 'add a value…'}
-                  suggestions={editing.field === 'genre' || editing.field === 'tag' ? genres : undefined}
-                />
-                {fieldErrors.values && (
-                  <FieldError
-                    id={`${fieldId}-values-error`}
-                    errors={[{ message: fieldErrors.values }]}
-                  />
-                )}
-              </div>
-            )}
+                );
+              }}
+            />
 
-            <div className="field">
-              <label className="flex cursor-pointer items-center gap-2 text-[12px]">
-                <input
-                  type="checkbox"
-                  checked={editing.season !== null}
-                  onChange={() => patch({
-                    season: editing.season ? null : { from: { month: 12, day: 1 }, to: { month: 12, day: 26 } },
-                  })}
-                />
-                <span>Seasonal — allow on air only between two dates</span>
-              </label>
-              {editing.season && (
-                <>
-                  <div className="mt-2 grid grid-cols-2 gap-3">
-                    {(['from', 'to'] as const).map(end => (
-                      <div key={end} className="grid grid-cols-2 gap-2">
-                        <div className="field">
-                          <Label htmlFor={`${fieldId}-${end}-m`}>{end === 'from' ? 'From' : 'To'}</Label>
-                          <Select
-                            value={String(editing.season![end].month)}
-                            onValueChange={v => {
-                              const month = Number(v);
-                              const cur = editing.season!;
-                              patch({
-                                season: {
-                                  ...cur,
-                                  [end]: { month, day: Math.min(cur[end].day, DAYS_IN_MONTH(month)) },
-                                },
-                              });
-                            }}
-                          >
-                            <SelectTrigger id={`${fieldId}-${end}-m`} aria-label={`${end} month`}>
-                              <SelectValue />
-                            </SelectTrigger>
-                            <SelectContent>
-                              {MONTH_NAMES.map((name, i) => (
-                                <SelectItem key={i + 1} value={String(i + 1)}>{name}</SelectItem>
-                              ))}
-                            </SelectContent>
-                          </Select>
+            {/* Raw Controller: a chip input (commit-on-Enter/blur, its own draft
+                state) and a checkbox list are both group controls with no single
+                labelable element — house policy per lib/form-fields.tsx's header
+                scopes chip inputs to Controller, and aria-labelledby/groupProps
+                (not htmlFor) is how a Field wrapping a GROUP names itself. */}
+            <Controller
+              control={control}
+              name="values"
+              render={({ field, fieldState }) => {
+                const baseId = `${fieldId}-values`;
+                const aria = fieldAria(baseId, fieldState.error);
+                if (fieldWatch === 'playlist') {
+                  return (
+                    <div className="field">
+                      <Label {...aria.labelledByProps}>Playlists</Label>
+                      {playlists.length === 0 ? (
+                        <div className="field-hint">No Navidrome playlists found (or Navidrome unreachable) — reopen this dialog to retry.</div>
+                      ) : (
+                        <div {...aria.groupProps} className="grid max-h-44 gap-1 overflow-auto">
+                          {playlists.map(pl => (
+                            <label key={pl.id} className="flex cursor-pointer items-center gap-2 text-[12px]">
+                              <input
+                                type="checkbox"
+                                checked={field.value.includes(pl.id)}
+                                onChange={() => field.onChange(
+                                  field.value.includes(pl.id)
+                                    ? field.value.filter(v => v !== pl.id)
+                                    : [...field.value, pl.id],
+                                )}
+                              />
+                              <span className="truncate">{pl.name}</span>
+                              {pl.songCount != null && <span className="mono-num text-[10px] text-muted">{pl.songCount}</span>}
+                            </label>
+                          ))}
                         </div>
-                        <div className="field">
-                          <Label htmlFor={`${fieldId}-${end}-d`}>Day</Label>
-                          <Select
-                            value={String(editing.season![end].day)}
-                            onValueChange={v => patch({
-                              season: { ...editing.season!, [end]: { ...editing.season![end], day: Number(v) } },
-                            })}
-                          >
-                            <SelectTrigger id={`${fieldId}-${end}-d`} aria-label={`${end} day`}>
-                              <SelectValue />
-                            </SelectTrigger>
-                            <SelectContent>
-                              {Array.from({ length: DAYS_IN_MONTH(editing.season![end].month) }, (_, i) => (
-                                <SelectItem key={i + 1} value={String(i + 1)}>{i + 1}</SelectItem>
-                              ))}
-                            </SelectContent>
-                          </Select>
-                        </div>
-                      </div>
-                    ))}
+                      )}
+                    </div>
+                  );
+                }
+                return (
+                  <div className="field">
+                    <Label {...aria.labelledByProps}>Values <span className="text-muted">(any of, Enter to add)</span></Label>
+                    <div {...aria.groupProps}>
+                      <ValuesInput
+                        id={baseId}
+                        values={field.value}
+                        onChange={field.onChange}
+                        placeholder={fieldWatch === 'genre' ? 'e.g. Death Metal' : fieldWatch === 'tag' ? 'e.g. christmas' : 'add a value…'}
+                        suggestions={fieldWatch === 'genre' || fieldWatch === 'tag' ? genres : undefined}
+                      />
+                    </div>
+                    {fieldState.error && <FieldError {...aria.errorProps} errors={[fieldState.error]} />}
                   </div>
-                  <div className="field-hint mt-1">
-                    Matching tracks are blocked the rest of the year. A window may wrap the year end (Dec 1 → Jan 6).
-                  </div>
-                </>
-              )}
-            </div>
+                );
+              }}
+            />
 
-            <div className="field">
-              <Label>Only during certain shows <span className="text-muted">(optional — empty is station-wide)</span></Label>
-              {shows.length === 0 ? (
-                <div className="field-hint">No shows defined — the rule applies station-wide.</div>
-              ) : (
-                <div className="grid max-h-36 gap-1 overflow-auto">
-                  {shows.map(s => (
-                    <label key={s.id} className="flex cursor-pointer items-center gap-2 text-[12px]">
+            <Controller
+              control={control}
+              name="season"
+              render={({ field }) => {
+                const season = field.value;
+                return (
+                  <div className="field">
+                    <label className="flex cursor-pointer items-center gap-2 text-[12px]">
                       <input
                         type="checkbox"
-                        checked={editing.showIds.includes(s.id)}
-                        onChange={() => patch({
-                          showIds: editing.showIds.includes(s.id)
-                            ? editing.showIds.filter(v => v !== s.id)
-                            : [...editing.showIds, s.id],
-                        })}
+                        checked={season !== null}
+                        onChange={() => field.onChange(
+                          season ? null : { from: { month: 12, day: 1 }, to: { month: 12, day: 26 } },
+                        )}
                       />
-                      <span className="truncate">{s.name}</span>
+                      <span>Seasonal — allow on air only between two dates</span>
                     </label>
-                  ))}
+                    {season && (
+                      <>
+                        <div className="mt-2 grid grid-cols-2 gap-3">
+                          {(['from', 'to'] as const).map(end => (
+                            <div key={end} className="grid grid-cols-2 gap-2">
+                              <div className="field">
+                                <Label htmlFor={`${fieldId}-${end}-m`}>{end === 'from' ? 'From' : 'To'}</Label>
+                                <Select
+                                  value={String(season[end].month)}
+                                  onValueChange={v => {
+                                    const month = Number(v);
+                                    field.onChange({
+                                      ...season,
+                                      [end]: { month, day: Math.min(season[end].day, DAYS_IN_MONTH(month)) },
+                                    });
+                                  }}
+                                >
+                                  <SelectTrigger id={`${fieldId}-${end}-m`} aria-label={`${end} month`}>
+                                    <SelectValue />
+                                  </SelectTrigger>
+                                  <SelectContent>
+                                    {MONTH_NAMES.map((name, i) => (
+                                      <SelectItem key={i + 1} value={String(i + 1)}>{name}</SelectItem>
+                                    ))}
+                                  </SelectContent>
+                                </Select>
+                              </div>
+                              <div className="field">
+                                <Label htmlFor={`${fieldId}-${end}-d`}>Day</Label>
+                                <Select
+                                  value={String(season[end].day)}
+                                  onValueChange={v => field.onChange({
+                                    ...season,
+                                    [end]: { ...season[end], day: Number(v) },
+                                  })}
+                                >
+                                  <SelectTrigger id={`${fieldId}-${end}-d`} aria-label={`${end} day`}>
+                                    <SelectValue />
+                                  </SelectTrigger>
+                                  <SelectContent>
+                                    {Array.from({ length: DAYS_IN_MONTH(season[end].month) }, (_, i) => (
+                                      <SelectItem key={i + 1} value={String(i + 1)}>{i + 1}</SelectItem>
+                                    ))}
+                                  </SelectContent>
+                                </Select>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                        <div className="field-hint mt-1">
+                          Matching tracks are blocked the rest of the year. A window may wrap the year end (Dec 1 → Jan 6).
+                        </div>
+                      </>
+                    )}
+                  </div>
+                );
+              }}
+            />
+
+            <Controller
+              control={control}
+              name="showIds"
+              render={({ field }) => (
+                <div className="field">
+                  <Label>Only during certain shows <span className="text-muted">(optional — empty is station-wide)</span></Label>
+                  {shows.length === 0 ? (
+                    <div className="field-hint">No shows defined — the rule applies station-wide.</div>
+                  ) : (
+                    <div className="grid max-h-36 gap-1 overflow-auto">
+                      {shows.map(s => (
+                        <label key={s.id} className="flex cursor-pointer items-center gap-2 text-[12px]">
+                          <input
+                            type="checkbox"
+                            checked={field.value.includes(s.id)}
+                            onChange={() => field.onChange(
+                              field.value.includes(s.id)
+                                ? field.value.filter(v => v !== s.id)
+                                : [...field.value, s.id],
+                            )}
+                          />
+                          <span className="truncate">{s.name}</span>
+                        </label>
+                      ))}
+                    </div>
+                  )}
                 </div>
               )}
-            </div>
+            />
           </div>
         )}
       </Modal>

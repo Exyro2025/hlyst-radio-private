@@ -26,19 +26,38 @@ def api(path):
     return out.stdout
 
 
-def api_write(method, path, body=None):
+def api_write(method, path, body=None, ok_statuses=None):
     """POST/PUT/DELETE through the same curl mechanism as `api()` — for a
     check to seed or tear down its OWN fixtures rather than depending on a
-    human to run curl separately outside the script. `check=True` only
-    verifies curl itself ran; a 4xx/5xx response body doesn't raise (mirrors
-    `api()`'s posture, and is what makes a best-effort teardown-before-seed
-    call safe even when there's nothing to delete yet).
+    human to run curl separately outside the script.
+
+    `check=True` on the subprocess only proves curl itself ran — it says
+    nothing about the HTTP response. A seed that 4xx/5xx's used to sail
+    through silently, dropping the calling check straight into a full-timeout
+    hang (waiting on a fixture that was never actually created) with no
+    evidence pointing at the real cause. This asks curl for the status code
+    (`-w`) alongside the body and raises on anything outside 200-299, naming
+    the method, path and status — so a broken seed fails at the seed, not 30s
+    later at some unrelated `wait_for_selector`.
+
+    A caller that genuinely expects a non-2xx (a best-effort delete-before-
+    seed, where "nothing to delete yet" is a normal 404) passes the codes it
+    accepts via `ok_statuses`, e.g. `ok_statuses=(200, 404)`.
     """
-    cmd = ["curl", "-s", "-u", "test:test", "-X", method, f"{API}{path}"]
+    cmd = [
+        "curl", "-s", "-u", "test:test", "-X", method,
+        "-w", "\n%{http_code}", f"{API}{path}",
+    ]
     if body is not None:
         cmd += ["-H", "Content-Type: application/json", "-d", json.dumps(body)]
     out = subprocess.run(cmd, capture_output=True, text=True, check=True)
-    return out.stdout
+    stdout, _, status = out.stdout.rpartition("\n")
+    ok = set(ok_statuses) if ok_statuses is not None else range(200, 300)
+    if int(status) not in ok:
+        raise RuntimeError(
+            f"api_write {method} {path} -> HTTP {status}: {stdout.strip()[:500]}"
+        )
+    return stdout
 
 
 def new_page(pw):
@@ -371,8 +390,12 @@ def skills(page):
     """
     # Best-effort delete first: clears a fixture left behind by a run that
     # crashed before its own teardown, so this run's collision is guaranteed
-    # to be the seed made just below, not a stale leftover.
-    api_write("DELETE", f"/dj/skills/{SKILLS_FIXTURE_SLUG}")
+    # to be the seed made just below, not a stale leftover. 404 ("no such
+    # custom skill") is the expected, normal outcome on a clean stack —
+    # confirmed against routes/dj.ts's DELETE /dj/skills/:slug — so it's
+    # named explicitly rather than opening api_write's check up to every
+    # status.
+    api_write("DELETE", f"/dj/skills/{SKILLS_FIXTURE_SLUG}", ok_statuses=(200, 404))
     api_write("POST", "/dj/skills", {
         "name": SKILLS_FIXTURE_SLUG,
         "label": "Verify Dup Skill",
@@ -410,8 +433,100 @@ def skills(page):
         assert "already exists" in page.locator(f'[id="{error_id}"]').inner_text()
     finally:
         # Runs whether the assertions above passed or raised — a failed run
+        # must not leave the fixture behind to poison the NEXT run. 200 is
+        # the normal case; 404 covers a run that failed before the seed
+        # above ever landed.
+        api_write("DELETE", f"/dj/skills/{SKILLS_FIXTURE_SLUG}", ok_statuses=(200, 404))
+
+
+BLOCKRULE_LABEL = "Verify Blocklist Rule"
+
+
+@check
+def blockrules(page):
+    """BlockRulesCard (#1300 FR 1, converted onto blockRuleSchema).
+
+    Both halves run the SAME schema — validateBody(blockRuleSchema) at
+    POST/PUT /library/blocklist/rules (confirmed by reading routes/library.ts)
+    is byte-for-byte what the client's zodResolver runs — so there is no
+    client-accepts/server-rejects gap to exercise here the way skills()'s
+    duplicate-slug check does; the only refusal reachable from this build is
+    the client-side one, gated on the Save button rather than a round trip.
+    That refusal is proven here; the round trip is proven separately by
+    actually saving and reading the result back.
+
+    `values` (the chip input) has no single labelable element — ValuesInput
+    is a draft box plus a list of removable chips — so its Field names itself
+    via aria-labelledby/groupProps (fieldAria's group variant), not htmlFor.
+    assert_aria is generic over the locator it's given; the point of this
+    check's aria assertion is confirming that GROUP locator (found via the
+    "-values-label" suffix on aria-labelledby, not a `for` attribute) is a
+    real, single node with real ids behind it — not just that assert_aria
+    passes on whatever the caller happened to hand it.
+    """
+    def find_rule_id():
+        data = json.loads(api("/library/blocklist"))
+        for r in data.get("rules", []):
+            if r["label"] == BLOCKRULE_LABEL:
+                return r["id"]
+        return None
+
+    # Best-effort cleanup from a run that crashed before its own teardown —
+    # same posture as skills()'s pre-seed delete.
+    leftover = find_rule_id()
+    if leftover:
+        api_write("DELETE", f"/library/blocklist/rules/{leftover}", ok_statuses=(204, 404))
+
+    try:
+        page.goto(f"{WEB}/admin/library?tab=blocked")
+        page.wait_for_selector("text=Blocking rules")
+
+        page.get_by_role("button", name="Add rule").click()
+        dialog = page.get_by_role("dialog")
+        dialog.wait_for()
+
+        name = dialog.get_by_label("Name")
+        # Scoped to the dialog: the page ALSO has a toolbar "Add rule" button
+        # that opens this same dialog, and the footer's save button carries
+        # the identical label while no rule is being edited.
+        save = dialog.get_by_role("button", name="Add rule", exact=True)
+
+        name.fill(BLOCKRULE_LABEL)
+
+        # 1. Validate — a label with no values. The default field is 'tag'
+        #    (EMPTY_RULE), whose chip input carries the "e.g. christmas"
+        #    placeholder. `values` starts already empty, and mode: 'onChange'
+        #    only reacts to a real change event (same caveat festivals() and
+        #    moods() note) — so commit a chip and remove it again to force
+        #    one, landing back on an empty, freshly-invalidated list.
+        chip_input = dialog.get_by_placeholder("e.g. christmas", exact=True)
+        chip_input.fill("temp")
+        chip_input.press("Enter")
+        dialog.get_by_role("button", name="remove temp").click()
+        page.wait_for_selector("text=rule.values must have at least one entry")
+        assert save.is_disabled(), "Add rule enabled with an empty values list"
+
+        group = dialog.locator('[aria-labelledby$="-values-label"]')
+        assert group.count() == 1, f"expected exactly one values group, found {group.count()}"
+        assert_aria(page, group)
+
+        # 2. Save — a valid value clears the refusal, and the round trip
+        #    really persists (not just a client-side state flip): confirmed
+        #    against GET /library/blocklist afterward.
+        chip_input.fill("verify-tag")
+        chip_input.press("Enter")
+        page.wait_for_selector("text=rule.values must have at least one entry", state="detached")
+        assert not save.is_disabled(), "Add rule stayed disabled on a valid rule"
+
+        save.click()
+        dialog.wait_for(state="detached")
+        assert BLOCKRULE_LABEL in api("/library/blocklist"), "rule did not persist"
+    finally:
+        # Runs whether the assertions above passed or raised — a failed run
         # must not leave the fixture behind to poison the NEXT run.
-        api_write("DELETE", f"/dj/skills/{SKILLS_FIXTURE_SLUG}")
+        rid = find_rule_id()
+        if rid:
+            api_write("DELETE", f"/library/blocklist/rules/{rid}", ok_statuses=(204, 404))
 
 
 if __name__ == "__main__":
