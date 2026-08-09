@@ -109,7 +109,6 @@ export function PersonaIdentityCard({
             label="Soul"
             rows={14}
             placeholder="e.g. warm and dry, never corny, observant, favours one good image over a list"
-            maxLength={SOUL_MAX}
           />
           <div className="field-hint">
             One short personality sketch. Injected into the prompt as <code>{'{soul}'}</code>.
