@@ -308,14 +308,19 @@ export default function SkillEditModal({ mode, skill, personas, tagSuggestions, 
   const dirty = loaded && (form.formState.isDirty || configDirty || assignDirty);
 
   const canSave = loaded && form.formState.isValid && !busy;
-  // Any schema objection the form has no inline slot for — a disk-authored
-  // requiresKey that isn't UPPER_SNAKE_CASE, an unknown context token riding
-  // the hidden passthrough state, a bad tag loaded off disk — used to disable
-  // Save with no visible reason anywhere. The footer surfaces the first such
-  // issue so a gated Save always says why.
+  // Every field has its own inline error slot now except `requiresKey`
+  // (name/label/cooldown/brief via TextField/TextareaField's built-in
+  // FieldError; context/tags/window via the hand-rolled Controller blocks
+  // below) — excluded here so a message doesn't render TWICE, once under the
+  // field and again in this generic banner. `requiresKey` is the one field
+  // with NO rendered control at all (a hidden passthrough — see its
+  // declaration above), so a disk-authored value that isn't UPPER_SNAKE_CASE
+  // has nowhere else to surface. The footer shows the first such issue so a
+  // gated Save always says why.
+  const FIELDS_WITH_INLINE_ERRORS = ['name', 'label', 'cooldown', 'context', 'tags', 'window', 'brief'];
   const blockingIssue = (() => {
     const entry = Object.entries(form.formState.errors).find(
-      ([key, err]) => err && !['name', 'cooldown'].includes(key),
+      ([key, err]) => err && !FIELDS_WITH_INLINE_ERRORS.includes(key),
     );
     if (!entry) return null;
     const [field, err] = entry;
@@ -758,6 +763,11 @@ export default function SkillEditModal({ mode, skill, personas, tagSuggestions, 
                             <button key={w} type="button" onClick={() => field.onChange(w)} style={presetStyle(field.value === w, i)}>{lbl}</button>
                           ))}
                         </div>
+                        {fieldState.error && (
+                          <div {...aria.errorProps} role="alert" style={{ fontSize: 12, color: 'var(--accent)', marginTop: 12 }}>
+                            {fieldState.error.message}
+                          </div>
+                        )}
                         <div style={{ fontSize: 12, color: 'var(--muted)', marginTop: 12 }}>Commute-only restricts this segment to the morning and evening commute hours.</div>
                       </>
                     );

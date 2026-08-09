@@ -26,6 +26,21 @@ def api(path):
     return out.stdout
 
 
+def api_write(method, path, body=None):
+    """POST/PUT/DELETE through the same curl mechanism as `api()` — for a
+    check to seed or tear down its OWN fixtures rather than depending on a
+    human to run curl separately outside the script. `check=True` only
+    verifies curl itself ran; a 4xx/5xx response body doesn't raise (mirrors
+    `api()`'s posture, and is what makes a best-effort teardown-before-seed
+    call safe even when there's nothing to delete yet).
+    """
+    cmd = ["curl", "-s", "-u", "test:test", "-X", method, f"{API}{path}"]
+    if body is not None:
+        cmd += ["-H", "Content-Type: application/json", "-d", json.dumps(body)]
+    out = subprocess.run(cmd, capture_output=True, text=True, check=True)
+    return out.stdout
+
+
 def new_page(pw):
     browser = pw.chromium.launch()
     ctx = browser.new_context()
@@ -332,6 +347,9 @@ def moods_unsaved_vocab_gap(page):
     page.wait_for_selector("text=must be 1-40 chars", state="detached")
 
 
+SKILLS_FIXTURE_SLUG = "verify-dup-skill"
+
+
 @check
 def skills(page):
     """SkillEditModal (#1358 follow-on): a create whose slug already exists on
@@ -343,37 +361,57 @@ def skills(page):
     passes (the slug is well-formed), and the refusal that lands is the
     server's, attributed to the right input via applyServerFieldErrors.
 
-    Requires a custom skill named "verify-dup-skill" to already exist —
-    seeded once via `curl -u test:test -X POST /dj/skills` before this runs.
+    Seeds and tears down its own fixture — a custom skill named
+    "verify-dup-skill" — through api_write(), the same curl mechanism every
+    other request in this file already uses. Every other check here is
+    repeatable from a pristine state dir (moods_unsaved_vocab_gap explicitly
+    reverts its own in-progress edit at the end); this one must be too, or it
+    fails unreadably — no collision, so the "already exists" wait just times
+    out — against a freshly booted stack that never got a manual curl seed.
     """
-    page.goto(f"{WEB}/admin/skills")
-    page.get_by_role("button", name="New skill").click()
+    # Best-effort delete first: clears a fixture left behind by a run that
+    # crashed before its own teardown, so this run's collision is guaranteed
+    # to be the seed made just below, not a stale leftover.
+    api_write("DELETE", f"/dj/skills/{SKILLS_FIXTURE_SLUG}")
+    api_write("POST", "/dj/skills", {
+        "name": SKILLS_FIXTURE_SLUG,
+        "label": "Verify Dup Skill",
+        "brief": "Seeded by verify-forms.py's skills() check — collision fixture, torn down at the end of the same run.",
+    })
 
-    dialog = page.get_by_role("dialog")
-    dialog.wait_for()
+    try:
+        page.goto(f"{WEB}/admin/skills")
+        page.get_by_role("button", name="New skill").click()
 
-    slug = dialog.get_by_label("SLUG")
-    brief = dialog.get_by_label("The brief")
-    create = dialog.get_by_role("button", name="Create", exact=True)
+        dialog = page.get_by_role("dialog")
+        dialog.wait_for()
 
-    slug.fill("verify-dup-skill")   # valid shape, but already exists on disk
-    brief.fill("Playwright dup-slug probe — should never actually save.")
-    assert not create.is_disabled(), "Create stayed disabled on a well-formed, if colliding, slug"
+        slug = dialog.get_by_label("SLUG")
+        brief = dialog.get_by_label("The brief")
+        create = dialog.get_by_role("button", name="Create", exact=True)
 
-    create.click()
-    page.wait_for_selector('[role="dialog"] :text("already exists")')
-    assert_aria(page, slug)
+        slug.fill(SKILLS_FIXTURE_SLUG)   # valid shape, but already exists on disk
+        brief.fill("Playwright dup-slug probe — should never actually save.")
+        assert not create.is_disabled(), "Create stayed disabled on a well-formed, if colliding, slug"
 
-    # The dialog must still be open — a real refusal, not a swallowed error
-    # that quietly closed the modal.
-    assert dialog.is_visible(), "dialog closed despite the server refusal"
+        create.click()
+        page.wait_for_selector('[role="dialog"] :text("already exists")')
+        assert_aria(page, slug)
 
-    # And the refusal really did attribute to THIS input, not just render an
-    # aria-describedby pointing at unrelated text — the associated node's own
-    # text must be the "already exists" message.
-    described = slug.get_attribute("aria-describedby")
-    error_id = [t for t in described.split() if t.endswith("-error")][0]
-    assert "already exists" in page.locator(f'[id="{error_id}"]').inner_text()
+        # The dialog must still be open — a real refusal, not a swallowed error
+        # that quietly closed the modal.
+        assert dialog.is_visible(), "dialog closed despite the server refusal"
+
+        # And the refusal really did attribute to THIS input, not just render an
+        # aria-describedby pointing at unrelated text — the associated node's own
+        # text must be the "already exists" message.
+        described = slug.get_attribute("aria-describedby")
+        error_id = [t for t in described.split() if t.endswith("-error")][0]
+        assert "already exists" in page.locator(f'[id="{error_id}"]').inner_text()
+    finally:
+        # Runs whether the assertions above passed or raised — a failed run
+        # must not leave the fixture behind to poison the NEXT run.
+        api_write("DELETE", f"/dj/skills/{SKILLS_FIXTURE_SLUG}")
 
 
 if __name__ == "__main__":
