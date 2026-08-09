@@ -1,5 +1,22 @@
-// Thin react-hook-form + zod wiring, written once rather than in each of the
-// ~78 admin forms.
+// Thin react-hook-form + zod wiring, written once rather than in each admin
+// form that binds one.
+//
+// `useZodForm` + `fieldAria` here, the five bound field components
+// (TextField/TextareaField/SelectField/SwitchField/ToggleGroupField) in the
+// sibling lib/form-fields.tsx — together these are what every converted
+// ENTITY EDITOR binds through: TakeoverCard, the Festivals/Moods/Skills/
+// Blocklist editors, the seven imaging create/import modals, the onboarding
+// wizard, Personas (+ its persona/prompt card files), Shows, Playlist
+// Builder, Webhooks, Stations. 23 `useZodForm(` call sites as of this
+// writing (`grep -rn 'useZodForm(' web --include=*.tsx | wc -l`).
+//
+// The nine `settings/` sections (Station, TTS, LLM, Embedding, Requests,
+// Privacy, Search, Scrobble, Imaging toggles, …) are DELIBERATELY NOT bound
+// here — see CLAUDE.md's "Shared form schemas (zod)" bullet for why: there is
+// no single submit to bind (`SaveBar` commits one setting at a time, so each
+// panel needs its own per-field save/dirty machinery, not one form-wide
+// handleSubmit) and `SettingsPanel` owns a hydrate-once lifecycle across all
+// nine that a per-panel `useZodForm` would have to duplicate or fight.
 //
 // The schemas come from lib/schemas.generated.ts — the committed mirror of
 // controller/src/schemas/**, kept honest by a CI drift check. So the rules this
@@ -8,6 +25,29 @@
 // Note there is deliberately no ui/form.tsx: shadcn's Field primitives are
 // already vendored at components/ui/field.tsx, and FieldError already accepts
 // react-hook-form's { message } error shape.
+//
+// PITFALL — a field registered here that ISN'T a key of the bound schema is
+// SILENTLY DROPPED, not a type error: `handleSubmit`'s callback receives the
+// resolver's PARSED OUTPUT (z.output<S>), and z.object() strips any key it
+// doesn't declare. `useZodForm`'s `z.input<S>`/`z.output<S>` generics (below)
+// make the compiler see the real output TYPE, but the compiler cannot see a
+// field that was never part of the schema's shape at all — `form.register`/
+// `useController`/a bound component all happily accept any string as `name`.
+// This shipped live once (PlaylistBuilderPanel's `saveMode`, task-11-report.md
+// / task-12-report.md Fix round 1): every "Overwrite existing" save read
+// `values.saveMode` as `undefined` and created a duplicate playlist instead of
+// updating. The two safe patterns, both used elsewhere in this codebase: (1)
+// every field the form registers is a real key of the bound schema (verify by
+// diffing registered names against the schema's declared object shape — see
+// task-12-report.md's per-form audit for the method), or (2) a field that
+// deliberately isn't part of the wire schema (a local UI-only choice like
+// `saveMode`, a `File` a zod-only schema can't describe) is read off
+// `form.getValues('thatField')` / `useWatch({control, name: 'thatField'})`
+// instead of off `handleSubmit`'s parsed `values` — both bypass the resolver
+// and return exactly what's registered. A form that never calls
+// `handleSubmit` at all (MoodsPanel/PersonasPanel/ShowsPanel — they build
+// their POST body from `getValues()` instead) cannot exhibit this by
+// construction, whichever pattern its fields use.
 import { zodResolver } from '@hookform/resolvers/zod';
 import {
   useForm,

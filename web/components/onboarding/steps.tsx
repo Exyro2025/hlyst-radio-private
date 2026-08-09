@@ -154,6 +154,7 @@ export function NavidromeStep({ w }: { w: WizardController }) {
           control={form.control}
           name="user"
           label="Username"
+          autoComplete="username"
           description="tip: a dedicated Navidrome user that can only access the libraries you want on air keeps audiobooks and seasonal collections off the stream"
         />
         <TextField
@@ -161,6 +162,7 @@ export function NavidromeStep({ w }: { w: WizardController }) {
           name="pass"
           label="Password"
           type="password"
+          autoComplete="current-password"
         />
         <div>
           <Button
@@ -333,6 +335,7 @@ export function LlmStep({ w }: { w: WizardController }) {
             name="apiKey"
             label="API key"
             type="password"
+            autoComplete="off"
             description="Stored in state/secrets.env (mode 0600), not in settings.json"
           />
         )}
@@ -386,7 +389,7 @@ export function LlmStep({ w }: { w: WizardController }) {
                       : 'No models found yet — set the URL above, or type a model ID.')
                 : 'Type the model ID. Discovery runs here once the API key is saved.'}
           </span>
-          <FieldError {...modelAria.errorProps} errors={[modelField.fieldState.error]} />
+          <FieldError {...modelAria.errorProps} errors={modelField.fieldState.error ? [modelField.fieldState.error] : undefined} />
         </div>
         <div>
           {/* The step's own resolver IS llmProbeSchema now, so formState.isValid
@@ -534,13 +537,14 @@ export function TtsStep({ w }: { w: WizardController }) {
                   </SelectGroup>
                 </SelectContent>
               </Select>
-              <FieldError {...cloudProviderAria.errorProps} errors={[cloudProviderField.fieldState.error]} />
+              <FieldError {...cloudProviderAria.errorProps} errors={cloudProviderField.fieldState.error ? [cloudProviderField.fieldState.error] : undefined} />
             </Field>
             <TextField
               control={form.control}
               name="cloud.apiKey"
               label="API key"
               type="password"
+              autoComplete="off"
             />
             {form.watch('cloud.provider') === 'fish-audio' && (
               <>
@@ -549,12 +553,14 @@ export function TtsStep({ w }: { w: WizardController }) {
                   name="cloud.model"
                   label="Fish model id"
                   placeholder="s2.1-pro"
+                  maxLength={100}
                 />
                 <TextField
                   control={form.control}
                   name="cloud.voice"
                   label="Fish voice reference id"
                   placeholder="Paste an account, public, or custom reference_id"
+                  maxLength={100}
                 />
                 <p className="text-xs text-muted">
                   Account voice discovery is available after setup in Admin → Settings → TTS.

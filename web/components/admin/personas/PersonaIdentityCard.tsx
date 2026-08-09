@@ -60,6 +60,7 @@ export function PersonaIdentityCard({
                   control={control}
                   name={`personas.${index}.name`}
                   label="On-air name"
+                  maxLength={NAME_MAX}
                 />
                 <div className="field-hint">
                   Shown in the player and injected into every prompt as <code>{'{name}'}</code>.
@@ -72,6 +73,7 @@ export function PersonaIdentityCard({
                   name={`personas.${index}.tagline`}
                   label="Tagline"
                   placeholder="e.g. late-night drift"
+                  maxLength={TAGLINE_MAX}
                 />
                 <div className="field-hint">
                   A short line shown alongside the persona. Optional.
@@ -87,6 +89,7 @@ export function PersonaIdentityCard({
               name={`personas.${index}.language`}
               label="Language"
               placeholder="English (default)"
+              maxLength={LANGUAGE_MAX}
             />
             <div className="field-hint">
               The DJ <em>writes</em> every on-air line in this language; leave empty for English.
@@ -106,6 +109,7 @@ export function PersonaIdentityCard({
             label="Soul"
             rows={14}
             placeholder="e.g. warm and dry, never corny, observant, favours one good image over a list"
+            maxLength={SOUL_MAX}
           />
           <div className="field-hint">
             One short personality sketch. Injected into the prompt as <code>{'{soul}'}</code>.

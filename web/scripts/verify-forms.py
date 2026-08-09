@@ -141,44 +141,86 @@ def check(fn):
     return fn
 
 
+TAKEOVER_SHOW_NAME = "Verify Takeover Show"
+
+
 @check
 def takeover(page):
-    # Installed BEFORE goto so every timer the page schedules on mount —
-    # including TakeoverCard's 30s poll setInterval — is one this test
-    # controls. Left in default (auto-ticking) mode: only the later
-    # fast_forward jumps ahead of real time, everything up to that point
-    # behaves exactly like an uninstalled clock would.
-    page.clock.install()
-    page.goto(f"{WEB}/admin/dash")
-    page.wait_for_selector("text=Takeover")
+    """TakeoverCard (Task 2) renders NOTHING to interact with — not "Pin a
+    show", not "Takeover minutes" — when `shows.length === 0`
+    (TakeoverCard.tsx:186-192 falls to the "no shows to pin" branch), so
+    every assertion below needs at least one real show to exist first. This
+    check used to pass by silently riding a show shows() left behind before
+    that check's own teardown was fixed (commit f94c0738); now that shows()
+    cleans up after itself, a takeover() run against a freshly booted stack
+    (no shows at all) hung at `get_by_label("Pin a show")`. Seeded/torn down
+    the same try/finally pattern shows()/skills()/imaging() use, so this
+    check is self-contained and order-independent within the file.
+    """
+    def find_show(name):
+        data = json.loads(api("/settings"))
+        for s in data.get("values", {}).get("shows", []):
+            if s.get("name") == name:
+                return s
+        return None
 
-    minutes = page.get_by_label("Takeover minutes")
+    # Best-effort cleanup from a run that crashed before its own teardown.
+    leftover = find_show(TAKEOVER_SHOW_NAME)
+    if leftover:
+        api_write("DELETE", f"/shows/{leftover['id']}", ok_statuses=(200, 404))
 
-    # 2. Validate — 5 is under OVERRIDE_MIN_MINUTES (15).
-    minutes.fill("5")
-    page.wait_for_selector("text=must be an integer between 15 and 720")
-    assert_aria(page, minutes)
+    # name + personaId are showSchema's only required fields — everything
+    # else defaults. personaId is read from the live roster rather than
+    # hardcoded (like moods()'s early_morning_mood lookup), since a seeded
+    # persona id isn't a documented contract of the verify stack.
+    personas = json.loads(api("/settings")).get("values", {}).get("personas", [])
+    assert personas, "no personas on the roster — can't seed a show to pin"
+    seeded = json.loads(api_write(
+        "POST", "/shows",
+        {"show": {"name": TAKEOVER_SHOW_NAME, "personaId": personas[0]["id"]}},
+    ))["show"]
 
-    # Save must be gated while invalid.
-    pin = page.get_by_role("button", name="Pin to air")
-    assert pin.is_disabled(), "Save enabled with an out-of-range window"
+    try:
+        # Installed BEFORE goto so every timer the page schedules on mount —
+        # including TakeoverCard's 30s poll setInterval — is one this test
+        # controls. Left in default (auto-ticking) mode: only the later
+        # fast_forward jumps ahead of real time, everything up to that point
+        # behaves exactly like an uninstalled clock would.
+        page.clock.install()
+        page.goto(f"{WEB}/admin/dash")
+        page.wait_for_selector("text=Takeover")
 
-    # 3. Save — pick a real show, a valid window, confirm it persists.
-    minutes.fill("60")
-    page.get_by_label("Pin a show").click()
-    page.locator("[role=menuitem], [role=option]").first.click()
-    pin.click()
-    page.wait_for_selector("text=on air")
-    assert '"expiresAt"' in api("/schedule"), "override did not persist"
+        minutes = page.get_by_label("Takeover minutes")
 
-    # 4. Poll safety — the 30s tick must not clobber a half-typed window.
-    #    fast_forward past the real interval so the tick genuinely fires
-    #    (see assert_survives_poll's docstring for why a dispatched focus
-    #    event and a short sleep cannot prove this).
-    page.get_by_role("button", name="Cancel takeover").click()
-    page.wait_for_selector("text=Pin a show")
-    minutes.fill("123")
-    assert_survives_poll(page, minutes, "123")
+        # 2. Validate — 5 is under OVERRIDE_MIN_MINUTES (15).
+        minutes.fill("5")
+        page.wait_for_selector("text=must be an integer between 15 and 720")
+        assert_aria(page, minutes)
+
+        # Save must be gated while invalid.
+        pin = page.get_by_role("button", name="Pin to air")
+        assert pin.is_disabled(), "Save enabled with an out-of-range window"
+
+        # 3. Save — pick a real show, a valid window, confirm it persists.
+        minutes.fill("60")
+        page.get_by_label("Pin a show").click()
+        page.locator("[role=menuitem], [role=option]").first.click()
+        pin.click()
+        page.wait_for_selector("text=on air")
+        assert '"expiresAt"' in api("/schedule"), "override did not persist"
+
+        # 4. Poll safety — the 30s tick must not clobber a half-typed window.
+        #    fast_forward past the real interval so the tick genuinely fires
+        #    (see assert_survives_poll's docstring for why a dispatched focus
+        #    event and a short sleep cannot prove this).
+        page.get_by_role("button", name="Cancel takeover").click()
+        page.wait_for_selector("text=Pin a show")
+        minutes.fill("123")
+        assert_survives_poll(page, minutes, "123")
+    finally:
+        # Runs whether the assertions above passed or raised — a failed run
+        # must not leave the fixture show behind to poison the NEXT run.
+        api_write("DELETE", f"/shows/{seeded['id']}", ok_statuses=(200, 404))
 
 
 @check
@@ -679,13 +721,13 @@ def imaging(page):
         assert create_save.is_disabled(), "Create enabled with an out-of-range duration"
 
         # A valid duration clears the refusal. FieldError (components/ui/
-        # field.tsx) keeps its own (now-empty) id in the DOM even once valid
-        # — only the input's aria-describedby stops naming it — so "the
-        # message went away" is proven by the rendered TEXT detaching, same
-        # pattern moods()/blockrules() use for their state="detached" waits,
-        # plus the aria-invalid attribute assert_aria itself targets.
+        # field.tsx) renders null once `errors` is undefined (form-fields.tsx
+        # passes `fieldState.error ? [fieldState.error] : undefined`, not an
+        # always-truthy `[fieldState.error]`), so the field's own `-error` id
+        # actually leaves the DOM — scoped the same way the initial assertion
+        # above is, not a bare page-wide text= match.
         duration.fill("1")
-        page.wait_for_selector('text=is capped at 10s', state="detached")
+        page.wait_for_selector('[id$="-durationSec-error"]', state="detached")
         assert duration.get_attribute("aria-invalid") is None, "duration still marked invalid"
         assert not create_save.is_disabled(), "Create stayed disabled on a valid duration"
 

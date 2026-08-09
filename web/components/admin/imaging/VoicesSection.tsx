@@ -15,7 +15,7 @@ import { V3Alert } from '../../ui/alert';
 import { SkeletonCards } from '@/components/ui/skeleton';
 import { Btn } from '../ui';
 import { PreviewButton } from '../settings/shared';
-import { voiceImportSchema } from '@/lib/schemas.generated';
+import { IMAGING_NAME_MAX, voiceImportSchema } from '@/lib/schemas.generated';
 import { useZodForm, applyServerFieldErrors } from '@/lib/form';
 import { TextField } from '@/lib/form-fields';
 import type { VoiceData, ImagingSubmitResult } from './types';
@@ -134,6 +134,7 @@ function VoiceImportModal({
             name="name"
             label="Name"
             placeholder="late-night-dj"
+            maxLength={IMAGING_NAME_MAX}
             description={`Becomes the filename personas pick from. Stored as a mono .wav in ${dir}, so you can also drop files there by hand.`}
           />
         </div>

@@ -283,7 +283,7 @@ export function ShowEditor({
               })}
             />
           )}
-          <TextField control={control} name={path('name')} label="show name" placeholder="e.g. The Late Shift" />
+          <TextField control={control} name={path('name')} label="show name" placeholder="e.g. The Late Shift" maxLength={NAME_MAX} />
           <span className="field-hint -mt-2">{show.name.trim().length}/{NAME_MAX}</span>
 
           {/* Raw Controller, not SelectField — see the comment on personaIdCtl
@@ -315,7 +315,7 @@ export function ShowEditor({
               leave a guest who is also the new host — Save will refuse and name
               the guests field until you remove the overlap.
             </FieldDescription>
-            <FieldError {...personaIdAria.errorProps} errors={[personaIdCtl.fieldState.error]} />
+            <FieldError {...personaIdAria.errorProps} errors={personaIdCtl.fieldState.error ? [personaIdCtl.fieldState.error] : undefined} />
           </div>
 
           {personas.length > 1 && (
@@ -336,7 +336,7 @@ export function ShowEditor({
                 news) in their own voice. The host still drives the music and
                 track intros.
               </FieldDescription>
-              <FieldError {...guestsAria.errorProps} errors={[guestsCtl.fieldState.error]} />
+              <FieldError {...guestsAria.errorProps} errors={guestsCtl.fieldState.error ? [guestsCtl.fieldState.error] : undefined} />
 
               <div className="mt-1">
                 <SwitchField
@@ -381,7 +381,7 @@ export function ShowEditor({
                   a morning roundup. Producer&apos;s choice lets each episode
                   decide.
                 </FieldDescription>
-                <FieldError {...segmentSkillAria.errorProps} errors={[segmentSkillCtl.fieldState.error]} />
+                <FieldError {...segmentSkillAria.errorProps} errors={segmentSkillCtl.fieldState.error ? [segmentSkillCtl.fieldState.error] : undefined} />
               </div>
             )}
           </Field>
@@ -406,7 +406,7 @@ export function ShowEditor({
               then back to the station default. Manage themes in
               Settings → Theme.
             </FieldDescription>
-            <FieldError {...themeAria.errorProps} errors={[themeCtl.fieldState.error]} />
+            <FieldError {...themeAria.errorProps} errors={themeCtl.fieldState.error ? [themeCtl.fieldState.error] : undefined} />
           </Field>
         </Card>
 
@@ -427,7 +427,7 @@ export function ShowEditor({
               Pick any that fit; a track matching any of them qualifies. None
               selected = Any (auto), following the station&apos;s own mood.
             </FieldDescription>
-            <FieldError {...moodsAria.errorProps} errors={[moodsCtl.fieldState.error]} />
+            <FieldError {...moodsAria.errorProps} errors={moodsCtl.fieldState.error ? [moodsCtl.fieldState.error] : undefined} />
           </Field>
 
           <Field data-invalid={erasAria.invalid || undefined}>
@@ -468,7 +468,7 @@ export function ShowEditor({
               Pick any decades, even non-adjacent ones ({'"'}90s + 2010s{'"'}).
               None selected = any era.
             </FieldDescription>
-            <FieldError {...erasAria.errorProps} errors={[erasCtl.fieldState.error]} />
+            <FieldError {...erasAria.errorProps} errors={erasCtl.fieldState.error ? [erasCtl.fieldState.error] : undefined} />
           </Field>
 
           <ToggleGroupField
@@ -501,7 +501,7 @@ export function ShowEditor({
               steers tracks that have had a vocal pass — on a library without
               one it simply doesn&apos;t apply, and the show plays as before.
             </FieldDescription>
-            <FieldError {...vocalsAria.errorProps} errors={[vocalsCtl.fieldState.error]} />
+            <FieldError {...vocalsAria.errorProps} errors={vocalsCtl.fieldState.error ? [vocalsCtl.fieldState.error] : undefined} />
           </Field>
 
           <Field data-invalid={genresAria.invalid || undefined}>
@@ -547,7 +547,7 @@ export function ShowEditor({
             <FieldDescription {...genresAria.descriptionProps}>
               Up to {FILTER_VALUES_MAX}; a track matching any of them qualifies.
             </FieldDescription>
-            <FieldError {...genresAria.errorProps} errors={[genresCtl.fieldState.error]} />
+            <FieldError {...genresAria.errorProps} errors={genresCtl.fieldState.error ? [genresCtl.fieldState.error] : undefined} />
             {unknownGenres.length > 0 && (
               <span role="alert" className="field-hint text-vermilion">
                 No track in your library is tagged{' '}
@@ -631,6 +631,7 @@ export function ShowEditor({
             rows={7}
             placeholder="e.g. Slow ambient, modern classical and downtempo for the late shift. Think Nils Frahm, Hammock, Bonobo's quieter side, nothing with a hard beat. Keep the host calm and unhurried, like a friend talking you down at 1am."
             description="The brief the AI DJ works from. The more you describe, the better it picks music and writes links: genres, eras, moods, artists to lean into or avoid, time of day, the listener, how the host should sound. Write it like you're briefing a real DJ before their slot."
+            maxLength={TOPIC_MAX}
           />
           <span className="field-hint -mt-2">{show.topic.trim().length}/{TOPIC_MAX}</span>
 
@@ -659,7 +660,7 @@ export function ShowEditor({
               limit (good for long mixes or DJ sets), or set at
               least {minTrackSeconds ?? 30}s to cap it here.
             </FieldDescription>
-            <FieldError {...maxTrackSecondsAria.errorProps} errors={[maxTrackSecondsCtl.fieldState.error]} />
+            <FieldError {...maxTrackSecondsAria.errorProps} errors={maxTrackSecondsCtl.fieldState.error ? [maxTrackSecondsCtl.fieldState.error] : undefined} />
           </div>
         </Card>
       </div>
@@ -692,7 +693,7 @@ function PlaylistIdsField({
         max={max}
         onChange={field.onChange}
       />
-      <FieldError {...aria.errorProps} errors={[fieldState.error]} />
+      <FieldError {...aria.errorProps} errors={fieldState.error ? [fieldState.error] : undefined} />
     </div>
   );
 }

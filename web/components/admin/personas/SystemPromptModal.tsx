@@ -14,7 +14,7 @@ import { TextField, TextareaField } from '@/lib/form-fields';
 import { cn } from '../../../lib/cn';
 import type { DjPromptPreset, PersonasFormValues } from './types';
 import { clientMintId } from './helpers';
-import { HOUSE_RULES_MAX, PROMPT_MAX, PROMPT_PRESET_MAX } from './constants';
+import { HOUSE_RULES_MAX, PROMPT_MAX, PROMPT_NAME_MAX, PROMPT_PRESET_MAX } from './constants';
 
 interface SystemPromptModalProps {
   open: boolean;
@@ -272,8 +272,8 @@ export function SystemPromptModal({
           <pre className="term max-h-[420px]">{defaultPrompt || '(default unavailable)'}</pre>
         ) : editingPreset ? (
           <div className="grid gap-3">
-            <TextField control={control} name={`djPrompts.${editingIdx}.name`} label="name" />
-            <TextareaField control={control} name={`djPrompts.${editingIdx}.text`} label="template" rows={16} className="font-mono text-[12px]" />
+            <TextField control={control} name={`djPrompts.${editingIdx}.name`} label="name" maxLength={PROMPT_NAME_MAX} />
+            <TextareaField control={control} name={`djPrompts.${editingIdx}.text`} label="template" rows={16} className="font-mono text-[12px]" maxLength={PROMPT_MAX} />
             <div>
               <Btn
                 onClick={() => setValue(`djPrompts.${editingIdx}.text`, defaultPrompt, { shouldDirty: true, shouldValidate: true })}

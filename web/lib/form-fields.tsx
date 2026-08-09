@@ -18,6 +18,11 @@
 // aria-describedby note) are load-bearing and a .ts -> .tsx rename reads as
 // delete-plus-add.
 import { useId } from 'react';
+import type {
+  ComponentPropsWithoutRef,
+  InputHTMLAttributes,
+  TextareaHTMLAttributes,
+} from 'react';
 import {
   useController,
   type Control,
@@ -75,6 +80,15 @@ function useBoundField<T extends FieldValues>(
   return { field, fieldState, aria };
 }
 
+// Native attributes a caller may need on the underlying element that this
+// component doesn't otherwise name (autoComplete, maxLength, min/max/step,
+// autoFocus, ...) — everything the component itself already controls is
+// omitted so a stray rest prop can never fight the controlled value/handlers.
+type TextFieldRest = Omit<
+  InputHTMLAttributes<HTMLInputElement>,
+  'value' | 'onChange' | 'onBlur' | 'ref' | 'id' | 'name' | 'className' | 'disabled' | 'placeholder' | 'type'
+>;
+
 export function TextField<T extends FieldValues>({
   control,
   name,
@@ -85,12 +99,14 @@ export function TextField<T extends FieldValues>({
   type,
   disabled,
   className,
-}: BaseProps<T> & { placeholder?: string; numeric?: boolean; type?: string }) {
+  ...rest
+}: BaseProps<T> & { placeholder?: string; numeric?: boolean; type?: string } & TextFieldRest) {
   const { field, fieldState, aria } = useBoundField(control, name, !!description);
   return (
     <Field data-invalid={aria.invalid || undefined} className={className}>
       <FieldLabel {...aria.labelProps}>{label}</FieldLabel>
       <Input
+        {...rest}
         {...aria.controlProps}
         type={type ?? (numeric ? 'number' : 'text')}
         placeholder={placeholder}
@@ -114,10 +130,15 @@ export function TextField<T extends FieldValues>({
       {description && (
         <FieldDescription {...aria.descriptionProps}>{description}</FieldDescription>
       )}
-      <FieldError {...aria.errorProps} errors={[fieldState.error]} />
+      <FieldError {...aria.errorProps} errors={fieldState.error ? [fieldState.error] : undefined} />
     </Field>
   );
 }
+
+type TextareaFieldRest = Omit<
+  TextareaHTMLAttributes<HTMLTextAreaElement>,
+  'value' | 'onChange' | 'onBlur' | 'ref' | 'id' | 'name' | 'className' | 'disabled' | 'placeholder' | 'rows'
+>;
 
 export function TextareaField<T extends FieldValues>({
   control,
@@ -128,12 +149,14 @@ export function TextareaField<T extends FieldValues>({
   rows,
   disabled,
   className,
-}: BaseProps<T> & { placeholder?: string; rows?: number }) {
+  ...rest
+}: BaseProps<T> & { placeholder?: string; rows?: number } & TextareaFieldRest) {
   const { field, fieldState, aria } = useBoundField(control, name, !!description);
   return (
     <Field data-invalid={aria.invalid || undefined} className={className}>
       <FieldLabel {...aria.labelProps}>{label}</FieldLabel>
       <Textarea
+        {...rest}
         {...aria.controlProps}
         rows={rows}
         placeholder={placeholder}
@@ -146,10 +169,15 @@ export function TextareaField<T extends FieldValues>({
       {description && (
         <FieldDescription {...aria.descriptionProps}>{description}</FieldDescription>
       )}
-      <FieldError {...aria.errorProps} errors={[fieldState.error]} />
+      <FieldError {...aria.errorProps} errors={fieldState.error ? [fieldState.error] : undefined} />
     </Field>
   );
 }
+
+type SelectFieldRest = Omit<
+  ComponentPropsWithoutRef<typeof SelectTrigger>,
+  'value' | 'onBlur' | 'ref' | 'id' | 'children' | 'className' | 'disabled'
+>;
 
 export function SelectField<T extends FieldValues>({
   control,
@@ -160,7 +188,8 @@ export function SelectField<T extends FieldValues>({
   placeholder,
   disabled,
   className,
-}: BaseProps<T> & { options: Option[]; placeholder?: string }) {
+  ...rest
+}: BaseProps<T> & { options: Option[]; placeholder?: string } & SelectFieldRest) {
   const { field, fieldState, aria } = useBoundField(control, name, !!description);
   return (
     <Field data-invalid={aria.invalid || undefined} className={className}>
@@ -170,7 +199,7 @@ export function SelectField<T extends FieldValues>({
         onValueChange={field.onChange}
         disabled={disabled}
       >
-        <SelectTrigger {...aria.controlProps} onBlur={field.onBlur} ref={field.ref}>
+        <SelectTrigger {...rest} {...aria.controlProps} onBlur={field.onBlur} ref={field.ref}>
           <SelectValue placeholder={placeholder} />
         </SelectTrigger>
         <SelectContent>
@@ -185,10 +214,15 @@ export function SelectField<T extends FieldValues>({
       {description && (
         <FieldDescription {...aria.descriptionProps}>{description}</FieldDescription>
       )}
-      <FieldError {...aria.errorProps} errors={[fieldState.error]} />
+      <FieldError {...aria.errorProps} errors={fieldState.error ? [fieldState.error] : undefined} />
     </Field>
   );
 }
+
+type SwitchFieldRest = Omit<
+  ComponentPropsWithoutRef<typeof Switch>,
+  'checked' | 'onCheckedChange' | 'onBlur' | 'ref' | 'id' | 'className' | 'disabled'
+>;
 
 export function SwitchField<T extends FieldValues>({
   control,
@@ -197,7 +231,8 @@ export function SwitchField<T extends FieldValues>({
   description,
   disabled,
   className,
-}: BaseProps<T>) {
+  ...rest
+}: BaseProps<T> & SwitchFieldRest) {
   const { field, fieldState, aria } = useBoundField(control, name, !!description);
   return (
     <Field
@@ -207,6 +242,7 @@ export function SwitchField<T extends FieldValues>({
     >
       <FieldLabel {...aria.labelProps}>{label}</FieldLabel>
       <Switch
+        {...rest}
         {...aria.controlProps}
         checked={!!field.value}
         onCheckedChange={field.onChange}
@@ -217,10 +253,20 @@ export function SwitchField<T extends FieldValues>({
       {description && (
         <FieldDescription {...aria.descriptionProps}>{description}</FieldDescription>
       )}
-      <FieldError {...aria.errorProps} errors={[fieldState.error]} />
+      <FieldError {...aria.errorProps} errors={fieldState.error ? [fieldState.error] : undefined} />
     </Field>
   );
 }
+
+// ToggleGroup's own props are a `type`-discriminated union (single vs
+// multiple value shapes), and Omit over a union collapses to its SHARED keys
+// only — exactly what's wanted here: the type-specific `value`/`onValueChange`
+// stay owned by this component, and what's left (orientation, dir, loop, ...)
+// is safe to forward.
+type ToggleGroupFieldRest = Omit<
+  ComponentPropsWithoutRef<typeof ToggleGroup>,
+  'type' | 'value' | 'defaultValue' | 'onValueChange' | 'disabled' | 'children' | 'className'
+>;
 
 export function ToggleGroupField<T extends FieldValues>({
   control,
@@ -231,7 +277,8 @@ export function ToggleGroupField<T extends FieldValues>({
   disabled,
   className,
   multiple,
-}: BaseProps<T> & { options: Option[]; multiple?: boolean }) {
+  ...rest
+}: BaseProps<T> & { options: Option[]; multiple?: boolean } & ToggleGroupFieldRest) {
   const { field, fieldState, aria } = useBoundField(control, name, !!description);
   // `multiple` is opt-in and defaults to the original single-select radio
   // behaviour (unclickable-to-empty, since that reading is what every other
@@ -250,6 +297,7 @@ export function ToggleGroupField<T extends FieldValues>({
       <FieldTitle {...aria.labelledByProps}>{label}</FieldTitle>
       {multiple ? (
         <ToggleGroup
+          {...rest}
           {...aria.groupProps}
           type="multiple"
           value={Array.isArray(field.value) ? field.value.map(String) : []}
@@ -262,6 +310,7 @@ export function ToggleGroupField<T extends FieldValues>({
         </ToggleGroup>
       ) : (
         <ToggleGroup
+          {...rest}
           {...aria.groupProps}
           type="single"
           value={field.value == null ? '' : String(field.value)}
@@ -276,7 +325,7 @@ export function ToggleGroupField<T extends FieldValues>({
       {description && (
         <FieldDescription {...aria.descriptionProps}>{description}</FieldDescription>
       )}
-      <FieldError {...aria.errorProps} errors={[fieldState.error]} />
+      <FieldError {...aria.errorProps} errors={fieldState.error ? [fieldState.error] : undefined} />
     </Field>
   );
 }

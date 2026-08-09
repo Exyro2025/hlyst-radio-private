@@ -13,7 +13,13 @@ import { SkeletonCards } from '@/components/ui/skeleton';
 import { Btn, Seg } from '../ui';
 import { PreviewButton, type SettingsData, type SaveSettings } from '../settings/shared';
 import type { SfxData, ImagingSubmitResult } from './types';
-import { IMAGING_PROMPT_MAX, sfxCreateSchema, imagingImportSchema } from '@/lib/schemas.generated';
+import {
+  IMAGING_DESCRIPTION_MAX,
+  IMAGING_NAME_MAX,
+  IMAGING_PROMPT_MAX,
+  sfxCreateSchema,
+  imagingImportSchema,
+} from '@/lib/schemas.generated';
 import { useZodForm, applyServerFieldErrors } from '@/lib/form';
 import { TextField, TextareaField } from '@/lib/form-fields';
 import {
@@ -90,7 +96,7 @@ function SfxCreateModal({
           </V3Alert>
         )}
         <div className="grid grid-cols-[1fr_120px] gap-3">
-          <TextField control={control} name="name" label="Name" placeholder="tape-stop" />
+          <TextField control={control} name="name" label="Name" placeholder="tape-stop" maxLength={IMAGING_NAME_MAX} />
           <TextField control={control} name="durationSec" label="Duration · s" numeric placeholder="auto" />
         </div>
         <TextField
@@ -98,6 +104,7 @@ function SfxCreateModal({
           name="description"
           label="Description · optional"
           placeholder="Your DJ reads this to decide when the effect fits a line"
+          maxLength={IMAGING_DESCRIPTION_MAX}
         />
         <div className="grid gap-1.5">
           <TextareaField
@@ -169,12 +176,13 @@ function SfxImportModal({
       }
     >
       <div className="grid gap-3.5">
-        <TextField control={control} name="name" label="Name" placeholder="rain-hiss" />
+        <TextField control={control} name="name" label="Name" placeholder="rain-hiss" maxLength={IMAGING_NAME_MAX} />
         <TextField
           control={control}
           name="description"
           label="Description · optional"
           placeholder="Your DJ reads this to decide when the effect fits a line"
+          maxLength={IMAGING_DESCRIPTION_MAX}
         />
         <Controller
           control={control}

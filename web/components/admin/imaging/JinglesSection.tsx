@@ -14,6 +14,7 @@ import { PreviewButton, type SettingsData, type SaveSettings } from '../settings
 import type { JingleImportFailure, JingleImportResult, ImagingSubmitResult } from './types';
 import { notify } from '../../../lib/notify';
 import {
+  IMAGING_DESCRIPTION_MAX,
   JINGLE_RATIO_BOUNDS,
   JINGLE_TEXT_MAX,
   jingleCreateSchema,
@@ -234,6 +235,7 @@ function JingleImportModal({
             name="label"
             label="Label · optional"
             placeholder="Defaults to the file’s own name"
+            maxLength={IMAGING_DESCRIPTION_MAX}
           />
         )}
 

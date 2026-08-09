@@ -23,6 +23,8 @@ import { EmptyState } from '@/components/ui/empty-state';
 import { ErrorState } from '@/components/ui/error-state';
 import {
   festivalsSchema,
+  SETTINGS_FESTIVAL_DESCRIPTION_MAX,
+  SETTINGS_FESTIVAL_NAME_MAX,
   SETTINGS_FESTIVAL_WINDOW_DAYS_MAX,
 } from '@/lib/schemas.generated';
 
@@ -130,6 +132,7 @@ function FestivalModalFields({
         name={`festivals.${idx}.name`}
         label="Name"
         placeholder="e.g. New Year's Day"
+        maxLength={SETTINGS_FESTIVAL_NAME_MAX}
       />
 
       <div className="grid grid-cols-2 gap-3">
@@ -156,7 +159,7 @@ function FestivalModalFields({
               ))}
             </SelectContent>
           </Select>
-          <FieldError {...monthAria.errorProps} errors={[monthField.fieldState.error]} />
+          <FieldError {...monthAria.errorProps} errors={monthField.fieldState.error ? [monthField.fieldState.error] : undefined} />
         </Field>
 
         <Field data-invalid={dayAria.invalid || undefined}>
@@ -174,7 +177,7 @@ function FestivalModalFields({
               ))}
             </SelectContent>
           </Select>
-          <FieldError {...dayAria.errorProps} errors={[dayField.fieldState.error]} />
+          <FieldError {...dayAria.errorProps} errors={dayField.fieldState.error ? [dayField.fieldState.error] : undefined} />
         </Field>
       </div>
 
@@ -184,6 +187,7 @@ function FestivalModalFields({
         label="Description (optional)"
         placeholder="Short note about the festival"
         description="A short note your DJ can weave into its chat while the festival is on."
+        maxLength={SETTINGS_FESTIVAL_DESCRIPTION_MAX}
       />
 
       <div className="grid grid-cols-2 gap-3">
@@ -214,7 +218,7 @@ function FestivalModalFields({
             onBlur={windowField.field.onBlur}
             ref={windowField.field.ref}
           />
-          <FieldError {...windowAria.errorProps} errors={[windowField.fieldState.error]} />
+          <FieldError {...windowAria.errorProps} errors={windowField.fieldState.error ? [windowField.fieldState.error] : undefined} />
         </Field>
       </div>
       <div className="field-hint -mt-2">

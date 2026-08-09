@@ -26,6 +26,8 @@ import {
   moodScheduleSchema,
   weatherMoodsSchema,
   SETTINGS_MOODS_LIMIT,
+  SETTINGS_MOOD_NAME_MAX,
+  SETTINGS_MOOD_PROMPT_MAX,
 } from '@/lib/schemas.generated';
 
 interface MoodEntry {
@@ -137,7 +139,7 @@ function WeatherMoodSelect({
           ))}
         </SelectContent>
       </Select>
-      <FieldError {...aria.errorProps} errors={[fieldState.error]} />
+      <FieldError {...aria.errorProps} errors={fieldState.error ? [fieldState.error] : undefined} />
     </Field>
   );
 }
@@ -520,6 +522,7 @@ export default function MoodsPanel() {
                       label="Mood id"
                       placeholder="id (e.g. mellow)"
                       className="sm:w-48 sm:shrink-0"
+                      maxLength={SETTINGS_MOOD_NAME_MAX}
                     />
                     <TextField
                       control={arrayControl}
@@ -527,6 +530,7 @@ export default function MoodsPanel() {
                       label="Sound description"
                       placeholder="sound description for audio tagging (optional)"
                       className="sm:flex-1"
+                      maxLength={SETTINGS_MOOD_PROMPT_MAX}
                     />
                     <Btn
                       sm
@@ -639,6 +643,7 @@ export default function MoodsPanel() {
                       label="Text on air"
                       placeholder="text on air (e.g. GHz)"
                       className="sm:flex-1"
+                      maxLength={CORRECTION_FROM_MAX}
                     />
                     <TextField
                       control={arrayControl}
@@ -646,6 +651,7 @@ export default function MoodsPanel() {
                       label="Spoken form"
                       placeholder="spoken form (e.g. gigahertz)"
                       description="leave empty to drop the word"
+                      maxLength={CORRECTION_TO_MAX}
                       className="sm:flex-1"
                     />
                     <Btn

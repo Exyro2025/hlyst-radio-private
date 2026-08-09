@@ -18,6 +18,8 @@ import { notify } from '../../../lib/notify';
 import {
   BEDS_CROSS_SEC_BOUNDS,
   BEDS_THRESHOLD_SEC_BOUNDS,
+  IMAGING_DESCRIPTION_MAX,
+  IMAGING_NAME_MAX,
   IMAGING_PROMPT_MAX,
   bedCreateSchema,
   bedsPatchSchema,
@@ -99,7 +101,7 @@ function BedsCreateModal({
           </V3Alert>
         )}
         <div className="grid grid-cols-[1fr_120px] gap-3">
-          <TextField control={control} name="name" label="Name" placeholder="midnight-drift" />
+          <TextField control={control} name="name" label="Name" placeholder="midnight-drift" maxLength={IMAGING_NAME_MAX} />
           <TextField control={control} name="durationSec" label="Length · s" numeric placeholder="45" />
         </div>
         <TextField
@@ -107,6 +109,7 @@ function BedsCreateModal({
           name="description"
           label="Description · optional"
           placeholder="For your own reference — the DJ never reads this"
+          maxLength={IMAGING_DESCRIPTION_MAX}
         />
         <div className="grid gap-1.5">
           <TextareaField
@@ -178,12 +181,13 @@ function BedsImportModal({
       }
     >
       <div className="grid gap-3.5">
-        <TextField control={control} name="name" label="Name" placeholder="midnight-drift" />
+        <TextField control={control} name="name" label="Name" placeholder="midnight-drift" maxLength={IMAGING_NAME_MAX} />
         <TextField
           control={control}
           name="description"
           label="Description · optional"
           placeholder="For your own reference — the DJ never reads this"
+          maxLength={IMAGING_DESCRIPTION_MAX}
         />
         <Controller
           control={control}

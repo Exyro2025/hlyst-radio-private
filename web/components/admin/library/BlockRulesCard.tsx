@@ -27,7 +27,7 @@ import { SkeletonRows } from '@/components/ui/skeleton';
 import { EmptyState } from '@/components/ui/empty-state';
 import { cn } from '../../../lib/cn';
 import { FieldError } from '../../ui/field';
-import { blockRuleSchema } from '@/lib/schemas.generated';
+import { blockRuleSchema, RULE_TEXT_MAX } from '@/lib/schemas.generated';
 import { useZodForm, applyServerFieldErrors, fieldAria } from '@/lib/form';
 import { TextField } from '@/lib/form-fields';
 import type { BlockRuleStat, RuleField, SeasonWindow } from './types';
@@ -412,7 +412,7 @@ export function BlockRulesCard({ onChanged }: { onChanged?: () => void }) {
       >
         {formOpen && (
           <div className="grid gap-4">
-            <TextField control={control} name="label" label="Name" placeholder="e.g. Christmas songs" />
+            <TextField control={control} name="label" label="Name" placeholder="e.g. Christmas songs" maxLength={RULE_TEXT_MAX} />
 
             {/* Raw Controller, not SelectField: switching "Match on" has to clear
                 `values` too. Without it, leftover chip values from one field type
