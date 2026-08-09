@@ -455,14 +455,28 @@ def blockrules(page):
     That refusal is proven here; the round trip is proven separately by
     actually saving and reading the result back.
 
-    `values` (the chip input) has no single labelable element — ValuesInput
-    is a draft box plus a list of removable chips — so its Field names itself
-    via aria-labelledby/groupProps (fieldAria's group variant), not htmlFor.
-    assert_aria is generic over the locator it's given; the point of this
-    check's aria assertion is confirming that GROUP locator (found via the
-    "-values-label" suffix on aria-labelledby, not a `for` attribute) is a
-    real, single node with real ids behind it — not just that assert_aria
-    passes on whatever the caller happened to hand it.
+    `values` (the chip input, and the playlist checkbox list — same field,
+    two branches keyed on `field`) has no single labelable element, so its
+    Field names itself via aria-labelledby/groupProps (fieldAria's group
+    variant), not htmlFor. assert_aria is generic over the locator it's
+    given; the point of this check's aria assertions is confirming that
+    GROUP locator (found via the "-values-label" suffix on aria-labelledby,
+    not a `for` attribute) is a real, single node with real ids behind it —
+    not just that assert_aria passes on whatever the caller happened to hand
+    it.
+
+    Message assertions read off the invalid control's OWN aria-describedby
+    (like skills()'s duplicate-slug check does), never a bare page-wide
+    `text=...` match — Fix round 1's Minor 1: the message being unique in
+    the app today isn't a property this check should depend on.
+
+    GET /dj/playlists is mocked to return one fixture playlist regardless of
+    whether this verify stack has real Navidrome connectivity (it usually
+    doesn't) — the playlist branch's checkbox-list container only renders at
+    all when `playlists.length > 0` (an empty list falls back to a plain
+    "No Navidrome playlists found" hint with no group control to assert
+    against), so without a real playlist to select, Fix round 1's dangling-
+    aria-describedby bug in that branch would have nothing to catch it on.
     """
     def find_rule_id():
         data = json.loads(api("/library/blocklist"))
@@ -477,7 +491,18 @@ def blockrules(page):
     if leftover:
         api_write("DELETE", f"/library/blocklist/rules/{leftover}", ok_statuses=(204, 404))
 
+    def mock_playlists(route):
+        route.fulfill(
+            status=200,
+            content_type="application/json",
+            body=json.dumps({"results": [
+                {"id": "verify-playlist", "name": "Verify Playlist", "songCount": 3},
+            ]}),
+        )
+
     try:
+        page.route("**/dj/playlists", mock_playlists)
+
         page.goto(f"{WEB}/admin/library?tab=blocked")
         page.wait_for_selector("text=Blocking rules")
 
@@ -490,32 +515,71 @@ def blockrules(page):
         # that opens this same dialog, and the footer's save button carries
         # the identical label while no rule is being edited.
         save = dialog.get_by_role("button", name="Add rule", exact=True)
+        match_on = dialog.get_by_label("Match on")
 
         name.fill(BLOCKRULE_LABEL)
 
-        # 1. Validate — a label with no values. The default field is 'tag'
-        #    (EMPTY_RULE), whose chip input carries the "e.g. christmas"
-        #    placeholder. `values` starts already empty, and mode: 'onChange'
-        #    only reacts to a real change event (same caveat festivals() and
-        #    moods() note) — so commit a chip and remove it again to force
-        #    one, landing back on an empty, freshly-invalidated list.
+        # 1. Validate (tag mode) — a label with no values. The default field
+        #    is 'tag' (EMPTY_RULE), whose chip input carries the "e.g.
+        #    christmas" placeholder. `values` starts already empty, and
+        #    mode: 'onChange' only reacts to a real change event (same
+        #    caveat festivals() and moods() note) — so commit a chip and
+        #    remove it again to force one, landing back on an empty,
+        #    freshly-invalidated list.
         chip_input = dialog.get_by_placeholder("e.g. christmas", exact=True)
         chip_input.fill("temp")
         chip_input.press("Enter")
         dialog.get_by_role("button", name="remove temp").click()
-        page.wait_for_selector("text=rule.values must have at least one entry")
+        page.wait_for_selector('[aria-labelledby$="-values-label"][aria-invalid="true"]')
         assert save.is_disabled(), "Add rule enabled with an empty values list"
 
-        group = dialog.locator('[aria-labelledby$="-values-label"]')
-        assert group.count() == 1, f"expected exactly one values group, found {group.count()}"
-        assert_aria(page, group)
+        values_group = dialog.locator('[aria-labelledby$="-values-label"]')
+        assert values_group.count() == 1, f"expected exactly one values group, found {values_group.count()}"
+        assert_aria(page, values_group)
+        described = values_group.get_attribute("aria-describedby")
+        error_id = [t for t in described.split() if t.endswith("-error")][0]
+        assert "must have at least one entry" in page.locator(f'[id="{error_id}"]').inner_text()
+
+        # 1b. Validate (playlist mode) — Fix round 1's finding: switching
+        #     Match-on resets `values` to [] (see the field Controller's
+        #     onValueChange, below), which makes an unticked playlist list
+        #     the DEFAULT state on every switch into Playlist mode, not a
+        #     rare edge case — and this branch previously spread
+        #     aria-describedby with no FieldError behind it. No earlier
+        #     check ever switched into Playlist mode to notice.
+        match_on.click()
+        page.get_by_role("option", name="Playlist").click()
+        page.wait_for_selector('[aria-labelledby$="-values-label"][aria-invalid="true"]')
+        assert save.is_disabled(), "Add rule enabled with no playlists selected"
+
+        playlist_group = dialog.locator('[aria-labelledby$="-values-label"]')
+        assert playlist_group.count() == 1, f"expected exactly one values group, found {playlist_group.count()}"
+        assert_aria(page, playlist_group)
+        described = playlist_group.get_attribute("aria-describedby")
+        error_id = [t for t in described.split() if t.endswith("-error")][0]
+        assert "must have at least one entry" in page.locator(f'[id="{error_id}"]').inner_text()
+
+        # Tick the mocked playlist — the group must actually leave its
+        # invalid state once `values` is non-empty again, not just report
+        # invalid forever regardless of content.
+        playlist_group.get_by_text("Verify Playlist").click()
+        page.wait_for_selector('[aria-labelledby$="-values-label"][aria-invalid="true"]', state="detached")
+        assert not save.is_disabled(), "Add rule stayed disabled with a playlist selected"
+
+        # Switch back to `tag` before the real save below — this check's
+        # persisted rule stays field='tag', same as before this fix round.
+        # The switch resets `values` to [] again, which is exactly the
+        # empty starting point step 2 below already expects.
+        match_on.click()
+        page.get_by_role("option", name="Any tag").click()
+        page.wait_for_selector('[aria-labelledby$="-values-label"][aria-invalid="true"]')
 
         # 2. Save — a valid value clears the refusal, and the round trip
         #    really persists (not just a client-side state flip): confirmed
         #    against GET /library/blocklist afterward.
         chip_input.fill("verify-tag")
         chip_input.press("Enter")
-        page.wait_for_selector("text=rule.values must have at least one entry", state="detached")
+        page.wait_for_selector('[aria-labelledby$="-values-label"][aria-invalid="true"]', state="detached")
         assert not save.is_disabled(), "Add rule stayed disabled on a valid rule"
 
         save.click()

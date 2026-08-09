@@ -490,6 +490,15 @@ export function BlockRulesCard({ onChanged }: { onChanged?: () => void }) {
                           ))}
                         </div>
                       )}
+                      {/* Same group, same `values` field — `values` resets to
+                          [] on every switch INTO playlist mode (see the field
+                          Controller above), so an unchecked list is the
+                          default state here, not a rare edge case. Rendering
+                          the error is the better answer to "why is Save
+                          disabled": the alternative (stop spreading
+                          aria-describedby) would leave a screen-reader user
+                          with aria-invalid and no explanation at all. */}
+                      {fieldState.error && <FieldError {...aria.errorProps} errors={[fieldState.error]} />}
                     </div>
                   );
                 }
