@@ -183,6 +183,23 @@ export interface FormState {
   schedule: Schedule;
 }
 
+// The react-hook-form shape: just the shows field array. `schedule` is NOT
+// form data — ShowsPanel loads it read-only for the hours-a-week counts and
+// never saves it from this panel (the weekly grid + PUT /schedule live on the
+// separate Rundown page), so it stays a plain useState alongside the form.
+//
+// TYPE-ONLY, not derived from z.input<typeof showSchema>: showSchema's outer
+// z.preprocess (the legacy-field migration, #929) plus most of its own field
+// pipelines (z.preprocess(nullToUndefined, ...), showBool()'s z.unknown())
+// all declare their z.input as `unknown`, so no nested path
+// (`shows.0.personaId`) would type-check as a FieldPath. Show is the shape
+// the schema's own parse actually produces and the shape this editor already
+// edits — same type-only-cast technique Task 3/9 established for
+// festivalsSchema/moodsSchema/personaSchema.
+export interface ShowsFormValues {
+  shows: Show[];
+}
+
 export interface SettingsResponse {
   values?: {
     shows?: Array<Partial<Show>>;

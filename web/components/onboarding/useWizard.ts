@@ -122,7 +122,13 @@ export function useWizard() {
   // 401-handling. Both test helpers catch their own failures into the result
   // pill: a rejected or timed-out fetch must surface as a red pill, never as an
   // unhandled throw that wedges the button on "Testing…" (issue #682).
-  const testNavidrome = useCallback(async () => {
+  //
+  // Both now take the credentials/config as an explicit argument rather than
+  // reading `data.navidrome` / `data.llm` — each step owns its own
+  // react-hook-form instance and only writes back into `data` on Next, so the
+  // Test button (which must probe whatever is CURRENTLY typed, not the last
+  // committed value) hands over the step form's live values directly.
+  const testNavidrome = useCallback(async (creds: WizardData['navidrome']) => {
     // The browser→controller hop has no default timeout, so a request that
     // never answers wedges the button. 15s clears the 5s server-side Subsonic
     // probe with margin.
@@ -130,7 +136,7 @@ export function useWizard() {
       const r = await auth.adminFetch('/onboarding/test-navidrome', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify(data.navidrome),
+        body: JSON.stringify(creds),
         signal: AbortSignal.timeout(15000),
       });
       const j = (await r.json().catch(() => ({}))) as { ok?: boolean; serverType?: string; serverVersion?: string; error?: string };
@@ -142,16 +148,16 @@ export function useWizard() {
       patch({ navidromeTest: result });
       return result;
     }
-  }, [auth, data.navidrome, patch]);
+  }, [auth, patch]);
 
-  const testLlm = useCallback(async () => {
+  const testLlm = useCallback(async (values: WizardData['llm']) => {
     // 60s sits just above the controller's 45s generateText abort, so a slow
     // model surfaces the server's error rather than a bare client timeout.
     try {
       const r = await auth.adminFetch('/onboarding/test-llm', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify(data.llm),
+        body: JSON.stringify(values),
         signal: AbortSignal.timeout(60000),
       });
       const j = (await r.json().catch(() => ({}))) as { ok?: boolean; sample?: string; error?: string };
@@ -163,7 +169,7 @@ export function useWizard() {
       patch({ llmTest: result });
       return result;
     }
-  }, [auth, data.llm, patch]);
+  }, [auth, patch]);
 
   // Uses data.llm.baseUrl when set; otherwise the controller defaults to the
   // locca host URL.
