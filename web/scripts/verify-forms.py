@@ -4,7 +4,15 @@
 # form converted to react-hook-form. Not part of CI — web/ has no test suite and
 # the merge gate is lint. This is the evidence for the PR.
 #
-# Usage: python3 web/scripts/verify-forms.py [form_name ...]
+# Every check here does DESTRUCTIVE writes (takeovers, whole-array replaces,
+# create/delete fixtures) authenticated as test/test, so running this file
+# requires an explicit opt-in — set SUBWAVE_VERIFY_ALLOW_DESTRUCTIVE=1, and
+# only after confirming API/WEB below really point at the isolated verify
+# stack from .claude/skills/verify/SKILL.md, never a real station. See
+# assert_throwaway_stack() for why this is a plain env-var opt-in rather than
+# an inferred check.
+#
+# Usage: SUBWAVE_VERIFY_ALLOW_DESTRUCTIVE=1 python3 web/scripts/verify-forms.py [form_name ...]
 import base64
 import json
 import os
@@ -1734,11 +1742,13 @@ def playlists(page):
 
 
 VERIFY_STACK_PERSONAS = {"Marlowe", "Wren", "Hale"}
+ALLOW_DESTRUCTIVE_ENV = "SUBWAVE_VERIFY_ALLOW_DESTRUCTIVE"
 
 
 def assert_throwaway_stack():
-    """Refuses to run a single check until it's confident `API`/`WEB` are the
-    isolated verify stack, not a real station.
+    """Refuses to run a single check until the caller has EXPLICITLY opted
+    into destructive writes against `API`/`WEB` — an env var, not an
+    inference.
 
     Every check in this file does destructive, whole-array-replace writes —
     60-minute takeovers via `POST /schedule/override`, a full `POST /settings`
@@ -1748,44 +1758,75 @@ def assert_throwaway_stack():
     wrong shell) this would scribble over their actual configuration with no
     confirmation prompt anywhere in the file.
 
-    Two signals, both required, neither sufficient alone:
-      1. `test`/`test` must actually authenticate against `API` — the `verify`
-         skill's documented isolated-controller boot
-         (`.claude/skills/verify/SKILL.md`) always sets `ADMIN_USER=test
-         ADMIN_PASS=test`. A real station almost certainly rejects it, which
-         is caught here in one place rather than every check below failing
-         unreadably, one at a time, on its own first `adminFetch`.
-      2. The persona roster must contain the verify stack's own seeded names
-         — Marlowe, Wren and Hale (personas() and shows() already depend on
-         these three existing by name, seeded fresh by the isolated
-         controller boot). Credentials alone aren't enough: an operator could
-         plausibly leave `ADMIN_USER`/`ADMIN_PASS` at `test`/`test` on a real,
-         low-stakes personal station. A real roster coincidentally named
-         exactly Marlowe/Wren/Hale is not a real scenario — the two signals
-         together are what "throwaway" means here.
+    An earlier version of this guard tried to INFER "throwaway" from two
+    signals: test/test credentials authenticating, plus the persona roster
+    containing the seeded names Marlowe/Wren/Hale. That inference does not
+    hold: `SEED_PERSONAS` (`controller/src/settings/vocab.ts`) — the roster
+    `defaults.ts` seeds on every FRESH install — is exactly Marlowe/Wren/Hale.
+    Any real operator who hasn't yet customised personas satisfies both
+    signals simultaneously; they aren't independent evidence of "throwaway",
+    they're both just "this is an unconfigured install", which a real station
+    legitimately is for a while after setup. A guard that reads as protection
+    but doesn't protect is worse than none — it stops the next person from
+    adding a real one, on the belief the risk is already covered.
+
+    So the load-bearing check is now a plain opt-in: the caller must set
+    `SUBWAVE_VERIFY_ALLOW_DESTRUCTIVE=1` (or any other truthy-looking value —
+    see `_env_truthy`) before running this file at all, which the product
+    never sets on its own. `.claude/skills/verify/SKILL.md`'s documented
+    isolated-controller boot is the one place that should ever export it.
+
+    The old credential + roster checks are kept, but now purely as a
+    SECONDARY sanity check that runs only once the opt-in has already been
+    proven — they can turn a wrong-target opt-in into a clearer error message
+    (e.g. "wrong port"), but they never substitute for the opt-in and never
+    grant permission on their own.
     """
+    if not _env_truthy(os.environ.get(ALLOW_DESTRUCTIVE_ENV)):
+        print(
+            f"ABORT: refusing to run — every check in this file makes "
+            f"destructive writes against {API} (60-minute takeovers, a full "
+            f"personas-roster replace, show/rule/skill/festival writes), "
+            f"authenticated as test/test. This script will not infer that a "
+            f"target is a safe throwaway stack; you must say so explicitly.\n"
+            f"  Set {ALLOW_DESTRUCTIVE_ENV}=1 and re-run — only after "
+            f"confirming {API} is the isolated verify controller from "
+            f".claude/skills/verify/SKILL.md, never a real station.",
+            file=sys.stderr,
+        )
+        raise SystemExit(1)
+
+    # Secondary sanity check, informational only from here on — it cannot
+    # grant permission (that already happened above) and a failure here
+    # aborts too, but the message is about a probably-wrong TARGET, not about
+    # missing consent.
     try:
         settings = json.loads(api("/settings"))
     except Exception as e:  # noqa: BLE001 — any failure here means "not our stack"
         print(
-            f"ABORT: could not read {API}/settings with test/test admin "
-            f"credentials. Refusing to run — this does not look like the "
-            f"isolated verify stack (see .claude/skills/verify/SKILL.md), and "
-            f"every check in this file does destructive writes. ({type(e).__name__}: {e})",
+            f"ABORT: {ALLOW_DESTRUCTIVE_ENV} is set, but could not read "
+            f"{API}/settings with test/test admin credentials — this doesn't "
+            f"look like the isolated verify stack's controller at all. "
+            f"({type(e).__name__}: {e})",
             file=sys.stderr,
         )
         raise SystemExit(1)
     persona_names = {p.get("name") for p in settings.get("values", {}).get("personas", [])}
     if not VERIFY_STACK_PERSONAS.issubset(persona_names):
         print(
-            f"ABORT: {API}'s persona roster is {sorted(n for n in persona_names if n)!r}, "
-            f"not a superset of the verify stack's seeded {sorted(VERIFY_STACK_PERSONAS)!r}. "
-            f"This does not look like a throwaway stack — refusing to run "
-            f"destructive checks (takeovers, whole-roster replaces, show/rule/"
-            f"skill/festival writes) against it.",
+            f"ABORT: {ALLOW_DESTRUCTIVE_ENV} is set, but {API}'s persona "
+            f"roster is {sorted(n for n in persona_names if n)!r}, not a "
+            f"superset of the verify stack's seeded "
+            f"{sorted(VERIFY_STACK_PERSONAS)!r} — double-check {API} is "
+            f"really the isolated controller and not something else running "
+            f"on this port.",
             file=sys.stderr,
         )
         raise SystemExit(1)
+
+
+def _env_truthy(v):
+    return v is not None and v.strip().lower() not in ("", "0", "false", "no", "off")
 
 
 if __name__ == "__main__":
