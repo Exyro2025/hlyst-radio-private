@@ -347,6 +347,13 @@ export default function FestivalsSection() {
     // the index the new row lands at.
     setEditIdx(fields.length);
     setEditing(true);
+    // formState.errors is populated per-field, lazily — a freshly appended
+    // row carries no error until touched. `form.formState.isValid` (the
+    // Save button's own gate) IS eager and already disables Save correctly,
+    // but without this the modal opens with no message under the blank
+    // Name field explaining why: the operator sees a disabled button and
+    // nothing else. Force the refresh so the field-level error appears too.
+    void form.trigger('festivals');
   };
 
   const startEdit = (idx: number) => {
