@@ -999,6 +999,192 @@ def onboarding(page):
         )
 
 
+PERSONA_VERIFY_NAME = "Verify Persona"
+
+
+@check
+def personas(page):
+    """PersonasPanel (Task 9) — the roster + system-prompt library on
+    react-hook-form. Two field arrays (`personas`, `djPrompts`) bound via
+    `useZodForm(z.object({ personas: z.array(personaSchema), djPrompts:
+    z.array(djPromptSchema) }))`; `activePersonaId`/`activeDjPromptId`/
+    `djHouseRules` stay plain useState (they aren't array rows).
+
+    Unlike webhooks/festivals (every row rendered simultaneously as a card),
+    this editor is single-focus: ONE persona's fields render at a time inside
+    a full-screen dialog (`PersonaEditor`), selected by `focusIdx`. Assertion
+    4 below proves the row-indexing property by switching FOCUS between two
+    already-open rows in the same form instance, not by reading two rows off
+    the page at once.
+
+    applyServerFieldErrors trace (read against controller/src/routes/
+    settings/core.ts, middleware/validate.ts, settings/patch-registry.ts,
+    schemas/persona.ts): `personas` IS one of the 26 converted `/settings`
+    patch-registry keys — `validateSettingsBody()` runs `personasSchema`
+    (== `z.array(personaSchema)`, the SAME schema this form's zodResolver
+    runs) BEFORE the route handler, so a bad persona never reaches
+    `settings.update()`; the middleware itself answers the 400 with
+    `fieldErrors`. Traced empirically (a real safeParse against a 3-persona
+    array with a bad `tts` in the MIDDLE entry):
+        fieldErrors: { "personas.1.tts": "tts.voice must be 1-100 chars" }
+    `ttsVoiceSlotSchema` (schemas/persona.ts) is ONE `.transform()` over the
+    whole `{engine, cloudProvider, voice, gainDb, speed}` slot with no
+    `.path()` on its `ctx.addIssue` calls, so the error is rooted at
+    `personas.<i>.tts` — never deeper (`.tts.voice`) — which is exactly why
+    PersonaVoiceCard binds ONE `useController` over the whole `tts` object
+    rather than a `SelectField` per subfield: only a control literally
+    subscribed at that exact path can pick the error up at all.
+
+    Because personaSchema is the identical mirror on both sides, there is NO
+    client-accepts/server-rejects gap for THIS rule the way skills()'s
+    duplicate-slug or moods()'s orphan-guard have one — the editor's own Save
+    gate (`formState.isValid`) already refuses to submit a persona whose tts
+    the schema would flag, so a real end-to-end 400 for this exact rule is
+    not reachable by driving the UI honestly. What IS proven for real: a
+    mocked `POST /settings` response carrying the controller's ACTUAL,
+    traced `fieldErrors` shape (`personas.1.tts`, the real path + a real
+    message the schema emits) reaches `applyServerFieldErrors` and lands on
+    the RIGHT persona's Voice field, not persona 0's — which is the field-
+    array wiring this task exists to prove, and is exactly the kind of bug
+    (an off-by-one, or a collapse-to-index-0 in the row mapping) an honest
+    round trip and a mocked one would catch identically, since neither the
+    client nor the server does any index remapping of its own.
+    """
+    def find_verify_persona():
+        data = json.loads(api("/settings"))
+        for p in data.get("values", {}).get("personas", []):
+            if p.get("name") == PERSONA_VERIFY_NAME:
+                return p
+        return None
+
+    # Best-effort cleanup from a run that crashed before finishing. Personas
+    # have no per-row DELETE endpoint (the roster is one whole-array `POST
+    # /settings` patch) — idempotent across repeated runs the same way
+    # skills()/blockrules() pre-clean their own fixtures.
+    if find_verify_persona():
+        data = json.loads(api("/settings"))
+        remaining = [p for p in data["values"]["personas"] if p.get("name") != PERSONA_VERIFY_NAME]
+        api_write("POST", "/settings", {"personas": remaining})
+
+    page.goto(f"{WEB}/admin/personas")
+    page.wait_for_selector("text=The voices on your station.")
+
+    # 1. Hydrate — the verify stack seeds three personas (Marlowe, Wren,
+    #    Hale); open the MIDDLE one (Wren, index 1) so assertion 4 below can
+    #    prove a server message lands on ITS row, not row 0's. A stored
+    #    field value landing in the bound TextField is the round trip.
+    page.get_by_role("button", name="Edit Wren").click()
+    dialog = page.get_by_role("dialog")
+    dialog.wait_for()
+    name = dialog.get_by_label("On-air name")
+    assert name.input_value() == "Wren", f"expected hydrated name 'Wren', got {name.input_value()!r}"
+
+    # 2. Validate — clearing the name refuses locally against personaSchema
+    #    (the SAME schema the server runs), scoped to this field's own
+    #    aria-describedby id, and disables Save.
+    save = dialog.get_by_role("button", name="Save persona")
+    name.fill("x")
+    name.fill("")  # mode: 'onChange' needs a real change event, not a starting-blank value
+    page.wait_for_selector("text=name must be 1-40 chars")
+    assert_aria(page, name)
+    assert save.is_disabled(), "Save persona enabled with a blank name"
+
+    # Restore — nothing was ever saved this invalid, so putting the value
+    # back is just clearing the local edit, not reverting server state.
+    name.fill("Wren")
+    page.wait_for_selector("text=name must be 1-40 chars", state="detached")
+    assert not save.is_disabled(), "Save persona stayed disabled once the name was restored"
+
+    # Close (Wren is now byte-identical to what the server has, so no
+    # discard-confirm should fire) so the roster/hero are clickable again for
+    # step 3.
+    dialog.get_by_role("button", name="Close").click()
+    dialog.wait_for(state="detached")
+
+    # 3. Save — a genuinely NEW persona (not a mutation of a seeded fixture,
+    #    so nothing here needs reverting for repeatability beyond the
+    #    pre-clean above) persists through a real POST /settings round trip.
+    page.get_by_role("button", name="+ Add persona").click()
+    dialog = page.get_by_role("dialog")
+    dialog.wait_for()
+    add_name = dialog.get_by_label("On-air name")
+    add_name.fill("")
+    add_name.fill(PERSONA_VERIFY_NAME)
+    # A freshly-appended row's `soul` starts empty (personaSchema requires
+    # 1-2000 chars, same as every persona) — fill it too, or Save correctly
+    # stays disabled and this step would be testing the wrong thing.
+    dialog.get_by_label("Soul").fill("Playwright fixture — a placeholder persona created and persisted by verify-forms.py's personas() check.")
+    add_save = dialog.get_by_role("button", name="Save persona")
+    assert not add_save.is_disabled(), "Save persona disabled on a freshly-added, valid persona"
+    add_save.click()
+    dialog.wait_for(state="detached")
+    assert PERSONA_VERIFY_NAME in api("/settings"), "new persona did not persist"
+
+    # 4. applyServerFieldErrors, the row-proof: reopen Wren (still index 1 —
+    #    the new persona appended at the END, index 3), mock POST /settings
+    #    to answer with the controller's REAL, traced fieldErrors shape for a
+    #    bad `personas.1.tts`, and confirm the message lands on WREN's Voice
+    #    field. Then swap focus to Marlowe (index 0) in the SAME form
+    #    instance and confirm its Voice field carries no such error — an
+    #    off-by-one or a collapse-to-index-0 in the row wiring would show the
+    #    message on the wrong persona (or on both).
+    def mock_tts_refusal(route):
+        if route.request.method != "POST":
+            route.continue_()
+            return
+        route.fulfill(
+            status=400,
+            content_type="application/json",
+            body=json.dumps({
+                "error": "personas.1.tts: tts.voice must be 1-100 chars",
+                "fieldErrors": {"personas.1.tts": "tts.voice must be 1-100 chars"},
+            }),
+        )
+
+    page.get_by_role("button", name="Edit Wren").click()
+    dialog = page.get_by_role("dialog")
+    dialog.wait_for()
+    assert dialog.get_by_label("On-air name").input_value() == "Wren"
+
+    page.route("**/settings", mock_tts_refusal)
+    try:
+        wren_save = dialog.get_by_role("button", name="Save persona")
+        assert not wren_save.is_disabled(), "Save persona disabled on an already-valid, unedited persona"
+        wren_save.click()
+
+        voice_group = dialog.locator('[aria-labelledby$="-tts-label"]')
+        voice_group.wait_for()
+        page.wait_for_selector('[aria-labelledby$="-tts-label"][aria-invalid="true"]')
+        assert_aria(page, voice_group)
+        described = voice_group.get_attribute("aria-describedby")
+        error_id = [t for t in described.split() if t.endswith("-error")][0]
+        assert "tts.voice must be 1-100 chars" in page.locator(f'[id="{error_id}"]').inner_text()
+
+        # The dialog must still be on WREN — a real refusal, not a swallowed
+        # error that quietly closed or advanced the editor.
+        assert dialog.get_by_label("On-air name").input_value() == "Wren"
+
+        # Now switch focus to Marlowe (index 0) in the SAME form instance —
+        # the whole point of this check. Close Wren first (no unsaved edit:
+        # the refused save never mutated any field, so no discard-confirm).
+        dialog.get_by_role("button", name="Close").click()
+        dialog.wait_for(state="detached")
+
+        page.get_by_role("button", name="Edit Marlowe").click()
+        dialog = page.get_by_role("dialog")
+        dialog.wait_for()
+        assert dialog.get_by_label("On-air name").input_value() == "Marlowe"
+
+        marlowe_voice_group = dialog.locator('[aria-labelledby$="-tts-label"]')
+        marlowe_voice_group.wait_for()
+        assert marlowe_voice_group.get_attribute("aria-invalid") != "true", (
+            "the personas.1.tts server error bled onto persona 0 (Marlowe) — "
+            "off-by-one or collapse-to-index-0 in the field-array row mapping"
+        )
+    finally:
+        page.unroute("**/settings", mock_tts_refusal)
+
+
 if __name__ == "__main__":
     names = sys.argv[1:] or list(CHECKS)
     with sync_playwright() as pw:

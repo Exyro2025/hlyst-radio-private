@@ -3,9 +3,6 @@ import {
   AVATAR_TARGET_PX, DICEBEAR_STYLES, DIAL_NEUTRAL,
   CHATTERBOX_VOICE_RE, POCKET_TTS_VOICE_RE,
 } from './constants';
-// The validity RULES themselves, so this editor and the controller cannot
-// disagree about whether a persona is saveable — see personaValid.
-import { djPromptSchema, personaSchema } from '@/lib/schemas.generated';
 import { CLOUD_PROVIDER_ENV_KEY, cloudProviderLabel } from '../tts/cloudProviderMeta';
 
 // Client-minted opaque id ('p_' personas, 'dp_' prompt presets). The server
@@ -14,16 +11,6 @@ import { CLOUD_PROVIDER_ENV_KEY, cloudProviderLabel } from '../tts/cloudProvider
 export function clientMintId(prefix: string = 'p_') {
   const b = crypto.getRandomValues(new Uint8Array(3));
   return prefix + [...b].map(x => x.toString(16).padStart(2, '0')).join('');
-}
-
-// Client-side mirror of the controller's per-preset validation
-// (settings.ts:validateDjPromptsStrict) — used to gate Save.
-/**
- * Same treatment as personaValid: the SHARED djPromptSchema, not a local copy
- * of its three rules (name cap, text bounds, the mandatory {name} placeholder).
- */
-export function promptPresetValid(p: { name: string; text: string }): boolean {
-  return djPromptSchema.safeParse(p).success;
 }
 
 // The single defaulting path — used by the initial load, community install and
@@ -164,44 +151,6 @@ export async function fileToAvatarDataUrl(file: File): Promise<string> {
   } finally {
     bitmap.close?.();
   }
-}
-
-/**
- * Is this persona one the controller would accept?
- *
- * Runs the SHARED schema (personaSchema, mirrored from
- * controller/src/schemas/persona.ts), not a local reimplementation of it. This
- * predicate gates the Save button and paints the roster's per-row validity dot,
- * so it deciding differently from the server means either a save that is
- * refused after the fact or — worse, and what happened here — a valid roster
- * the operator is simply not allowed to save.
- *
- * The version this replaces had already drifted: it required a `cloud` voice
- * unconditionally, while the controller has always allowed an EMPTY voice for
- * the `openai-compatible` provider (a self-hosted server picks its own default,
- * and there is no canonical voice id to type). An operator on such a server saw
- * their persona marked invalid and the Save button disabled, with nothing
- * naming the field.
- */
-export function personaValid(p: Persona): boolean {
-  return personaSchema.safeParse(p).success;
-}
-
-/**
- * The same answer, but keyed by field, for surfacing WHICH rule failed.
- *
- * Dotted paths, matching the controller's own `fieldErrors` payload, so one
- * rendering serves a local parse and a server refusal alike.
- */
-export function personaFieldErrors(p: Persona): Record<string, string> {
-  const r = personaSchema.safeParse(p);
-  if (r.success) return {};
-  const out: Record<string, string> = Object.create(null);
-  for (const issue of r.error.issues) {
-    const key = issue.path.join('.');
-    if (!(key in out)) out[key] = issue.message;
-  }
-  return out;
 }
 
 // `voice` is shared across engines, so switching engines can leave an incompatible
