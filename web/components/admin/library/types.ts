@@ -100,6 +100,40 @@ export interface BlockRuleStat extends BlockRule {
   matchCount: number;
 }
 
+// What a manual tag save or a single-track retag did, broadcast to every
+// loaded row list. Each list decides what it means for itself: Browse and
+// Search patch the row in place, Needs-tags DROPS it (a tagged track is no
+// longer untagged), Liked ignores it.
+export interface TagEvent {
+  track: Track;
+  moods: string[];
+  energy: string | null;
+  cleared: boolean;
+  applyToAlbum: boolean;
+  // Mirrors what the server stamped: 'manual' for the inline editor,
+  // 'llm' for a single-track retag.
+  source: string;
+}
+
+// A loaded list of tracks that cross-tab operations must be able to reach.
+// Registered by each tab while it is mounted and dropped on unmount, so an
+// operation only ever touches lists that are actually on screen.
+//
+// The five methods are separate rather than one generic patch because each
+// list means something different by the same event — see TagEvent above, and
+// note Liked is the only list that removes a row when its like count hits 0.
+export interface RowSource {
+  // Rows currently loaded, for the blocklist re-check to submit.
+  getRows(): Track[];
+  // Stamp fresh `blockedBy` marks. Ids absent from the map are left alone.
+  applyBlockMarks(marks: Record<string, BlockRef | null>): void;
+  onTagged(ev: TagEvent): void;
+  // A song's like state settled server-side. `next` null means none remain.
+  onLikeChanged(songId: string, next: { count: number; operator: boolean } | null): void;
+  // Drop cached rows and refetch if this list is on screen.
+  invalidate(): void;
+}
+
 // GET /library/history. Title/artist/album are air-time snapshots.
 export interface PlayEntry {
   id: number;
