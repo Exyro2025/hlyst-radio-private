@@ -1,12 +1,12 @@
-// Pure show helpers: hydration, validation, and the payload / table-row
-// projections.
+// Pure show helpers: hydration and the payload / table-row projections.
 //
-// Hydration and validation both defer to the shared show schema
-// (controller/src/schemas/show.ts, mirrored into lib/schemas.generated.ts), so
+// Validation itself now lives entirely in ShowsPanel/ShowEditor, which run the
+// shared show schema (controller/src/schemas/show.ts, mirrored into
+// lib/schemas.generated.ts) directly through react-hook-form's zodResolver, so
 // the rules this panel applies are byte-for-byte the ones the controller
-// enforces. What stays local is only what the schema deliberately does not
-// express: the editor's tolerance for a half-finished show, and showPayload's
-// "only means something with" conditionals.
+// enforces. What stays local here is only what the schema deliberately does
+// not express: the editor's tolerance for a half-finished show (hydrateShow),
+// and showPayload's "only means something with" conditionals.
 
 import type { ShowFacet, ShowRow } from './ShowsTable';
 import { SHOW_COLORS } from '../schedule/lib';
@@ -14,7 +14,6 @@ import { eraLabelOf } from './types';
 import type { Persona, Schedule, Show } from './types';
 import {
   migrateLegacyShowFields,
-  showSchema,
   type ShowSchemaContext,
 } from '@/lib/schemas.generated';
 
@@ -91,56 +90,6 @@ export function showContext(opts: {
     themeIds: opts.themeIds,
     minTrackSeconds: opts.minTrackSeconds,
   };
-}
-
-// showSchema() is a heavyweight factory (~20 field pipelines), and the panel
-// judges every row on every render — one build per CALL turned a 30-show rack
-// into 30 schema constructions per keystroke while the editor was open. The
-// context is identity-stable (ShowsPanel memoises it and hands the same object
-// to the rows AND the editor), so a one-slot cache keyed on that identity makes
-// every caller share one schema instance.
-let cachedCtx: ShowSchemaContext | null = null;
-let cachedSchema: ReturnType<typeof showSchema> | null = null;
-function schemaFor(ctx: ShowSchemaContext) {
-  if (cachedSchema == null || ctx !== cachedCtx) {
-    cachedCtx = ctx;
-    cachedSchema = showSchema(ctx);
-  }
-  return cachedSchema;
-}
-
-/**
- * Would the controller accept this show?
- *
- * Runs the shared schema rather than restating three of its rules, which is
- * what this used to do (name length, host present, brief length) — so the
- * editor's badge and Save gate now also catch an era window that ends before it
- * starts, a track cap under the station's crossfade floor, a guest who is also
- * the host, and every cap. It can only ever prevent a save the server was going
- * to reject.
- *
- * Mood is still not required: an empty list means "Any", and the autonomous
- * mood applies while the show is on air.
- */
-export function showValid(s: Show, ctx: ShowSchemaContext): boolean {
-  return schemaFor(ctx).safeParse(s).success;
-}
-
-/**
- * Per-field messages for the same parse, keyed by the schema's field name.
- * The editor footer reads the first of these when Save is gated, so the
- * diagnosis is whatever the schema actually objected to — not a hard-coded
- * guess about names and personas.
- */
-export function showFieldErrors(s: Show, ctx: ShowSchemaContext): Record<string, string> {
-  const r = schemaFor(ctx).safeParse(s);
-  if (r.success) return {};
-  const out: Record<string, string> = {};
-  for (const issue of r.error.issues) {
-    const key = issue.path.join('.');
-    if (!(key in out)) out[key] = issue.message;
-  }
-  return out;
 }
 
 // At least one music filter set — the Strict filter toggle only means
@@ -220,13 +169,16 @@ function faceOf(p: Persona, apiBase: string) {
 }
 
 // Everything the row needs is derived here, so ShowsTable never sees `Show`.
+// `ok` is supplied by the caller (ShowsPanel), sourced from the RHF form's own
+// `formState.errors.shows` — the schema's answer, not a local reimplementation
+// of it. Same convention PersonaRoster/PersonaTable already established.
 export function showRow(
   s: Show,
   index: number,
   personas: Persona[],
   apiBase: string,
   hrs: number,
-  ctx: ShowSchemaContext,
+  ok: boolean,
 ): ShowRow {
   const host = personas.find(p => p.id === s.personaId) ?? null;
   const guests = (s.guestPersonaIds || [])
@@ -246,7 +198,7 @@ export function showRow(
     guestNames: joinNames(guests.map(g => g.name?.trim() || 'Unnamed')),
     facets: showFacets(s),
     hrs,
-    ok: showValid(s, ctx),
+    ok,
   };
 }
 

@@ -230,8 +230,16 @@ export function ToggleGroupField<T extends FieldValues>({
   options,
   disabled,
   className,
-}: BaseProps<T> & { options: Option[] }) {
+  multiple,
+}: BaseProps<T> & { options: Option[]; multiple?: boolean }) {
   const { field, fieldState, aria } = useBoundField(control, name, !!description);
+  // `multiple` is opt-in and defaults to the original single-select radio
+  // behaviour (unclickable-to-empty, since that reading is what every other
+  // caller of this component wants — a required field like `frequency`).
+  // Array-valued fields (Show's `energies`, capped multi-choice) need Radix's
+  // own `type="multiple"`, whose value/onValueChange shape is a string[], not
+  // a string — so both branches read/write field.value through the same
+  // `field`, just coerced to the shape Radix expects for that type.
   return (
     <Field data-invalid={aria.invalid || undefined} className={className}>
       {/* A ToggleGroup is a group of buttons with no single labelable control,
@@ -240,17 +248,31 @@ export function ToggleGroupField<T extends FieldValues>({
           to point at a <div>, which is invalid. FieldTitle is the primitive for
           exactly this case — a plain div with the same typography. */}
       <FieldTitle {...aria.labelledByProps}>{label}</FieldTitle>
-      <ToggleGroup
-        {...aria.groupProps}
-        type="single"
-        value={field.value == null ? '' : String(field.value)}
-        onValueChange={(v: string) => { if (v) field.onChange(v); }}
-        disabled={disabled}
-      >
-        {options.map(o => (
-          <ToggleGroupItem key={o.value} value={o.value}>{o.label}</ToggleGroupItem>
-        ))}
-      </ToggleGroup>
+      {multiple ? (
+        <ToggleGroup
+          {...aria.groupProps}
+          type="multiple"
+          value={Array.isArray(field.value) ? field.value.map(String) : []}
+          onValueChange={(v: string[]) => field.onChange(v)}
+          disabled={disabled}
+        >
+          {options.map(o => (
+            <ToggleGroupItem key={o.value} value={o.value}>{o.label}</ToggleGroupItem>
+          ))}
+        </ToggleGroup>
+      ) : (
+        <ToggleGroup
+          {...aria.groupProps}
+          type="single"
+          value={field.value == null ? '' : String(field.value)}
+          onValueChange={(v: string) => { if (v) field.onChange(v); }}
+          disabled={disabled}
+        >
+          {options.map(o => (
+            <ToggleGroupItem key={o.value} value={o.value}>{o.label}</ToggleGroupItem>
+          ))}
+        </ToggleGroup>
+      )}
       {description && (
         <FieldDescription {...aria.descriptionProps}>{description}</FieldDescription>
       )}

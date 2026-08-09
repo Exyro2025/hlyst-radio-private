@@ -1185,6 +1185,244 @@ def personas(page):
         page.unroute("**/settings", mock_tts_refusal)
 
 
+SHOW_VERIFY_NAME = "Verify Show"
+GHOST_SHOW_NAME = "Verify Ghost Show"
+
+
+@check
+def shows(page):
+    """ShowsPanel + ShowEditor (Task 10) — the second master-detail panel, and
+    the only schema in the whole react-hook-form migration that is a FACTORY:
+    `showSchema(ctx)` cannot be validated against itself because `personaId`
+    has to name a real persona, `moods` a live mood, `themeId` an installed
+    theme, and `maxTrackSeconds` clears a floor derived from the station's
+    crossfade. The browser passes all four (ShowsPanel's `showCtx`), which is
+    what makes the three assertions below possible at all.
+
+    Bound via `useZodForm(z.object({shows: z.array(showSchema(showCtx))}),
+    {shows: []})`, `showCtx`/the schema object both memoised on identity
+    (showSchema is documented as a heavyweight ~20-pipeline factory). One
+    `useFieldArray({name: 'shows', keyName: '_rhfKey'})`; `schedule` stays a
+    plain useState — this panel loads it read-only for the hours-a-week counts
+    and never saves it (the weekly grid + PUT /schedule live on the separate
+    Rundown page, already converted separately and out of scope here).
+
+    trigger()-vs-remount, and how it was actually determined: read directly
+    against node_modules/react-hook-form/dist/index.cjs.js's `useForm` body —
+    `const o = r.current.control; return o._options = t, ...` runs
+    UNCONDITIONALLY on every render (not gated behind a ref, an effect, or a
+    dirty-check), so `control._options.resolver` always reflects the LATEST
+    `zodResolver(schema)` passed to `useZodForm` on the render that just
+    committed. `form.trigger()` reads `_options.resolver` at CALL time, so a
+    `trigger()` fired from a `useEffect(() => {...}, [showCtx])` — which by
+    definition runs AFTER the render that produced the new `showCtx` — always
+    sees the current schema, never a stale one captured at mount. No remount
+    needed anywhere, confirmed by inspecting the actual diff (ShowEditor is
+    still keyed by show id and remounts on FOCUS switch, exactly as before
+    this task — that key was never about validation).
+
+    This was also confirmed empirically, by sabotage (not part of this
+    committed check — see the task report for the exact before/after
+    transcript): temporarily deleting ShowsPanel's `useEffect(() => {void
+    form.trigger()}, [showCtx])` reproduces a REAL bug, not a contrived one.
+    `resetForm({shows})` and `setData(j)` (which is what makes `showCtx` go
+    from its default empty context to the real one) run back-to-back in the
+    same synchronous callback, so a `trigger()` fired inline right after
+    `resetForm` — the naive placement — would run against the schema from the
+    PREVIOUS render, built from the empty-context default
+    (`personaIds: []`) that showCtx starts at before `data` loads. Every
+    already-valid show's `personaId` fails `ctx.personaIds.includes(v)`
+    against that empty list, so EVERY row reads "incomplete" immediately after
+    a real page load until something re-validates it — which, without the
+    ctx-keyed effect, only happens once the operator touches a field. With the
+    effect restored, the SAME sequence validates correctly because the effect
+    runs one tick later, after `showCtx` has already updated to the real
+    roster.
+
+    Where each cross-field rule's error actually roots (traced against
+    controller/src/schemas/show.ts, confirmed by reading the schema, not
+    guessed): `personaId`'s `.refine(v => ctx.personaIds.includes(v))` roots
+    at `personaId` itself; `maxTrackSeconds`'s floor `.refine()` roots at
+    `maxTrackSeconds` itself; the guest-is-host rule is a `.check()` on the
+    whole object that explicitly pushes its issue at `path: ['guestPersonaIds']`
+    — all three root at a real, distinct, field-addressable path (unlike Task
+    9's `tts` slot, which rooted at the whole object). That's why ShowEditor
+    binds `personaId` through the plain `SelectField` wrapper (no cross-field
+    work survives once the host-changes-clear-overlapping-guests side effect
+    is DELIBERATELY dropped — see below) and `maxTrackSeconds`/
+    `guestPersonaIds` each through their own single `useController`, rather
+    than needing anything rooted deeper.
+
+    Assertion 3 (guest-is-host) needed one real behaviour change to become
+    reachable through the UI at all: the pre-RHF editor's host picker cleared
+    any guest matching the newly-picked host as a side effect ("the new host
+    can't also sit in the guest chairs"), which is a nice UX default but also
+    made the invalid state structurally unreachable by driving the UI
+    honestly — selecting a host always vacated that seat first. Dropped, and
+    documented in ShowEditor's SelectField comment: Save now refuses instead
+    and names the guests field, which is what this assertion actually proves.
+
+    Assertion 1 (host not a live persona) turned out to be UNREACHABLE by any
+    real API call, and that took an actual failed attempt to discover, not a
+    guess: the first version of this check created a throwaway show pointing
+    at a real persona (Hale) and then removed Hale from the roster via a
+    `personas`-only PATCH, expecting the show's stored `personaId` to go
+    stale. It didn't — the show vanished outright. Reading
+    controller/src/settings.ts around its "Post-patch integrity sweep"
+    comment (~line 1982) shows why: `next.shows = next.shows.filter(s =>
+    personaIds.includes(s.personaId))` runs INSIDE `update()`
+    UNCONDITIONALLY, in a bare block with no `if ('shows' in patch)` or
+    `if ('personas' in patch)` guard — every single `settings.update()` call,
+    whatever keys it patches, filters every show's host against the CURRENT
+    roster and drops the ones that don't resolve. Confirmed empirically too
+    (`curl` transcript, not just the source read): POST a show hosted by
+    Hale → `GET /settings` shows it; POST `{"personas": [...without Hale]}` →
+    `GET /settings` shows the show gone, not merely host-invalid. So a show
+    with a dangling `personaId` cannot exist in PERSISTED state, full stop —
+    not "the client already refuses what the server would", the stronger
+    claim that the inconsistent STATE itself cannot be constructed by any
+    caller, client or server, ever, including a backup restore (which also
+    goes through `update()`). What's proven below instead, the same
+    `page.route()`-mock technique Task 9 used for its one unreachable rule:
+    the CLIENT's own validation machinery, fed a hypothetically inconsistent
+    `GET /settings` response (the shape a stale cache, a future server bug, or
+    a self-hosted variant with a different sweep could in principle hand it),
+    correctly flags the host field and refuses to save — proving the wiring
+    works even though the current server can never trigger it honestly.
+    """
+    def find_show(name):
+        data = json.loads(api("/settings"))
+        for s in data.get("values", {}).get("shows", []):
+            if s.get("name") == name:
+                return s
+        return None
+
+    # Best-effort cleanup from a run that crashed before its own teardown.
+    for leftover_name in (SHOW_VERIFY_NAME, GHOST_SHOW_NAME):
+        leftover = find_show(leftover_name)
+        if leftover:
+            api_write("DELETE", f"/shows/{leftover['id']}", ok_statuses=(200, 404))
+
+    base_show = {
+        "topic": "", "guestPersonaIds": [], "banter": False, "moods": [], "themeId": "",
+        "genres": [], "eras": [], "energies": [], "vocals": "", "filtersStrict": False,
+        "maxTrackSeconds": None, "playlistIds": [], "playlistStrict": False,
+        "excludedPlaylistIds": [], "programme": False, "segmentSkill": "",
+    }
+
+    # 1. Validate — a show whose host is not a live persona. `GET /settings`
+    #    is mocked (never the server) to hand the panel a `values.shows` entry
+    #    whose `personaId` names nobody in `values.personas` — the one state
+    #    the docstring above establishes the real server can never produce.
+    real_settings = json.loads(api("/settings"))
+    mocked_settings = json.loads(json.dumps(real_settings))  # deep copy
+    mocked_settings["values"]["shows"] = [{
+        **base_show, "id": "s_verify_ghost", "name": GHOST_SHOW_NAME, "personaId": "p_does_not_exist",
+    }]
+
+    def mock_settings_get(route):
+        if route.request.method != "GET":
+            route.continue_()
+            return
+        route.fulfill(status=200, content_type="application/json", body=json.dumps(mocked_settings))
+
+    page.route("**/settings", mock_settings_get)
+    try:
+        page.goto(f"{WEB}/admin/shows")
+        page.wait_for_selector("text=Build your shows here.")
+        page.get_by_role("button", name=f"Edit {GHOST_SHOW_NAME}").click()
+        dialog = page.get_by_role("dialog")
+        dialog.wait_for()
+
+        host_field = dialog.get_by_label("persona owner")
+        page.wait_for_selector('[aria-invalid="true"]')
+        assert host_field.get_attribute("aria-invalid") == "true", (
+            "host field not flagged invalid for a personaId absent from the roster"
+        )
+        assert_aria(page, host_field)
+        described = host_field.get_attribute("aria-describedby")
+        error_id = [t for t in described.split() if t.endswith("-error")][0]
+        assert "must reference an existing persona" in page.locator(f'[id="{error_id}"]').inner_text()
+
+        save = dialog.get_by_role("button", name="Save show")
+        assert save.is_disabled(), "Save show enabled with a host that names no live persona"
+
+        # ShowEditor's footer carries an explicit "Close" action (unlike
+        # PersonaEditor's "Discard"), which shares its accessible name with
+        # EditorDialog's header × control (aria-label="Close") — `.last` is
+        # the real footer action, the one actually wired to onClose.
+        dialog.get_by_role("button", name="Close").last.click()
+        dialog.wait_for(state="detached")
+    finally:
+        page.unroute("**/settings", mock_settings_get)
+
+    # 2 & 3, and the final valid save — one continuous "Add show" session,
+    # against the REAL (unmocked) controller.
+    page.goto(f"{WEB}/admin/shows")
+    page.wait_for_selector("text=Build your shows here.")
+
+    page.get_by_role("button", name="+ Add show").click()
+    dialog = page.get_by_role("dialog")
+    dialog.wait_for()
+
+    name = dialog.get_by_label("show name")
+    name.fill("")
+    name.fill(SHOW_VERIFY_NAME)  # mode: 'onChange' needs a real change event
+    save = dialog.get_by_role("button", name="Save show")
+
+    # Host defaults to the roster's first persona; pin it explicitly so the
+    # guest-overlap scenario below is deterministic regardless of roster order.
+    host_field = dialog.get_by_label("persona owner")
+    host_field.click()
+    page.get_by_role("option", name="Marlowe").click()
+
+    # 2. Validate — maxTrackSeconds under the crossfade-derived floor (30s by
+    #    default on this verify stack: max(30, ceil(2 * crossfadeDuration))).
+    maxlen = dialog.get_by_label("max track length (seconds)")
+    maxlen.fill("5")
+    page.wait_for_selector("text=must be 0 (inherit/unlimited) or at least the station's minimum track length")
+    assert_aria(page, maxlen)
+    assert save.is_disabled(), "Save show enabled with a track cap under the crossfade floor"
+
+    maxlen.fill("")  # blank = inherit the station default, always valid
+    page.wait_for_selector("text=must be 0 (inherit/unlimited)", state="detached")
+
+    # 3. Validate — a guest who is also the host. The pre-RHF editor
+    #    auto-cleared an overlapping guest when the host changed, which made
+    #    this state unreachable by honest UI interaction; that side effect is
+    #    deliberately gone now (see ShowEditor's SelectField comment), so
+    #    picking a guest and then switching the host onto her really does
+    #    reach it.
+    guest_group = dialog.locator('[aria-labelledby$=".guestPersonaIds-label"]')
+    guest_group.wait_for()
+    guest_group.get_by_role("button", name="Wren").click()
+
+    host_field.click()
+    page.get_by_role("option", name="Wren").click()
+
+    page.wait_for_selector('[aria-labelledby$=".guestPersonaIds-label"][aria-invalid="true"]')
+    assert save.is_disabled(), "Save show enabled with a guest who is also the host"
+    assert_aria(page, guest_group)
+    described = guest_group.get_attribute("aria-describedby")
+    error_id = [t for t in described.split() if t.endswith("-error")][0]
+    assert "must not include the show's host persona" in page.locator(f'[id="{error_id}"]').inner_text()
+
+    # Fix — host back to Marlowe (clears the overlap; Wren stays selected as
+    # a guest, which is fine, but untoggle her too for a clean fixture).
+    host_field.click()
+    page.get_by_role("option", name="Marlowe").click()
+    page.wait_for_selector('[aria-labelledby$=".guestPersonaIds-label"][aria-invalid="true"]', state="detached")
+    guest_group.get_by_role("button", name="Wren").click()
+
+    assert not save.is_disabled(), "Save show stayed disabled once the overlap was fixed"
+
+    # 4. Save — a genuinely valid show persists through a real POST /shows
+    #    round trip.
+    save.click()
+    dialog.wait_for(state="detached")
+    assert SHOW_VERIFY_NAME in api("/settings"), "new show did not persist"
+
+
 if __name__ == "__main__":
     names = sys.argv[1:] or list(CHECKS)
     with sync_playwright() as pw:
