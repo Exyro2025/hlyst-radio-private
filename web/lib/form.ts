@@ -48,6 +48,15 @@
 // `handleSubmit` at all (MoodsPanel/PersonasPanel/ShowsPanel — they build
 // their POST body from `getValues()` instead) cannot exhibit this by
 // construction, whichever pattern its fields use.
+//
+// `useZodForm` now also runs a DEV-ONLY runtime probe for pattern (1) —
+// see "Dev-only phantom-field probe" below `useZodForm`'s own definition for
+// the mechanism (why a parse-and-diff check would miss the forms most likely
+// to be wrong, and why the warning only fires on a literal `values.thatField`
+// read rather than on the defaultValues/schema mismatch alone, which pattern
+// (2) produces just as legitimately). It cannot see call-site source, so it
+// stays silent wherever it can't prove a key is both dropped AND read off the
+// parsed values — task-14-report.md has the full false-positive audit.
 import { zodResolver } from '@hookform/resolvers/zod';
 import {
   useForm,
@@ -56,7 +65,10 @@ import {
   type Path,
   type UseFormReturn,
 } from 'react-hook-form';
-import type { z } from 'zod';
+// Value import, not type-only: the phantom-field probe below does a runtime
+// `instanceof z.ZodObject` check. Zod is already a runtime dependency of
+// every schema this file is handed, so this adds no new weight.
+import { z } from 'zod';
 
 // All THREE generics are passed on purpose.
 //
@@ -74,7 +86,7 @@ export function useZodForm<S extends z.ZodType<FieldValues, FieldValues>>(
   schema: S,
   defaultValues: DefaultValues<z.input<S>>,
 ): UseFormReturn<z.input<S>, unknown, z.output<S>> {
-  return useForm<z.input<S>, unknown, z.output<S>>({
+  const form = useForm<z.input<S>, unknown, z.output<S>>({
     // A cast is unavoidable here: inside this function TS only knows S by its
     // constraint, so it collapses z.input<S>/z.output<S> to plain FieldValues
     // and zodResolver comes back as Resolver<FieldValues, unknown, FieldValues>.
@@ -91,6 +103,206 @@ export function useZodForm<S extends z.ZodType<FieldValues, FieldValues>>(
     // hand-rolled `valid()` predicate used to provide.
     mode: 'onChange',
   });
+
+  // No hook call inside this branch (see the section below) — just a plain
+  // function call, so there's nothing here for react-hooks/rules-of-hooks to
+  // flag, and `process.env.NODE_ENV` is a build-time constant Next.js inlines
+  // and strips in a production bundle, taking this whole call with it.
+  if (process.env.NODE_ENV !== 'production') {
+    installPhantomFieldProbe(form, schema, defaultValues);
+  }
+
+  return form;
+}
+
+// ---------------------------------------------------------------------------
+// Dev-only phantom-field probe (see the PITFALL comment above).
+//
+// An ESLint rule was considered and rejected: several bound schemas here have
+// no object SHAPE to introspect statically (`festivalsSchema` is
+// `z.unknown().superRefine(...).transform(...)` — the stripping happens
+// inside a hand-written transform, not a `z.object`), some are runtime
+// factories that don't exist until called with context (`showSchema(ctx)`),
+// and `playlistSaveSchema` hides its shape behind a `z.preprocess(...)`
+// wrapper. None of that is visible to a lint pass. This is a runtime probe
+// instead, gated on `process.env.NODE_ENV !== 'production'` — the same gate
+// `components/ServiceWorkerRegister.tsx` uses — which Next's build inlines to
+// the literal `"production"` and strips as dead code, so it costs nothing in
+// a prod bundle: no extra render work, no extra bytes.
+//
+// Two parts, because a parse-and-diff probe (parse `defaultValues` through
+// the schema, diff the input keys against whatever keys survive) is SILENT
+// on exactly the forms most likely to be wrong: a fresh row's defaultValues
+// are deliberately seeded blank — an empty required `name`, say — so the
+// parse fails before there's an output to diff against at all. That's
+// PlaylistBuilderPanel's SaveFormValues in one sentence (`name: ''` fails
+// `.min(1, 'name is required')`), which is exactly the form this needs to
+// catch.
+//
+//   1. STRUCTURAL, at mount (`declaredTopLevelKeys` below): unwrap the schema
+//      — through ZodOptional/ZodNullable/ZodDefault/ZodReadonly/
+//      ZodNonOptional/ZodPrefault's `innerType`, and a ZodPipe's `.out`
+//      (covers `z.preprocess(fn, obj)`; `.check()`/`.superRefine()` on an
+//      object need no unwrapping at all, since they keep `def.type ===
+//      'object'`) — down to the outermost ZodObject governing the form's
+//      TOP-LEVEL keys. `z.object()` strips any key outside its declared
+//      `.shape` UNCONDITIONALLY, whether or not the rest of the value would
+//      parse, so this needs no successful parse and is never wrong when it
+//      resolves. When no ZodObject is reachable — a bare transform/effect as
+//      the whole bound schema, or one with `.passthrough()`/`.catchall()`
+//      where nothing is actually dropped — it gives up rather than guess.
+//      Only the OUTERMOST object ever needs unwrapping: a factory's own
+//      internals (`showSchema(ctx)`, `festivalsSchema(ctx)`) don't need
+//      resolving, because `defaultValues`' keys are checked at the same top
+//      level the object's own `.shape` is declared at.
+//   2. ACCESS-TRACKING, at submit (`wrapWithPhantomFieldWarnings` below):
+//      knowing step 1's key is dropped doesn't mean reading it is a bug —
+//      pattern (2) in the PITFALL comment (`saveMode` today, read via
+//      `getValues`/`useWatch`) produces the IDENTICAL defaultValues/schema
+//      mismatch and is fully supported. The two are NOT distinguishable from
+//      defaultValues and the schema alone — proven by this codebase's own
+//      history: the commit that shipped the bug and the commit that fixed it
+//      pass `useZodForm` the exact same schema and the exact same
+//      defaultValues; only the `handleSubmit` callback's BODY differs
+//      (`values.saveMode` vs `saveForm.getValues('saveMode')`), and that body
+//      is application code this file never sees. So step 1's "phantom" set
+//      only arms a wrapped `handleSubmit`: the `values` object handed to the
+//      caller's `onValid` becomes a Proxy that warns the first time
+//      application code reads one of those keys BY NAME. `getValues()`/
+//      `useWatch()` never touch this object at all — they're separate
+//      control APIs — so the safe pattern never trips it. Neither does
+//      `{...values}` or `Object.keys(values)`: spread and enumeration only
+//      visit keys the target actually HAS, and a stripped key isn't one of
+//      them, so `get` never fires for it — this is what keeps
+//      `SkillEditModal`'s `body = { ...values }` (which relies on
+//      `builtinSkillFileSchema` stripping `window`/`requiresKey` for a
+//      built-in edit as a FEATURE, not a bug) silent, with no special-casing
+//      needed. Only a literal `values.key` / `values['key']` / destructuring
+//      trips the trap, because property access goes through `get` even when
+//      the property doesn't exist — which is exactly the shape of the bug
+//      and nothing else reachable in this codebase today reproduces it (see
+//      task-14-report.md for the full audit of all `useZodForm` call sites;
+//      `RecipeFormValues` in `PlaylistBuilderPanel` is the other close call —
+//      18 "phantom" keys by the step-1 diff alone, silent because that form
+//      never calls `handleSubmit` at all, so the wrapper is never invoked).
+//
+// `console.error` rather than throw: the trap fires from inside whatever
+// arbitrary `onValid` code the operator wrote, possibly after other side
+// effects already started, and a throw there would surface as a confusing
+// stack trace inside a Proxy trap instead of at the line that's actually
+// wrong — no safer than the bug it's guarding against. A `console.error`
+// naming the field and both fixes is loud enough not to miss in a dev
+// session, and it can't make anything worse than the silent `undefined`
+// already would have.
+
+function resolveTopLevelObjectSchema(schema: z.ZodType, depth = 0): z.ZodObject | null {
+  if (depth > 12) return null; // defensive only — nothing here nests this deep
+  if (schema instanceof z.ZodObject) return schema;
+  // Structural rather than per-wrapper-class: zod4's own def shape carries
+  // `innerType` under this exact name on every optional/nullable/default/
+  // readonly/nonoptional/prefault wrapper.
+  const def = schema.def as unknown as { type: string; innerType?: z.ZodType; out?: z.ZodType };
+  if (def.innerType) return resolveTopLevelObjectSchema(def.innerType, depth + 1);
+  // A ZodPipe's `.out` is the schema that actually produces the pipe's OUTPUT
+  // type — right for `z.preprocess(fn, target)` (out = target). A
+  // `.transform()` pipe's `.out` is a bare transform node with no declared
+  // shape, so this correctly stops there rather than falling back to `.in`
+  // (the PRE-transform shape — provably the wrong answer for what
+  // `handleSubmit` actually receives).
+  if (def.type === 'pipe' && def.out) return resolveTopLevelObjectSchema(def.out, depth + 1);
+  return null;
+}
+
+function declaredTopLevelKeys(schema: z.ZodType): Set<string> | null {
+  const obj = resolveTopLevelObjectSchema(schema);
+  if (!obj) return null;
+  const catchall = (obj.def as unknown as { catchall?: z.ZodType }).catchall;
+  // .passthrough()/.catchall(x) let unrecognised keys survive — nothing is
+  // actually dropped, so there's nothing this probe can prove.
+  if (catchall && (catchall.def as unknown as { type?: string }).type !== 'never') return null;
+  return new Set(Object.keys(obj.shape));
+}
+
+function warnDroppedField(key: string): void {
+  console.error(
+    `useZodForm: "${key}" is in this form's defaultValues but the bound schema doesn't `
+    + `declare it as a key, so z.object() strips it — handleSubmit's callback never receives `
+    + `"${key}"; reading values.${key} there is always undefined. This is the bug class `
+    + `PlaylistBuilderPanel's saveMode shipped with (see the PITFALL comment atop this file). `
+    + `Fix it one of two ways: (1) add "${key}" to the schema's declared shape, or (2) if it's `
+    + `deliberately not part of the wire schema, read it via form.getValues('${key}') or `
+    + `useWatch({ control, name: '${key}' }) instead of destructuring it off handleSubmit's `
+    + 'parsed values.',
+  );
+}
+
+// Wraps `values` in a Proxy that fires `warnDroppedField` the first time
+// application code reads one of `phantomKeys` BY NAME. Enumeration (spread,
+// Object.keys, JSON.stringify) never triggers it — see the design note above.
+function wrapWithPhantomFieldWarnings(
+  values: unknown,
+  phantomKeys: readonly string[],
+  warned: Set<string>,
+): unknown {
+  if (!values || typeof values !== 'object') return values;
+  return new Proxy(values as Record<string, unknown>, {
+    get(target, prop, receiver) {
+      if (typeof prop === 'string' && !warned.has(prop) && phantomKeys.includes(prop)) {
+        warned.add(prop);
+        warnDroppedField(prop);
+      }
+      return Reflect.get(target, prop, receiver);
+    },
+  });
+}
+
+// A structural stand-in for react-hook-form's UseFormHandleSubmit —
+// deliberately erased to `unknown` on both sides of the callback rather than
+// fought generic-for-generic, the same one-cast-not-fought-at-every-callsite
+// move the resolver cast in `useZodForm` makes above. Nothing about runtime
+// behaviour changes: the wrapped function still calls straight through to
+// react-hook-form's own `handleSubmit`, with the caller's `onInvalid`
+// untouched — only `onValid`'s `values` argument gets wrapped.
+type AnyHandleSubmit = (
+  onValid?: (values: unknown, event?: unknown) => unknown,
+  onInvalid?: (errors: unknown, event?: unknown) => unknown,
+) => (event?: unknown) => Promise<unknown>;
+
+const PHANTOM_PROBE_INSTALLED = Symbol('useZodForm.phantomProbeInstalled');
+
+// `form` is typed down to just the one property this touches — the real
+// argument is always the full `UseFormReturn` `useZodForm` just built, whose
+// object identity is stable for the component's lifetime (react-hook-form
+// caches it in a ref and returns the same object every render), so wrapping
+// `handleSubmit` once here persists across re-renders without needing a
+// `useRef` of our own.
+function installPhantomFieldProbe(
+  form: { handleSubmit: unknown },
+  schema: z.ZodType,
+  defaultValues: unknown,
+): void {
+  const marker = form as unknown as Record<symbol, boolean>;
+  if (marker[PHANTOM_PROBE_INSTALLED]) return;
+
+  const declared = declaredTopLevelKeys(schema);
+  if (!declared) return; // can't prove anything is dropped — stay silent
+
+  const phantomKeys = Object.keys((defaultValues as Record<string, unknown> | undefined) ?? {})
+    .filter((key) => !declared.has(key));
+  if (phantomKeys.length === 0) return;
+
+  marker[PHANTOM_PROBE_INSTALLED] = true;
+  const original = form.handleSubmit as unknown as AnyHandleSubmit;
+  const warned = new Set<string>();
+  const wrapped: AnyHandleSubmit = (onValid, onInvalid) =>
+    original(
+      onValid
+        ? (values: unknown, event?: unknown) =>
+          onValid(wrapWithPhantomFieldWarnings(values, phantomKeys, warned), event)
+        : onValid,
+      onInvalid,
+    );
+  form.handleSubmit = wrapped as unknown as typeof form.handleSubmit;
 }
 
 // ARIA wiring for one field, derived from a single base id.
