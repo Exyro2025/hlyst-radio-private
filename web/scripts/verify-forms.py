@@ -7,14 +7,22 @@
 # Usage: python3 web/scripts/verify-forms.py [form_name ...]
 import base64
 import json
+import os
+import shutil
 import subprocess
 import sys
+import tempfile
+import time
+from pathlib import Path
 
 from playwright.sync_api import sync_playwright
 
 WEB = "http://localhost:7793"
 API = "http://localhost:7791"
 AUTH = base64.b64encode(b"test:test").decode()
+
+WEB_DIR = Path(__file__).resolve().parents[1]
+CONTROLLER_DIR = WEB_DIR.parent / "controller"
 
 
 def api(path):
@@ -710,6 +718,285 @@ def imaging(page):
         # must not leave the fixture behind to poison the NEXT run.
         if find_effect():
             api_write("DELETE", f"/sfx/{SFX_FIXTURE_NAME}", ok_statuses=(200, 400, 404))
+
+
+# --- onboarding: needs its OWN second stack -------------------------------
+#
+# The wizard (WizardShell) only renders when GET /onboarding/status reports
+# needsSetup: true. The shared verify controller on :7791 is deliberately
+# booted WITH fake NAVIDROME_* env (see .claude/skills/verify/SKILL.md)
+# specifically so needsSetup is FALSE and the admin shell doesn't redirect
+# every other check in this file into the wizard — so this check structurally
+# cannot run against :7791/:7793 the way the rest of the file does, and must
+# not touch that shared stack (six other checks, and everything Task 13
+# drives, depend on it staying up and configured).
+ONBOARD_CONTROLLER_PORT = 7792
+ONBOARD_WEB_PORT = 7794
+ONBOARD_API = f"http://localhost:{ONBOARD_CONTROLLER_PORT}"
+ONBOARD_WEB = f"http://localhost:{ONBOARD_WEB_PORT}"
+
+
+def _onboard_curl(method, url, body=None):
+    cmd = ["curl", "-s", "-u", "test:test", "-X", method, url]
+    if body is not None:
+        cmd += ["-H", "Content-Type: application/json", "-d", json.dumps(body)]
+    out = subprocess.run(cmd, capture_output=True, text=True, check=True, timeout=30)
+    return out.stdout
+
+
+def _wait_http(url, timeout=90):
+    deadline = time.time() + timeout
+    last_err = None
+    while time.time() < deadline:
+        try:
+            r = subprocess.run(
+                ["curl", "-s", "-o", "/dev/null", "-w", "%{http_code}", url],
+                capture_output=True, text=True, timeout=5,
+            )
+            if r.stdout.strip() and r.stdout.strip() != "000":
+                return
+        except Exception as e:  # noqa: BLE001 — keep polling, report the last one on timeout
+            last_err = e
+        time.sleep(1)
+    raise RuntimeError(f"timed out waiting for {url} (last error: {last_err})")
+
+
+@check
+def onboarding(page):
+    """The onboarding wizard, converted onto react-hook-form (Task 8):
+    NavidromeStep/LlmStep/TtsStep/DjStep each own a useZodForm and their own
+    gated "Next" submit; ReviewStep is unchanged (no fields of its own).
+
+    Boots its OWN throwaway controller (port 7792, a fresh temp STATE_DIR, and
+    critically NO NAVIDROME_* env at all — that absence is what makes
+    needsSetup true) and its OWN second Next dev server (port 7794). Both are
+    started and stopped by THIS check, in a `finally`, so this file stays
+    runnable as a whole against a freshly booted stack (Task 13's job) with no
+    manual step for anyone to forget — that was Task 5's bar.
+
+    Two things make the second web server non-trivial, not just a second
+    `npm run dev -p N`:
+
+    1. `NEXT_PUBLIC_API_URL` is inlined into the client bundle at `next dev`
+       STARTUP (webpack `DefinePlugin`), not read per request — confirmed by
+       reading app/onboarding/page.tsx's `process.env.NEXT_PUBLIC_API_URL`
+       and next.config.js (no rewrite proxies `/api` dynamically). So the
+       EXISTING :7793 server this file's other checks use cannot be
+       retargeted per request; a second `next dev` process, pointed at 7792
+       from the start, is the only way.
+    2. A second `next dev` in the SAME source tree collides with the first:
+       Next's dev server refuses to start a second instance sharing one
+       `.next/dev/lock` file ("Another next dev server is already running",
+       confirmed by actually hitting it). The lock path is keyed off
+       `distDir`, so this needs its own — `next.config.js` reads
+       `SUBWAVE_NEXT_DIST_DIR` (falls back to plain `.next` for every other
+       invocation) for exactly this. Building instead of a second dev server
+       was considered and rejected: `next build` overwrites the SHARED
+       `.next/` output the :7793 dev server is serving from, corrupting it
+       for every other check in this file (this is the documented "don't
+       `npm run build` while dev server runs" gotcha, and it would fire here
+       even though the intent is isolation, since both processes would
+       default to the same `.next` without the distDir override).
+       `next dev` (not `next start`) is also needed because this worktree's
+       `node_modules` is a symlink — Turbopack panics resolving it
+       ("Symlink […]/node_modules is invalid"), so this launches with
+       `--webpack`, same as every other worktree dev invocation until a real
+       `npm install` replaces the symlink.
+
+    Runnable standalone: `python3 web/scripts/verify-forms.py onboarding`.
+    Needs nothing pre-booted beyond the repo + node_modules every other check
+    already needs — no manual second-stack step for Task 13 or anyone else.
+
+    fieldErrors trace (Task 8's step 6-7): POST /onboarding/save is a
+    hand-rolled try/catch (routes/onboarding.ts), not validateBody(schema),
+    so it NEVER emits fieldErrors — only `{ok, error}`. The two probe routes
+    (test-navidrome, test-llm) DO run validateBody(navidromeProbeSchema /
+    llmProbeSchema) and DO carry a fieldErrors object on a 400 — but both
+    schemas are `z.unknown().refine(...)` with no `.path()` on the refine, so
+    every issue lands at the schema ROOT: flattenIssues produces `{"":
+    message}`, not `{provider: message}` or `{url: message}`. There is no
+    field to call form.setError() on, so steps.tsx does not wire
+    applyServerFieldErrors anywhere in this wizard — doing so would be inert,
+    misrepresenting a channel that doesn't functionally exist here (Task 4's
+    mistake, not Task 5's). Both halves of that trace are proven below by
+    curl, not just cited.
+    """
+    state_dir = tempfile.mkdtemp(prefix="subwave-onboarding-verify-")
+    # Next's `distDir` is ALWAYS resolved relative to the project root
+    # (path.join(projectDir, distDir)) — handing it an absolute /tmp path
+    # doesn't escape that, it just gets joined as another path SEGMENT
+    # (path.join('/a/b', '/tmp/c') === '/a/b/tmp/c' in Node, no special
+    # leading-slash handling), so the real build output silently lands under
+    # web/tmp/... instead of the tempdir this script thinks it owns and
+    # cleans up — confirmed the hard way: an early version of this check left
+    # exactly that behind, and it was picking up `npm run lint` because the
+    # relative name is a real leftover directory in the repo, not the actual
+    # temp path. A plain relative name, cleaned up via its OWN absolute path
+    # (WEB_DIR / name), avoids the mismatch entirely.
+    dist_dir_name = f".next-onboarding-verify-{os.getpid()}"
+    dist_dir_abs = WEB_DIR / dist_dir_name
+
+    controller_env = dict(os.environ)
+    controller_env.update({
+        "STATE_DIR": state_dir,
+        "PORT": str(ONBOARD_CONTROLLER_PORT),
+        "ADMIN_USER": "test",
+        "ADMIN_PASS": "test",
+        "NODE_ENV": "development",
+    })
+    # The absence of these three is the entire point — with them set,
+    # needsSetup is false and the wizard never renders. Strip rather than
+    # trust the ambient shell not to have them (the shared verify SKILL sets
+    # exactly these three for the OTHER stack).
+    for k in ("NAVIDROME_URL", "NAVIDROME_USER", "NAVIDROME_PASS"):
+        controller_env.pop(k, None)
+
+    controller_proc = subprocess.Popen(
+        ["npx", "tsx", "src/server.ts"],
+        cwd=str(CONTROLLER_DIR),
+        env=controller_env,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+    )
+    web_proc = None
+    try:
+        _wait_http(f"{ONBOARD_API}/onboarding/status")
+        status = json.loads(_onboard_curl("GET", f"{ONBOARD_API}/onboarding/status"))
+        assert status.get("needsSetup") is True, (
+            f"second controller did not come up in needs-setup state: {status}"
+        )
+
+        web_env = dict(os.environ)
+        web_env.update({
+            "NEXT_PUBLIC_API_URL": ONBOARD_API,
+            "SUBWAVE_NEXT_DIST_DIR": dist_dir_name,
+        })
+        web_proc = subprocess.Popen(
+            ["npx", "next", "dev", "-p", str(ONBOARD_WEB_PORT), "--webpack"],
+            cwd=str(WEB_DIR),
+            env=web_env,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+        _wait_http(f"{ONBOARD_WEB}/onboarding")
+
+        # 1. The wizard renders step 1 and NOT the "already set up" fallback.
+        page.goto(f"{ONBOARD_WEB}/onboarding")
+        page.wait_for_selector("text=Connect Navidrome", timeout=20000)
+
+        # 2. Navidrome step: Test connection gates on navidromeProbeSchema
+        #    (all three fields required), Next does not (skipping Navidrome
+        #    is a supported path — useWizard.save()/routes/onboarding.ts both
+        #    persist empty creds fine).
+        test_conn = page.get_by_role("button", name="Test connection")
+        assert test_conn.is_disabled(), "Test connection enabled with blank Navidrome fields"
+        next_btn = page.get_by_role("button", name="Next →")
+        assert not next_btn.is_disabled(), "Navidrome step's Next should never require creds"
+
+        page.get_by_label("Navidrome URL").fill("http://verify.invalid:4533")
+        page.get_by_label("Username").fill("verify-user")
+        page.get_by_label("Password").fill("verify-pass")
+        assert not test_conn.is_disabled(), "Test connection stayed disabled with all 3 fields filled"
+
+        next_btn.click()
+        page.wait_for_selector("text=Pick a language model", timeout=15000)
+
+        # 3. LLM step: the FAILS-BEFORE case (confirmed by hand against the
+        #    pre-migration code: clearing Model neither disabled Next nor
+        #    blocked advancing — there was no gating at all). Now the step's
+        #    own resolver is llmProbeSchema, so formState.isValid — gating
+        #    both Next and the Test button, one source of truth — goes false
+        #    the moment Model is empty.
+        next_btn = page.get_by_role("button", name="Next →")
+        assert not next_btn.is_disabled(), "LLM Next should start enabled (DEFAULT_DATA is already valid)"
+        model = page.get_by_label("Model")
+        model.fill("")
+        page.wait_for_timeout(300)
+        assert next_btn.is_disabled(), "LLM Next did not disable once Model was cleared"
+        assert page.get_by_role("button", name="Send a test prompt").is_disabled(), (
+            "Send a test prompt did not disable once Model was cleared"
+        )
+        model.fill("verify-model")
+        page.wait_for_timeout(300)
+        assert not next_btn.is_disabled(), "LLM Next did not re-enable once Model was restored"
+
+        next_btn.click()
+        page.wait_for_selector("text=Choose a voice engine", timeout=15000)
+
+        # 4. TTS step: the default-engine SelectField renders as a real Radix
+        #    combobox (the swap from a native <select>), not just present.
+        engine_select = page.get_by_label("Default engine")
+        assert engine_select.get_attribute("role") == "combobox", (
+            f"expected Default engine to be a combobox (SelectField), got role={engine_select.get_attribute('role')!r}"
+        )
+        page.get_by_role("button", name="Next →").click()
+        page.wait_for_selector("text=DJ persona", timeout=15000)
+
+        # 5. DJ step: the one genuinely NEW, field-addressable validation rule
+        #    in this migration (stationName <= SETTINGS_STATION_NAME_MAX) —
+        #    confirmed by hand against the pre-migration code that neither the
+        #    error text nor a disabled Next existed there at all. assert_aria
+        #    proves the id it points at is really in the DOM, not just that
+        #    SOME error rendered somewhere on the page.
+        station = page.get_by_label("Station name")
+        dj_next = page.get_by_role("button", name="Next →")
+        station.fill("x" * 81)
+        page.wait_for_selector("text=station name must be 80 chars or fewer", timeout=5000)
+        assert_aria(page, station)
+        assert dj_next.is_disabled(), "DJ Next stayed enabled with an over-length station name"
+
+        station.fill("Verify Station")
+        page.wait_for_selector("text=station name must be 80 chars or fewer", state="detached", timeout=5000)
+        assert station.get_attribute("aria-invalid") is None, "station name still marked invalid"
+        assert not dj_next.is_disabled(), "DJ Next stayed disabled on a valid station name"
+
+        dj_next.click()
+        page.wait_for_selector("text=All set?", timeout=15000)
+
+        # 6. Save — the full round trip, not just a client-side state flip:
+        #    confirmed against GET /onboarding/status on the SECOND
+        #    controller afterward, same pattern as festivals()/moods()'s save
+        #    steps against the shared one.
+        page.get_by_role("button", name="Save and finish").click()
+        page.wait_for_selector("text=You're on air.", timeout=20000)
+        after = json.loads(_onboard_curl("GET", f"{ONBOARD_API}/onboarding/status"))
+        assert after.get("needsSetup") is False, f"needsSetup did not flip to false after save: {after}"
+        assert after.get("setupCompletedAt"), f"setupCompletedAt was not stamped: {after}"
+
+        # 7. The fieldErrors trace above, proven empirically rather than only
+        #    cited: the probe endpoints' 400s carry a fieldErrors object keyed
+        #    by the empty root path (no field to attach to), and /save's 400
+        #    carries no fieldErrors key at all.
+        probe_400 = json.loads(_onboard_curl("POST", f"{ONBOARD_API}/onboarding/test-llm", {}))
+        assert list(probe_400.get("fieldErrors", {}).keys()) == [""], (
+            f"expected the probe's sole fieldErrors key to be the empty root path, got {probe_400}"
+        )
+        save_400 = json.loads(_onboard_curl(
+            "POST", f"{ONBOARD_API}/onboarding/save",
+            {"tts": {"cloud": {"enabled": True, "provider": "fish-audio", "model": "", "voice": ""}}},
+        ))
+        assert save_400.get("ok") is False, f"expected the malformed Fish Audio save to be refused: {save_400}"
+        assert "fieldErrors" not in save_400, (
+            f"expected /onboarding/save to carry no fieldErrors key at all, got {save_400}"
+        )
+    finally:
+        # Kill by port, never `pkill -f "tsx src/server.ts"` / "next dev" —
+        # either would match this very Bash/subprocess wrapper's own cmdline
+        # and take the calling shell down with it (exit 144).
+        if web_proc is not None:
+            subprocess.run(["fuser", "-k", f"{ONBOARD_WEB_PORT}/tcp"], capture_output=True)
+            web_proc.wait(timeout=15)
+        subprocess.run(["fuser", "-k", f"{ONBOARD_CONTROLLER_PORT}/tcp"], capture_output=True)
+        controller_proc.wait(timeout=15)
+        shutil.rmtree(state_dir, ignore_errors=True)
+        shutil.rmtree(dist_dir_abs, ignore_errors=True)
+        # `next dev` with a non-default distDir still rewrites tsconfig.json
+        # and next-env.d.ts (both tracked files) to reference it — restore
+        # them so this check leaves the working tree exactly as it found it.
+        subprocess.run(
+            ["git", "checkout", "--", "web/tsconfig.json", "web/next-env.d.ts"],
+            cwd=str(WEB_DIR.parent), capture_output=True,
+        )
 
 
 if __name__ == "__main__":
