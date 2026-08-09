@@ -1452,6 +1452,155 @@ def shows(page):
             api_write("DELETE", f"/shows/{leftover['id']}", ok_statuses=(200, 404))
 
 
+PLAYLIST_NAME_MAX = 120  # controller/src/schemas/playlist.ts
+PLAYLIST_VERIFY_NAME = "Verify Playlist"
+
+
+@check
+def playlists(page):
+    """PlaylistBuilderPanel (Task 11) — the recipe rail is bound to
+    playlistGenerateSchema (RecipeFormValues; no per-field rule exists in that
+    schema — knobs/sources are deliberately unchecked passthrough, see
+    schemas/playlist.ts's header comment — so `playlistHasIntent(buildBody())`
+    stays the real Generate gate, called directly, exactly as before
+    conversion; see the split comment at the top of PlaylistBuilderPanel.tsx).
+    The save modal is a second, separate form bound to playlistSaveSchema
+    itself: `name` is the ONE real rule in the whole playlist schema module
+    (1-120 chars), which is what assertion 2 below exercises.
+
+    Reaching the deck (tracks.length > 0) needs a generation result, which in
+    the real app comes from POST /playlists/generate/jobs over a live
+    Navidrome + curation model. This verify stack's controller is started
+    with an UNREACHABLE Navidrome on purpose for the other checks
+    (NAVIDROME_URL=http://localhost:9999) — confirmed directly against the
+    running stack (`curl -u test:test localhost:7791/dj/search?q=a` and
+    `.../playlists` both answer `{"error":"fetch failed"}`), so there is no
+    honest way to generate or persist a REAL playlist here. Generate and Save
+    are therefore mocked at the browser's fetch boundary — the same
+    `page.route()` technique shows()'s assertion 1 uses for its one
+    server-unreachable rule — so what's under test is the CLIENT's own
+    wiring (does the form assemble the real wire body, does it apply the
+    server's response), not Navidrome reachability. Assertion 3 is proved
+    against that mocked POST /playlists response rather than a real
+    `api('/playlists')` GET round-trip, because that GET is equally
+    unreachable here; the mock's own assertions on the posted body (name,
+    songIds) are what stand in for "persisted correctly".
+
+    The brief's other named assertion — "a backwards year window (yearFrom >
+    yearTo) refuses" — does not correspond to any real rule anywhere in the
+    system: knobs/eras carry no zod validation (playlistLooseRecord is
+    deliberately unchecked passthrough) and no server logic rejects an
+    inverted window either (music/playlist-gen.ts's matchesEra just filters
+    every track out, indistinguishable from an over-narrow window that
+    happens to match nothing). The DualRange widget instead makes the state
+    UNREACHABLE BY CONSTRUCTION: its onLo/onHi clamp the incoming value
+    against the OTHER thumb before either prop fires
+    (playlist-builder/bits.tsx), so dragging "from" past "to" carries "to"
+    along with it rather than crossing it — which is what assertion 1 proves
+    instead, the real, reachable guarantee standing in for the brief's
+    premise.
+    """
+    page.goto(f"{WEB}/admin/playlists")
+    page.wait_for_selector("text=Describe the set")
+
+    # 1. The year DualRange clamps rather than ever allowing an inverted
+    #    window — see the docstring for why this replaces the brief's literal
+    #    "backwards window refuses" premise (there is no such rule to trip).
+    year_from = page.get_by_label("earliest release year")
+    year_to = page.get_by_label("latest release year")
+    year_max = int(year_from.get_attribute("max"))
+    year_min = int(year_from.get_attribute("min"))
+    year_to.fill(str(year_min + 5))
+    year_from.fill(str(year_min + 5))
+    year_from.fill(str(year_max))  # push "from" up to the slider's own max, past "to"
+    assert int(year_from.input_value()) <= int(year_to.input_value()), (
+        "yearFrom exceeded yearTo — the DualRange clamp regressed"
+    )
+    # Put the window back to "any year" (both anchors at their extremes) so
+    # it doesn't feed a stray knob into the mocked generate call below —
+    # cosmetic, the mock ignores the request body, but keeps this check's
+    # intent honest.
+    year_from.fill(str(year_min))
+    year_to.fill(str(year_max))
+
+    # Generate is gated on playlistHasIntent(buildBody()), not on this form's
+    # own isValid (see the docstring) — an "any year" recipe with nothing
+    # else set has no intent, same as pre-conversion, so give it a prompt.
+    page.get_by_label("Vibe").fill("verify vibe")
+
+    # 2 & 3 need at least one track in the deck — mocked generation, see the
+    # docstring for why a real one isn't reachable in this environment.
+    def mock_start(route):
+        route.fulfill(status=200, content_type="application/json", body=json.dumps({"jobId": "verify-job"}))
+
+    def mock_poll(route):
+        route.fulfill(status=200, content_type="application/json", body=json.dumps({
+            "status": "done",
+            "result": {
+                "tracks": [{"id": "verify-track-1", "title": "Verify Track", "artist": "Verify Artist", "durationSec": 180}],
+                "reasons": [], "usedFallback": False, "poolSize": 1, "name": "", "description": None,
+            },
+        }))
+
+    page.route("**/playlists/generate/jobs", mock_start)
+    page.route("**/playlists/generate/jobs/verify-job", mock_poll)
+    try:
+        page.get_by_role("button", name="Generate", exact=True).click()
+        # A bare `text=` selector also matches the browser <title> (this admin
+        # shell reflects the now-playing track into the document title), which
+        # is never visible and stalls wait_for_selector's default "visible"
+        # state — scope to the deck row's own title span instead.
+        page.locator("span.font-semibold", has_text="Verify Track").first.wait_for()
+    finally:
+        page.unroute("**/playlists/generate/jobs", mock_start)
+        page.unroute("**/playlists/generate/jobs/verify-job", mock_poll)
+
+    page.get_by_role("button", name="Save", exact=True).click()
+    dialog = page.get_by_role("dialog")
+    dialog.wait_for()
+
+    name_field = dialog.get_by_label("Name")
+    save_btn = dialog.get_by_role("button", name="Save playlist")
+
+    # 2. Validate — a name over PLAYLIST_NAME_MAX refuses on the name field.
+    name_field.fill("x" * (PLAYLIST_NAME_MAX + 1))
+    page.wait_for_selector('[aria-invalid="true"]')
+    assert name_field.get_attribute("aria-invalid") == "true", (
+        "name field not flagged invalid over PLAYLIST_NAME_MAX"
+    )
+    assert_aria(page, name_field)
+    described = name_field.get_attribute("aria-describedby")
+    error_id = [t for t in described.split() if t.endswith("-error")][0]
+    assert f"1-{PLAYLIST_NAME_MAX}" in page.locator(f'[id="{error_id}"]').inner_text()
+    assert save_btn.is_disabled(), "Save playlist enabled with a name over PLAYLIST_NAME_MAX"
+
+    # 3. Save — a valid build submits the real wire body (mocked response —
+    #    see the docstring) and the client applies it (modal closes).
+    name_field.fill("")
+    name_field.fill(PLAYLIST_VERIFY_NAME)
+    page.wait_for_selector(f'[id="{name_field.get_attribute("id")}"][aria-invalid="true"]', state="detached")
+
+    posted = {}
+
+    def mock_save(route):
+        if route.request.method != "POST":
+            route.continue_()
+            return
+        posted.update(json.loads(route.request.post_data or "{}"))
+        route.fulfill(status=200, content_type="application/json", body=json.dumps({"playlist": {"id": "verify-playlist-1"}, "added": 1}))
+
+    page.route("**/playlists", mock_save)
+    try:
+        assert not save_btn.is_disabled(), "Save playlist stayed disabled with a valid name"
+        save_btn.click()
+        dialog.wait_for(state="detached")
+    finally:
+        page.unroute("**/playlists", mock_save)
+
+    assert posted.get("name") == PLAYLIST_VERIFY_NAME, f"posted body carried the wrong name: {posted}"
+    assert posted.get("songIds") == ["verify-track-1"], f"posted body did not carry the deck's track ids: {posted}"
+
+
 if __name__ == "__main__":
     names = sys.argv[1:] or list(CHECKS)
     with sync_playwright() as pw:
