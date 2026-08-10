@@ -24,6 +24,33 @@ export interface RescueSlot {
   personaTts: { engine: string; voice: string; cloudProvider: string } | null;
 }
 
+export interface TtsTarget {
+  engine: string;
+  cloudProvider?: string | null;
+}
+
+function slotTarget(slot: RescueSlot): TtsTarget {
+  return {
+    engine: slot.engine,
+    cloudProvider: slot.personaTts?.cloudProvider ?? null,
+  };
+}
+
+// Engines normally identify a render target on their own. Cloud is the one
+// exception: OpenAI-compatible/Fish, ElevenLabs, and OpenAI share the `cloud`
+// dispatcher but are independent failure domains. A failed provider must not
+// blacklist a healthy provider configured as the operator's rescue.
+export function sameTtsTarget(
+  left: TtsTarget,
+  right: TtsTarget,
+  defaultCloudProvider: string | null | undefined = null,
+): boolean {
+  if (left.engine !== right.engine) return false;
+  if (left.engine !== 'cloud') return true;
+  const provider = (target: TtsTarget) => target.cloudProvider || defaultCloudProvider || null;
+  return provider(left) === provider(right);
+}
+
 export interface TtsFallbackConfig {
   enabled?: boolean;
   engine?: string;
@@ -76,11 +103,15 @@ export function configuredSlot(
 // null for the hardcoded ones — the probe must agree with the call, and a
 // hardcoded cloud rung speaks with the station default's credentials.
 export function orderedFallbacks(
-  primary: string,
+  primary: string | TtsTarget,
   configured: RescueSlot | null,
   defaultEngine: string | null | undefined,
   usable: (engine: string, cloudProvider?: string | null) => boolean,
+  defaultCloudProvider: string | null | undefined = null,
 ): RescueSlot[] {
+  const primaryTarget: TtsTarget = typeof primary === 'string'
+    ? { engine: primary }
+    : primary;
   const candidates: RescueSlot[] = [
     ...(configured ? [configured] : []),
     ...[defaultEngine, 'piper', 'kokoro'].map((engine) => ({
@@ -91,7 +122,12 @@ export function orderedFallbacks(
   const out: RescueSlot[] = [];
   for (const slot of candidates) {
     const { engine } = slot;
-    if (!engine || engine === primary || out.some((s) => s.engine === engine)) continue;
+    const target = slotTarget(slot);
+    if (
+      !engine
+      || sameTtsTarget(target, primaryTarget, defaultCloudProvider)
+      || out.some((s) => s.engine === engine)
+    ) continue;
     if (!usable(engine, slot.personaTts?.cloudProvider ?? null)) continue;
     out.push(slot);
   }

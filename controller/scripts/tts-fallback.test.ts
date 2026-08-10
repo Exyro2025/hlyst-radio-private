@@ -10,7 +10,7 @@
 
 import assert from 'node:assert/strict';
 import {
-  configuredSlot, fallbackTextFor, orderedFallbacks, type RescueSlot,
+  configuredSlot, fallbackTextFor, orderedFallbacks, sameTtsTarget, type RescueSlot,
 } from '../src/audio/tts-fallback.js';
 
 const allUsable = () => true;
@@ -214,6 +214,49 @@ const cloudFb = configuredSlot(
   { enabled: true, engine: 'cloud', voice: 'nova', cloudProvider: 'elevenlabs' },
   ENGINES,
 );
+
+// A failed Cloud provider must not blacklist the whole Cloud engine. This is
+// the live #1345 shape: a local OpenAI-compatible/Fish service fails, while the
+// operator's configured ElevenLabs rescue is healthy and should be attempted
+// before Piper.
+const crossProviderCloud = orderedFallbacks(
+  { engine: 'cloud', cloudProvider: 'openai-compatible' },
+  cloudFb,
+  'piper',
+  allUsable,
+  'openai-compatible',
+);
+assert.deepEqual(
+  engines(crossProviderCloud),
+  ['cloud', 'piper', 'kokoro'],
+  'a different Cloud provider remains a valid rescue target',
+);
+assert.equal(
+  crossProviderCloud[0]?.personaTts?.cloudProvider,
+  'elevenlabs',
+  'the first rescue carries the configured ElevenLabs provider',
+);
+assert.equal(
+  sameTtsTarget(
+    { engine: 'cloud', cloudProvider: 'elevenlabs' },
+    { engine: 'cloud', cloudProvider: 'elevenlabs' },
+    'openai-compatible',
+  ),
+  true,
+  'the same Cloud provider is still the same failed target',
+);
+assert.deepEqual(
+  engines(orderedFallbacks(
+    { engine: 'cloud', cloudProvider: 'elevenlabs' },
+    cloudFb,
+    'piper',
+    allUsable,
+    'openai-compatible',
+  )),
+  ['piper', 'kokoro'],
+  'the failed Cloud provider is not immediately retried',
+);
+
 const seen: Array<[string, string | null | undefined]> = [];
 orderedFallbacks('piper', cloudFb, 'cloud', (e, p) => { seen.push([e, p]); return true; });
 assert.deepEqual(

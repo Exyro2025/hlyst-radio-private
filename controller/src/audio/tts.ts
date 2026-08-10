@@ -13,7 +13,8 @@ import { heavyEnabledEngines } from './ttsHeavyClient.js';
 import * as remoteTts from './remoteTts.js';
 import { normalizeForSpeech } from './speech-text.js';
 import {
-  configuredSlot, fallbackTextFor, orderedFallbacks, type RescueSlot,
+  configuredSlot, fallbackTextFor, orderedFallbacks, sameTtsTarget,
+  type RescueSlot, type TtsTarget,
 } from './tts-fallback.js';
 import { localizedPreviewText } from './preview-text.js';
 import * as cloud from '../llm/speech.js';
@@ -108,6 +109,23 @@ function plainSlot(engine: string): RescueSlot {
   return { engine, personaTts: null };
 }
 
+function ttsTarget(
+  engine: string,
+  personaTts: { engine?: unknown; cloudProvider?: unknown } | null | undefined,
+): TtsTarget {
+  const globalCloudProvider = settings.get().tts?.cloud?.provider ?? null;
+  const personaCloudProvider = personaTts?.engine === 'cloud'
+    && typeof personaTts.cloudProvider === 'string'
+    ? personaTts.cloudProvider
+    : null;
+  return {
+    engine,
+    cloudProvider: engine === 'cloud'
+      ? (personaCloudProvider || globalCloudProvider)
+      : null,
+  };
+}
+
 // Which engine — and which VOICE — actually speaks a segment of `kind`.
 // Returns a slot rather than an engine string because a reroute can now carry
 // the operator's chosen fallback voice, which an engine id alone can't express.
@@ -135,7 +153,11 @@ function resolveEngine(kind: string, personaTts: any): RescueSlot {
     const configured = fallbackSlot();
     if (
       configured
-      && configured.engine !== chosen
+      && !sameTtsTarget(
+        ttsTarget(configured.engine, configured.personaTts),
+        ttsTarget(chosen, personaTts),
+        tts.cloud?.provider,
+      )
       && engineUsable(configured.engine, configured.personaTts?.cloudProvider ?? null)
     ) {
       return configured;
@@ -164,12 +186,13 @@ function resolveEngine(kind: string, personaTts: any): RescueSlot {
 //
 // At most four attempts; the ordering is pure and pinned by
 // scripts/tts-fallback.test.ts.
-function fallbackChain(primary: string): RescueSlot[] {
+function fallbackChain(primary: TtsTarget): RescueSlot[] {
   return orderedFallbacks(
     primary,
     fallbackSlot(),
     settings.get().tts?.defaultEngine,
     (engine, cloudProvider) => engineUsable(engine, cloudProvider ?? null),
+    settings.get().tts?.cloud?.provider,
   );
 }
 
@@ -477,7 +500,7 @@ export async function speak(
     // The primary passed the pre-flight gate but threw mid-render. Walk the
     // rescue chain — configured default engine, then Piper, then Kokoro — so
     // the DJ never goes silent because one provider hiccuped.
-    const chain = fallbackChain(primary);
+    const chain = fallbackChain(ttsTarget(primary, primaryPersonaTts));
     if (!chain.length) {
       recordTts({
         ...callBase, engine: primary, fellBack: requested !== primary,
