@@ -5,16 +5,16 @@
 // colour.
 
 import { useMemo } from 'react';
-import type { Persona } from './types';
 import { API_BASE } from './constants';
 import { initialsFor } from './helpers';
+import type { PersonaRosterEntry } from './roster-order';
 import { Pill, MetaChip } from '../ui';
 import { RosterTable } from '../RosterTable';
 import type { RosterColumn } from '../RosterTable';
 import { RosterAvatar } from '../RosterAvatar';
 
 interface PersonaTableProps {
-  personas: Persona[];
+  entries: PersonaRosterEntry[];
   // The admin-selected default — gets the "default" pill.
   activePersonaId: string;
   // The persona actually broadcasting now (show override aware).
@@ -26,21 +26,10 @@ interface PersonaTableProps {
   onSelect: (idx: number) => void;
 }
 
-// The roster is index-keyed (onSelect(i)), so the row carries its position.
-interface PersonaRow {
-  persona: Persona;
-  index: number;
-}
-
 export function PersonaTable({
-  personas, activePersonaId, onAirPersonaId, avatarTick, isPersonaInvalid, onSelect,
+  entries, activePersonaId, onAirPersonaId, avatarTick, isPersonaInvalid, onSelect,
 }: PersonaTableProps) {
-  const rows = useMemo<PersonaRow[]>(
-    () => personas.map((persona, index) => ({ persona, index })),
-    [personas],
-  );
-
-  const cols = useMemo<RosterColumn<PersonaRow>[]>(() => [
+  const cols = useMemo<RosterColumn<PersonaRosterEntry>[]>(() => [
     {
       key: 'face',
       label: '',
@@ -124,7 +113,7 @@ export function PersonaTable({
   ], [activePersonaId, onAirPersonaId, avatarTick, isPersonaInvalid]);
 
   // Same status priority as the card spine.
-  const spineFor = ({ persona: p, index }: PersonaRow): string => {
+  const spineFor = ({ persona: p, index }: PersonaRosterEntry): string => {
     if (p.id === onAirPersonaId) return 'var(--accent)';
     if (p.id === activePersonaId) return 'var(--ink)';
     if (isPersonaInvalid(index)) return 'var(--danger)';
@@ -135,7 +124,7 @@ export function PersonaTable({
     <RosterTable
       caption="DJ roster"
       cols={cols}
-      rows={rows}
+      rows={entries}
       rowKey={r => r.persona.id}
       rowLabel={r => `Edit ${r.persona.name.trim() || `Persona ${r.index + 1}`}`}
       rowSpine={spineFor}

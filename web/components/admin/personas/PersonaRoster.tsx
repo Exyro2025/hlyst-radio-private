@@ -1,10 +1,12 @@
 'use client';
 // One "broadcast slate" card per persona, matching the show cards on /admin/shows.
 // The whole card is the edit target; adding lives in the hero's "+ Add persona".
+import { useMemo } from 'react';
 import { Users } from 'lucide-react';
 import type { Persona } from './types';
 import { API_BASE, PERSONA_MAX } from './constants';
 import { initialsFor } from './helpers';
+import { orderPersonaRoster } from './roster-order';
 import { cn } from '../../../lib/cn';
 import { useRosterView } from '../../../lib/adminView';
 import { Btn, Pill, MetaChip } from '../ui';
@@ -36,13 +38,19 @@ export function PersonaRoster({
 }: PersonaRosterProps) {
   // Cards (default) or a dense table. Remembered per surface in localStorage.
   const [view, setView] = useRosterView('personas');
+  const roster = useMemo(
+    () => orderPersonaRoster(personas, onAirPersonaId),
+    [personas, onAirPersonaId],
+  );
 
   return (
     <section className="grid gap-4">
       {/* On phones the actions take a full row of their own under the count:
           squeezed onto the count's line they run past the right edge. */}
       <div className="flex flex-wrap items-center justify-between gap-3">
-        <span className="caption">roster · {personas.length} / {PERSONA_MAX}</span>
+        <span className="caption">
+          roster · {personas.length} / {PERSONA_MAX} · on air first · then A–Z
+        </span>
         <div className="flex w-full flex-wrap items-center gap-2 sm:w-auto">
           <RosterViewToggle view={view} onChange={setView} />
           <Btn
@@ -64,7 +72,7 @@ export function PersonaRoster({
       </div>
       {view === 'list' && personas.length > 0 && (
         <PersonaTable
-          personas={personas}
+          entries={roster}
           activePersonaId={activePersonaId}
           onAirPersonaId={onAirPersonaId}
           avatarTick={avatarTick}
@@ -73,7 +81,7 @@ export function PersonaRoster({
         />
       )}
 
-      {view === 'cards' && personas.map((p, i) => {
+      {view === 'cards' && roster.map(({ persona: p, index: i }) => {
         const isOnAir = p.id === onAirPersonaId;
         const isDefault = p.id === activePersonaId;
         const valid = !isPersonaInvalid(i);
@@ -102,6 +110,7 @@ export function PersonaRoster({
             className={cn(
               'group card relative cursor-pointer transition-colors hover:bg-[var(--ink-softer)]',
               'focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-[var(--accent)]',
+              isOnAir && roster.length > 1 && 'mb-1',
             )}
           >
             <span
