@@ -64,54 +64,23 @@ import {
   playlistSaveSchema,
 } from '@/lib/schemas.generated';
 
-// ─── The generate-vs-save split (task-11-brief step 2) ─────────────────────
+// ─── The generate-vs-save split ────────────────────────────────────────────
 //
-// This panel drives TWO request bodies: POST /playlists/generate (a preview,
-// never persisted) and POST /playlists (the create/overwrite call). Only the
-// second is "the create body" — but its `recipe` field is the SAME shape
-// /generate takes (playlistRecipeSchema mirrors playlistGenerateSchema minus
-// excludeTrackIds), and `recipe` rides on every save where "Keep in sync" is
-// on. So every recipe-rail input (prompt, seeds, moods, genres, energies,
-// year/bpm/length bounds, artists, arc, count, artistSpacing, the three
-// source/knob switches) genuinely belongs to BOTH bodies, not just the
-// generate one — RecipeFormValues below holds all of them.
+// Two request bodies, two forms. The recipe rail (RecipeFormValues) feeds both
+// POST /playlists/generate and the `recipe` field of POST /playlists, since the
+// two share a shape. `seedArtist` and `genreInput` stay plain state: the latter
+// is an uncommitted text buffer, and neither carries a schema rule.
 //
-// Two fields are deliberately left OUT of RecipeFormValues, per the brief:
-// `seedArtist` and `genreInput`. `genreInput` is a real uncommitted text
-// buffer (only becomes a value on Enter/comma/blur via addGenre). `seedArtist`
-// is arguably not that — once picked from a search result it IS a committed
-// value, same shape as a `seeds` chip — but it carries no schema rule either
-// way (playlistText — free text, unchecked) and buildBody() below reads it
-// directly regardless of where it lives, so keeping it as plain state loses
-// no correctness, only RHF's reset/dirty-tracking for that one field. Kept as
-// plain state per the brief's explicit instruction.
+// `formState.isValid` on the recipe form is inert and never read. The only
+// whole-object rule is `playlistHasIntent`, which the schema's `.refine` reads
+// off the NESTED wire shape (`knobs.moods`, `sources.recentlyAdded`), while
+// this form's fields are flat to match the rail's own UI concepts. So
+// `playlistHasIntent(buildBody())` stays the real Generate gate.
 //
-// The knobs/sources wire shape (playlistLooseRecord) is UNVALIDATED
-// passthrough by design (see schemas/playlist.ts's header comment) — there is
-// no per-field rule anywhere for moods/genres/energies/artists/arc/count/etc.
-// The only whole-object rule in the whole module is `playlistHasIntent`,
-// which playlistGenerateSchema enforces via `.refine`. Binding this form's
-// resolver to playlistGenerateSchema does NOT make `formState.isValid` track
-// that rule, though: the refine reads `input.knobs.moods` /
-// `input.sources.recentlyAdded` / etc, and this form's fields are flat
-// (`moods`, `recentlyAdded`, `yearFrom`/`yearTo` rather than `knobs.eras[]`)
-// to match the rail's own UI concepts, which is what buildBody() below
-// derives the wire shape FROM — so `isValid` here would only ever see
-// `prompt` correctly and stays false-negative for every other case. Per step
-// 6: the schema does not express the rule this form needs, so
-// `playlistHasIntent(buildBody())` stays the real Generate gate, called
-// directly, exactly as before conversion — `isValid` from this binding is
-// otherwise inert and never read.
-//
-// The SAVE modal is a second, separate form (SaveFormValues) bound to
-// playlistSaveSchema itself. `name` is the ONE real rule in that schema (1-120
-// chars) and is the only field this form validates meaningfully — `isValid`
-// on THIS binding correctly reduces to "is name valid", since songIds/
-// playlistId/recipe are assembled at submit time from live component state
-// (tracks/existingId/the recipe form's buildBody()) rather than tracked as
-// interactive fields here. `saveMode` isn't a schema key at all (it only
-// steers which value `playlistId` gets) but travels in this form anyway since
-// it's a real save-time choice, not generation-only state.
+// The SAVE modal is a separate form bound to playlistSaveSchema, where `name`
+// is the one real rule — songIds/playlistId/recipe are assembled at submit time
+// from live component state. `saveMode` isn't a schema key at all; it travels
+// here anyway as a save-time choice, and is read off raw form state.
 interface RecipeFormValues {
   prompt: string;
   seeds: SeedChip[];
@@ -169,15 +138,9 @@ const SAVE_DEFAULTS: SaveFormValues = { name: '', keepInSync: false, saveMode: '
 export default function PlaylistBuilderPanel() {
   const { adminFetch } = useAdminAuth();
 
-  // Both playlistGenerateSchema and playlistSaveSchema are `z.preprocess(...)`
-  // wrapped (see schemas/playlist.ts — the non-object-body fallback), which
-  // makes their inferred `_input` `unknown` rather than a FieldValues-shaped
-  // object, so useZodForm's own generic bound can't be satisfied by passing
-  // them directly. The schema is cast to the form's own field shape here —
-  // same one-cast-not-fought-at-every-callsite move as `Control<T>` elsewhere
-  // in this file, just applied one level up. Nothing about runtime validation
-  // changes: zodResolver(schema) inside useZodForm still runs the real
-  // schema against the real posted values.
+  // Both playlist schemas are `z.preprocess(...)`-wrapped, so their inferred
+  // `_input` is `unknown` and can't satisfy useZodForm's generic bound. Cast to
+  // the form's own field shape; the resolver still runs the real schema.
   const recipeForm = useZodForm(
     playlistGenerateSchema as unknown as z.ZodType<RecipeFormValues, RecipeFormValues>,
     RECIPE_DEFAULTS,
@@ -227,9 +190,8 @@ export default function PlaylistBuilderPanel() {
   const hotTimer = useRef<number | null>(null);
   const [toast, setToast] = useState('');
 
-  // The live mood NAMES off /settings (tts.moods) — moods are operator-editable
-  // (/admin/moods), so a hand-copied vocabulary here was wrong twice over: a
-  // custom mood was unpickable and a deleted one was still offered.
+  // The live mood names off /settings. Moods are operator-editable, so a
+  // hand-copied vocabulary here would miss custom ones and offer deleted ones.
   const [liveMoods, setLiveMoods] = useState<string[]>([]);
 
   const [seedQuery, setSeedQuery] = useState('');
@@ -367,12 +329,9 @@ export default function PlaylistBuilderPanel() {
     excludeTrackIds,
   }), [recipeValues, seedArtist]);
 
-  // The SAME intent rule the /generate routes enforce (the schema's own
-  // refinement runs playlistHasIntent too) — the Generate button needs the
-  // answer before a request exists, which is why the predicate is exported
-  // rather than living only inside the schema. See the split comment at the
-  // top of this file for why this stays a direct call rather than
-  // `recipeForm.formState.isValid`.
+  // The same intent rule the /generate route enforces — exported as a predicate
+  // rather than living only inside the schema, because the Generate button needs
+  // the answer before a request exists. See the split comment at the top.
   const hasIntent = useMemo(() => playlistHasIntent(buildBody()), [buildBody]);
 
   const generating = view === 'generating';
@@ -576,10 +535,9 @@ export default function PlaylistBuilderPanel() {
       keepInSync,
       saveMode: existingId ? 'overwrite' : 'create',
     });
-    // reset() doesn't itself validate, so an empty/over-length default (e.g.
-    // an ungenerated deck with no name typed yet) would leave `isValid` stale
-    // — true — until the operator touches the field. Force it once so the
-    // Save button's initial disabled state is correct from the first paint.
+    // reset() doesn't validate, so an empty default would leave `isValid`
+    // stale-true until the field is touched, and the Save button wrongly
+    // enabled on first paint.
     void saveForm.trigger();
     setModal('save');
   }, [tracks.length, name, existingId, keepInSync, flash, saveForm]);
@@ -587,16 +545,10 @@ export default function PlaylistBuilderPanel() {
   const onSaveSubmit = saveForm.handleSubmit(async (values) => {
     setSaving(true);
     try {
-      // `saveMode` is NOT a key of playlistSaveSchema (only name/songIds/
-      // playlistId/keepInSync/recipe are), so zodResolver's parsed OUTPUT —
-      // what `values` above actually is — silently drops it: z.object()
-      // strips unknown keys and this schema is never `.passthrough()`d.
-      // Reading `values.saveMode` here always saw `undefined`, so `overwrite`
-      // was always false and every "Overwrite existing" save created a new
-      // playlist instead (Fix round 1 — see task-11-report.md). `saveMode`
-      // isn't part of the wire body at all, only a local UI choice, so it's
-      // read straight off the form's raw state instead — the same place
-      // `existingId`/`tracks` already come from.
+      // Read off raw form state, NOT off `values`: `saveMode` is not a key of
+      // playlistSaveSchema, so the resolver's parsed output drops it and
+      // `values.saveMode` is always undefined — which once made every
+      // "Overwrite existing" save create a new playlist instead.
       const saveMode = saveForm.getValues('saveMode');
       const overwrite = saveMode === 'overwrite' && existingId;
       const r = await adminFetch('/playlists', {
@@ -1399,8 +1351,8 @@ export default function PlaylistBuilderPanel() {
       {modal === 'open' && (
         <div
           // Backdrop keeps no role and no tabIndex: `role="button"` would put a
-          // full-viewport control in the tab order and hide the dialog's real
-          // controls from assistive tech. Escape is handled at the document level.
+          // full-viewport control in the tab order, ahead of the dialog's real
+          // controls. Escape is handled at the document level.
           className="fixed inset-0 z-[80] flex items-start justify-center bg-[rgba(20,18,14,0.42)] p-5 pt-16"
           // Only a click on the backdrop itself closes, so the panel needs no
           // stopPropagation of its own.

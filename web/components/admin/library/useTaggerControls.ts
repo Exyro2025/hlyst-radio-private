@@ -18,14 +18,12 @@ import type {
 import type { SettingsResponse } from './types';
 
 // The tagging/analysis half of the library page: the slow /settings poll and
-// every operator action the Tagging panel fires. Split out of LibraryPanel so
-// the panel is a tab router and nothing else.
+// every operator action the Tagging panel fires.
 //
-// The two FAST loops (coverage + the tagger snapshot) live in LibraryContext —
-// the tagger snapshot is what sets the coverage cadence, and Search reads
-// coverage too, so they belong with the other page-wide state. This slow loop
-// deliberately never touches tagger state, which is what keeps them from
-// racing.
+// The two FAST loops (coverage + the tagger snapshot) live in LibraryContext,
+// since the tagger snapshot sets the coverage cadence and Search reads coverage
+// too. This slow loop never touches tagger state, which is what keeps the two
+// from racing.
 
 // POST /settings with one nested block, the shape all four toggles share.
 async function postAudioSetting(
@@ -62,8 +60,8 @@ export function useTaggerControls() {
   const [batch, setBatch] = useState<Batch>('500');
   const [logOpen, setLogOpen] = useState(false);
 
-  // Slow loop: the rarely-changing settings-derived bits. Silent on failure,
-  // like its predecessor — a 30s poll that toasts on a blip is noise.
+  // Slow loop: the rarely-changing settings-derived bits. Silent on failure —
+  // a 30s poll that toasts on a blip is noise.
   const settingsQuery = useAdminQuery<SettingsResponse>({
     key: libraryKeys.settings(),
     path: '/settings',
@@ -105,10 +103,9 @@ export function useTaggerControls() {
     [qc],
   );
 
-  // Per-track analysis failures (#1300 bug 3c). Fetched on demand, never
-  // polled: `coverage.analysisFailed` already says whether there is anything to
-  // look at, and on a healthy station the answer is zero forever. Kept off the
-  // query cache for that reason — a key nothing reads is a key nothing evicts.
+  // Per-track analysis failures (#1300 bug 3c). Fetched on demand and kept off
+  // the query cache: `coverage.analysisFailed` already says whether there is
+  // anything to look at, and on a healthy station that is zero forever.
   const loadFailures = useCallback(async () => {
     if (!ready) return;
     try {
@@ -135,10 +132,8 @@ export function useTaggerControls() {
   const remaining = coverage?.total != null ? Math.max(0, coverage.total - coverage.tagged) : null;
 
   // --- the runs ------------------------------------------------------------
-  // Each opens the log and refreshes the tagger snapshot, which is what their
-  // trailing `await loadTaggerState()` did. Failures toast through
-  // useAdminMutation's shared onError — the copy was identical at all eleven
-  // hand-rolled call sites.
+  // Each opens the log and refreshes the tagger snapshot; failures toast
+  // through useAdminMutation's shared onError.
 
   const startM = useAdminMutation<TagSteps | undefined, void>({
     request: (steps, fetcher) => {
@@ -199,8 +194,7 @@ export function useTaggerControls() {
     onDone: async (_d, _v, client) => {
       notify.ok('library reset — all tagging data wiped');
       // Everything under ['library'] — every row list, plus coverage and the
-      // library stats. Wider than the old row-only clear and correct: the two
-      // lines that refetched those by hand sat right beside it.
+      // library stats.
       await client.invalidateQueries({ queryKey: libraryKeys.all });
     },
   });
@@ -208,7 +202,7 @@ export function useTaggerControls() {
   // --- the toggles ---------------------------------------------------------
   // Each writes the flipped value straight into the cached /settings body
   // before invalidating, so the switch moves at once rather than waiting out
-  // the poll — the local setState the hand-rolled versions did, one layer down.
+  // the poll.
   const patchAudioSetting = useCallback((patch: Record<string, unknown>) => {
     qc.setQueryData<SettingsResponse>(libraryKeys.settings(), prev => (prev
       ? { ...prev, values: { ...prev.values, audio: { ...prev.values?.audio, ...patch } } }
@@ -292,8 +286,8 @@ export function useTaggerControls() {
     },
   });
 
-  // One shared busy flag, as before: the Tagging panel disables every control
-  // while any of them is in flight.
+  // One shared busy flag: the Tagging panel disables every control while any
+  // of them is in flight.
   const busy = [
     startM, stopM, rescanM, reconcileM, analyzeM, vocalBackfillM, resetM,
     toggleAudioM, toggleVocalM, toggleQuietM, saveQuietMinutesM,
@@ -311,9 +305,9 @@ export function useTaggerControls() {
     resetLibrary: () => { resetM.mutate(); },
     analyzeAudio: () => { analyzeM.mutate(); },
     vocalBackfill: () => { vocalBackfillM.mutate(); },
-    // The panel's switches send no argument, so the flip is computed here.
-    // The `== null` guard is what stopped a toggle firing before the first
-    // /settings poll landed and writing `!null` = true over a real `true`.
+    // The panel's switches send no argument, so the flip is computed here. The
+    // `== null` guard stops a toggle firing before the first /settings poll
+    // lands and writing `!null` = true over a real `true`.
     toggleAudio: () => { if (audioEnabled != null) toggleAudioM.mutate(!audioEnabled); },
     toggleVocal: () => { if (vocalEnabled != null) toggleVocalM.mutate(!vocalEnabled); },
     toggleQuiet: () => { if (quietEnabled != null) toggleQuietM.mutate(!quietEnabled); },

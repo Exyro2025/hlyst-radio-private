@@ -72,16 +72,12 @@ const CONDITIONS: Array<{ id: string; label: string }> = [
 // option rides a sentinel that maps back to '' on save.
 const NONE = '__none__';
 
-// From the mirror, not re-typed: a bare literal beside a "mirrors the
-// server" comment is exactly what had already drifted in the persona editor.
 const MOODS_LIMIT = SETTINGS_MOODS_LIMIT;
 
-// tts.corrections has no controller-side zod schema — `tts` is one of the
-// settings-patch-registry keys that deliberately did NOT convert (root
-// CLAUDE.md, "What deliberately did NOT convert"; six cross-field rules read
-// POST-MERGE state). This is a LOCAL, client-only shape guard mirroring the
-// UI's own pre-existing caps, not a mirror of a server rule — there isn't one
-// to mirror.
+// A LOCAL shape guard, not a mirror of a server rule: `tts` is one of the
+// settings-patch-registry keys that deliberately has no zod schema (root
+// CLAUDE.md, "What deliberately did NOT convert"), so these caps are the UI's
+// own and there is nothing to mirror.
 const CORRECTION_FROM_MAX = 80;
 const CORRECTION_TO_MAX = 160;
 const CORRECTIONS_LIMIT = 100;
@@ -97,11 +93,8 @@ const correctionsSchema = z
 type TabId = 'vocab' | 'moments' | 'festivals' | 'speech';
 const TAB_IDS: TabId[] = ['vocab', 'moments', 'festivals', 'speech'];
 
-// The moods[] rows and the moments/speech rows all bind through the SAME
-// arrayControl (the schema-output-typed cast — see the comment beside it
-// below), so a hand-rolled row component isn't needed for the plain text
-// fields: TextField/SelectField take a template-literal FieldPath directly.
-// Weather is the one exception — see WeatherMoodSelect below.
+// The one row control that can't be a plain TextField/SelectField off
+// arrayControl — see the note inside.
 function WeatherMoodSelect({
   control,
   condition,
@@ -115,11 +108,9 @@ function WeatherMoodSelect({
   moodOptions: Option[];
   fieldId: string;
 }) {
-  // Hand-rolled rather than SelectField: weather's '' ("no mood steer") value
-  // has to ride a Radix sentinel (Radix forbids an empty-string item value),
-  // and remapping that sentinel on the way in/out of field.onChange is real
-  // onChange logic SelectField doesn't expose — the same carve-out
-  // FestivalsSection uses for month/day/windowDays.
+  // Remapping the NONE sentinel in and out of field.onChange is onChange logic
+  // SelectField doesn't expose — the same carve-out FestivalsSection makes for
+  // month/day/windowDays.
   const { field, fieldState } = useController({ control, name: `weather.${condition}` });
   const aria = fieldAria(`${fieldId}-weather-${condition}`, fieldState.error);
   return (
@@ -159,35 +150,13 @@ export default function MoodsPanel() {
   const rawTab = searchParams.get('tab');
   const tab: TabId = (TAB_IDS as string[]).includes(rawTab ?? '') ? (rawTab as TabId) : 'vocab';
 
-  // The vocabulary moodSchedule/weatherMoods validate against — and the
-  // dropdown OPTIONS those two cards' Selects offer — is the PERSISTED
-  // (last-saved) mood list, not the live, possibly-unsaved content of the
-  // Vocabulary tab. This looks like it should be the opposite (moods is
-  // itself one of the four collections this same form edits, so "use the
-  // live form value" was the first thing tried — see Fix round 1 in the task
-  // report for the full story), but the two cards are NOT symmetric on the
-  // server: `saveMoods` posts `{ moods }` alone, so settings.ts's moodCtx
-  // (settings.ts:1211, `next.moods`) is built from what THIS patch carries —
-  // live is correct for that card, and it's why `moodsSchema` itself needs
-  // no such context. `saveSchedule`/`saveWeather` post `{ moodSchedule }` /
-  // `{ weatherMoods }` alone — `moods` never rides in their patch, so the
-  // server ALWAYS judges them against whatever's actually persisted
-  // (settings.ts:1205-1219, the `'moods' in patch` branch only runs for the
-  // moods card's own save). Sourcing their dropdown options and their
-  // validation context from the live watch meant an operator could rename a
-  // mood on the Vocabulary tab without saving, assign the new (unsaved) name
-  // to a time-of-day/weather slot on the Moments tab — client validation
-  // passed, because it was checking the same live list — and have the save
-  // rejected by the server with a confusing generic-error round trip, a
-  // click path the pre-refactor UI (built from `savedMoodNames`) could not
-  // produce. Fixed by making `savedMoodNames` real, separate state — set at
-  // load and again only when the MOODS card's own save actually succeeds
-  // (with the server-normalised names from the response, not the raw
-  // payload) — rather than anything read live off the form. This also
-  // removes the circular-dependency problem the live-watch version had
-  // (schema needs form.control, form needs schema): `savedMoodNames` doesn't
-  // depend on the form at all, so the schema can be built before the form
-  // exists, no settle-one-render-behind dance required.
+  // The PERSISTED mood list, deliberately not the live Vocabulary tab value:
+  // it is both the vocabulary the schedule/weather cards validate against and
+  // the options their Selects offer. `saveSchedule`/`saveWeather` post their
+  // own key alone, so the server judges them against what is actually stored —
+  // validating against the live list would let an operator assign an unsaved
+  // mood name, pass client validation, and be rejected server-side. Advanced
+  // only at load and on a successful moods-card save.
   const [savedMoodNames, setSavedMoodNames] = useState<string[]>([]);
   const moodOptions: Option[] = useMemo(
     () => savedMoodNames.map(m => ({ value: m, label: m })),
@@ -205,18 +174,12 @@ export default function MoodsPanel() {
     [savedMoodNames],
   );
   const form = useZodForm(schema, { moods: [], schedule: {}, weather: {}, corrections: [] });
-  // form.control's declared field-values type collapses to `unknown` for
-  // moods/schedule/weather (moodsSchema/moodScheduleSchema/weatherMoodsSchema
-  // are z.unknown().superRefine().transform(), not structural z.object/
-  // z.array — see FestivalsSection's FESTIVALS_TYPE_SHAPE comment for the
-  // full reasoning; same shape here). This cast only widens what TypeScript
-  // is allowed to believe the control's shape is, to the real OUTPUT shape —
-  // the same `control` object at runtime, and the type every field actually
-  // holds since the form is seeded only from server data or empty rows.
+  // The three mirrored schemas are z.unknown().superRefine().transform(), not
+  // structural z.object/z.array, so the form's declared field-values type
+  // collapses to `unknown` for them (see FestivalsSection's FESTIVALS_TYPE_SHAPE
+  // comment). These two casts widen it back to the real output shape at the
+  // type level only.
   const arrayControl = form.control as unknown as Control<MoodsFormValues>;
-  // Same cast rationale as arrayControl: form.getValues(key)'s declared type
-  // is z.input<schema>[key], which is `unknown` for moods/schedule/weather —
-  // this widens it back to the real shape at the type level only.
   const getFormValue = <K extends keyof MoodsFormValues>(key: K): MoodsFormValues[K] =>
     form.getValues(key as never) as unknown as MoodsFormValues[K];
 
@@ -231,11 +194,9 @@ export default function MoodsPanel() {
     keyName: '_rhfKey',
   });
 
-  // Re-validate once the schema has actually been rebuilt against a fresh
-  // `savedMoodNames` (after load, and again after the moods card's own save
-  // succeeds) — a stale-schema-in-closure guard: changing the `resolver`
-  // react-hook-form is holding doesn't retroactively re-run it against
-  // already-computed error state, only the next validation trigger does.
+  // Swapping the resolver doesn't re-run it against already-computed error
+  // state, so re-validate whenever the schema is rebuilt from a fresh
+  // `savedMoodNames`.
   useEffect(() => {
     void form.trigger();
   }, [schema, form]);
@@ -260,15 +221,12 @@ export default function MoodsPanel() {
         ? v.weatherMoods : {}) as Record<string, string>;
       const loadedCorr = Array.isArray(v.tts?.corrections)
         ? (v.tts!.corrections as Correction[]) : [];
-      // A period with no stored value yet falls back to the first vocab
-      // entry (display convenience only, matching the pre-RHF behaviour) —
-      // resolved once here at load, not re-derived on every render.
+      // A period with no stored value falls back to the first vocab entry.
       const firstMood = loadedMoods[0]?.name ?? '';
       const loadedSchedule = Object.fromEntries(
         PERIODS.map(p => [p.id, rawSchedule[p.id] || firstMood]),
       );
-      // Weather gets NO such fallback — '' is a real, intentional value
-      // ("no mood steer"), not a gap to fill.
+      // Weather gets no such fallback — '' means "no mood steer".
       const loadedWeather = Object.fromEntries(
         CONDITIONS.map(c => [c.id, rawWeather[c.id] || '']),
       );
@@ -303,36 +261,15 @@ export default function MoodsPanel() {
     [router, pathname, searchParams],
   );
 
-  // POST one settings slice, then re-baseline the WHOLE form via
-  // form.reset({...form.getValues(), [key]: nextValue}) — the same
-  // no-options `form.reset(values)` FestivalsSection already proves out,
-  // just fed the live current values for the three keys NOT being saved
-  // (rather than a fixed `{festivals: […]}` shape) instead of dropping them.
+  // POST one settings slice, then re-baseline the WHOLE form with a plain
+  // `form.reset(values)`. `reset(next, {keepDirtyValues: true})` looks like the
+  // right tool but does NOT recompute dirtyFields/isValid against the new
+  // defaults, so the just-saved card's Save button stayed wrongly enabled.
   //
-  // This was NOT the first thing tried: `form.reset(next, {keepDirtyValues:
-  // true})` looked like the right tool (RHF's docs describe it as "keep
-  // dirty fields' current value"), and a per-key `defaultsRef` was built to
-  // support it. Reading react-hook-form's own reset() implementation (and
-  // confirming empirically against the live verify stack) showed
-  // `keepDirtyValues: true` does NOT recompute `dirtyFields`/`isValid`
-  // against the new defaults unless `keepDefaultValues` is ALSO passed — and
-  // `keepDefaultValues: true` means the OPPOSITE of what the name suggests
-  // here: it skips adopting the new defaults at all. Without it, dirtyFields
-  // is carried over from before the call, untouched — so the just-saved
-  // card's dirty flag never cleared and its Save button stayed wrongly
-  // enabled (caught by a manual Playwright pass against the running verify
-  // stack, not by reading the source alone).
-  //
-  // The tradeoff of the simpler approach used here: because `nextDefaults`
-  // adopts the LIVE value for every key (not just the one being saved), a
-  // genuinely in-progress, unsaved edit on ANOTHER card will have its dirty
-  // flag (and therefore its own Save button) incorrectly clear too — its
-  // VALUE is preserved exactly (still visible, still editable, nothing is
-  // lost), only the "you have unsaved changes" signal resets. Given RHF's
-  // reset() has no option that recomputes dirtiness for one key while truly
-  // leaving another's untouched, this is the safer failure direction: no
-  // silent data loss, only a cosmetic re-touch-to-re-enable papercut on a
-  // narrow (near-simultaneous multi-card edit) path.
+  // Tradeoff: adopting the live value for every key also clears the dirty flag
+  // of an unsaved edit on another card. The VALUE is untouched — only the
+  // "unsaved changes" signal resets — which is the safer failure direction, and
+  // RHF offers no option that recomputes one key's dirtiness alone.
   const persistPatch = useCallback(
     async (
       card: string,
@@ -340,9 +277,7 @@ export default function MoodsPanel() {
       patch: Record<string, unknown>,
       nextValue: MoodsFormValues[keyof MoodsFormValues],
       okMsg: string,
-      // Only the moods card uses this — see saveMoods — to re-baseline
-      // savedMoodNames from the server's own (normalised) response rather
-      // than the raw payload we sent.
+      // Only the moods card uses this, to re-baseline savedMoodNames.
       onSuccess?: (saved: Record<string, unknown> | undefined) => void,
     ) => {
       setBusy(card);
@@ -358,13 +293,10 @@ export default function MoodsPanel() {
           saved?: Record<string, unknown>;
         };
         if (!r.ok) {
-          // Only meaningful for a SHAPE-level failure (e.g. a duplicate/
-          // too-long mood name) — the route validates the patch with
-          // moodNames: null before update() ever runs, so it can catch that
-          // without knowing the vocabulary. A membership failure (the
-          // orphan-guard case) is judged only inside update(), which throws a
-          // plain Error with no field path — applyServerFieldErrors is a
-          // no-op there, and the message is surfaced by notify.err instead.
+          // Only carries field paths for a SHAPE-level failure (duplicate or
+          // over-long name), which the route catches with moodNames: null. A
+          // membership failure is judged inside update() and throws a plain
+          // Error with no path, so it surfaces via notify.err below instead.
           applyServerFieldErrors(form, j.fieldErrors);
           throw new Error(j.error || `failed (${r.status})`);
         }
@@ -386,29 +318,19 @@ export default function MoodsPanel() {
     if (!ok) return;
     const raw = getFormValue('moods');
     const payload = raw.map(m => ({ name: m.name, clapPrompt: m.clapPrompt }));
-    // This is the one save that can hit the controller's in-use removal
-    // guard (assertNoOrphanMoods, settings/validate.ts): renaming or
-    // removing a mood that a time-of-day slot, weather slot, festival or show
-    // still points at throws a plain Error — "can't remove that mood — still
-    // used by …" — from INSIDE settings.update(), after the vocabulary is
-    // re-validated but before the maps are re-checked against it (only a
-    // same-patch moodSchedule/weatherMoods save re-validates membership; this
-    // card posts `moods` alone). That's a cross-field, whole-request rule,
-    // not a single input's — there is no field to attach it to, so it
-    // surfaces as a toast via persistPatch's catch, not via
-    // applyServerFieldErrors/setError.
+    // The one save that can hit the controller's in-use removal guard
+    // (assertNoOrphanMoods): renaming or removing a mood a time-of-day slot,
+    // weather slot, festival or show still points at. It's a whole-request
+    // rule with no field to attach to, so it surfaces as a toast.
     await persistPatch(
       'moods',
       'moods',
       { moods: payload },
       raw,
       `${raw.length} mood${raw.length === 1 ? '' : 's'} saved`,
-      // The only place savedMoodNames advances — see the comment above its
-      // declaration. Prefer the server's own normalised names (settings.ts
-      // runs every mood id through settingsNormalizeMoodName) over the raw
-      // payload, so a not-yet-lowercased/dashed id typed by the operator
-      // doesn't leak into the Moments dropdowns as a name the server would
-      // never actually store that way.
+      // The only place savedMoodNames advances. Prefer the server's own
+      // normalised names over the raw payload, so an id the operator typed
+      // un-normalised doesn't leak into the Moments dropdowns.
       saved => {
         const savedMoods = Array.isArray(saved?.moods) ? (saved.moods as MoodEntry[]) : payload;
         setSavedMoodNames(savedMoods.map(m => m.name));
@@ -435,28 +357,15 @@ export default function MoodsPanel() {
     if (!ok) return;
     const raw = getFormValue('corrections');
     const effective = raw.map(c => ({ from: c.from.trim(), to: c.to.trim() })).filter(c => c.from);
-    // nextValue is the RAW value (blank scratch rows included) so the dirty
-    // comparison stays structural (current === new default exactly); the
-    // POSTED payload is the filtered one. A lingering blank row (added but
-    // never filled in) therefore still reads as "dirty" after a save — a
-    // minor, pre-existing quirk (the old state-diff version had the same
-    // shape: dirtiness compared the FILTERED value, so a blank row was
-    // invisible to it too) — harmless: re-saving just resends the same
-    // effective payload.
+    // The new default is the RAW value (blank scratch rows included) so the
+    // dirty comparison stays structural; only the POSTED payload is filtered.
     await persistPatch('corrections', 'corrections', { tts: { corrections: effective } }, raw, 'Speech corrections saved');
   };
 
-  // Per-card Save gate. Not `form.formState.isValid` — that's the WHOLE
-  // form's validity (zodResolver parses the combined schema as one object on
-  // every change), so an invalid vocab-tab row would also disable the
-  // moments/speech Save buttons despite those cards being independently fine.
-  // Deferred /settings section work inherits this shape: one form per
-  // section, one Save per card within it, each card gated on ITS OWN slice
-  // of formState.errors/dirtyFields rather than the form-wide flags. Note
-  // this direct-index lookup (`errors[key]`) only generalises as-is for
-  // TOP-LEVEL keys, which is all four cards here are — a card keyed on a
-  // NESTED settings path (e.g. a future `llm.baseUrl` card) will need a
-  // `get(errors, path)`-style accessor instead of a bare index.
+  // Per-card Save gate, not `form.formState.isValid` — that's the whole form's
+  // validity, so an invalid vocab row would disable the moments/speech Save
+  // buttons too. The bare index only works for TOP-LEVEL keys; a card keyed on
+  // a nested path would need a `get(errors, path)` accessor.
   const cardState = (key: keyof MoodsFormValues) => {
     const errors = form.formState.errors as Record<string, unknown>;
     const dirty = form.formState.dirtyFields as Record<string, unknown>;
@@ -550,13 +459,8 @@ export default function MoodsPanel() {
                 disabled={moodFields.length >= MOODS_LIMIT}
                 onClick={() => {
                   appendMood({ name: '', clapPrompt: '' });
-                  // formState.errors is populated per-field, lazily — a
-                  // freshly appended row carries no error until touched,
-                  // even though the Save button's `moodsCard.invalid` gate
-                  // reads that same errors map. Without this, "Save
-                  // vocabulary" enables on a blank row and the click just
-                  // silently no-ops against form.trigger('moods') inside
-                  // saveMoods. Force the refresh here instead.
+                  // errors are populated lazily, so an untouched blank row
+                  // would leave the Save button enabled and its click a no-op.
                   void form.trigger('moods');
                 }}
               >

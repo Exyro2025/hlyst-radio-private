@@ -6,7 +6,7 @@ import {
 } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { notify, errorMessage } from '../../../lib/notify';
-import type { PlaylistSummary } from '../LibraryPlaylistsTab';
+import type { PlaylistSummary } from './types';
 import type { Coverage, TaggerState } from '../LibraryTaggingPanel';
 import {
   applyBlockMarks, applyLikeChange, applyTagEvent, libraryKeys, rowsOf,
@@ -44,8 +44,7 @@ export interface LibraryShared {
   reloadCoverage: () => Promise<void>;
   tagger: TaggerState | null;
 
-  // Re-stamp blockedBy across every cached list. Signature unchanged from the
-  // registry era — every call site is untouched.
+  // Re-stamp blockedBy across every cached list.
   restampBlockMarks: () => Promise<void>;
 
   likeIndex: LikeIndex;

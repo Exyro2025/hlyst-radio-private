@@ -56,8 +56,6 @@ export function useUntaggedTracks(enabled: boolean) {
   return {
     rows,
     loading: q.isFetching,
-    // Replaces the raw `cursor` the hand-rolled version returned — the only
-    // thing TracksTab did with it was test it for truthiness.
     hasMore: !!q.hasNextPage,
     loadMore: () => { void q.fetchNextPage(); },
   };
