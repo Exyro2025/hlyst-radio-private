@@ -1,10 +1,10 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import { useEffect } from 'react';
 import { ListMusic, Telescope, ArrowRight } from 'lucide-react';
 import { useAdminAuth } from '../../lib/adminAuth';
+import AdminQueryProvider from './AdminQueryProvider';
 import TaggingPanel from './LibraryTaggingPanel';
-import type { Coverage } from './LibraryTaggingPanel';
 import { LibraryProvider, useLibrary } from './library/LibraryContext';
 import { useLibraryUrlState } from './library/useLibraryUrlState';
 import { useTaggerControls } from './library/useTaggerControls';
@@ -16,31 +16,26 @@ import BlockedTabContainer from './library/tabs/BlockedTabContainer';
 import { Tabs } from './library/Tabs';
 import { AddToPlaylistBar } from './library/AddToPlaylistBar';
 
-// Owns the ONE useAdminAuth instance for the page and the coverage snapshot
-// the provider hands to every tab. Split from the body purely so the body can
-// consume its own provider — useAdminAuth is a per-instance hook, and a second
-// caller inside a tab would race a second hydration (lib/adminAuth.ts:80).
+// The QueryClient is mounted here rather than in AdminShell: this PR converts
+// the Library page only, and a provider in the shell would put every other
+// panel's future conversion behind this PR's review. Hoisting it is a two-line
+// move when the second panel converts.
 export default function LibraryPanel() {
-  const { adminFetch, needsAuth, hydrated } = useAdminAuth();
-  const ready = hydrated && !needsAuth;
-  const [coverage, setCoverage] = useState<Coverage | null>(null);
-
-  const loadCoverage = useCallback(async () => {
-    if (!ready) return;
-    try {
-      const r = await adminFetch('/library/coverage');
-      if (!r.ok) return;
-      setCoverage((await r.json()) as Coverage);
-    } catch { /* transient */ }
-  }, [adminFetch, ready]);
-
   return (
-    <LibraryProvider
-      adminFetch={adminFetch}
-      ready={ready}
-      coverage={coverage}
-      reloadCoverage={loadCoverage}
-    >
+    <AdminQueryProvider>
+      <LibraryPanelInner />
+    </AdminQueryProvider>
+  );
+}
+
+// Owns the ONE useAdminAuth instance for the page. Split from the body purely
+// so the body can consume its own provider — useAdminAuth is a per-instance
+// hook, and a second caller inside a tab would race a second hydration
+// (lib/adminAuth.ts:80).
+function LibraryPanelInner() {
+  const { adminFetch, needsAuth, hydrated } = useAdminAuth();
+  return (
+    <LibraryProvider adminFetch={adminFetch} ready={hydrated && !needsAuth}>
       <LibraryBody />
     </LibraryProvider>
   );

@@ -122,7 +122,7 @@ export default function TracksTab({
         </div>
       )}
 
-      {trackMode === 'needs' && untagged.cursor && (
+      {trackMode === 'needs' && untagged.hasMore && (
         <div className="flex justify-center">
           <Btn onClick={untagged.loadMore} disabled={untagged.loading}>
             {untagged.loading ? 'Loading…' : 'Load more'}

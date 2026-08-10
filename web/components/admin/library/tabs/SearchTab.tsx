@@ -1,17 +1,20 @@
 'use client';
 
 import {
-  useCallback, useEffect, useRef, useState,
+  useEffect, useMemo, useRef, useState,
   type ChangeEvent, type FormEvent,
 } from 'react';
+import { useInfiniteQuery } from '@tanstack/react-query';
 import { Search } from 'lucide-react';
-import { notify, errorMessage } from '../../../../lib/notify';
 import { InputGroup, InputGroupAddon, InputGroupInput } from '../../../ui/input-group';
 import { Card, Btn, Seg } from '../../ui';
 import { RowsTable } from '../RowsTable';
-import { applyMarks, patchTaggedRows, useLibrary } from '../LibraryContext';
+import { useLibrary } from '../LibraryContext';
+import { libraryKeys, useQueryErrorToast } from '../queries';
 import type { SearchMode, Track } from '../types';
 import { SEARCH_PAGE } from '../types';
+
+interface SearchPage { rows: Track[]; hasMore: boolean }
 
 export interface SearchTabProps {
   searchQuery: string; setSearchQuery: (s: string) => void;
@@ -24,83 +27,67 @@ export interface SearchTabProps {
 export default function SearchTab({
   searchQuery, setSearchQuery, searchMode, setSearchMode, urlRestored,
 }: SearchTabProps) {
-  const { adminFetch, ready, coverage, registerRowSource } = useLibrary();
+  const { adminFetch, ready, coverage } = useLibrary();
 
-  const [searchResults, setSearchResults] = useState<Track[] | null>(null);
-  const [searching, setSearching] = useState(false);
-  // Library-mode paging: a full page from /dj/search means more may exist.
-  const [searchHasMore, setSearchHasMore] = useState(false);
-  const [searchingMore, setSearchingMore] = useState(false);
-  // Load more must page the search that produced searchResults, not whatever is
-  // currently typed in the (maybe edited) input.
-  const lastSearchRef = useRef<{ q: string; mode: SearchMode } | null>(null);
+  // Carries the same rationale lastSearchRef did: Load more must page the
+  // search that produced the rows, not whatever is currently typed in the
+  // (maybe edited) input.
+  const [submitted, setSubmitted] = useState<{ q: string; mode: SearchMode } | null>(null);
 
-  // 'library' pages Navidrome metadata search by offset; 'sound' is a one-shot
-  // CLAP search with no paging (fixed KNN).
-  const executeSearch = useCallback(async (text: string, mode: SearchMode, offset: number) => {
-    if (!text || !ready) return;
-    const append = offset > 0;
-    if (append) setSearchingMore(true);
-    else setSearching(true);
-    try {
-      let rows: Track[] = [];
-      let more = false;
+  // Offset paging, not a cursor: /dj/search takes an offset and reports hasMore.
+  // 'sound' mode is a fixed-K CLAP search with no paging at all, so its
+  // getNextPageParam always returns undefined.
+  const searchQ = useInfiniteQuery<SearchPage>({
+    queryKey: libraryKeys.search(submitted?.q ?? '', submitted?.mode ?? 'library'),
+    enabled: ready && !!submitted?.q,
+    initialPageParam: 0,
+    queryFn: async ({ pageParam }) => {
+      // `enabled` already gates on submitted?.q, so this is unreachable — but
+      // the queryFn's own types don't know that.
+      if (!submitted?.q) return { rows: [], hasMore: false };
+      const { q: text, mode } = submitted;
       if (mode === 'sound') {
         const r = await adminFetch(`/library/search-sound?q=${encodeURIComponent(text)}&limit=${SEARCH_PAGE}`);
         const j = await r.json().catch(() => ({})) as { results?: Track[]; error?: string };
         if (!r.ok) throw new Error(j.error || `sound search failed (${r.status})`);
-        rows = j.results || [];
-      } else {
-        const r = await adminFetch(`/dj/search?q=${encodeURIComponent(text)}&limit=${SEARCH_PAGE}&offset=${offset}`);
-        const j = await r.json().catch(() => ({})) as { results?: Track[]; hasMore?: boolean; error?: string };
-        if (!r.ok) throw new Error(j.error || `search failed (${r.status})`);
-        rows = j.results || [];
-        // Absent on an old controller (fixed 12 rows) → no Load more, as before.
-        more = !!j.hasMore;
+        return { rows: j.results || [], hasMore: false };
       }
-      setSearchResults(prev => (append ? [...(prev || []), ...rows] : rows));
-      setSearchHasMore(more);
-      lastSearchRef.current = { q: text, mode };
-    } catch (err) {
-      notify.err(errorMessage(err));
-      if (!append) { setSearchResults([]); setSearchHasMore(false); }
-    } finally {
-      if (append) setSearchingMore(false);
-      else setSearching(false);
-    }
-  }, [adminFetch, ready]);
+      const r = await adminFetch(
+        `/dj/search?q=${encodeURIComponent(text)}&limit=${SEARCH_PAGE}&offset=${pageParam as number}`);
+      const j = await r.json().catch(() => ({})) as
+        { results?: Track[]; hasMore?: boolean; error?: string };
+      if (!r.ok) throw new Error(j.error || `search failed (${r.status})`);
+      // Absent on an old controller (fixed 12 rows) → no Load more, as before.
+      return { rows: j.results || [], hasMore: !!j.hasMore };
+    },
+    getNextPageParam: (last, all) =>
+      (last.hasMore ? all.reduce((n, p) => n + p.rows.length, 0) : undefined),
+  });
+  useQueryErrorToast(searchQ.error, true);
+
+  const rows = useMemo(
+    () => searchQ.data?.pages.flatMap(p => p.rows) ?? null,
+    [searchQ.data],
+  );
+  // isFetching covers the next page too; the Search button and the table
+  // spinner are about the FIRST page, which is what `searching` tracked.
+  const searching = searchQ.isFetching && !searchQ.isFetchingNextPage;
 
   const runSearch = (e?: FormEvent<HTMLFormElement>) => {
     e?.preventDefault();
-    executeSearch(searchQuery.trim(), searchMode, 0);
-  };
-
-  const loadMoreSearch = () => {
-    const last = lastSearchRef.current;
-    if (last) executeSearch(last.q, last.mode, searchResults?.length || 0);
+    const text = searchQuery.trim();
+    if (text) setSubmitted({ q: text, mode: searchMode });
   };
 
   // Runs once per mount, for a deep link (?tab=search&sq=…) and — because this
-  // component now unmounts with the tab, taking its results with it — on a
-  // return to Search with a query still in the box. Before the split the
-  // results survived the tab switch and this fired only for the deep link.
+  // component unmounts with the tab — on a return to Search with a query still
+  // in the box. Keep the one-shot ref: remounting must not re-fire it.
   const autoSearchedRef = useRef(false);
   useEffect(() => {
     if (!ready || !urlRestored || autoSearchedRef.current) return;
     autoSearchedRef.current = true;
-    if (searchQuery.trim()) executeSearch(searchQuery.trim(), searchMode, 0);
-  }, [ready, urlRestored, searchQuery, searchMode, executeSearch]);
-
-  const rowsRef = useRef(searchResults);
-  rowsRef.current = searchResults;
-  useEffect(() => registerRowSource('search', {
-    getRows: () => rowsRef.current || [],
-    applyBlockMarks: marks => setSearchResults(prev => applyMarks(prev, marks)),
-    // Never refetched: that would lose Load-more paging and re-hit Navidrome.
-    onTagged: ev => setSearchResults(prev => patchTaggedRows(prev, ev)),
-    onLikeChanged: () => {},
-    invalidate: () => { setSearchResults(null); setSearchHasMore(false); },
-  }), [registerRowSource]);
+    if (searchQuery.trim()) setSubmitted({ q: searchQuery.trim(), mode: searchMode });
+  }, [ready, urlRestored, searchQuery, searchMode]);
 
   return (
     <>
@@ -117,8 +104,7 @@ export default function SearchTab({
                 ]}
                 onChange={(v: string) => {
                   setSearchMode(v as SearchMode);
-                  setSearchResults(null);
-                  setSearchHasMore(false);
+                  setSubmitted(null);
                 }}
               />
               {searchMode === 'sound' && (
@@ -147,7 +133,7 @@ export default function SearchTab({
             <Btn tone="accent" type="submit" disabled={searching || !searchQuery.trim() || !ready}>
               {searching ? 'Searching…' : 'Search'}
             </Btn>
-            <Btn type="button" onClick={() => { setSearchQuery(''); setSearchResults(null); setSearchHasMore(false); }} disabled={searching}>
+            <Btn type="button" onClick={() => { setSearchQuery(''); setSubmitted(null); }} disabled={searching}>
               Clear
             </Btn>
           </form>
@@ -156,16 +142,16 @@ export default function SearchTab({
 
       <Card
         title="Search results"
-        sub={searchResults ? `${searchResults.length} result${searchResults.length === 1 ? '' : 's'}` : 'enter a query'}
+        sub={rows ? `${rows.length} result${rows.length === 1 ? '' : 's'}` : 'enter a query'}
         bodyClass="!p-0"
       >
-        <RowsTable tab="search" rows={searchResults || []} loading={searching} />
+        <RowsTable tab="search" rows={rows || []} loading={searching} />
       </Card>
 
-      {searchHasMore && (searchResults?.length || 0) > 0 && (
+      {searchQ.hasNextPage && (rows?.length || 0) > 0 && (
         <div className="flex justify-center">
-          <Btn onClick={loadMoreSearch} disabled={searchingMore}>
-            {searchingMore ? 'Loading…' : 'Load more'}
+          <Btn onClick={() => { void searchQ.fetchNextPage(); }} disabled={searchQ.isFetchingNextPage}>
+            {searchQ.isFetchingNextPage ? 'Loading…' : 'Load more'}
           </Btn>
         </div>
       )}
