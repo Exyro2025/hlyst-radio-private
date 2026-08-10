@@ -165,12 +165,11 @@ async function resolveGenre(name) {
 // `ctx` from getFullContext() is fetched once here and threaded through every
 // path, instead of the four separate fetches the inline handler used to do.
 // ---------------------------------------------------------------------------
-// Append the durable debug record once, at a request's terminal state. Reads
-// the trace fields the resolution paths stash on `entry` as they go (path,
-// pickSource, the matcher breakdown, the full picked track + intro script).
-// Best-effort — never let a logging hiccup affect the listener's outcome. Used
-// by both resolveRequest's terminal closures and the crash catch below, so a
-// request that throws mid-resolution still lands in the log.
+// Append the durable debug record once, at a request's terminal state, from the
+// trace fields the resolution paths stash on `entry` as they go. Best-effort —
+// a logging hiccup must never affect the listener's outcome. Called from both
+// resolveRequest's terminal closures and the crash catch below, so a request
+// that throws mid-resolution still lands in the log.
 function recordOutcome(entry) {
   try {
     requestLog.record({
@@ -740,13 +739,13 @@ async function resolveRequest(entry) {
 // synchronously, then returns a request id immediately and resolves in the
 // background. The listener never waits on the LLM.
 //
-// The shared schema (schemas/request.ts — also run pre-flight by the player's
-// request boxes) owns the SHAPE: text present and under the cap, name under
-// its cap. Over-cap text used to be silently sliced to 280 here, which could
-// cut a request mid-thought and have the DJ answer half of it; now it refuses,
-// and the box tells the listener before the network is touched. The guard
-// pipeline below (sanitize → strip → screen) stays route-owned: it repairs
-// rather than refuses, and needs server state the schema can't see.
+// The shared schema (schemas/request.ts, also run pre-flight by the player's
+// request boxes) owns the SHAPE: text present and under the cap, name under its
+// cap. Over-cap text REFUSES rather than being sliced — a silent slice could cut
+// a request mid-thought and have the DJ answer half of it — and the box tells
+// the listener before the network is touched. The guard pipeline below
+// (sanitize → strip → screen) stays route-owned: it repairs rather than refuses,
+// and needs server state the schema can't see.
 // ---------------------------------------------------------------------------
 // validatePublicBody, not validateBody: this is the one LISTENER-facing form,
 // so the 400 carries an unprefixed message plus the success/message keys the

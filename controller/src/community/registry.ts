@@ -100,7 +100,7 @@ export interface CommunityShow {
 
 // Stations are the public directory (a map of listeners' stations) — pass-through
 // JSON, shape-owned by web/lib/stations.ts. We keep them loose here.
-export type CommunityStation = Record<string, unknown> & { slug?: string };
+type CommunityStation = Record<string, unknown> & { slug?: string };
 
 interface Catalog {
   skills: CommunitySkill[];

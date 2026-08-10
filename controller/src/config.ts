@@ -242,19 +242,18 @@ export const config = {
     // both honestly suppliable from the sidecar, with margin. ~300KB of JSON,
     // rewritten once per play — negligible either way.
     recentPlaysMax: 2500,
-    // Count-based hard no-repeat guard: the picker (both pool and agent paths)
-    // never re-airs any of the last N DISTINCT plays. Unlike the time-window
-    // guard (recencyWindowsForLibrary) this is non-relaxable — it survives the
-    // filterPickerCandidates starvation cascade, closing the hole where a
-    // thin/over-visited mood cluster let the cascade drop the recent-track guard
-    // and re-serve a just-played song. Clamped to library size at use
-    // (effectiveNoRepeatWindow) so a small catalogue never fully blocks; 0
-    // disables. Seeds settings.llm.noRepeatWindow — the live, admin-tunable
-    // value; env wins. Listener requests stay exempt (request path is untouched).
-    // Default 250 (was 100): 100 distinct blocked ~6-8h of air — a bubble of
-    // ~300 tracks satisfied it forever. 250 is still auto-scaled DOWN on small
-    // libraries by effectiveNoRepeatWindow's 37.5% ceiling, so only catalogues
-    // that can absorb the memory actually carry it.
+    // Count-based hard no-repeat guard: neither pick path re-airs any of the
+    // last N DISTINCT plays. Unlike the time-window guard this is non-relaxable
+    // — it survives the filterPickerCandidates starvation cascade, closing the
+    // hole where a thin mood cluster let the cascade drop the recent-track guard
+    // and re-serve a just-played song. Clamped to library size at use so a small
+    // catalogue never fully blocks; 0 disables. Seeds the live, admin-tunable
+    // settings.llm.noRepeatWindow (env wins); listener requests stay exempt.
+    //
+    // 250 rather than 100 because 100 distinct blocked only ~6-8h of air, which
+    // a bubble of ~300 tracks satisfied forever. effectiveNoRepeatWindow's 37.5%
+    // ceiling still scales it DOWN on small libraries, so only catalogues that
+    // can absorb the memory carry it.
     noRepeatWindow: parseInt(process.env.NO_REPEAT_WINDOW || '250', 10),
   },
   curiosity: {
