@@ -6,7 +6,7 @@ export default function Prerequisites() {
     <SetupPage
       eyebrow="SETUP · 01"
       title="Have these ready."
-      intro="SUB/WAVE doesn't ship Navidrome or Ollama; it talks to yours. Get them running first if they aren't already, and write down the URLs and credentials. The install wizard asks for them."
+      intro="SUB/WAVE doesn't ship Navidrome or Ollama; it connects to yours. Get them running first if they aren't already, and write down the URLs and credentials. The install wizard asks for all of it."
       current="/setup/prerequisites"
     >
       <section className="bs-section">

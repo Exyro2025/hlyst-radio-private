@@ -41,34 +41,76 @@ resolve_state_dir() {
 log() { echo "[subwave-aio] $*" >&2; }
 
 # ---------------------------------------------------------------------------
-# One-time state bootstrap. Mode 777 because the services run under different
-# uids (icecast2 / liquidsoap / root).
+# Shared state bootstrap — same functions, list and messages as
+# docker/broadcast-entrypoint.sh, which carries the full rationale (#1300 bug
+# 10); scripts/state-bootstrap.test.ts drives both through one table, because
+# them drifting apart is how the bug returns.
+#
+# Nothing here is fatal. This script runs under `set -u` (not -e), so its copy
+# of the old bulk chmod merely printed a raw `chmod:` line naming no cause;
+# the entrypoint's identical block ran under `set -eu` and aborted the
+# container outright.
 # ---------------------------------------------------------------------------
-init_state() {
-	mkdir -p /var/sub-wave \
-	         /var/sub-wave/voice \
-	         /var/sub-wave/voices \
-	         /var/sub-wave/archive \
-	         /var/sub-wave/jingles \
-	         /var/sub-wave/logs \
-	         /var/sub-wave/sessions \
-	         /var/sub-wave/sfx
-	chmod 777 /var/sub-wave \
-	          /var/sub-wave/voice \
-	          /var/sub-wave/voices \
-	          /var/sub-wave/archive \
-	          /var/sub-wave/jingles \
-	          /var/sub-wave/logs \
-	          /var/sub-wave/sessions \
-	          /var/sub-wave/sfx
+state_warn() { log "WARNING $*"; }
 
+# True when `other` can write the dir — see the entrypoint on why the warning
+# keys on this rather than on chmod's exit status.
+state_writable_by_others() {
+	case "$(stat -c %a "$1" 2>/dev/null || echo 0)" in
+		*[2367]) return 0 ;;
+		*) return 1 ;;
+	esac
+}
+
+state_prepare_dir() {
+	local p=$1
+	mkdir -p "$p" 2>/dev/null || true
+	if [ ! -d "$p" ]; then
+		state_warn "state dir $p could not be created — a read-only or unwritable mount; the station boots, but anything writing there will fail"
+		return 0
+	fi
+	chmod 777 "$p" 2>/dev/null || true
+	if [ ! -w "$p" ] || ! state_writable_by_others "$p"; then
+		state_warn "state dir $p is mode $(stat -c %a "$p" 2>/dev/null || echo '?') and chmod could not change it — the controller and analyzer write there as other uids; chown/chmod it on the host"
+	fi
+	return 0
+}
+
+state_prepare_file() {
+	local p=$1
+	local mode=${2:-}
+	touch "$p" 2>/dev/null || true
+	if [ ! -f "$p" ]; then
+		state_warn "state file $p could not be created — a read-only or unwritable mount"
+		return 0
+	fi
+	[ -n "$mode" ] && chmod "$mode" "$p" 2>/dev/null || true
+	return 0
+}
+
+bootstrap_state_dirs() {
+	local root=$1
+	local dir=$2
+	local sub
+	state_prepare_dir "$root"
+	state_prepare_dir "$dir"
+	# stems + transitions are the analyzer's, and the only two dirs worth
+	# relocating to a bigger disk — a bind mount at <state>/stems lands
+	# root-owned 755, which the analyzer cannot write without this chmod.
+	for sub in voice voices archive jingles logs sessions sfx stems transitions; do
+		state_prepare_dir "$dir/$sub"
+	done
 	# Liquidsoap's reload_mode="watch" playlists need the files to exist.
-	touch /var/sub-wave/auto.m3u /var/sub-wave/jingles.m3u
-	chmod 666 /var/sub-wave/auto.m3u /var/sub-wave/jingles.m3u
-
+	state_prepare_file "$dir/auto.m3u" 666
+	state_prepare_file "$dir/jingles.m3u" 666
 	# Keep a co-located Navidrome from scanning the hourly archive mixdowns
 	# in as junk "HH-00" tracks (issue #273).
-	touch /var/sub-wave/archive/.ndignore
+	state_prepare_file "$dir/archive/.ndignore"
+	return 0
+}
+
+init_state() {
+	bootstrap_state_dirs /var/sub-wave /var/sub-wave
 
 	link_liquidsoap_log
 
@@ -91,11 +133,10 @@ init_state() {
 # degraded log. Every branch below must end in a path liquidsoap can open,
 # verified by probe.
 #
-# The original #1196 fix created the link unconditionally and guarded on -L
-# only. If <state>/logs was itself a symlink back at /var/log/liquidsoap (a
-# natural pre-#1196 host-side workaround), the two links closed an ELOOP cycle
-# ("Too many levels of symbolic links") that the guard then never repaired —
-# an unbreakable crash loop the "Restart mixer" button couldn't touch.
+# #1196's original fix linked unconditionally and guarded on -L only. If
+# <state>/logs was itself a symlink back at /var/log/liquidsoap (a natural
+# pre-#1196 host-side workaround), the two closed an ELOOP cycle the guard
+# never repaired — an unbreakable crash loop "Restart mixer" couldn't touch.
 # ---------------------------------------------------------------------------
 link_liquidsoap_log() {
 	local target="$STATE_ROOT/logs"
@@ -219,21 +260,16 @@ warn_if_state_unmounted() {
 }
 
 # ---------------------------------------------------------------------------
-# ANALYZER_HEAVY selects an IMAGE TAG, and it does so by docker-compose variable
-# interpolation (`subwave-analyzer${ANALYZER_HEAVY:+-heavy}` in
-# docker-compose.yml). The all-in-one image has no analyzer service to select:
-# CLAP and Demucs are baked into the venv at build time or they are not, decided
-# entirely by which tag was pulled. So the variable is inert here by
-# construction — not unsupported, unreachable.
+# ANALYZER_HEAVY selects an IMAGE TAG by compose variable interpolation
+# (`subwave-analyzer${ANALYZER_HEAVY:+-heavy}`). The AIO has no analyzer
+# service to select — CLAP and Demucs are baked into the venv at build time or
+# they are not — so the variable is inert here by construction. Operators set
+# it, see no stem-transitions card, and conclude the feature is broken (#1300
+# bug 9); the caveat was documented (docs/unraid.md, the doctor) but nothing
+# said it at the boot right after they set it.
 #
-# Operators set it, see no stem-transitions card appear, and reasonably conclude
-# the feature is broken (#1300 bug 9). The caveat was written down (docs/unraid.md,
-# the doctor) but nothing said it at the moment they were actually looking: the
-# boot right after setting it.
-#
-# Probed rather than read from a baked marker, because torch in the venv IS what
-# makes the heavy tier work — a probe cannot disagree with the thing it describes,
-# a marker can.
+# Probed rather than read from a baked marker: torch in the venv IS what makes
+# the heavy tier work, so a probe cannot disagree with what it describes.
 # ---------------------------------------------------------------------------
 ANALYZER_VENV="${SUBWAVE_ANALYZER_VENV:-/opt/analyzer/venv}"
 
@@ -438,28 +474,8 @@ run_broadcast() {
 
 	# Bootstrap the resolved station dir's subdirs (the root case is covered
 	# by init_state at boot; a non-root station dir needs its own here).
-	mkdir -p "$STATE_DIR" \
-	         "$STATE_DIR/voice" \
-	         "$STATE_DIR/voices" \
-	         "$STATE_DIR/archive" \
-	         "$STATE_DIR/jingles" \
-	         "$STATE_DIR/logs" \
-	         "$STATE_DIR/sessions" \
-	         "$STATE_DIR/sfx"
-	chmod 777 "$STATE_DIR" \
-	          "$STATE_DIR/voice" \
-	          "$STATE_DIR/voices" \
-	          "$STATE_DIR/archive" \
-	          "$STATE_DIR/jingles" \
-	          "$STATE_DIR/logs" \
-	          "$STATE_DIR/sessions" \
-	          "$STATE_DIR/sfx"
-	touch "$STATE_DIR/auto.m3u" "$STATE_DIR/jingles.m3u"
-	chmod 666 "$STATE_DIR/auto.m3u" "$STATE_DIR/jingles.m3u"
-	touch "$STATE_DIR/archive/.ndignore"
+	bootstrap_state_dirs "$STATE_DIR" "$STATE_DIR"
 
-	# Re-render on every pair launch so a flipped listener-auth flag lands
-	# after a restart-mixer (which bounces this pair, not the container).
 	render_icecast
 	log "starting icecast2"
 	sudo -E -u icecast2 icecast2 -n -c "$RENDERED" &
@@ -478,10 +494,8 @@ run_broadcast() {
 
 	log "starting liquidsoap"
 	# TEMPORARY (re-harden later): run liquidsoap as root — same reason as
-	# docker/broadcast-entrypoint.sh (savonet base bump changed the liquidsoap
-	# uid 10000 → 100, making persisted state files unwritable). Restore the
-	# privilege drop once state files are chowned to the new uid
-	# (radio.liq's settings.init.allow_root is set for the same reason).
+	# docker/broadcast-entrypoint.sh (the savonet base bump changed the
+	# liquidsoap uid, making persisted state files unwritable).
 	liquidsoap /etc/liquidsoap/radio.liq &
 	local lq=$!
 

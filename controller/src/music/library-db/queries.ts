@@ -3,7 +3,42 @@
 
 import { SQL_HAS_MOODS, SQL_NO_MOODS, requireDb } from './handle.js';
 import type { EnergyValue, TrackRecord, TrackRow } from './types.js';
-import { rowToTrack } from './rows.js';
+import { rowToTrack, safeParseArray } from './rows.js';
+
+// ---------------------------------------------------------------------------
+// Blocklist-rule match counting (admin Blocked tab)
+// ---------------------------------------------------------------------------
+
+// Every row, projected down to exactly the fields blocklist-rules.ruleMatches
+// reads. Deliberately NOT rowToTrack (which parses the full analysis surface):
+// GET /library/blocklist runs this over the whole library per request to show
+// per-rule match counts, and the slim projection keeps that a one-shot scan.
+export function ruleMatchRows(): Array<{
+  id: string;
+  title: string | null;
+  artist: string | null;
+  album: string | null;
+  genres: string[] | null;
+  genre: string | null;
+  moods: string[] | null;
+  audioMoods: string[] | null;
+  lastfmTags: string[] | null;
+}> {
+  const rows = requireDb()
+    .prepare(`SELECT id, title, artist, album, genres, genre, moods, audio_moods, lastfm_tags FROM tracks`)
+    .all() as Array<Record<string, any>>;
+  return rows.map((r) => ({
+    id: r.id,
+    title: r.title ?? null,
+    artist: r.artist ?? null,
+    album: r.album ?? null,
+    genres: r.genres ? safeParseArray(r.genres) : null,
+    genre: r.genre ?? null,
+    moods: r.moods ? safeParseArray(r.moods) : null,
+    audioMoods: r.audio_moods ? safeParseArray(r.audio_moods) : null,
+    lastfmTags: r.lastfm_tags ? safeParseArray(r.lastfm_tags) : null,
+  }));
+}
 
 // ---------------------------------------------------------------------------
 // Mood-keyed reads (drop-in replacements for the old library.ts in-memory loops)
@@ -140,11 +175,10 @@ export function trackIdsByGenreDecade(): Map<string, string[]> {
 
 // ---------------------------------------------------------------------------
 // Per-genre embedding centroids — the mean text-embedding vector across every
-// tagged+embedded track in each genre. Powers the genre-cloud 2D projection
-// (music/genre-cloud.ts): semantically similar genres land near each other.
-// One streaming SQL join so a multi-thousand-track library stays light on
-// memory — vectors are accumulated into per-genre running sums, never all held
-// at once.
+// tagged+embedded track in each genre, so semantically similar genres land near
+// each other. Consumed by music/genre-suggest.ts. One streaming SQL join keeps a
+// multi-thousand-track library light on memory — vectors accumulate into
+// per-genre running sums rather than all being held at once.
 // ---------------------------------------------------------------------------
 export function genreCentroids(): Array<{ genre: string; count: number; centroid: Float32Array }> {
   // json_each over the multi-genre array: a Hip-Hop + Rap track contributes

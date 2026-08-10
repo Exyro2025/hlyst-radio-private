@@ -32,22 +32,31 @@ export function ManualTagEditor(props: {
   const energyVal = energy === 'none' ? null : energy;
 
   return (
-    <div className="grid gap-3 border-b border-ink bg-[var(--ink-softer)] px-4 py-3">
+    // The editor renders as a SIBLING of .lib-row, not inside it, and its chips
+    // are Pills like any other — so a test has no way to scope to this panel
+    // without a hook of its own.
+    <div data-testid="manual-tag-editor" className="grid gap-3 border-b border-ink bg-[var(--ink-softer)] px-4 py-3">
       <div className="grid gap-1.5">
         <Eyebrow>moods · up to 3</Eyebrow>
         <div className="flex flex-wrap gap-1.5">
           {vocab.length === 0 && <SkeletonText lines={1} />}
           {vocab.map(m => {
             const on = sel.includes(m);
+            // Unpicked chips go unavailable once three are chosen, and every
+            // chip does while a save is in flight. Passed as `disabled` rather
+            // than by dropping onClick: without a handler the Pill falls back
+            // to a Badge <span>, which is neither focusable nor announced as
+            // unavailable — so the cap was invisible to a keyboard user, who
+            // simply found that chips had stopped responding.
+            const unavailable = busy || (!on && sel.length >= 3);
             return (
               <Pill
                 key={m}
                 tone={on ? 'accent' : 'default'}
-                onClick={busy || (!on && sel.length >= 3) ? undefined : () => toggle(m)}
-                className={cn(
-                  (busy || (!on && sel.length >= 3)) && !on && 'opacity-40',
-                  !busy && 'cursor-pointer',
-                )}
+                pressed={on}
+                disabled={unavailable}
+                onClick={() => toggle(m)}
+                className={cn(unavailable && !on && 'opacity-40')}
               >
                 {m}
               </Pill>

@@ -28,7 +28,7 @@ export interface CandidateLike {
   durationSec?: number | null;
 }
 
-export interface CandidateFilterState {
+interface CandidateFilterState {
   recentIds?: Set<string>;
   recentKeys?: Set<string>;
   recentArtists?: Set<string>;
@@ -96,23 +96,21 @@ const JOIN_SPLIT = /\s+(?:&|\+|and)\s+/i;
 //   "Kanye West (feat. Jay-Z)"     → "kanye west"
 //   "Sly & the Family Stone"       → "sly & the family stone"   (unchanged)
 //
-// The `the …` exception on the join is what keeps band names whole: "X & the
-// Y" / "X and the Y" is one act, not two credits, and stripping it would key
-// half the Motown and soul bench onto a first name. Everything else after a
-// join is treated as a second credited act — imperfect on "Hall & Oates"-shaped
-// duos (keyed "hall"), but a wrong key here can only over-match, and every
-// caller reads an over-match as "pick someone else", never as a hard drop.
+// The `the …` exception on the join keeps band names whole: "X & the Y" is one
+// act, not two credits, and stripping it would key half the Motown and soul
+// bench onto a first name. Everything else after a join is a second credited act
+// — imperfect on "Hall & Oates"-shaped duos (keyed "hall"), but a wrong key here
+// can only over-match, and every caller reads an over-match as "pick someone
+// else", never as a hard drop.
 //
-// Only the LEAD is normalised: "Tammi Terrell" and "Marvin Gaye & Tammi
+// Only the LEAD is normalised, so "Tammi Terrell" and "Marvin Gaye & Tammi
 // Terrell" still key apart. Matching every credited act would need the same
-// name-vs-credit judgement on the tail that the `the …` exception exists to
-// dodge, and the guard's whole job is the artist a listener just heard fronting
-// a track.
+// name-vs-credit judgement on the tail that the exception exists to dodge, and
+// the guard's job is the artist a listener just heard fronting a track.
 //
-// NOT a replacement for `artistKey`: that one is an identity key (it feeds
-// `trackKey`, which must stay byte-identical to the `title|artist` keys
-// queue.recentlyPlayed builds from raw tag text). This one is a MATCHING key,
-// for "is this the same act as the one that just played".
+// NOT a replacement for `artistKey`, which is an IDENTITY key feeding
+// `trackKey` and must stay byte-identical to the `title|artist` keys
+// queue.recentlyPlayed builds from raw tag text. This is a MATCHING key.
 export function artistRootKey(song: CandidateLike | string): string {
   const raw = typeof song === 'string' ? song : (song?.artist || '');
   const base = raw.toLowerCase().trim();
@@ -135,15 +133,35 @@ export function trackKey(song: CandidateLike): string {
   return `${(song.title || '').toLowerCase().trim()}|${artistKey(song)}`;
 }
 
-export function recencyWindowsForLibrary(distinctArtists: number | null | undefined): RecencyWindows {
+// Large-library boost on the relaxable windows. The 12h/2h defaults were tuned
+// for small-to-mid libraries; at radio pace (~300-400 plays/day) 12h blocks
+// ~150-200 tracks, which on a 10k-50k catalogue is under 2% — far too little
+// memory to push selection anywhere new. Keys on TRACK COUNT, never distinct
+// artists (a 500-track library easily clears any artist threshold, and
+// doubling its window would over-block it): stepped, so the window only grows
+// where the catalogue can absorb it — even the largest step blocks under ~5%
+// of the library at that pace. The count guard (noRepeatWindow) is the
+// non-relaxable long-memory companion; this stays the relaxable short one.
+function librarySizeBoost(totalTracks: number): number {
+  if (totalTracks >= 20000) return 3;   // 36h track / 6h artist
+  if (totalTracks >= 8000) return 2;    // 24h / 4h
+  if (totalTracks >= 3000) return 1.5;  // 18h / 3h
+  return 1;
+}
+
+export function recencyWindowsForLibrary(
+  distinctArtists: number | null | undefined,
+  totalTracks: number | null | undefined = 0,
+): RecencyWindows {
+  const boost = librarySizeBoost(Math.floor(Number(totalTracks) || 0));
   if (!distinctArtists || distinctArtists <= 0) {
     return {
-      trackHours: DEFAULT_TRACK_RECENCY_HOURS,
-      artistHours: DEFAULT_ARTIST_RECENCY_HOURS,
+      trackHours: DEFAULT_TRACK_RECENCY_HOURS * boost,
+      artistHours: DEFAULT_ARTIST_RECENCY_HOURS * boost,
     };
   }
 
-  const scale = Math.min(1, Math.max(distinctArtists / DIVERSE_LIBRARY_ARTISTS, 1 / 12));
+  const scale = Math.min(1, Math.max(distinctArtists / DIVERSE_LIBRARY_ARTISTS, 1 / 12)) * boost;
   const roundToQuarterHour = (hours: number) => Math.round(hours * 4) / 4;
 
   return {
