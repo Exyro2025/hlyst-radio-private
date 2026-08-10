@@ -86,7 +86,7 @@ import {
 } from './settings/defaults.js';
 import { validateCompatParams } from './settings/compat-params.js';
 import { parseSettingsPatchKey } from './settings/patch-registry.js';
-import { maxTrackSecondsValueSchema } from './schemas/settings.js';
+import { STREAM_BUFFER_SECONDS_BOUNDS, maxTrackSecondsValueSchema } from './schemas/settings.js';
 import { minTrackSeconds, peek, setCache } from './settings/store.js';
 import {
   SKILL_RENAMES,
@@ -419,6 +419,19 @@ export async function load() {
         typeof stored.stream?.oggIcyMetadata === 'boolean'
           ? stored.stream.oggIcyMetadata
           : DEFAULTS.stream.oggIcyMetadata,
+      // Bounded against the SAME constant the save path checks
+      // (schemas/settings.ts streamSchema), so a value update() accepted always
+      // survives a restart. Omitting this line is what made the setting revert
+      // to 22 on every cold load — the mixer handoff file got the string
+      // "undefined" and the entrypoint fell back, while /now-playing advertised
+      // the default to every player.
+      bufferSeconds:
+        typeof stored.stream?.bufferSeconds === 'number' &&
+        Number.isFinite(stored.stream.bufferSeconds) &&
+        stored.stream.bufferSeconds >= STREAM_BUFFER_SECONDS_BOUNDS.min &&
+        stored.stream.bufferSeconds <= STREAM_BUFFER_SECONDS_BOUNDS.max
+          ? Math.round(stored.stream.bufferSeconds)
+          : DEFAULTS.stream.bufferSeconds,
       idleWhenEmpty:
         typeof stored.stream?.idleWhenEmpty === 'boolean'
           ? stored.stream.idleWhenEmpty
@@ -1107,24 +1120,23 @@ export async function update(patch) {
         restart = true;
       }
     }
-    // Listener-side buffer depth (Icecast <burst-size>, in seconds). Deep =
-    // survives a dead zone but sits further behind the live edge; shallow =
-    // tighter sync, likelier to stall. 0 disables burst-on-connect entirely.
-    // Capped at 60s: past that a listener is a full minute behind and
-    // <queue-size> (which must comfortably exceed the burst) gets unreasonable.
+    // Listener-side buffer depth (Icecast <burst-size>, seconds). Deep survives
+    // a dead zone but sits further behind the live edge; shallow syncs tighter
+    // and stalls more. 0 disables burst-on-connect. Capped at 60s: past that a
+    // listener is a full minute behind and <queue-size> (which must comfortably
+    // exceed the burst) gets unreasonable.
     //
-    // restart=true is load-bearing here and NOT just a mixer concern: burst
-    // lives in icecast.xml, which is rendered once by the broadcast entrypoint
-    // at container boot. It applies anyway because liquidsoap and icecast
-    // share a container and the entrypoint `wait -n`s on both — the telnet
-    // restart shuts liquidsoap down, the container bounces, and the entrypoint
-    // re-renders the template on the way back up.
-    // NOTE cur.stream.bufferSeconds is `undefined` on any cold-loaded process —
-    // load()'s stream block never composes it (the documented "three edits"
-    // trap). That makes this comparison always true, so a bufferSeconds patch
-    // always restarts. Preserved deliberately: fixing load() would turn an
-    // unconditional restart into a conditional one, which is a behaviour change
-    // and belongs in its own PR.
+    // restart=true is not just a mixer concern — burst lives in icecast.xml,
+    // rendered once by the broadcast entrypoint at container boot. It applies
+    // anyway because liquidsoap and icecast share a container the entrypoint
+    // `wait -n`s on: the telnet restart shuts liquidsoap down, the container
+    // bounces, and the template re-renders on the way back up.
+    //
+    // Change-gated against `cur` like the encoder fields above, which needs
+    // load() to actually compose bufferSeconds — while it didn't, `cur` read
+    // `undefined` on every cold-loaded process, so this fired unconditionally
+    // AND the operator's value was lost on restart. Kept out of the loop above
+    // because it is not an encoder field and restarts for a different reason.
     if (st.bufferSeconds !== undefined && st.bufferSeconds !== cur.stream.bufferSeconds) {
       next.stream.bufferSeconds = st.bufferSeconds as number;
       restart = true;
