@@ -191,11 +191,18 @@ app.listen(config.server.port, async () => {
   // env_file) always win — secrets.env is the persistence layer for keys the
   // operator typed into the first-run wizard.
   try {
-    const { loaded, skipped } = await loadSecretsIntoEnv();
+    const { loaded, skipped, warnings } = await loadSecretsIntoEnv();
     if (loaded.length || skipped.length) {
       console.log(
         `[secrets] state/secrets.env: loaded=${loaded.length} skipped(env-already-set)=${skipped.length}`,
       );
+    }
+    // A hand edit this file couldn't read the way the operator meant it. Both
+    // surfaces, for the same reason the env warnings take both: the mistake
+    // otherwise presents only as a provider 401, which points nowhere near here.
+    for (const w of warnings) {
+      console.warn(`[secrets] ${w}`);
+      queue.log('warn', `[secrets] ${w}`);
     }
   } catch (err: any) {
     console.error('[secrets] load failed:', err.message);

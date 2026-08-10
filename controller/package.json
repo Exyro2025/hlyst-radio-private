@@ -33,6 +33,7 @@
     "ai": "^7.0.48",
     "ai-sdk-ollama": "^4.1.0",
     "better-sqlite3": "^11.10.0",
+    "dotenv": "^17.4.2",
     "express": "^4.21.0",
     "fast-xml-parser": "^5.10.1",
     "helmet": "^8.3.0",
