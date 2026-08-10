@@ -67,6 +67,7 @@ import {
   formatAgo,
   knownDurationSec,
   linkClockDrifted,
+  nextTransitionLabel,
   pickLeadSec,
   pickLinkInterval,
   playAlreadyRecorded,
@@ -2302,6 +2303,10 @@ class Queue {
       current: this.current ? mapItem(this.current) : null,
       upcoming: this.upcoming.map(mapItem),
       history: this.history.map(mapItem),
+      // One operator-facing answer for the imminent seam. Effect flags live
+      // on opposite sides of the pair, so derive this here rather than making
+      // the dashboard reverse-engineer mixer precedence.
+      nextTransition: nextTransitionLabel(this.current, this.upcoming[0]),
       djLog: this.djLog.slice(0, 50),
       autoPick: this.autoPick,
       autoLink: this.autoLink,
