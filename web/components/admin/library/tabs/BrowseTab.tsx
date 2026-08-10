@@ -1,14 +1,15 @@
 'use client';
 
-import { useCallback, useEffect, useRef, useState, type Dispatch, type SetStateAction } from 'react';
+import { useEffect, useState, type Dispatch, type SetStateAction } from 'react';
 import { X } from 'lucide-react';
-import { notify, errorMessage } from '../../../../lib/notify';
 import { Card, Btn } from '../../ui';
 import { num } from '../../LibraryTaggingPanel';
 import type { LibraryStatsLite } from '../../LibraryTaggingPanel';
 import { BrowseFilters } from '../BrowseFilters';
 import { RowsTable } from '../RowsTable';
-import { applyMarks, useLibrary } from '../LibraryContext';
+import { useLibrary } from '../LibraryContext';
+import { libraryKeys, type BrowseKeyFilters } from '../queries';
+import { useAdminQuery } from '../useAdminQuery';
 import type { BrowseResponse, Energy, Sort, Vocal } from '../types';
 import { PAGE_SIZE } from '../types';
 
@@ -32,23 +33,30 @@ export default function BrowseTab({
   moods, setMoods, energy, setEnergy, vocal, setVocal, genre, setGenre,
   yearFrom, setYearFrom, yearTo, setYearTo, q, setQ, sort, setSort, libStats,
 }: BrowseTabProps) {
-  const { adminFetch, ready, registerRowSource, seedVocab } = useLibrary();
+  const { seedVocab } = useLibrary();
 
-  const [browse, setBrowse] = useState<BrowseResponse | null>(null);
-  const [browseLoading, setBrowseLoading] = useState(false);
   const [page, setPage] = useState(0);
-  const [genreList, setGenreList] = useState<{ value: string; songCount: number }[]>([]);
 
-  // Each run aborts the previous in-flight request: without it a slow earlier
-  // response can land after a faster later one and show stale-filter results.
-  const browseAbortRef = useRef<AbortController | null>(null);
-  const runBrowse = useCallback(async () => {
-    if (!ready) return;
-    browseAbortRef.current?.abort();
-    const ac = new AbortController();
-    browseAbortRef.current = ac;
-    setBrowseLoading(true);
-    try {
+  // Debounce only the free-text box. The old code debounced the whole request
+  // by 250ms, but mood chips, sort and the year fields all change one step at a
+  // time, and delaying those just makes the UI feel laggy — so the delay moves
+  // onto the key INPUT instead of the query.
+  const [debouncedQ, setDebouncedQ] = useState(q);
+  useEffect(() => {
+    const t = setTimeout(() => setDebouncedQ(q), 250);
+    return () => clearTimeout(t);
+  }, [q]);
+
+  const filters: BrowseKeyFilters = {
+    moods, energy, vocal, genre, yearFrom, yearTo, q: debouncedQ.trim(), sort, page,
+  };
+
+  // No AbortController any more, and not because the race was handled: the
+  // response is keyed to the filters that asked for it, so a slow earlier
+  // request cannot overwrite a faster later one. The race is structurally gone.
+  const browseQuery = useAdminQuery<BrowseResponse>({
+    key: libraryKeys.browse(filters),
+    path: () => {
       const params = new URLSearchParams();
       if (moods.length) params.set('moods', moods.join(','));
       if (energy !== 'any') params.set('energy', energy);
@@ -56,65 +64,33 @@ export default function BrowseTab({
       if (genre) params.set('genre', genre);
       if (yearFrom) params.set('yearFrom', yearFrom);
       if (yearTo) params.set('yearTo', yearTo);
-      if (q.trim()) params.set('q', q.trim());
+      if (debouncedQ.trim()) params.set('q', debouncedQ.trim());
       params.set('sort', sort);
       params.set('limit', String(PAGE_SIZE));
       params.set('offset', String(page * PAGE_SIZE));
-      const r = await adminFetch(`/library/browse?${params}`, { signal: ac.signal });
-      if (!r.ok) throw new Error(`browse failed (${r.status})`);
-      setBrowse((await r.json()) as BrowseResponse);
-    } catch (err) {
-      // Superseded by a newer run — that run owns the table and the spinner.
-      if (ac.signal.aborted) return;
-      notify.err(errorMessage(err));
-      setBrowse(null);
-    } finally {
-      if (!ac.signal.aborted) setBrowseLoading(false);
-    }
-  }, [adminFetch, ready, moods, energy, vocal, genre, yearFrom, yearTo, q, sort, page]);
+      return `/library/browse?${params}`;
+    },
+    toastOnError: true,
+  });
+  const browse = browseQuery.data ?? null;
 
-  // Debounced so typing in the free-text box doesn't fire per keystroke. The
-  // tab guard is gone — this component only exists while Browse is open.
-  useEffect(() => {
-    if (!ready) return;
-    const t = setTimeout(runBrowse, 250);
-    return () => clearTimeout(t);
-  }, [ready, runBrowse]);
+  const genresQuery = useAdminQuery<{ value: string; songCount: number }[]>({
+    key: libraryKeys.genres(),
+    path: '/library/genres',
+    // Genres change only when the library is re-scanned. The old code fetched
+    // once per mount and never again (`if (genreList.length) return`).
+    staleTime: Infinity,
+    parse: raw => (raw as { genres?: { value: string; songCount: number }[] }).genres || [],
+  });
+  const genreList = genresQuery.data ?? [];
 
-  useEffect(() => {
-    if (!ready || genreList.length) return;
-    let cancelled = false;
-    (async () => {
-      try {
-        const r = await adminFetch('/library/genres');
-        if (!r.ok) return;
-        const j = await r.json() as { genres: { value: string; songCount: number }[] };
-        if (!cancelled) setGenreList(j.genres || []);
-      } catch { /* skip */ }
-    })();
-    return () => { cancelled = true; };
-  }, [ready, adminFetch, genreList.length]);
-
-  useEffect(() => { setPage(0); }, [moods, energy, vocal, genre, yearFrom, yearTo, q, sort]);
+  useEffect(() => { setPage(0); }, [moods, energy, vocal, genre, yearFrom, yearTo, debouncedQ, sort]);
 
   // The vocab only rides along on the browse response, so other tabs fetch a
   // one-row browse rather than hardcoding SHOW_MOODS into the bundle.
   useEffect(() => {
     if (browse?.moodVocab?.length) seedVocab(browse.moodVocab);
   }, [browse, seedVocab]);
-
-  const browseRef = useRef(browse);
-  browseRef.current = browse;
-  useEffect(() => registerRowSource('browse', {
-    getRows: () => browseRef.current?.rows || [],
-    applyBlockMarks: marks => setBrowse(prev => (prev
-      ? { ...prev, rows: applyMarks(prev.rows, marks) ?? prev.rows } : prev)),
-    // Browse REFETCHES rather than patching: it is the one list whose
-    // membership can change from a tag edit (a mood filter may stop matching).
-    onTagged: () => { void runBrowse(); },
-    onLikeChanged: () => {},
-    invalidate: () => { setBrowse(null); void runBrowse(); },
-  }), [registerRowSource, runBrowse]);
 
   const stats = browse?.stats;
   const moodCounts = stats?.byMood || libStats?.byMood || {};
@@ -179,7 +155,10 @@ export default function BrowseTab({
         sub={browse ? `${num(browse.total)} match${browse.total === 1 ? '' : 'es'}` : ''}
         bodyClass="!p-0"
       >
-        <RowsTable tab="browse" rows={browse?.rows || []} loading={browseLoading} />
+        {/* isFetching, not isLoading: isLoading is false on a cached-then-
+            revalidating page, which would drop the spinner during a page
+            change. isFetching is what browseLoading tracked. */}
+        <RowsTable tab="browse" rows={browse?.rows || []} loading={browseQuery.isFetching} />
       </Card>
 
       {browse && browse.total > PAGE_SIZE && (
