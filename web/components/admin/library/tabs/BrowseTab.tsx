@@ -37,10 +37,8 @@ export default function BrowseTab({
 
   const [page, setPage] = useState(0);
 
-  // Debounce only the free-text box. The old code debounced the whole request
-  // by 250ms, but mood chips, sort and the year fields all change one step at a
-  // time, and delaying those just makes the UI feel laggy — so the delay moves
-  // onto the key INPUT instead of the query.
+  // Debounce the free-text box only. Mood chips, sort and the year fields all
+  // change one step at a time, so delaying the whole request just feels laggy.
   const [debouncedQ, setDebouncedQ] = useState(q);
   useEffect(() => {
     const t = setTimeout(() => setDebouncedQ(q), 250);
@@ -77,8 +75,7 @@ export default function BrowseTab({
   const genresQuery = useAdminQuery<{ value: string; songCount: number }[]>({
     key: libraryKeys.genres(),
     path: '/library/genres',
-    // Genres change only when the library is re-scanned. The old code fetched
-    // once per mount and never again (`if (genreList.length) return`).
+    // Genres change only when the library is re-scanned.
     staleTime: Infinity,
     parse: raw => (raw as { genres?: { value: string; songCount: number }[] }).genres || [],
   });

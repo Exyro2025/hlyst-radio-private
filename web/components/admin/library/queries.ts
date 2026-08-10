@@ -18,9 +18,8 @@ export interface BrowseKeyFilters {
 // Keys nest so a filter matches a family. ['library','rows'] is the one that
 // matters most: every cached list of Tracks sits under it, which is how a block
 // re-stamp or a tag edit reaches all of them in one setQueriesData call without
-// knowing which tabs are mounted. That is exactly what the RowSource registry
-// did by hand — do not add a list here that holds anything but Tracks (history
-// rows are PlayEntry, blocklist rows are BlockEntry; both sit outside).
+// knowing which tabs are mounted. Never file a list here that holds anything but
+// Tracks (history rows are PlayEntry, blocklist rows are BlockEntry).
 export const libraryKeys = {
   all: ['library'] as const,
   rows: ['library', 'rows'] as const,
@@ -42,14 +41,12 @@ export const libraryKeys = {
 };
 
 /**
- * Toasts a query error ONCE per distinct error, for the queries whose
- * hand-rolled predecessors called notify.err.
+ * Toasts a query error once per distinct error.
  *
  * v5 removed useQuery's onError, and the toast-vs-silence split on this page is
  * deliberate and documented per call site — the polls that swallow failures
- * (coverage, tagger, settings, likeIndex, each commented "transient" or "never
- * toast this") pass enabled=false and keep their silence. A global QueryCache
- * onError would toast all of them.
+ * (coverage, tagger, settings, likeIndex) pass enabled=false. A global
+ * QueryCache onError would toast all of them.
  */
 export function useQueryErrorToast(error: unknown, enabled: boolean): void {
   const lastRef = useRef<string | null>(null);
@@ -89,8 +86,8 @@ export function rowsOf(data: unknown): Track[] {
 
 /**
  * Patches every cached list of Tracks — plain, offset-paged and infinite alike —
- * in one call. This is the whole reason the RowSource registry existed; the
- * cache already knows which lists are loaded, so nothing has to register.
+ * in one call. The cache already knows which lists are loaded, so nothing has to
+ * register itself.
  */
 export function patchAllRows(qc: QueryClient, fn: (t: Track) => Track) {
   qc.setQueriesData<unknown>({ queryKey: libraryKeys.rows }, (prev: unknown) => {
@@ -148,12 +145,10 @@ export function applyTagEvent(qc: QueryClient, ev: TagEvent) {
 /**
  * A song's like state settled server-side; `next` null means none remain.
  *
- * Deliberately does NOT stamp likeCount/likedByOperator across every list — the
- * old RowSource made onLikeChanged a no-op everywhere except Liked, and that
- * was right: TrackTable's likeStateFor prefers a row's INLINE like fields over
- * the shared index, so stamping them onto a browse row would pin that row to a
- * snapshot and stop it tracking later index refreshes. Only Liked carries them
- * inline to begin with, and only Liked drops a row at zero.
+ * Deliberately touches only the Liked list. TrackTable's likeStateFor prefers a
+ * row's INLINE like fields over the shared index, so stamping them onto a browse
+ * row would pin it to a snapshot and stop it tracking later index refreshes.
+ * Only Liked carries them inline, and only Liked drops a row at zero.
  */
 export function applyLikeChange(
   qc: QueryClient, songId: string, next: { count: number; operator: boolean } | null,

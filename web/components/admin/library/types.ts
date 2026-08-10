@@ -168,3 +168,14 @@ export const SEARCH_PAGE = 30;
 export const TABS: Tab[] = ['tracks', 'browse', 'search', 'history', 'blocked'];
 export const SORTS: Sort[] = ['artist', 'title', 'year', 'taggedAt', 'bpm', 'loudness', 'pace'];
 
+
+// One row of GET /dj/playlists — the Navidrome playlist index the Add-to-playlist
+// bar offers.
+export interface PlaylistSummary {
+  id: string;
+  name: string;
+  songCount: number;
+  durationSec: number;
+  owner: string;
+  public: boolean;
+}
