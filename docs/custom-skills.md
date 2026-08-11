@@ -138,10 +138,12 @@ entirely, the same posture as pressing **Run now** in the admin UI. Leave it
 blank (the default) and the skill only airs through the normal cooldown /
 frequency-gated segment tick.
 
-The expression runs in the station's own timezone (Settings → Station). A
-skill can carry both a `cooldown:` and a `cron:` — the cooldown still applies
-to any *autonomous* firing from the segment tick, while the cron timer ignores
-it. An invalid expression is logged and skipped rather than refused at save
+The expression runs in the station's own timezone (Settings → Station), so a
+`cron: 0 8 * * *` fires at 8am local time wherever the station is configured to
+be, not the container's UTC clock. A skill can carry both a `cooldown:` and a
+`cron:` — the cooldown still applies to any *autonomous* firing from the
+segment tick, while the cron timer ignores it. An invalid expression is logged
+and skipped rather than refused at save
 time, since the deeper per-field range validation only runs when the scheduler
 registers the task.
 
