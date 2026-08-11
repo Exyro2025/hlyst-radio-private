@@ -79,7 +79,7 @@ const ENTRIES: PreviewEntry[] = [
 ];
 
 // "Türkçe" → "turkce": lowercase, strip combining marks, collapse whitespace.
-export function normalizeLanguage(raw: string): string {
+function normalizeLanguage(raw: string): string {
   return raw
     .normalize('NFD')
     .replace(/[\u0300-\u036f]/g, '')

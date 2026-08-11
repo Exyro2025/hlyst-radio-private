@@ -31,7 +31,6 @@ import {
   SETTINGS_MOOD_PROMPT_MAX,
 } from '@/lib/schemas.generated';
 import { VoicePreviewButton } from './tts/VoicePreviewButton';
-import { LanguageSelect } from './LanguageSelect';
 
 interface MoodEntry {
   name: string;
@@ -164,8 +163,6 @@ export default function MoodsPanel() {
   // resolved from settings.tts on load, never edited here.
   const [previewVoice, setPreviewVoice] = useState<TestVoiceDefaults>({ engine: 'piper', voice: '' });
   const [testText, setTestText] = useState('');
-  const [testLanguage, setTestLanguage] = useState('');
-  const [speechLanguages, setSpeechLanguages] = useState<string[]>([]);
 
   // The PERSISTED mood list, deliberately not the live Vocabulary tab value:
   // it is both the vocabulary the schedule/weather cards validate against and
@@ -241,9 +238,6 @@ export default function MoodsPanel() {
             speed?: Record<string, number>;
           };
         };
-        tts?: {
-          speechLanguages?: string[];
-        };
       } | null;
       const v = j?.values || {};
       const loadedMoods = Array.isArray(v.moods) ? (v.moods as MoodEntry[]) : [];
@@ -275,8 +269,6 @@ export default function MoodsPanel() {
       // Which voice the "Test corrections" sample uses — the station's
       // configured default engine, resolved the same way tts.ts picks it.
       const rawTts = v.tts || {};
-      const loadedSpeechLanguages = Array.isArray(j?.tts?.speechLanguages)
-        ? (j!.tts!.speechLanguages as string[]) : [];
       const previewEngine = rawTts.defaultEngine || 'piper';
       const previewVoiceValue =
         previewEngine === 'kokoro' ? (rawTts.kokoro?.voice || '')
@@ -284,7 +276,6 @@ export default function MoodsPanel() {
         : previewEngine === 'pocket-tts' ? (rawTts.pocketTts?.voice || '')
         : previewEngine === 'cloud' ? (rawTts.cloud?.voice || '')
         : '';
-      setSpeechLanguages(loadedSpeechLanguages);
       setPreviewVoice({
         engine: previewEngine,
         voice: previewVoiceValue,
@@ -662,9 +653,7 @@ export default function MoodsPanel() {
               <div className="field-hint">
                 Uses the corrections list above exactly as it stands right now, unsaved
                 changes included, spoken by the station&apos;s default voice
-                ({previewVoice.engine}). Type a line using a word you corrected, or leave
-                it blank and pick a language below to hear a localized sample sentence
-                instead.
+                ({previewVoice.engine}).
               </div>
               <Input
                 aria-label="Test sentence"
@@ -672,13 +661,6 @@ export default function MoodsPanel() {
                 onChange={e => setTestText(e.target.value)}
                 placeholder="Type a line using a word you corrected…"
                 maxLength={200}
-              />
-              <LanguageSelect
-                value={testLanguage}
-                onChange={setTestLanguage}
-                languages={speechLanguages}
-                className="mt-2 max-w-[260px]"
-                ariaLabel="Sample sentence language"
               />
               <VoicePreviewButton
                 className="mt-3"
@@ -688,9 +670,8 @@ export default function MoodsPanel() {
                 cloudModel={previewVoice.cloudModel}
                 speed={previewVoice.speed}
                 text={testText}
-                language={testLanguage}
                 corrections={effectiveCorr}
-                disabled={!testText.trim() && !testLanguage}
+                disabled={!testText.trim()}
                 adminFetch={adminFetch}
               />
             </div>
