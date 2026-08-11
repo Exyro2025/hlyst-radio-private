@@ -9,10 +9,11 @@
 // Usage (host, from a clone — same environment as picker-test.mjs):
 //   npm run llm-bench -- --models ollama:qwen3:8b,openrouter:google/gemma-4-31b-it
 //   npm run llm-bench -- --models ollama:qwen3:8b --kinds pick,segment --modes pool --iterations 5
+//   npm run llm-bench -- --models openai-compatible:/models/Qwen3-8B.gguf --kinds producer --iterations 5
 //
 // Flags:
 //   --models      comma list of provider:model (REQUIRED; first colon splits)
-//   --kinds       comma list of groups (pick|segment|request|scripts|banter|programme)
+//   --kinds       comma list of groups (pick|segment|request|scripts|banter|programme|producer)
 //                 or exact kind names; default all
 //   --modes       pool,agent (default both). 'any' kinds always run once.
 //   --iterations  runs per scenario (default 3)
@@ -39,9 +40,11 @@ import { specs as requestSpecs } from './kinds/request.js';
 import { specs as scriptSpecs } from './kinds/scripts.js';
 import { specs as banterSpecs } from './kinds/banter.js';
 import { specs as programmeSpecs } from './kinds/programme.js';
+import { specs as producerSpecs } from './kinds/producer.js';
 
 const ALL_SPECS: KindSpec[] = [
   ...pickSpecs, ...segmentSpecs, ...requestSpecs, ...scriptSpecs, ...banterSpecs, ...programmeSpecs,
+  ...producerSpecs,
 ];
 
 function parseArgs(argv: string[]) {

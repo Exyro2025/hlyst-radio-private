@@ -12,7 +12,7 @@ export interface Scenario {
 
 export interface KindSpec {
   kind: string;
-  /** CLI filter group: pick | segment | request | scripts | banter | programme */
+  /** CLI filter group: pick | segment | request | scripts | banter | programme | producer */
   group: string;
   /** which picker mode this kind represents; 'any' kinds behave identically in
    *  both and run once regardless of --modes */
