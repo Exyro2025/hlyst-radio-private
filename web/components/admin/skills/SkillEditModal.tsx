@@ -34,7 +34,8 @@ import {
 } from '@/lib/schemas.generated';
 import { skillSubmitUrl } from '../../../lib/repo';
 import { useZodForm, applyServerFieldErrors, fieldAria } from '@/lib/form';
-import { TextField, TextareaField, SwitchField } from '@/lib/form-fields';
+import { TextField, TextareaField } from '@/lib/form-fields';
+import { Switch } from '@/components/ui/switch';
 
 // Only what this modal needs from GET /dj/skills; the full list type lives in
 // SkillsPanel.
@@ -750,13 +751,31 @@ export default function SkillEditModal({ mode, skill, personas, tagSuggestions, 
               <div style={{ fontSize: 12, color: 'var(--muted)', marginTop: 12, lineHeight: 1.6, maxWidth: '72ch' }}>
                 Standard 5-field cron expression (e.g. <code>0 * * * *</code> = top of every hour, <code>*/30 * * * *</code> = every 30 min). Leave blank to rely on the cooldown / normal frequency gating. When a cron timer fires it runs the skill immediately, bypassing the frequency floor and cooldown — same as pressing Run Now. Uses the station timezone set in Settings.
               </div>
-              <SwitchField
+              <Controller
                 control={control}
                 name="cronOnly"
-                label="Only fire on the cron timer"
-                description="Off by default: the skill stays eligible for the DJ's normal between-track random picks in addition to firing on the schedule above. Turn this on for a skill written around a specific moment (a running joke tied to a particular time) so it never airs at any other time."
-                style={{ marginTop: 16 }}
+                render={({ field }) => {
+                  const baseId = `${uid}-cron-only`;
+                  const aria = fieldAria(baseId);
+                  return (
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginTop: 20 }}>
+                      <Switch
+                        {...aria.controlProps}
+                        checked={!!field.value}
+                        onCheckedChange={field.onChange}
+                        onBlur={field.onBlur}
+                        ref={field.ref}
+                      />
+                      <label {...aria.labelProps} style={{ ...sectionLabel, cursor: 'pointer' }}>
+                        ONLY FIRE ON THE CRON TIMER
+                      </label>
+                    </div>
+                  );
+                }}
               />
+              <div style={{ fontSize: 12, color: 'var(--muted)', marginTop: 12, lineHeight: 1.6, maxWidth: '72ch' }}>
+                Off by default: the skill stays eligible for the DJ&apos;s normal between-track random picks in addition to firing on the schedule above. Turn this on for a skill written around a specific moment (a running joke tied to a particular time) so it never airs at any other time.
+              </div>
             </div>
 
             {/* Window — custom skills only (built-in window isn't editable) */}
