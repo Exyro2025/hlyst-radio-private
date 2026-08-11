@@ -40,7 +40,13 @@ import { ARTIST_VARIETY_WINDOW, alternativeCandidates } from './dj-agent/artist-
 import { hasEraBound, genreResolutionWarningOnce, type VocalMode } from '../music/show-filter.js';
 import { djCallsAllowed } from './listeners.js';
 import { autoVoiceAllowed } from './voice-policy.js';
-import { pickerAgent, requestAgent } from './dj-agent/agents.js';
+import {
+  pickerAgent,
+  producerPickerAgent,
+  producerPickerSystem,
+  requestAgent,
+} from './dj-agent/agents.js';
+import { ProducerPickSchema } from '../llm/producer.js';
 import { pickerScope } from '../llm/tools.js';
 import {
   HANDOFF_MAX_AGE_MS,
@@ -62,7 +68,7 @@ export { runActive } from './dj-agent/runs.js';
 export {
   PICK_SCHEMA, PICK_SCHEMA_NO_FX, pickSchema, pickSystem, requestSchema, requestSystem,
 } from './dj-agent/schemas.js';
-export { pickerAgent, requestAgent } from './dj-agent/agents.js';
+export { pickerAgent, producerPickerAgent, producerPickerSystem, requestAgent } from './dj-agent/agents.js';
 
 // ---------------------------------------------------------------------------
 // Track event — a track started; pick the next one and maybe air a link.
@@ -109,6 +115,50 @@ async function repickFromSeen({ seen, badId, wantLink, showAt = null, playlistRe
       schema,
       temperature: 0.5,
       kind: 'djAgentRepick',
+    });
+  } catch {
+    return null;
+  }
+}
+
+// Producer counterpart to repickFromSeen. Unknown-id and artist-variety
+// salvage must stay backstage when the split is active; using the legacy pick
+// schema here would quietly ask the Persona model to choose and write speech
+// again, recreating the coupling this route is meant to remove.
+async function repickProducerFromSeen({
+  seen,
+  badId,
+  wantLink,
+  showAt = null,
+  playlistResolved = true,
+  reason = null,
+}: {
+  seen: Map<string, any>;
+  badId: string | null;
+  wantLink: boolean;
+  showAt?: Date | null;
+  playlistResolved?: boolean;
+  reason?: string | null;
+}) {
+  const ids = [...seen.keys()];
+  if (ids.length === 0) return null;
+  const schema = modelTolerant(ProducerPickSchema.extend({
+    id: z.enum(ids as [string, ...string[]]).describe('the exact id of one candidate'),
+  }));
+  const why = reason
+    ?? `The id ${badId ? `"${badId}"` : 'you returned'} is not one of the candidates surfaced in this run. Choose the best exact candidate id.`;
+  try {
+    return await djObject({
+      system: producerPickerSystem(showAt, playlistResolved),
+      prompt: JSON.stringify({ candidates: [...seen.values()] }, null, 2)
+        + `\n\n${why}`
+        + (wantLink
+          ? ' Supply a compact speechBrief for the separate Persona.'
+          : ' Set speechBrief to null because this pick stays silent.'),
+      schema,
+      temperature: 0.4,
+      kind: 'djProducerRepick',
+      role: 'producer',
     });
   } catch {
     return null;
@@ -272,11 +322,26 @@ async function pickViaAgent(queue, ctx, { wantLink, audioWaypoint = null, curren
     excludedIds,
   });
 
-  const run = await pickerAgent.run({
-    messages: session.windowMessages(),
-    scope,
-    showAt,
-  });
+  const messages = session.windowMessages();
+  const producerRequested = settings.get().llm?.producer?.enabled === true;
+  let splitProducer = false;
+  let run;
+  if (producerRequested) {
+    try {
+      run = await producerPickerAgent.run({ messages, scope, showAt });
+      splitProducer = true;
+    } catch (err) {
+      // A failed backstage decision drops back to the complete established
+      // picker, not the stateless pool. This preserves session-aware picking
+      // and on-air speech when the optional Producer is unavailable or cannot
+      // complete its contract.
+      queue.log('producer', `Producer pick failed: ${err.message} — retrying with the all-in-one Persona picker`);
+      logEvent('producer.fallback', { stage: 'pick', reason: err.message });
+      run = await pickerAgent.run({ messages, scope, showAt });
+    }
+  } else {
+    run = await pickerAgent.run({ messages, scope, showAt });
+  }
   const { steps, toolCalls, extras } = run;
   let object = run.object;
 
@@ -304,7 +369,9 @@ async function pickViaAgent(queue, ctx, { wantLink, audioWaypoint = null, curren
     }
   }
   if (!song && extras.seen.size) {
-    const repicked = await repickFromSeen({ seen: extras.seen, badId: object?.id ?? null, wantLink, showAt, playlistResolved: !!playlistTracks?.length });
+    const repicked = splitProducer
+      ? await repickProducerFromSeen({ seen: extras.seen, badId: object?.id ?? null, wantLink, showAt, playlistResolved: !!playlistTracks?.length })
+      : await repickFromSeen({ seen: extras.seen, badId: object?.id ?? null, wantLink, showAt, playlistResolved: !!playlistTracks?.length });
     if (repicked) {
       logEvent('pick.repicked', { agent: 'pick', from: object?.id ?? null, to: repicked.id, candidates: extras.seen.size });
       queue.log('picker', `agent returned unknown id "${object?.id}" — re-picked "${repicked.id}" from its own candidates`);
@@ -374,11 +441,14 @@ async function pickViaAgent(queue, ctx, { wantLink, audioWaypoint = null, curren
     );
     let altSong: any = null;
     if (alt.size) {
-      const repicked = await repickFromSeen({
+      const repickArgs = {
         seen: alt, badId: null, wantLink, showAt,
         playlistResolved: !!playlistTracks?.length,
         reason: `The track you chose is by ${song.artist}, the artist already on air — never play the same artist twice in a row. Choose a DIFFERENT artist from the candidates above.`,
-      });
+      };
+      const repicked = splitProducer
+        ? await repickProducerFromSeen(repickArgs)
+        : await repickFromSeen(repickArgs);
       // Resolved from `alt`, not `extras.seen`: the re-pick's id is constrained
       // to the alternatives by construction (z.enum), and reading it back out of
       // the narrower map is what keeps that true if the schema ever gains a
@@ -424,7 +494,42 @@ async function pickViaAgent(queue, ctx, { wantLink, audioWaypoint = null, curren
     }
   }
 
-  const rawSay = typeof object.say === 'string' ? object.say.trim() : '';
+  let rawSay = '';
+  if (splitProducer && wantLink) {
+    try {
+      rawSay = (await dj.generateProducerLink({
+        previous: current,
+        current: song,
+        context: linkAirContext(ctx, linkAirAt),
+        clockIsAirTime: !!linkAirAt,
+        persona: session.onAirPersona(),
+        speechBrief: typeof object.speechBrief === 'string' ? object.speechBrief : null,
+        recap: queue.getDjRecap(),
+        recentTracks: queue.getRecentTracks(),
+        recentOpeners: queue.getRecentOpeners(),
+      })).trim();
+      if (!rawSay) throw new Error('Persona returned an empty link');
+    } catch (err) {
+      // Preserve the established on-air behaviour if the new delivery seam is
+      // the part that fails. A one-candidate legacy pick call keeps the
+      // Producer's grounded track/transition but asks the all-in-one Persona
+      // contract to write the link; if that also misses, the safe result is a
+      // silent transition rather than losing the queued song.
+      queue.log('producer', `Persona delivery failed: ${err.message} — trying the legacy link contract`);
+      logEvent('producer.fallback', { stage: 'delivery', reason: err.message, trackId: song.id });
+      const legacy = await repickFromSeen({
+        seen: new Map([[song.id, song]]),
+        badId: null,
+        wantLink: true,
+        showAt,
+        playlistResolved: !!playlistTracks?.length,
+        reason: `The Producer has already selected this exact track. Keep its id and write only the "say" link requested by the event.`,
+      });
+      rawSay = typeof legacy?.say === 'string' ? legacy.say.trim() : '';
+    }
+  } else {
+    rawSay = typeof object.say === 'string' ? object.say.trim() : '';
+  }
   // Talk-within-the-intro (feature 3a): enqueuePick re-applies this trim at
   // the chokepoint (near-idempotent — see the note there); it runs here too so
   // the session turn below records the line as it will actually air — trimmed,
@@ -463,7 +568,7 @@ async function pickViaAgent(queue, ctx, { wantLink, audioWaypoint = null, curren
     text: object.reason || `Selected "${song.title}".`,
     meta: {
       trackId: song.id, title: song.title, artist: song.artist,
-      steps, toolCalls, say: say || null,
+      steps, toolCalls, say: say || null, producerSplit: splitProducer,
     },
   });
   return true;

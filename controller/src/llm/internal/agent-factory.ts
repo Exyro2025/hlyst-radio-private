@@ -19,6 +19,7 @@
 //     used to resolve the agent's chosen id to a full song object).
 
 import { djAgent } from './strategy/agent.js';
+import type { LlmRole } from './provider/legs.js';
 
 // TArgs is the run-argument shape this agent accepts — the same object
 // buildSystem and buildTools are handed. Naming it makes the hand-off from the
@@ -48,6 +49,10 @@ export interface AgentDefinition<TArgs = Record<string, any>, TExtras = any> {
   // historical step — see DjAgentOptions.providerDiscoveryBudget in
   // strategy/agent.ts for why this is opt-in per agent.
   providerDiscoveryBudget?: boolean;
+  // Persona is the established all-in-one route. Producer selects the
+  // dedicated backstage leg and its primary safety hop without changing the
+  // agent harness itself.
+  role?: LlmRole;
 }
 
 export interface AgentRunResult<TExtras = any> {
@@ -65,6 +70,7 @@ export interface DjAgentInstance<TArgs = Record<string, any>, TExtras = any> {
   readonly temperature: number | undefined;
   readonly maxOutputTokens: number | undefined;
   readonly providerDiscoveryBudget: boolean;
+  readonly role: LlmRole;
   run(args: TArgs & { messages: any[] }): Promise<AgentRunResult<TExtras>>;
 }
 
@@ -96,6 +102,7 @@ export function defineAgent<TArgs = Record<string, any>, TExtras = any>(
     temperature: def.temperature,
     maxOutputTokens: def.maxOutputTokens,
     providerDiscoveryBudget: def.providerDiscoveryBudget === true,
+    role: def.role ?? 'persona',
     async run({ messages, ...rest }) {
       const toolArgs = rest as TArgs;
       const system = def.buildSystem(toolArgs);
@@ -118,6 +125,7 @@ export function defineAgent<TArgs = Record<string, any>, TExtras = any>(
         maxOutputTokens: def.maxOutputTokens,
         kind: def.kind,
         providerDiscoveryBudget: def.providerDiscoveryBudget === true,
+        role: def.role ?? 'persona',
         ...(def.validateObject
           ? { validate: (object: any) => def.validateObject!(object, extras) }
           : {}),

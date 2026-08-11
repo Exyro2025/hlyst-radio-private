@@ -7,6 +7,13 @@
 import * as settings from '../../settings.js';
 import { defineAgent } from '../../llm/agent.js';
 import { buildPickerTools, type PickerScope } from '../../llm/tools.js';
+import {
+  PICKER_CRITERIA,
+  effectsGuidance,
+  producerPromptDiscoverySteps,
+  showMusicLean,
+} from '../../llm/dj.js';
+import { ProducerPickSchema, producerPickSystem } from '../../llm/producer.js';
 import { pickSchema, pickSystem, requestSchema, requestSystem } from './schemas.js';
 import { agentDeadline } from './breaker.js';
 
@@ -37,6 +44,24 @@ export interface RequestRunArgs {
 // What buildTools hands back for the caller to resolve the chosen id against.
 export interface PickerExtras {
   seen: Map<string, any>;
+}
+
+// The live Producer sees the same editorial/show constraints and transition
+// vocabulary as the established picker, but none of the Persona preamble,
+// speech style, listener-facing schema text or request-to-perform wording.
+// That separation is the point of the split: this prompt chooses and briefs;
+// generateProducerLink later turns the brief into on-air language.
+export function producerPickerSystem(showAt: Date | null = null, playlistResolved = true): string {
+  const activeShow = settings.resolveActiveShow(showAt ?? undefined);
+  const showLine = activeShow?.topic
+    ? `\n\nCurrent show brief: ${activeShow.topic}`
+    : '';
+  const playlistLine = activeShow?.playlistIds?.length && playlistResolved
+    ? `\n\nThe current show has a ${activeShow.playlistStrict ? 'strict' : 'preferred'} pinned playlist. Use the playlist-aware discovery tool and ${activeShow.playlistStrict ? 'stay inside it' : 'treat it as the strong first source'}.`
+    : '';
+  return `${producerPickSystem(producerPromptDiscoverySteps())}${showLine}${showMusicLean(activeShow)}${playlistLine}
+
+${PICKER_CRITERIA}${effectsGuidance()}`;
 }
 
 export const pickerAgent = defineAgent<PickerRunArgs, PickerExtras>({
@@ -81,6 +106,25 @@ export const pickerAgent = defineAgent<PickerRunArgs, PickerExtras>({
   // surfaced this run. A fabricated id falls the run through to the done-tool
   // harness instead of surfacing as an unknown-id rejection (observed:
   // gpt-5-mini invented 7/32 ids after an empty tool result).
+  validateObject: (object, extras) => !!(object?.id && extras?.seen?.has(object.id)),
+});
+
+export const producerPickerAgent = defineAgent<PickerRunArgs, PickerExtras>({
+  kind: 'djProducerPick',
+  schema: ProducerPickSchema,
+  maxSteps: 2,
+  providerDiscoveryBudget: true,
+  timeoutMs: agentDeadline,
+  temperature: 0.4,
+  role: 'producer',
+  buildSystem: ({ showAt, scope }) => producerPickerSystem(
+    showAt ?? null,
+    !!scope?.playlistTracks?.length,
+  ),
+  buildTools: ({ scope }) => {
+    const { tools, seen } = buildPickerTools(scope);
+    return { tools, extras: { seen } };
+  },
   validateObject: (object, extras) => !!(object?.id && extras?.seen?.has(object.id)),
 });
 

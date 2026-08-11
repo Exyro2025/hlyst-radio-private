@@ -23,6 +23,7 @@ export {
   generateHandoffGreeting,
   generateAdLib,
   generateLink,
+  generateProducerLink,
   generateHourlyTime,
 } from './internal/prompts/scripts.js';
 export { generateBanter } from './internal/prompts/banter.js';

@@ -186,7 +186,28 @@ export async function generateAdLib({ instruction, context = null, recap = null,
   });
 }
 
-export async function generateLink({ previous, current, context, clockIsAirTime = false, recap = null, recentTracks = null, recentOpeners = null, persona = null }: any) {
+// The entire data bridge from Producer to Persona. Keeping it pure and tiny
+// makes the boundary testable: no candidate list, tool result or reasoning
+// trail can enter the speech prompt except through this capped direction.
+export function producerBriefClause(editorialBrief: unknown): string {
+  const clipped = String(editorialBrief || '').replace(/\s+/g, ' ').trim().slice(0, 240);
+  return clipped
+    ? ` Backstage editorial direction: "${clipped}". Treat it as an angle, not wording to quote or explain.`
+    : '';
+}
+
+export async function generateLink({
+  previous,
+  current,
+  context,
+  clockIsAirTime = false,
+  recap = null,
+  recentTracks = null,
+  recentOpeners = null,
+  persona = null,
+  editorialBrief = null,
+  llmKind = 'generateLink',
+}: any) {
   const speaker = persona || settings.getEffectivePersona();
   // A pick-attached link is written when the pick is made but airs a full
   // track later, so a clock reference baked in at generation time is stale by
@@ -230,13 +251,25 @@ export async function generateLink({ previous, current, context, clockIsAirTime 
   // phrase to "skip the spoken intro" on vocals-immediate tracks — the
   // deterministic backstop would drop the line anyway; better not to write it.
   const budget = introBudgetPhrase(introMsFor(current), firstVocalMsFor(current));
-  const prompt = `Write a short DJ link to carry into the track now starting — set it up, capture its feel, weave in the moment.${teaseClause}${patterClause}${budget ? ' ' + budget : ''} ${lengthPhrase('link', speaker)}, conversational. Vary how you open — don't default to "here's", "this is", "coming up", or "that was"; find a different way in each time. Keep it forward-looking: don't back-announce, recap, or name the track that just played — focus on what's playing now.${clockClause}\n\n${ctxLines.join('\n')}`;
+  const briefClause = producerBriefClause(editorialBrief);
+  const prompt = `Write a short DJ link to carry into the track now starting — set it up, capture its feel, weave in the moment.${briefClause}${teaseClause}${patterClause}${budget ? ' ' + budget : ''} ${lengthPhrase('link', speaker)}, conversational. Vary how you open — don't default to "here's", "this is", "coming up", or "that was"; find a different way in each time. Keep it forward-looking: don't back-announce, recap, or name the track that just played — focus on what's playing now.${clockClause}\n\n${ctxLines.join('\n')}`;
 
   return djText({
     system: djSystem(speaker),
     prompt: decoratePrompt(prompt, { kind: 'link', recap, recentOpeners }),
     temperature: 0.95, topP: 0.92, repeatPenalty: 1.2, seed: randomSeed(),
-    kind: 'generateLink',
+    kind: llmKind,
+  });
+}
+
+// Producer/Persona split delivery. The Producer's structured decision is
+// reduced to one short editorial brief; the Persona receives no library tools,
+// discovery trail, candidate list, transition schema or Producer system text.
+export async function generateProducerLink({ speechBrief = null, ...args }: any) {
+  return generateLink({
+    ...args,
+    editorialBrief: speechBrief,
+    llmKind: 'generateProducerLink',
   });
 }
 

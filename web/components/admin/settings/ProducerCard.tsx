@@ -190,19 +190,19 @@ export function ProducerCard({
       <Card
         title="Producer"
         sub="advanced · backstage decision model"
-        right={<Pill tone="accent">preview</Pill>}
+        right={<Pill tone="accent">picker pilot</Pill>}
       >
         <div className="grid gap-[18px]">
           <div className="flex items-start gap-2.5 border border-[var(--accent)] bg-[var(--ink-softer)] p-3">
             <span className="mt-1 size-1.5 flex-none rounded-full bg-vermilion" />
             <div className="grid min-w-0 gap-0.5">
               <span className="text-[11px] font-bold tracking-[0.12em] text-vermilion uppercase">
-                Rehearsal routing only
+                Live djAgentPick routing
               </span>
               <span className="text-[14px] leading-[1.5] text-muted">
-                This connection is available to Producer evaluations, but no live
-                broadcast call is redirected yet. Enabling it cannot change what
-                goes on air in this preview stage.
+                When enabled, the Producer chooses the next track and transition;
+                the Persona then writes any spoken link in a separate call. Other
+                LLM call types remain on the primary model.
               </span>
             </div>
           </div>
@@ -213,7 +213,8 @@ export function ProducerCard({
               <div className="mt-0.5 max-w-[500px] text-[14px] leading-[1.5] text-muted">
                 Keeps backstage tool calls and structured decisions away from the
                 Persona model. If this model is unavailable, a Producer evaluation
-                retries once on the primary model.
+                retries once on the primary model, then returns to the established
+                all-in-one picker if the split cannot complete.
               </div>
             </div>
             <Seg
@@ -434,8 +435,8 @@ export function ProducerCard({
 
       <SaveBar
         note={producer.enabled
-          ? `Producer preview: ${producer.provider}:${producer.model || '(model not set)'}. Live broadcast routing remains unchanged.`
-          : 'Dedicated Producer routing is off; evaluations inherit the primary model.'}
+          ? `Live picker pilot: ${producer.provider}:${producer.model || '(model not set)'} chooses tracks; the Persona model writes the links.`
+          : 'Dedicated Producer routing is off; the primary model keeps the established all-in-one picker.'}
         busy={busy}
         onSave={save}
         saveLabel="Save Producer"
