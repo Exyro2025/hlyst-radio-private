@@ -3531,6 +3531,13 @@ export const SKILL_ENV_KEY_RE = /^[A-Z][A-Z0-9_]*$/;
 // refused here.
 export const SKILL_CRON_RE = /^\S+\s+\S+\s+\S+\s+\S+\s+\S+$/;
 
+// Optional companion to `cron:` — when true, the skill is withheld from the
+// autonomous segment director's random selection (availableCapabilities() in
+// skills/_agent.ts) and fires ONLY when its cron timer ticks. Without this a
+// skill with a `cron:` expression is still off-cooldown eligible for random
+// picks between timer fires, which is surprising for a skill authored to
+// speak at a specific, meaningful moment (e.g. "7:10, dabbers").
+
 // When a custom skill may air. 'commute' restricts it to the commute hours;
 // 'any' is the default and is NOT written to frontmatter.
 export const SKILL_WINDOWS = ['any', 'commute'] as const;
@@ -3711,11 +3718,20 @@ const skillCronSchema = z.preprocess(
     .transform((v) => v || undefined),
 );
 
+// Absent → false, same posture as persona djMode: present must be a real
+// boolean rather than silently coerced, since a truthy typo here would
+// silently withhold a skill from ever airing outside its cron window.
+const skillCronOnlySchema = z.preprocess(
+  skillNullToUndefined,
+  z.boolean({ error: 'cronOnly must be a boolean' }).default(false),
+);
+
 // The fields every skill's SKILL.md carries, built-in or custom.
 export const builtinSkillFileSchema = z.object({
   label: skillLabelSchema,
   cooldown: skillCooldownSchema,
   cron: skillCronSchema,
+  cronOnly: skillCronOnlySchema,
   context: skillContextSchema,
   tags: skillTagsSchema,
   brief: skillBriefSchema,
@@ -3757,6 +3773,7 @@ export function skillFieldsFrom(kind: string, parsed: SkillFileParsed) {
     label: parsed.label,
     cooldown: parsed.cooldown,
     cron: parsed.cron,
+    cronOnly: parsed.cronOnly,
     contextFields: parsed.context,
     window: parsed.window,
     requiresKey: parsed.requiresKey,

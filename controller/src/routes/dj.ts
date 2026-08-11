@@ -44,6 +44,7 @@ interface SkillFields {
   label?: string;
   cooldown?: string;
   cron?: string;
+  cronOnly?: boolean;
   contextFields?: string[];
   window?: 'any' | 'commute';
   requiresKey?: string;
@@ -380,6 +381,7 @@ router.get('/dj/skills/:kind/file', requireAdmin, async (req, res) => {
         context: (data.context ?? data.contextFields)?.trim() || (cat?.contextFields || []).join(', '),
         knownContextFields: [...dj.CONTEXT_FIELDS],
         cron: data.cron?.trim() || null,
+        cronOnly: String(data.cronOnly).trim().toLowerCase() === 'true',
         configFields,
         config: readConfigValues(configFields, data),
         tags: parseTags(data.tags),
@@ -433,6 +435,7 @@ router.get('/dj/skills/:kind/file', requireAdmin, async (req, res) => {
       window: data.window === 'commute' ? 'commute' : 'any',
       requiresKey: data.requiresKey || '',
       cron: data.cron?.trim() || null,
+      cronOnly: String(data.cronOnly).trim().toLowerCase() === 'true',
       tags: parseTags(data.tags),
       hasTool: await skillHasTool(kind),
       brief: body || '',

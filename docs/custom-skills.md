@@ -55,6 +55,7 @@ name: moon-phase          # the slug / "kind" (defaults to the folder name)
 label: Moon phase         # human label in /admin/skills (defaults to title-cased name)
 cooldown: 6h              # hard min gap between autonomous firings — "90m" | "6h" | "2d" | "45" (bare = minutes)
 cron: 0 * * * *           # OPTIONAL: fire on a fixed schedule instead of/alongside the cooldown gate (see below)
+cronOnly: true            # OPTIONAL: with a cron: set, withhold this skill from random autonomous picks entirely
 window: any               # "any" (default) | "commute" — only offered during commute hours
 context: time, festival   # OPTIONAL: which "right now" fields this segment may mention (see below)
 requiresKey: SOME_API_KEY # OPTIONAL: env var the skill needs; if unset, the skill stays inert
@@ -148,6 +149,15 @@ time, since the deeper per-field range validation only runs when the scheduler
 registers the task.
 
 Set it from the admin UI too: **/admin/skills → Edit → Cron timer**.
+
+**A `cron:` timer is a second trigger, not a replacement one.** By default the
+skill stays eligible for the normal autonomous segment tick too, off-cooldown,
+same as any other skill — so a skill written around a specific moment (e.g. a
+running joke tied to 7:10) can still fire at a random moment in between. Set
+`cronOnly: true` to withhold it from that random selection entirely; it then
+airs ONLY when its cron timer ticks (or via **Run now**, which always bypasses
+every gate). `cronOnly` on its own, without a `cron:` expression, means the
+skill never fires autonomously at all.
 
 For a **new** skill the `name` must be a lowercase slug that isn't a built-in kind
 (`weather`, `news`, `now-playing-dig`, `curiosity`, `album-anniversary`, `library-deep-cut`,

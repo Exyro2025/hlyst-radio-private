@@ -217,6 +217,7 @@ test('skillFieldsFrom renames context → contextFields and carries the rest', (
     label: '  Moon Phase  ',
     cooldown: '6h',
     cron: '0 * * * *',
+    cronOnly: true,
     context: ['weather'],
     tags: ['nightly'],
     window: 'commute',
@@ -227,12 +228,19 @@ test('skillFieldsFrom renames context → contextFields and carries the rest', (
     label: 'Moon Phase',
     cooldown: '6h',
     cron: '0 * * * *',
+    cronOnly: true,
     contextFields: ['weather'],
     window: 'commute',
     requiresKey: 'MOON_KEY',
     tags: ['nightly'],
     brief: 'say something',
   });
+});
+
+test('cronOnly defaults to false and rejects a non-boolean', () => {
+  const parsed = builtinSkillFileSchema.parse({ brief: 'b' });
+  assert.equal(parsed.cronOnly, false);
+  assert.throws(() => builtinSkillFileSchema.parse({ brief: 'b', cronOnly: 'yes' }));
 });
 
 test('an empty label is undefined, not "" — writeSkillFile omits the line', () => {

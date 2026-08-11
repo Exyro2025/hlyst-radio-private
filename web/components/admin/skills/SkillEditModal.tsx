@@ -34,7 +34,7 @@ import {
 } from '@/lib/schemas.generated';
 import { skillSubmitUrl } from '../../../lib/repo';
 import { useZodForm, applyServerFieldErrors, fieldAria } from '@/lib/form';
-import { TextField, TextareaField } from '@/lib/form-fields';
+import { TextField, TextareaField, SwitchField } from '@/lib/form-fields';
 
 // Only what this modal needs from GET /dj/skills; the full list type lives in
 // SkillsPanel.
@@ -99,6 +99,7 @@ interface SkillFileResponse {
   label?: string;
   cooldown?: string;
   cron?: string | null;
+  cronOnly?: boolean;
   context?: string;
   knownContextFields?: string[];
   window?: 'any' | 'commute';
@@ -121,6 +122,7 @@ interface SkillFormValues {
   label: string;
   cooldown: string;
   cron: string;
+  cronOnly: boolean;
   context: string[];
   tags: string[];
   brief: string;
@@ -159,6 +161,7 @@ function fileToFormValues(j: SkillFileResponse) {
     label: j.label || '',
     cooldown: j.cooldown || '',
     cron: j.cron || '',
+    cronOnly: !!j.cronOnly,
     context: splitContext(j.context),
     window: (j.window === 'commute' ? 'commute' : 'any') as 'any' | 'commute',
     tags: Array.isArray(j.tags) ? j.tags : [],
@@ -220,8 +223,8 @@ export default function SkillEditModal({ mode, skill, personas, tagSuggestions, 
   const form = useZodForm(
     schema,
     (mode === 'create'
-      ? { name: '', label: '', cooldown: '', cron: '', context: [], tags: [], brief: '', window: 'any', requiresKey: '' }
-      : { label: '', cooldown: '', cron: '', context: [], tags: [], brief: '', window: 'any', requiresKey: '' }
+      ? { name: '', label: '', cooldown: '', cron: '', cronOnly: false, context: [], tags: [], brief: '', window: 'any', requiresKey: '' }
+      : { label: '', cooldown: '', cron: '', cronOnly: false, context: [], tags: [], brief: '', window: 'any', requiresKey: '' }
     ) as DefaultValues<z.input<typeof schema>>,
   );
   const control = form.control as unknown as Control<SkillFormValues>;
@@ -305,7 +308,7 @@ export default function SkillEditModal({ mode, skill, personas, tagSuggestions, 
   // passthrough with no rendered control, so a disk-authored value that isn't
   // UPPER_SNAKE_CASE has nowhere else to surface, and a gated Save would
   // otherwise never say why.
-  const FIELDS_WITH_INLINE_ERRORS = ['name', 'label', 'cooldown', 'cron', 'context', 'tags', 'window', 'brief'];
+  const FIELDS_WITH_INLINE_ERRORS = ['name', 'label', 'cooldown', 'cron', 'cronOnly', 'context', 'tags', 'window', 'brief'];
   const blockingIssue = (() => {
     const entry = Object.entries(form.formState.errors).find(
       ([key, err]) => err && !FIELDS_WITH_INLINE_ERRORS.includes(key),
@@ -747,6 +750,13 @@ export default function SkillEditModal({ mode, skill, personas, tagSuggestions, 
               <div style={{ fontSize: 12, color: 'var(--muted)', marginTop: 12, lineHeight: 1.6, maxWidth: '72ch' }}>
                 Standard 5-field cron expression (e.g. <code>0 * * * *</code> = top of every hour, <code>*/30 * * * *</code> = every 30 min). Leave blank to rely on the cooldown / normal frequency gating. When a cron timer fires it runs the skill immediately, bypassing the frequency floor and cooldown — same as pressing Run Now. Uses the station timezone set in Settings.
               </div>
+              <SwitchField
+                control={control}
+                name="cronOnly"
+                label="Only fire on the cron timer"
+                description="Off by default: the skill stays eligible for the DJ's normal between-track random picks in addition to firing on the schedule above. Turn this on for a skill written around a specific moment (a running joke tied to a particular time) so it never airs at any other time."
+                style={{ marginTop: 16 }}
+              />
             </div>
 
             {/* Window — custom skills only (built-in window isn't editable) */}

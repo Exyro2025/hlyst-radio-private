@@ -208,6 +208,10 @@ function availableCapabilities(ctx, now: Date) {
     // can air, so dropping a folder never auto-airs unreviewed content/code.
     const isEnabled = cap.seeded ? enabled[cap.skill] !== false : enabled[cap.skill] === true;
     if (!isEnabled) continue;
+    // cronOnly withholds the skill from the autonomous director entirely — it
+    // fires only when its dedicated cron task calls runCapability() directly
+    // (scheduler.ts syncSkillCrons), which bypasses this function altogether.
+    if (cap.cronOnly) continue;
     if (persona?.skills && !persona.skills.includes(cap.skill)) continue;
     if (now.getTime() - (lastFired.get(cap.kind) || 0) < cap.cooldownMs) continue;
     // Window gating: custom skills opt into commute-hours-only firing via
