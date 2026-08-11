@@ -13,7 +13,7 @@ import * as dj from '../llm/dj.js';
 import * as subsonic from '../music/subsonic.js';
 import * as library from '../music/library.js';
 import * as settings from '../settings.js';
-import { runStationId, runHourlyCheck, runLink, runBanter, runProgrammeIntro, runProgrammeFeature, runProgrammeOutro, refreshAutoPlaylist } from '../broadcast/scheduler.js';
+import { runStationId, runHourlyCheck, runLink, runBanter, runProgrammeIntro, runProgrammeFeature, runProgrammeOutro, refreshAutoPlaylist, syncSkillCrons } from '../broadcast/scheduler.js';
 import { skillCatalog, runCapability, effectiveContextFields } from '../skills/_agent.js';
 import * as sfxLib from '../broadcast/sfx.js';
 import { loadSkills, loadedCapabilities, parseFrontmatter, parseTags, SEEDED_KINDS, RESERVED_KINDS, SLUG_RE, readTemplate, listCommunitySkills, readCommunitySkill } from '../skills/loader.js';
@@ -43,6 +43,7 @@ interface SkillFields {
   kind: string;
   label?: string;
   cooldown?: string;
+  cron?: string;
   contextFields?: string[];
   window?: 'any' | 'commute';
   requiresKey?: string;
@@ -124,6 +125,7 @@ router.get('/dj/skills', requireAdmin, (req, res) => {
 router.post('/dj/skills/rescan', requireAdmin, async (req, res) => {
   try {
     const caps = await loadSkills();
+    syncSkillCrons();
     queue.log('scheduler', `[skills] rescanned — ${caps.length} skill(s) loaded`);
     res.json({ skills: skillCatalog(), custom: caps.filter((c) => !c.seeded).length });
   } catch (err) {
@@ -198,6 +200,7 @@ router.post('/dj/skills/community/:slug/install', requireAdmin, async (req, res)
   try {
     await writeSkillFile(fields);
     await loadSkills();
+    syncSkillCrons();
     queue.log('scheduler', `[skills] community "${slug}" installed via admin UI (disabled)`);
     res.json({ skills: skillCatalog() });
   } catch (err) {
@@ -289,6 +292,7 @@ router.post('/dj/skills/import', requireAdmin, zipUpload('file'), async (req, re
     const hasTool = !!toolEntry;
     if (toolEntry) await writeFile(join(dir, 'tool.mjs'), toolEntry.getData());
     await loadSkills();
+    syncSkillCrons();
     queue.log('scheduler', `[skills] imported "${slug}" from zip${hasTool ? ' (with tool.mjs)' : ''} via admin UI (disabled)`);
     res.json({ skills: skillCatalog(), slug, hasTool });
   } catch (err) {
@@ -375,6 +379,7 @@ router.get('/dj/skills/:kind/file', requireAdmin, async (req, res) => {
         // Prefer the file's own value; fall back to the live effective set.
         context: (data.context ?? data.contextFields)?.trim() || (cat?.contextFields || []).join(', '),
         knownContextFields: [...dj.CONTEXT_FIELDS],
+        cron: data.cron?.trim() || null,
         configFields,
         config: readConfigValues(configFields, data),
         tags: parseTags(data.tags),
@@ -427,6 +432,7 @@ router.get('/dj/skills/:kind/file', requireAdmin, async (req, res) => {
       knownContextFields: [...dj.CONTEXT_FIELDS],
       window: data.window === 'commute' ? 'commute' : 'any',
       requiresKey: data.requiresKey || '',
+      cron: data.cron?.trim() || null,
       tags: parseTags(data.tags),
       hasTool: await skillHasTool(kind),
       brief: body || '',
@@ -467,6 +473,7 @@ router.post('/dj/skills', requireAdmin, validateBody(skillCreateSchema), async (
   try {
     await writeSkillFile(fields);
     await loadSkills();
+    syncSkillCrons();
     queue.log('scheduler', `[skills] custom "${name}" created via admin UI`);
     res.json({ skills: skillCatalog() });
   } catch (err) {
@@ -505,6 +512,7 @@ router.put('/dj/skills/:kind/file', requireAdmin, async (req, res) => {
     try {
       await writeSkillFile(fields); // rewrites SKILL.md only; a sibling tool.mjs is left intact
       await loadSkills();
+      syncSkillCrons();
       queue.log('scheduler', `[skills] custom "${kind}" edited via admin UI`);
       return res.json({ skills: skillCatalog() });
     } catch (err) {
@@ -535,6 +543,7 @@ router.put('/dj/skills/:kind/file', requireAdmin, async (req, res) => {
   try {
     await writeSkillFile(fields);
     await loadSkills();
+    syncSkillCrons();
     queue.log('scheduler', `[skills] built-in "${kind}" edited via admin UI`);
     res.json({ skills: skillCatalog() });
   } catch (err) {
@@ -623,6 +632,7 @@ router.post('/dj/skills/:kind/reset', requireAdmin, async (req, res) => {
   try {
     await resetBuiltinSkill(kind);
     await loadSkills();
+    syncSkillCrons();
     queue.log('scheduler', `[skills] built-in "${kind}" reset to default via admin UI`);
     res.json({ skills: skillCatalog() });
   } catch (err) {
@@ -650,6 +660,7 @@ router.delete('/dj/skills/:slug', requireAdmin, async (req, res) => {
   try {
     await rm(join(SKILLS_DIR, slug), { recursive: true, force: true });
     await loadSkills();
+    syncSkillCrons();
     queue.log('scheduler', `[skills] custom "${slug}" deleted via admin UI`);
     res.json({ skills: skillCatalog() });
   } catch (err) {

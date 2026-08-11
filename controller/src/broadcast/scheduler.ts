@@ -29,7 +29,9 @@ import { shouldFire } from './dj-gate.js';
 import { djCallsAllowed } from './listeners.js';
 import { autoVoiceAllowed } from './voice-policy.js';
 import { optionalSegmentsAllowed } from './dj-budget.js';
-import { agenticTick, skillCatalog } from '../skills/_agent.js';
+import { agenticTick, skillCatalog, runCapability } from '../skills/_agent.js';
+import { loadedCapabilities } from '../skills/loader.js';
+import { getStationTimezone } from '../time.js';
 import { withTrace, pruneOldEvents } from '../observability/events.js';
 import * as archives from './archives.js';
 import * as stemCacheStore from '../music/stem-cache.js';
@@ -879,6 +881,41 @@ async function nightlyDoctor() {
 }
 
 // ---------------------------------------------------------------------------
+// SKILL CRONS
+// Per-skill cron tasks, registered from the `cron:` frontmatter field in
+// SKILL.md. When a timer fires it calls runCapability() directly — same path
+// as the operator-override /dj/skill endpoint, bypassing the frequency floor,
+// cooldowns, and the enabled toggle. Rebuilt on every syncSkillCrons() call so
+// a rescan picks up added/removed/changed expressions without a restart.
+// ---------------------------------------------------------------------------
+
+const skillCronTasks = new Map<string, cron.ScheduledTask>();
+
+export function syncSkillCrons() {
+  for (const task of skillCronTasks.values()) task.stop();
+  skillCronTasks.clear();
+  for (const cap of loadedCapabilities()) {
+    const expr: string | undefined = cap.cronExpression;
+    if (!expr) continue;
+    if (!cron.validate(expr)) {
+      queue.log('error', `[skills] "${cap.kind}" has invalid cron expression "${expr}" — skipped`);
+      continue;
+    }
+    const tz = getStationTimezone();
+    const task = cron.schedule(expr, async () => {
+      try {
+        const ctx = await getFullContext();
+        await runCapability(cap.kind, ctx);
+      } catch (err: any) {
+        queue.log('error', `[skills] cron "${expr}" skill "${cap.kind}" failed: ${err.message}`);
+      }
+    }, { timezone: tz });
+    skillCronTasks.set(cap.kind, task);
+    queue.log('scheduler', `[skills] "${cap.kind}" cron registered: ${expr} (tz: ${tz})`);
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Takeover janitor — resolveActiveShow already ignores an expired schedule
 // override (lazy, date-aware), so correctness never depends on this tick. Its
 // job is promptness + hygiene: clear the persisted override and roll the
@@ -939,6 +976,8 @@ export function startScheduler() {
   // Nightly health check at 04:17 — populates the DJ Doc last-run cache + header
   // badge without the operator having to open the panel. Deterministic (no LLM).
   cron.schedule('17 4 * * *', nightlyDoctor);
+
+  syncSkillCrons();
 
   queue.log('scheduler', `Scheduler started · skills: ${skillCatalog().map((s: any) => s.name).join(', ')}`);
 }

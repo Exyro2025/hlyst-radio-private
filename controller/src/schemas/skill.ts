@@ -43,6 +43,15 @@ export const SKILL_COOLDOWN_RE = /^\d+\s*[smhd]?$/;
 // A skill may declare an env var it needs before it can fire (`requiresKey`).
 export const SKILL_ENV_KEY_RE = /^[A-Z][A-Z0-9_]*$/;
 
+// Optional dedicated cron schedule ("0 * * * *") that fires the skill
+// immediately, bypassing the cooldown/frequency gate. Structural check only
+// (5 space-separated fields) — this file may import ONLY zod, so the deeper
+// per-field range validation node-cron's own `validate()` does happens again
+// when scheduler.ts registers the task; an expression that passes this regex
+// but fails that one is skipped there with a logged error rather than
+// refused here.
+export const SKILL_CRON_RE = /^\S+\s+\S+\s+\S+\s+\S+\s+\S+$/;
+
 // When a custom skill may air. 'commute' restricts it to the commute hours;
 // 'any' is the default and is NOT written to frontmatter.
 export const SKILL_WINDOWS = ['any', 'commute'] as const;
@@ -210,10 +219,24 @@ const skillRequiresKeySchema = z.preprocess(
     .transform((v) => v || undefined),
 );
 
+const skillCronSchema = z.preprocess(
+  skillNullToUndefined,
+  z
+    .string({ error: 'must be text' })
+    .trim()
+    .optional()
+    .refine(
+      (v) => !v || SKILL_CRON_RE.test(v),
+      'must be a valid 5-field cron expression (e.g. "0 * * * *")',
+    )
+    .transform((v) => v || undefined),
+);
+
 // The fields every skill's SKILL.md carries, built-in or custom.
 export const builtinSkillFileSchema = z.object({
   label: skillLabelSchema,
   cooldown: skillCooldownSchema,
+  cron: skillCronSchema,
   context: skillContextSchema,
   tags: skillTagsSchema,
   brief: skillBriefSchema,
@@ -254,6 +277,7 @@ export function skillFieldsFrom(kind: string, parsed: SkillFileParsed) {
     kind,
     label: parsed.label,
     cooldown: parsed.cooldown,
+    cron: parsed.cron,
     contextFields: parsed.context,
     window: parsed.window,
     requiresKey: parsed.requiresKey,

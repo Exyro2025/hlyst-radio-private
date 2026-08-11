@@ -54,6 +54,7 @@ a folder into `state/skills/` and hit **Rescan** in the admin Skills page:
 name: moon-phase          # the slug / "kind" (defaults to the folder name)
 label: Moon phase         # human label in /admin/skills (defaults to title-cased name)
 cooldown: 6h              # hard min gap between autonomous firings — "90m" | "6h" | "2d" | "45" (bare = minutes)
+cron: 0 * * * *           # OPTIONAL: fire on a fixed schedule instead of/alongside the cooldown gate (see below)
 window: any               # "any" (default) | "commute" — only offered during commute hours
 context: time, festival   # OPTIONAL: which "right now" fields this segment may mention (see below)
 requiresKey: SOME_API_KEY # OPTIONAL: env var the skill needs; if unset, the skill stays inert
@@ -126,6 +127,25 @@ the hour. One sentence; skip it if nothing's notable.
 
 You can also set this from the admin UI: **/admin/skills → Edit** shows a
 tick-box per field. An empty selection resets the skill to the default profile.
+
+### `cron:` — fire on a fixed schedule
+
+`cron:` is an OPTIONAL standard 5-field cron expression (`"0 * * * *"` = top of
+every hour, `"*/30 * * * *"` = every 30 minutes). When set, the scheduler
+registers a dedicated timer for that skill and fires it directly the moment the
+expression matches — bypassing the cooldown and the DJ's frequency floor
+entirely, the same posture as pressing **Run now** in the admin UI. Leave it
+blank (the default) and the skill only airs through the normal cooldown /
+frequency-gated segment tick.
+
+The expression runs in the station's own timezone (Settings → Station). A
+skill can carry both a `cooldown:` and a `cron:` — the cooldown still applies
+to any *autonomous* firing from the segment tick, while the cron timer ignores
+it. An invalid expression is logged and skipped rather than refused at save
+time, since the deeper per-field range validation only runs when the scheduler
+registers the task.
+
+Set it from the admin UI too: **/admin/skills → Edit → Cron timer**.
 
 For a **new** skill the `name` must be a lowercase slug that isn't a built-in kind
 (`weather`, `news`, `now-playing-dig`, `curiosity`, `album-anniversary`, `library-deep-cut`,

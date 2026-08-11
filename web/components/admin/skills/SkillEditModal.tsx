@@ -98,6 +98,7 @@ interface SkillFileResponse {
   config?: Record<string, string | number>;
   label?: string;
   cooldown?: string;
+  cron?: string | null;
   context?: string;
   knownContextFields?: string[];
   window?: 'any' | 'commute';
@@ -119,6 +120,7 @@ interface SkillFormValues {
   name?: string;
   label: string;
   cooldown: string;
+  cron: string;
   context: string[];
   tags: string[];
   brief: string;
@@ -156,6 +158,7 @@ function fileToFormValues(j: SkillFileResponse) {
   return {
     label: j.label || '',
     cooldown: j.cooldown || '',
+    cron: j.cron || '',
     context: splitContext(j.context),
     window: (j.window === 'commute' ? 'commute' : 'any') as 'any' | 'commute',
     tags: Array.isArray(j.tags) ? j.tags : [],
@@ -217,8 +220,8 @@ export default function SkillEditModal({ mode, skill, personas, tagSuggestions, 
   const form = useZodForm(
     schema,
     (mode === 'create'
-      ? { name: '', label: '', cooldown: '', context: [], tags: [], brief: '', window: 'any', requiresKey: '' }
-      : { label: '', cooldown: '', context: [], tags: [], brief: '', window: 'any', requiresKey: '' }
+      ? { name: '', label: '', cooldown: '', cron: '', context: [], tags: [], brief: '', window: 'any', requiresKey: '' }
+      : { label: '', cooldown: '', cron: '', context: [], tags: [], brief: '', window: 'any', requiresKey: '' }
     ) as DefaultValues<z.input<typeof schema>>,
   );
   const control = form.control as unknown as Control<SkillFormValues>;
@@ -302,7 +305,7 @@ export default function SkillEditModal({ mode, skill, personas, tagSuggestions, 
   // passthrough with no rendered control, so a disk-authored value that isn't
   // UPPER_SNAKE_CASE has nowhere else to surface, and a gated Save would
   // otherwise never say why.
-  const FIELDS_WITH_INLINE_ERRORS = ['name', 'label', 'cooldown', 'context', 'tags', 'window', 'brief'];
+  const FIELDS_WITH_INLINE_ERRORS = ['name', 'label', 'cooldown', 'cron', 'context', 'tags', 'window', 'brief'];
   const blockingIssue = (() => {
     const entry = Object.entries(form.formState.errors).find(
       ([key, err]) => err && !FIELDS_WITH_INLINE_ERRORS.includes(key),
@@ -729,6 +732,24 @@ export default function SkillEditModal({ mode, skill, personas, tagSuggestions, 
               </div>
             </div>
 
+            {/* Cron timer — optional dedicated schedule that fires the skill immediately */}
+            <div className="sw-section">
+              <div style={sectionLabel}>CRON TIMER — FIRE ON A FIXED SCHEDULE</div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 14, flexWrap: 'wrap', marginTop: 16 }}>
+                <TextField
+                  control={control}
+                  name="cron"
+                  label="Cron expression"
+                  placeholder="0 * * * *"
+                  className="w-50"
+                />
+              </div>
+              <div style={{ fontSize: 12, color: 'var(--muted)', marginTop: 12, lineHeight: 1.6, maxWidth: '72ch' }}>
+                Standard 5-field cron expression (e.g. <code>0 * * * *</code> = top of every hour, <code>*/30 * * * *</code> = every 30 min). Leave blank to rely on the cooldown / normal frequency gating. When a cron timer fires it runs the skill immediately, bypassing the frequency floor and cooldown — same as pressing Run Now. Uses the station timezone set in Settings.
+              </div>
+            </div>
+
+            {/* Window — custom skills only (built-in window isn't editable) */}
             {custom && (
               <div className="sw-section">
                 <Controller
