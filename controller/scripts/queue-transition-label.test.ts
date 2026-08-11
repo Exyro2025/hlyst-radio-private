@@ -5,10 +5,16 @@
 import assert from 'node:assert/strict';
 import { nextTransitionLabel } from '../src/broadcast/queue/pure.js';
 
-const item = (track = {}, stemSeam = false) => ({ track, stemSeam });
+const item = (track = {}, stemSeam = false, sent = true) => ({ track, stemSeam, sent });
 
 assert.equal(nextTransitionLabel(null, null), null);
 assert.equal(nextTransitionLabel(null, item()), 'Normal');
+
+// applyMixTransition has not run yet: these are raw agent proposals, not a
+// promise about what will air. Even a stale stem flag must not bypass the sent
+// gate; the dashboard renders both null cases as an em dash.
+assert.equal(nextTransitionLabel(item(), item({ sweep: true }, false, false)), null);
+assert.equal(nextTransitionLabel(item(), item({}, true, false)), null);
 
 assert.equal(nextTransitionLabel(item({ washout: true }), item()), 'Washout');
 assert.equal(nextTransitionLabel(item({ loop: true }), item()), 'Loop');

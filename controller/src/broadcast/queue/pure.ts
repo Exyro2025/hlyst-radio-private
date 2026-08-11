@@ -12,19 +12,23 @@ import type { Track } from './types.js';
 
 interface TransitionItem {
   track: Track;
+  sent?: boolean;
   stemSeam?: boolean;
 }
 
-// Human-readable description of the NEXT seam the operator will hear. Exit
-// gestures ride the outgoing track while entry gestures ride the incoming
-// track, so the answer has to inspect both sides rather than exposing one raw
-// flag to the admin UI. Washout may combine with sweep/blend; stem rendering
-// owns the whole seam and therefore overrides every live effect.
+// Human-readable description of the NEXT FINALISED seam the operator will
+// hear. applyMixTransition and the pair/stem stamps run only when `incoming`
+// drains, so flags on an unsent item are still agent proposals: vetoes may
+// remove them and drain-time policy may add another. Returning null keeps the
+// admin honest until `sent` makes the pair authoritative. Exit gestures ride
+// the outgoing track while entry gestures ride the incoming track, so the
+// answer has to inspect both sides. Washout may combine with sweep/blend; stem
+// rendering owns the whole seam and therefore overrides every live effect.
 export function nextTransitionLabel(
   outgoing: TransitionItem | null | undefined,
   incoming: TransitionItem | null | undefined,
 ): string | null {
-  if (!incoming) return null;
+  if (!incoming || incoming.sent !== true) return null;
   if (incoming.stemSeam) return 'Stem blend';
 
   const labels: string[] = [];

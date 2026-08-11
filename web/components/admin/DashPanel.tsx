@@ -334,10 +334,10 @@ export default function DashPanel() {
   const listenersObj = listenersValue && typeof listenersValue === 'object' ? listenersValue : null;
   const upcoming = q.upcoming || [];
   const history = q.history || [];
-  const nextTransition =
-    upcoming.length === 0
-      ? '—'
-      : q.nextTransition || (upcoming[0]?.stemSeam ? 'Stem blend' : 'Normal');
+  // The controller publishes a label only after the incoming item has drained
+  // and its transition flags are final. Never reconstruct it from raw queue
+  // flags here: an unsent proposal can still be vetoed or replaced.
+  const nextTransition = q.nextTransition ?? '—';
   // `sessionMessages` arrives in air order and is shown newest first. Each turn
   // carries its ORIGINAL index: turnKey() folds the index into the React key, and
   // a display index would shift under every new turn, remounting the whole list.
@@ -424,6 +424,18 @@ export default function DashPanel() {
                         <QueueItemContent className="text-[12px] text-ink">
                           {t.title} <span className="text-muted">— {t.artist}</span>
                         </QueueItemContent>
+                        {/* `stemSeam` rides the successor, so keep its definitive
+                            marker on that row even while the header describes
+                            the earlier current → first-upcoming transition. Text
+                            makes the meaning explicit without the old opaque icon. */}
+                        {t.stemSeam ? (
+                          <span
+                            title="Arrives via a rendered blend mixed from cached stems"
+                            className="shrink-0 text-[8px] font-bold tracking-[0.14em] whitespace-nowrap text-vermilion/80 uppercase"
+                          >
+                            Stem blend
+                          </span>
+                        ) : null}
                         <span className="mono-num text-[10px] whitespace-nowrap text-muted">
                           {typeof t.duration === 'number' || typeof t.duration === 'string'
                             ? t.duration
