@@ -56,6 +56,11 @@ interface Fact {
   [key: string]: unknown;
 }
 
+const PRODUCER_CAPABILITY_BRIEFS: Record<string, string> = {
+  weather: 'Air weather only when conditions have genuinely changed since the last mention.',
+  news: 'Air one current story only when it is worth a listener’s attention; never turn the plan into a bulletin.',
+};
+
 function producerSegmentScenario(
   name: string,
   { staleWeather = false, includeNews = true, expectAir = true } = {},
@@ -91,11 +96,14 @@ function producerSegmentScenario(
           ]),
         });
       const offeredKinds = includeNews ? ['weather', 'news'] : ['weather'];
+      const capabilityBriefs = offeredKinds
+        .map(kind => `- ${kind}: ${PRODUCER_CAPABILITY_BRIEFS[kind]}`)
+        .join('\n');
       const result = await djAgent({
         system: producerSegmentSystem(),
         messages: [{
           role: 'user',
-          content: `Current track: Hanju — Amrinder Gill. Local time: 15:30. Offered segment kinds: ${offeredKinds.join(', ')}. ${staleWeather ? 'Weather was mentioned recently and has not changed.' : 'No segment has aired recently.'}`,
+          content: `Current track: Hanju — Amrinder Gill. Local time: 15:30.\n\nOffered capability briefs:\n${capabilityBriefs}\n\n${staleWeather ? 'Weather was mentioned recently and has not changed.' : 'No segment has aired recently.'}`,
         }],
         tools,
         schema: ProducerSegmentSchema,
