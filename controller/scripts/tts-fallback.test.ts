@@ -257,6 +257,53 @@ assert.deepEqual(
   'the failed Cloud provider is not immediately retried',
 );
 
+// The HARDCODED default-engine rung is provider-scoped too, and it is the rung
+// an operator who never configured a fallback actually gets. It carries no
+// override, so it speaks with the station default's credentials — which is
+// exactly why it survives a cloud primary on some OTHER provider.
+const defaultCloudRung = orderedFallbacks(
+  { engine: 'cloud', cloudProvider: 'fish-audio' },
+  null,
+  'cloud',
+  allUsable,
+  'elevenlabs',
+);
+assert.deepEqual(
+  engines(defaultCloudRung),
+  ['cloud', 'piper', 'kokoro'],
+  'the station default Cloud provider rescues a failed persona provider',
+);
+assert.equal(
+  defaultCloudRung[0]?.personaTts,
+  null,
+  'the default-engine rung carries no override, so it speaks with station credentials',
+);
+// The same rung against a primary that WAS the station default resolves to the
+// same provider on both sides and drops out — no retrying what just threw.
+assert.deepEqual(
+  engines(orderedFallbacks(
+    { engine: 'cloud', cloudProvider: 'elevenlabs' },
+    null,
+    'cloud',
+    allUsable,
+    'elevenlabs',
+  )),
+  ['piper', 'kokoro'],
+  'a cloud primary already on the station provider skips the default rung',
+);
+// An unspecified provider on BOTH sides is the pre-#1345 station: no cloud
+// rung, byte-for-byte the old chain.
+assert.deepEqual(
+  engines(orderedFallbacks({ engine: 'cloud' }, null, 'cloud', allUsable)),
+  ['piper', 'kokoro'],
+  'with no provider known anywhere, cloud is still one target',
+);
+assert.equal(
+  sameTtsTarget({ engine: 'piper' }, { engine: 'piper', cloudProvider: 'elevenlabs' }, 'openai'),
+  true,
+  'provider is ignored for every engine but cloud',
+);
+
 const seen: Array<[string, string | null | undefined]> = [];
 orderedFallbacks('piper', cloudFb, 'cloud', (e, p) => { seen.push([e, p]); return true; });
 assert.deepEqual(

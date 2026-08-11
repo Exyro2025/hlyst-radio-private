@@ -99,6 +99,12 @@ export function configuredSlot(
 // replaced by the engine's global default on exactly the station where both
 // were pointed at the same engine.
 //
+// Note dedup stays engine-keyed even though EXCLUSION is provider-keyed for
+// cloud (see sameTtsTarget). That asymmetry is deliberate: a failed provider
+// must not blacklist a healthy sibling, but once one cloud rung is in the
+// chain a second one buys another network round-trip on the same dispatcher
+// while the local floor is still waiting below. One cloud attempt per rescue.
+//
 // `usable` receives the slot's own cloud provider for the configured rung and
 // null for the hardcoded ones — the probe must agree with the call, and a
 // hardcoded cloud rung speaks with the station default's credentials.

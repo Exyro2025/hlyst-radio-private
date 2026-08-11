@@ -109,21 +109,37 @@ function plainSlot(engine: string): RescueSlot {
   return { engine, personaTts: null };
 }
 
-function ttsTarget(
-  engine: string,
-  personaTts: { engine?: unknown; cloudProvider?: unknown } | null | undefined,
-): TtsTarget {
-  const globalCloudProvider = settings.get().tts?.cloud?.provider ?? null;
-  const personaCloudProvider = personaTts?.engine === 'cloud'
-    && typeof personaTts.cloudProvider === 'string'
-    ? personaTts.cloudProvider
-    : null;
+// What a render is actually aimed at: the engine, plus — for `cloud` alone —
+// the provider inside it. The station default is deliberately NOT substituted
+// here; that is sameTtsTarget's job, so "which provider does an unspecified
+// cloud slot mean" has exactly one answer, shared with the pure chain builder
+// (whose hardcoded rungs carry no override at all).
+function ttsTarget(engine: string, personaTts: any): TtsTarget {
   return {
     engine,
-    cloudProvider: engine === 'cloud'
-      ? (personaCloudProvider || globalCloudProvider)
-      : null,
+    cloudProvider: engine === 'cloud' ? personaCloudProvider(personaTts) : null,
   };
+}
+
+// The station's Cloud provider — what an unspecified cloud target resolves to.
+function defaultCloudProvider(): string | null {
+  return settings.get().tts?.cloud?.provider ?? null;
+}
+
+// True when a segment did NOT go out on the target the persona asked for —
+// a different engine, or (for cloud) a different provider inside the same
+// engine. The engine-only comparison this replaces reported a fish-audio →
+// ElevenLabs reroute as no fallback at all, hiding from the Stats page and
+// /debug exactly the misconfiguration those surfaces exist to show (#1345).
+function rerouted(
+  requestedEngineId: string, requestedPersonaTts: any,
+  actualEngine: string, actualPersonaTts: any,
+): boolean {
+  return !sameTtsTarget(
+    ttsTarget(requestedEngineId, requestedPersonaTts),
+    ttsTarget(actualEngine, actualPersonaTts),
+    defaultCloudProvider(),
+  );
 }
 
 // Which engine — and which VOICE — actually speaks a segment of `kind`.
@@ -144,8 +160,8 @@ function resolveEngine(kind: string, personaTts: any): RescueSlot {
   // (engine + voice) if they set one and it can speak, else to their saved
   // default engine, else Piper as the universal local floor — instead of
   // attempting a call that can only throw. Note this does NOT verify the
-  // default is itself usable; if it isn't, the runtime chain in speak() picks
-  // up the pieces.
+  // default is itself usable (except on the same-engine cloud hop below); if it
+  // isn't, the runtime chain in speak() picks up the pieces.
   if (!engineUsable(chosen, personaCloudProvider(personaTts))) {
     // Probed with the fallback's OWN cloud provider, matching the credentials
     // the call would actually use — the same probe/call agreement rule the
@@ -153,18 +169,33 @@ function resolveEngine(kind: string, personaTts: any): RescueSlot {
     const configured = fallbackSlot();
     if (
       configured
-      && !sameTtsTarget(
-        ttsTarget(configured.engine, configured.personaTts),
-        ttsTarget(chosen, personaTts),
-        tts.cloud?.provider,
-      )
+      && rerouted(configured.engine, configured.personaTts, chosen, personaTts)
       && engineUsable(configured.engine, configured.personaTts?.cloudProvider ?? null)
     ) {
       return configured;
     }
-    return plainSlot(
-      tts.defaultEngine && tts.defaultEngine !== chosen ? tts.defaultEngine : 'piper',
-    );
+    if (tts.defaultEngine && tts.defaultEngine !== chosen) return plainSlot(tts.defaultEngine);
+    // Same engine id as the unusable primary — which only a DIFFERENT cloud
+    // provider can survive (sameTtsTarget treats every other engine as its own
+    // whole identity). A persona on a keyless Fish/openai-compatible target
+    // should reach the station's own healthy Cloud provider rather than skip
+    // past it to Piper, which is the pre-flight half of #1345; without it this
+    // path and the mid-render chain below would disagree about the very hop
+    // the chain now allows.
+    //
+    // Unlike the branch above this one is PROBED. That branch's leniency is
+    // load-bearing history ("does NOT verify the default is itself usable"),
+    // but this hop is new, and a station whose global Cloud provider is also
+    // dead would otherwise buy a guaranteed-throwing API call on the way to
+    // the same Piper it lands on today.
+    if (
+      tts.defaultEngine
+      && rerouted(tts.defaultEngine, null, chosen, personaTts)
+      && engineUsable(tts.defaultEngine, null)
+    ) {
+      return plainSlot(tts.defaultEngine);
+    }
+    return plainSlot('piper');
   }
   return plainSlot(chosen);
 }
@@ -192,7 +223,7 @@ function fallbackChain(primary: TtsTarget): RescueSlot[] {
     fallbackSlot(),
     settings.get().tts?.defaultEngine,
     (engine, cloudProvider) => engineUsable(engine, cloudProvider ?? null),
-    settings.get().tts?.cloud?.provider,
+    defaultCloudProvider(),
   );
 }
 
@@ -440,6 +471,9 @@ export async function speak(
   // global default and the operator's choice would apply only to mid-render
   // failures.
   const primaryPersonaTts = primarySlot.personaTts ?? personaTts;
+  // Did the pre-flight gate move the segment off what the persona asked for?
+  // Provider-aware, so a cloud→cloud reroute counts (see rerouted()).
+  const primaryFellBack = rerouted(requested, personaTts, primary, primaryPersonaTts);
   // Engine-native bracket cues must reach the expressive primary untouched,
   // but a local/remote rescue would speak them literally. Resolve the exact
   // provider+model family used by djSystem() and sanitize only that rescue.
@@ -448,7 +482,7 @@ export async function speak(
     ? cloud.requestedCloudExpressionCueFamilyForPersona(speakingPersona)
     : '';
   const rescueText = fallbackTextFor(requested, cloudCueFamily, speakText);
-  const primaryText = requested === primary ? speakText : rescueText;
+  const primaryText = primaryFellBack ? rescueText : speakText;
   // Persona on-air language (e.g. "French") rides along to the cloud engine as a
   // pronunciation hint so a non-English script isn't read with English phonetics
   // (issue #558). DJ-voiced kinds only — never jingles — and '' (ignored) for
@@ -492,7 +526,7 @@ export async function speak(
     // non-WAV output (cloud mp3) is left as-is.
     if (typeof result === 'string') await applyEdgeFades(result);
     recordTts({
-      ...callBase, engine: primary, fellBack: requested !== primary,
+      ...callBase, engine: primary, fellBack: primaryFellBack,
       ok: true, ms: Date.now() - started, t: new Date().toISOString(),
     });
     return result;
@@ -503,7 +537,7 @@ export async function speak(
     const chain = fallbackChain(ttsTarget(primary, primaryPersonaTts));
     if (!chain.length) {
       recordTts({
-        ...callBase, engine: primary, fellBack: requested !== primary,
+        ...callBase, engine: primary, fellBack: primaryFellBack,
         ok: false, ms: Date.now() - started, error: err.message,
         t: new Date().toISOString(),
       });
@@ -661,7 +695,10 @@ export function describeRouting() {
       engine,
       voice: voice || null,
       provider: provider || null,
-      fellBack: requested !== engine,
+      // Provider-aware like speak()'s: a persona rerouted from a dead Fish
+      // target onto the operator's ElevenLabs rescue is still on `cloud`, and
+      // reporting that as no fallback is what /debug is here to prevent.
+      fellBack: rerouted(requested, personaTts, engine, slot.personaTts ?? personaTts),
       warning,
     },
     fallback: {
