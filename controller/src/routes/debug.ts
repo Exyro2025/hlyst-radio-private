@@ -21,6 +21,7 @@ import { queue } from '../broadcast/queue.js';
 import * as session from '../broadcast/session.js';
 import { budgetStatus } from '../broadcast/dj-budget.js';
 import { voiceStatus } from '../broadcast/voice-policy.js';
+import { clockStatus } from '../broadcast/clock-policy.js';
 import * as requestLog from '../broadcast/request-log.js';
 import { getStationTimezone } from '../time.js';
 import { publicOrigin } from './public.js';
@@ -239,6 +240,11 @@ async function buildDebugSnapshot(req: express.Request): Promise<any> {
     // every autonomous talk moment is standing down — worth seeing here before
     // anyone debugs "why is the DJ quiet".
     voice: (() => { try { return voiceStatus(); } catch (err: any) { return { error: err.message }; } })(),
+    // Station clock switch (settings.djSpeakClock). `enabled:false` means the
+    // wall clock is off air and the automatic top-of-the-hour time check is
+    // standing down — the same "why has the DJ gone quiet about X" question
+    // `voice` above answers, one surface further in.
+    clock: (() => { try { return clockStatus(); } catch (err: any) { return { error: err.message }; } })(),
     // Done-tool retry churn (D2) — since-boot count of the strategy layer's
     // two "stopped without calling done" retry sites (agent.ts), the same
     // symptom the corrective re-pick in dj-agent.ts exists to salvage.
