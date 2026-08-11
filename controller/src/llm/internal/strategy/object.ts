@@ -32,6 +32,7 @@ export async function djObject({
   maxOutputTokens = resolveMaxOutputTokens(MAX_TOKENS_OBJECT),
   kind = 'sdk.djObject',
   leg = undefined,
+  role = 'persona',
   // Optional caller-supplied abort signal. No live caller wraps djObject in
   // withDeadline today, so this is inert unless one starts to — kept in the
   // shape as a precaution so a future deadline-wrapped call can cut the
@@ -137,5 +138,6 @@ export async function djObject({
       throw lastErr;
     },
     leg,
+    role,
   );
 }

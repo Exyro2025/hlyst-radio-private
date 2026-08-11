@@ -1,15 +1,22 @@
-// Primary→fallback failover harness + the success/failure record writers.
+// Role-aware failover harness + the success/failure record writers.
 //
 // Every primitive (djText / djObject / djAgent) runs its per-leg generation
-// inside withFailover(): the primary leg is tried first, and the call retries
-// once against the optional fallback leg when the primary leg can't recover this
-// call — either its host is unreachable (connection refused / DNS / timeout —
+// inside withFailover(). Persona calls retain primary→optional fallback.
+// Producer calls use configured Producer→primary; when Producer is disabled,
+// they collapse to that same Persona path. A call retries once when its first
+// leg can't recover — either its host is unreachable (connection/DNS/timeout —
 // see isUnreachable), it refused with a quota/usage-limit/auth error (see
 // isQuotaOrAuthError; issue #438), or a reachable gateway relayed a saturated
 // upstream that survived same-leg retries (see isUpstreamOverloaded; issue #671).
 // record* lives here so a call is logged exactly once, with the leg that ran.
 
-import { primaryLeg, fallbackLeg } from '../provider/legs.js';
+import {
+  primaryLeg,
+  fallbackLeg,
+  producerLeg,
+  producerFallbackLeg,
+} from '../provider/legs.js';
+import type { LlmPin, LlmRole } from '../provider/legs.js';
 import { record } from '../telemetry/log.js';
 import { isUnreachable, isQuotaOrAuthError, isUpstreamOverloaded, isRateLimited } from './pure.js';
 
@@ -73,11 +80,11 @@ export interface AttemptResult<T> {
   extra?: any;
 }
 
-// Run an LLM operation with primary→fallback failover. `attempt(leg)` performs
+// Run an LLM operation with role-aware failover. `attempt(leg)` performs
 // one full generation against a single leg and returns a record-ready result;
 // it throws on error, optionally tagging the error with `__via` so the failure
 // record attributes to the right sub-path (djObject/djAgent set this). The
-// primary leg is tried first; only when the primary leg can't recover this call
+// role's first leg is tried first; only when that leg can't recover this call
 // — host unreachable OR a quota/usage-limit/auth rejection OR a reachable
 // gateway relaying a saturated upstream (#671) OR a rate limit that survived
 // same-leg retries (#738 — a free-tier request cap) — and only when a fallback
@@ -85,20 +92,26 @@ export interface AttemptResult<T> {
 // On a failover the primary's failure is also recorded (via `…:failover→<backup>`)
 // so /debug shows the switch happened.
 //
-// `pin` overrides leg selection: instead of trying the primary and failing over,
+// `pin` overrides leg selection: instead of using role routing and failing over,
 // the call runs exactly once against the named leg with NO cross-leg failover —
 // any error propagates so the caller can manage its own leg (the library tagger
 // pins one consumer per leg, discussion #320). Records carry a `…:pinned` via
 // suffix so /stats' exact-match buckets stay untouched. Unpinned calls are the
-// untouched primary→fallback path.
+// untouched Persona primary→fallback path. `role` is opt-in and defaults to
+// Persona, so existing callers preserve their previous route.
 export async function withFailover<T>(
   kind: string,
   failExtra: (err: any) => any,
   attempt: (leg: any) => Promise<AttemptResult<T>>,
-  pin?: 'primary' | 'fallback',
+  pin?: LlmPin,
+  role: LlmRole = 'persona',
 ): Promise<T> {
   if (pin) {
-    const leg = pin === 'fallback' ? fallbackLeg() : primaryLeg();
+    const leg = pin === 'fallback'
+      ? fallbackLeg()
+      : pin === 'producer'
+        ? producerLeg()
+        : primaryLeg();
     if (!leg) throw new Error(`withFailover: pinned leg "${pin}" is not configured`);
     const started = Date.now();
     try {
@@ -111,7 +124,7 @@ export async function withFailover<T>(
       throw err;
     }
   }
-  const primary = primaryLeg();
+  const primary = role === 'producer' ? producerLeg() : primaryLeg();
   const primaryStarted = Date.now();
   try {
     const r = await attempt(primary);
@@ -122,7 +135,9 @@ export async function withFailover<T>(
     const quotaOrAuth = isQuotaOrAuthError(err);
     const upstreamOverloaded = isUpstreamOverloaded(err);
     const rateLimited = isRateLimited(err);
-    const backup = (isUnreachable(err) || quotaOrAuth || upstreamOverloaded || rateLimited) ? fallbackLeg() : null;
+    const backup = (isUnreachable(err) || quotaOrAuth || upstreamOverloaded || rateLimited)
+      ? (role === 'producer' ? producerFallbackLeg(primary) : fallbackLeg())
+      : null;
     if (!backup) {
       logFailurePreview(kind, err);
       recordFailure({ kind, started: primaryStarted, via: primaryVia, model: primary.label, error: err?.message, extra: failExtra(err) });
@@ -130,7 +145,8 @@ export async function withFailover<T>(
     }
     const reason = quotaOrAuth ? 'refused (quota/auth)' : upstreamOverloaded ? 'upstream overloaded' : rateLimited ? 'rate limited' : 'unreachable';
     const detail = err?.statusCode || err?.cause?.statusCode || err?.code || err?.cause?.code || err?.name || 'unknown';
-    console.log(`[${kind}] primary LLM (${primary.label}) ${reason} (${detail}) — failing over to ${backup.label}`);
+    const source = primary.slot === 'producer' ? 'producer' : 'primary';
+    console.log(`[${kind}] ${source} LLM (${primary.label}) ${reason} (${detail}) — failing over to ${backup.label}`);
     recordFailure({ kind, started: primaryStarted, via: `${primaryVia}:failover→${backup.label}`, model: primary.label, error: err?.message, extra: failExtra(err) });
     const backupStarted = Date.now();
     try {

@@ -28,6 +28,7 @@ export async function djText({
   seed = null,
   maxOutputTokens = resolveMaxOutputTokens(MAX_TOKENS_TEXT),
   kind = 'sdk.djText',
+  role = 'persona',
   // Optional caller-supplied abort signal. No live caller wraps djText in
   // withDeadline today, so this is inert unless one starts to — kept in the
   // shape as a precaution so a future deadline-wrapped call can cut the
@@ -77,5 +78,7 @@ export async function djText({
         extra: { system, user: prompt, response: out },
       };
     },
+    undefined,
+    role,
   );
 }

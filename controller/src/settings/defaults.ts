@@ -375,6 +375,27 @@ export const DEFAULTS = {
       // running a different model, so it resolves its own budget.
       discoverySteps: 0,
     },
+    // Optional backstage Producer LLM. Disabled is the compatibility posture:
+    // Producer-routed calls use the primary Persona leg byte-for-byte. When
+    // enabled, only calls that explicitly opt into the Producer role start
+    // here; an unreachable Producer falls back to the primary leg. Keeping the
+    // connection shape identical to fallback lets every provider capability
+    // (tool choice, context, repeat penalty, discovery budget) resolve through
+    // the existing per-leg chokepoints.
+    producer: {
+      enabled: false,
+      provider: 'ollama',
+      model: '',
+      apiKey: '',
+      ollamaUrl: '',
+      providerBaseUrls: {} as Record<string, string>,
+      baseUrl: '',
+      reasoning: false,
+      toolChoice: 'required',
+      numCtx: 16384,
+      repeatPenalty: 1.15,
+      discoverySteps: 0,
+    },
   },
   // Embedding-propagated library tagger (music/tag-library.ts): embed every
   // track's metadata text once, LLM-tag a small representative seed set, then

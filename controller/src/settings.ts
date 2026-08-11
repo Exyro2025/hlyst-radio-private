@@ -363,6 +363,14 @@ export async function load() {
     { ...fbStored, provider: fbProvider },
     LLM_PROVIDERS,
   );
+  const producerStored = stored.llm?.producer || {};
+  const producerProvider = LLM_PROVIDERS.includes(producerStored.provider)
+    ? producerStored.provider
+    : DEFAULTS.llm.producer.provider;
+  const producerBaseUrls = normalizeLlmProviderBaseUrls(
+    { ...producerStored, provider: producerProvider },
+    LLM_PROVIDERS,
+  );
   // The embedding leg inherits the chat provider when its own is empty, so the
   // legacy dedicated embedding URL (issue #405) must migrate under the
   // EFFECTIVE provider — that's the key the admin UI reads and writes.
@@ -837,6 +845,51 @@ export async function load() {
           numCtx: clampNumCtx(fb.numCtx, DEFAULTS.llm.fallback.numCtx),
           repeatPenalty: clampRepeatPenalty(fb.repeatPenalty, DEFAULTS.llm.fallback.repeatPenalty),
           discoverySteps: clampDiscoverySteps(fb.discoverySteps, DEFAULTS.llm.fallback.discoverySteps),
+        };
+      })(),
+      // Optional Producer leg — explicitly composed for the same cold-load
+      // reason as fallback. Do not replace this block with a DEFAULTS spread:
+      // stored per-provider URL maps need migration through the effective
+      // provider, and every field must prove it survives a controller restart.
+      producer: (() => {
+        const producer = stored.llm?.producer || {};
+        return {
+          enabled:
+            typeof producer.enabled === 'boolean'
+              ? producer.enabled
+              : DEFAULTS.llm.producer.enabled,
+          provider: LLM_PROVIDERS.includes(producer.provider)
+            ? producer.provider
+            : DEFAULTS.llm.producer.provider,
+          model:
+            typeof producer.model === 'string'
+              ? producer.model.trim()
+              : DEFAULTS.llm.producer.model,
+          apiKey: '',
+          ollamaUrl:
+            typeof producer.ollamaUrl === 'string'
+              ? producer.ollamaUrl.trim()
+              : DEFAULTS.llm.producer.ollamaUrl,
+          providerBaseUrls: producerBaseUrls,
+          baseUrl: producerBaseUrls[producerProvider]
+            ?? (typeof producer.baseUrl === 'string'
+              ? producer.baseUrl.trim()
+              : DEFAULTS.llm.producer.baseUrl),
+          reasoning:
+            typeof producer.reasoning === 'boolean'
+              ? producer.reasoning
+              : DEFAULTS.llm.producer.reasoning,
+          toolChoice:
+            producer.toolChoice === 'auto' ? 'auto' : DEFAULTS.llm.producer.toolChoice,
+          numCtx: clampNumCtx(producer.numCtx, DEFAULTS.llm.producer.numCtx),
+          repeatPenalty: clampRepeatPenalty(
+            producer.repeatPenalty,
+            DEFAULTS.llm.producer.repeatPenalty,
+          ),
+          discoverySteps: clampDiscoverySteps(
+            producer.discoverySteps,
+            DEFAULTS.llm.producer.discoverySteps,
+          ),
         };
       })(),
     },
@@ -1629,6 +1682,25 @@ export async function update(patch) {
       ) {
         throw new Error(
           'llm.fallback.baseUrl is required when its provider is "openai-compatible"',
+        );
+      }
+    }
+    // Backstage Producer leg. Like fallback, a half-filled disabled block is
+    // harmless; enabling an OpenAI-compatible endpoint makes its URL required.
+    if (l.producer !== undefined) {
+      const producer = l.producer || {};
+      if (producer.enabled !== undefined) {
+        next.llm.producer.enabled = !!producer.enabled;
+      }
+      applyLlmLegPatch(next.llm.producer, producer, 'llm.producer');
+      applyInlineKey(next.llm, next.llm.producer.provider, producer.apiKey);
+      if (
+        next.llm.producer.enabled &&
+        next.llm.producer.provider === 'openai-compatible' &&
+        !next.llm.producer.baseUrl
+      ) {
+        throw new Error(
+          'llm.producer.baseUrl is required when its provider is "openai-compatible"',
         );
       }
     }

@@ -504,8 +504,8 @@ export function applyInlineKey(llmHost: { keys?: Record<string, string> }, provi
 
 // Build the per-provider inline-key map from a stored settings.llm blob.
 // Sanitises any persisted `keys` (string values, known providers only) and
-// migrates the two legacy single slots (settings.llm.apiKey /
-// settings.llm.fallback.apiKey). Those were only ever written by the
+// migrates the legacy single slots (settings.llm.apiKey plus the fallback and
+// Producer leg apiKey fields). Those are only ever written by the
 // openai-compatible / locca inline-key path, so a value found while the leg's
 // provider is something else is a STALE compat token that leaked into the
 // shared slot (issue #657) — attribute it to its true owner (openai-compatible)
@@ -518,6 +518,7 @@ export function normalizeLlmKeys(storedLlm: unknown): Record<string, string> {
     apiKey?: unknown;
     provider?: unknown;
     fallback?: { apiKey?: unknown; provider?: unknown };
+    producer?: { apiKey?: unknown; provider?: unknown };
   } | null | undefined;
   const raw = sl?.keys;
   if (raw && typeof raw === 'object') {
@@ -537,6 +538,11 @@ export function normalizeLlmKeys(storedLlm: unknown): Record<string, string> {
   if (legacyFallback) {
     const owner = ownerFor(sl?.fallback?.provider);
     if (!out[owner]) out[owner] = legacyFallback;
+  }
+  const legacyProducer = typeof sl?.producer?.apiKey === 'string' ? sl.producer.apiKey : '';
+  if (legacyProducer) {
+    const owner = ownerFor(sl?.producer?.provider);
+    if (!out[owner]) out[owner] = legacyProducer;
   }
   return out;
 }

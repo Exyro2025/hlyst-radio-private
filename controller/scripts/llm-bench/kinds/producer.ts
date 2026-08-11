@@ -17,7 +17,7 @@ import {
 } from '../../../src/llm/producer.js';
 import { tagBatch } from '../../../src/music/tagger-core.js';
 import { pickerAgent } from '../../../src/broadcast/dj-agent.js';
-import { promptDiscoverySteps } from '../../../src/llm/dj.js';
+import { producerPromptDiscoverySteps } from '../../../src/llm/dj.js';
 import { pickerToolsSynthetic } from '../fixtures.js';
 
 function producerPickScenario(name: string, content: string) {
@@ -26,7 +26,7 @@ function producerPickScenario(name: string, content: string) {
     run: async () => {
       const { tools, seen } = pickerToolsSynthetic();
       const result = await djAgent({
-        system: producerPickSystem(promptDiscoverySteps()),
+        system: producerPickSystem(producerPromptDiscoverySteps()),
         messages: [{ role: 'user', content }],
         tools,
         schema: ProducerPickSchema,
@@ -35,6 +35,7 @@ function producerPickScenario(name: string, content: string) {
         timeoutMs: pickerAgent.timeoutMs,
         temperature: 0.4,
         kind: 'producerPick',
+        role: 'producer',
         validate: (object: any) => !!(object?.id && seen.has(object.id)),
       });
       return {
@@ -111,6 +112,7 @@ function producerSegmentScenario(
         timeoutMs: pickerAgent.timeoutMs,
         temperature: 0.3,
         kind: 'producerSegmentPlan',
+        role: 'producer',
       });
       return {
         object: result.object,
@@ -175,7 +177,7 @@ export const specs: KindSpec[] = [
     mode: 'any',
     scenarios: [{
       name: 'mixed-five-track-batch',
-      run: () => tagBatch(TAG_FIXTURES),
+      run: () => tagBatch(TAG_FIXTURES, { role: 'producer' }),
       check: (out: any) => {
         if (!Array.isArray(out) || out.length !== TAG_FIXTURES.length) return ['tag-count-mismatch'];
         const violations: string[] = [];

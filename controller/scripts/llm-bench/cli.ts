@@ -10,6 +10,7 @@
 //   npm run llm-bench -- --models ollama:qwen3:8b,openrouter:google/gemma-4-31b-it
 //   npm run llm-bench -- --models ollama:qwen3:8b --kinds pick,segment --modes pool --iterations 5
 //   npm run llm-bench -- --models openai-compatible:/models/Qwen3-8B.gguf --kinds producer --iterations 5
+//     --producer-model openai-compatible:/models/Qwen3-4B.gguf --producer-base-url http://host:8090/v1
 //
 // Flags:
 //   --models      comma list of provider:model (REQUIRED; first colon splits)
@@ -21,6 +22,11 @@
 //                 'both' runs every model twice, labelled [r:on]/[r:off].
 //                 Default: the live settings value (keeps old reports comparable).
 //   --out         JSON report path (default scripts/llm-bench/reports/<ts>.json)
+//   --producer-model      optional provider:model for Producer-group scenarios
+//   --producer-base-url   its OpenAI-compatible endpoint (or PRODUCER_LLM_BASE_URL)
+//   --producer-ollama-url its Ollama endpoint (or PRODUCER_OLLAMA_URL)
+//   --producer-reasoning  on | off (default off)
+//   --producer-num-ctx    optional context override
 //
 // API keys resolve exactly as live (state/secrets.env / settings / env);
 // OLLAMA_URL overrides the persisted ollamaUrl for off-container runs.
@@ -41,6 +47,7 @@ import { specs as scriptSpecs } from './kinds/scripts.js';
 import { specs as banterSpecs } from './kinds/banter.js';
 import { specs as programmeSpecs } from './kinds/programme.js';
 import { specs as producerSpecs } from './kinds/producer.js';
+import { applyProducerCandidate, producerCandidateFromArgs } from './producer-config.js';
 
 const ALL_SPECS: KindSpec[] = [
   ...pickSpecs, ...segmentSpecs, ...requestSpecs, ...scriptSpecs, ...banterSpecs, ...programmeSpecs,
@@ -59,7 +66,8 @@ function parseArgs(argv: string[]) {
 function usage(msg?: string): never {
   if (msg) console.error(`error: ${msg}\n`);
   console.error('Usage: npm run llm-bench -- --models provider:model[,provider:model...] '
-    + '[--kinds pick,segment,...] [--modes pool,agent] [--iterations N] [--out file.json]');
+    + '[--kinds pick,segment,...] [--modes pool,agent] [--iterations N] [--out file.json] '
+    + '[--producer-model provider:model --producer-base-url URL]');
   console.error(`Groups: ${[...new Set(ALL_SPECS.map(s => s.group))].join(' | ')}`);
   console.error(`Kinds:  ${ALL_SPECS.map(s => s.kind).join(', ')}`);
   process.exit(2);
@@ -68,6 +76,12 @@ function usage(msg?: string): never {
 async function main() {
   const args = parseArgs(process.argv.slice(2));
   if (!args.models) usage('--models is required');
+  let producerCandidate;
+  try {
+    producerCandidate = producerCandidateFromArgs(args);
+  } catch (err: any) {
+    usage(err?.message || String(err));
+  }
 
   const models = args.models.split(',').map(s => s.trim()).filter(Boolean).map(spec => {
     const i = spec.indexOf(':');
@@ -121,6 +135,8 @@ async function main() {
     kinds: specs.map(k => k.kind),
     iterations,
     reasoning: reasoningArg || (s.llm?.reasoning ?? null),
+    producerModel: producerCandidate?.spec ?? null,
+    producerBaseUrl: producerCandidate?.baseUrl ?? producerCandidate?.ollamaUrl ?? null,
   });
   process.on('SIGINT', () => {
     reporter.flush();
@@ -136,6 +152,9 @@ async function main() {
     s.llm.provider = m.provider;
     s.llm.model = m.model;
     s.llm.reasoning = reasoning;
+    // A saved station Producer must never redirect a benchmark silently. The
+    // split route is enabled only by the explicit --producer-model flag.
+    applyProducerCandidate(s.llm, producerCandidate);
     const label = labelReasoning ? `${m.spec} [r:${reasoning ? 'on' : 'off'}]` : m.spec;
     console.log(`━━ ${label}`);
     let consecutiveUnreachable = 0;
@@ -144,8 +163,11 @@ async function main() {
     for (const spec of specs) {
       for (const scenario of spec.scenarios) {
         for (let i = 1; i <= iterations; i++) {
+          const runLabel = producerCandidate && spec.group === 'producer'
+            ? `${label} → Producer ${producerCandidate.spec}`
+            : label;
           const base: RunRecord = {
-            model: label, kind: spec.kind, group: spec.group, mode: spec.mode,
+            model: runLabel, kind: spec.kind, group: spec.group, mode: spec.mode,
             scenario: scenario.name, iteration: i, outcome: 'skipped', violations: [], ms: 0,
           };
           if (skipRest) {

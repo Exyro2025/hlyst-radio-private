@@ -98,6 +98,9 @@ export function getRedacted() {
   if (clone.llm?.fallback) {
     clone.llm.fallback.apiKey = llmKeyFor(s.llm?.fallback?.provider ?? '') ? 'set' : '';
   }
+  if (clone.llm?.producer) {
+    clone.llm.producer.apiKey = llmKeyFor(s.llm?.producer?.provider ?? '') ? 'set' : '';
+  }
   if (clone.tts?.cloud) {
     clone.tts.cloud.apiKey = s.tts?.cloud?.apiKey ? 'set' : '';
     clone.tts.cloud.compatApiKey = s.tts?.cloud?.compatApiKey ? 'set' : '';

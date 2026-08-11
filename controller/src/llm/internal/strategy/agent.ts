@@ -40,6 +40,7 @@ import { stripThinking, extractJson, usageOf, perfOf, warningsOf, flattenToolCal
 import type { StepLike, ToolCallLike, ToolCallSummary, TokenUsage } from '../core/pure.js';
 import { needsToolCallObject, reasoningFor, samplingWithLocalKnobs, forcedToolChoice, runDiscoverySteps } from '../provider/capabilities.js';
 import type { Leg } from '../provider/legs.js';
+import type { LlmRole } from '../provider/legs.js';
 import { objectViaToolCall } from './object-via-tool.js';
 import { agentPlan } from './plan.js';
 import { resolveMaxOutputTokens } from '../../../settings.js';
@@ -89,6 +90,7 @@ interface DjAgentOptions {
   // FULL agentTimeoutMs when its loop silently widened — so only the agents
   // the widening was designed for (pick/request) ask for it.
   providerDiscoveryBudget?: boolean;
+  role?: LlmRole;
 }
 
 // Operator-overridable via settings.llm.maxOutputTokens (issue #712); 0 keeps
@@ -235,6 +237,7 @@ export async function djAgent({
   kind = 'sdk.djAgent',
   timeoutMs,
   providerDiscoveryBudget = false,
+  role = 'persona',
   // Optional caller-supplied acceptance check on the native path's object
   // (e.g. "the picked id must be one a discovery tool actually surfaced").
   // The native path is the only branch with no structural control over WHAT
@@ -591,5 +594,7 @@ export async function djAgent({
         throw err;
       }
     },
+    undefined,
+    role,
   );
 }

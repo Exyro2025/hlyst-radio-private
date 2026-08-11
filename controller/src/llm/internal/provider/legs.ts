@@ -11,6 +11,7 @@ import { languageModel, resolveModelId, ollamaBaseUrl, llmCfg } from './registry
 import { discoveryStepsFor, DISCOVERY_STEPS_MIN } from './capabilities.js';
 
 export interface Leg {
+  slot: LlmPin;  // configured connection this attempt is using
   cfg: any;       // the resolved llm config for this leg
   model: any;     // AI SDK LanguageModel — honours the operator reasoning toggle
   // Reasoning-disabled variant for forced-tool / structured legs (picker, done-
@@ -22,6 +23,9 @@ export interface Leg {
   label: string;  // `provider:modelId` for /debug records
 }
 
+export type LlmRole = 'persona' | 'producer';
+export type LlmPin = 'primary' | 'fallback' | 'producer';
+
 function labelFor(cfg: any): string {
   try {
     return `${cfg.provider}:${resolveModelId(cfg)}`;
@@ -30,12 +34,22 @@ function labelFor(cfg: any): string {
   }
 }
 
+function buildLeg(cfg: any, slot: LlmPin): Leg {
+  return {
+    slot,
+    cfg,
+    model: languageModel(cfg),
+    noThinkModel: languageModel(cfg, { forceNoThink: true }),
+    label: labelFor(cfg),
+  };
+}
+
 // The active primary leg. Throws on a misconfigured primary (empty model on a
 // cloud provider) exactly as languageModel() does today — that's a hard error
 // the caller surfaces, not something to silently route around.
 export function primaryLeg(): Leg {
   const cfg = llmCfg();
-  return { cfg, model: languageModel(cfg), noThinkModel: languageModel(cfg, { forceNoThink: true }), label: labelFor(cfg) };
+  return buildLeg(cfg, 'primary');
 }
 
 // The optional backup leg, or null when no usable fallback is configured.
@@ -50,10 +64,31 @@ export function fallbackLeg(): Leg | null {
   // fallback.apiKey slot is legacy/empty now. Empty → its env var, as before.
   const fb = { ...stored, apiKey: settings.llmKeyFor(stored.provider) };
   try {
-    return { cfg: fb, model: languageModel(fb), noThinkModel: languageModel(fb, { forceNoThink: true }), label: labelFor(fb) };
+    return buildLeg(fb, 'fallback');
   } catch {
     return null;
   }
+}
+
+// The Producer connection is deliberately lazy and opt-in. A disabled or bad
+// Producer configuration resolves to the primary Persona leg, preserving the
+// existing all-in-one topology for installations that never enable it.
+export function producerLeg(): Leg {
+  const stored = settings.get().llm?.producer;
+  if (!stored?.enabled) return primaryLeg();
+  const producer = { ...stored, apiKey: settings.llmKeyFor(stored.provider) };
+  try {
+    return buildLeg(producer, 'producer');
+  } catch {
+    return primaryLeg();
+  }
+}
+
+// Producer calls get one safety hop: configured Producer -> primary Persona.
+// If Producer is disabled/misconfigured, producerLeg() already returned the
+// primary, so retain the established primary -> fallback behaviour.
+export function producerFallbackLeg(active: Leg): Leg | null {
+  return active.slot === 'producer' ? primaryLeg() : fallbackLeg();
 }
 
 // The discovery budget a PROMPT may honestly promise the model.
@@ -85,6 +120,19 @@ export function promptDiscoverySteps(): number {
     }
   }
   return steps;
+}
+
+// Producer prompts are built before their leg is attempted, just like Persona
+// prompts. Promise only the smallest budget available across Producer and its
+// primary safety hop. Disabled Producer preserves the established budget.
+export function producerPromptDiscoverySteps(): number {
+  const stored = settings.get().llm?.producer;
+  if (!stored?.enabled) return promptDiscoverySteps();
+  try {
+    return Math.min(discoveryStepsFor(stored), discoveryStepsFor(llmCfg()));
+  } catch {
+    return DISCOVERY_STEPS_MIN;
+  }
 }
 
 // Cheap liveness check for a leg's host, used by the dual-LLM tagger to decide
