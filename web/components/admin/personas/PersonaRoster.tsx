@@ -1,12 +1,10 @@
 'use client';
 // One "broadcast slate" card per persona, matching the show cards on /admin/shows.
 // The whole card is the edit target; adding lives in the hero's "+ Add persona".
-import { useMemo } from 'react';
 import { Users } from 'lucide-react';
-import type { Persona } from './types';
 import { API_BASE, PERSONA_MAX } from './constants';
 import { initialsFor } from './helpers';
-import { orderPersonaRoster } from './roster-order';
+import type { PersonaRosterEntry } from './roster-order';
 import { cn } from '../../../lib/cn';
 import { useRosterView } from '../../../lib/adminView';
 import { Btn, Pill, MetaChip } from '../ui';
@@ -14,7 +12,9 @@ import PersonaTable from './PersonaTable';
 import RosterViewToggle from '../RosterViewToggle';
 
 interface PersonaRosterProps {
-  personas: Persona[];
+  // Already in display order — the panel owns the ordering so the editor's
+  // "n of m" counter can name the same position the operator clicked.
+  roster: PersonaRosterEntry[];
   // The admin-selected default — gets the "default" pill.
   activePersonaId: string;
   // Equals activePersonaId unless a show overrides it.
@@ -33,15 +33,11 @@ interface PersonaRosterProps {
 }
 
 export function PersonaRoster({
-  personas, activePersonaId, onAirPersonaId, avatarTick, isPersonaInvalid,
+  roster, activePersonaId, onAirPersonaId, avatarTick, isPersonaInvalid,
   onOpenPrompt, onAdd, onSelect, communityCount, onCommunity,
 }: PersonaRosterProps) {
   // Cards (default) or a dense table. Remembered per surface in localStorage.
   const [view, setView] = useRosterView('personas');
-  const roster = useMemo(
-    () => orderPersonaRoster(personas, onAirPersonaId),
-    [personas, onAirPersonaId],
-  );
 
   return (
     <section className="grid gap-4">
@@ -49,7 +45,7 @@ export function PersonaRoster({
           squeezed onto the count's line they run past the right edge. */}
       <div className="flex flex-wrap items-center justify-between gap-3">
         <span className="caption">
-          roster · {personas.length} / {PERSONA_MAX} · on air first · then A–Z
+          roster · {roster.length} / {PERSONA_MAX} · on air first · then A–Z
         </span>
         <div className="flex w-full flex-wrap items-center gap-2 sm:w-auto">
           <RosterViewToggle view={view} onChange={setView} />
@@ -65,12 +61,12 @@ export function PersonaRoster({
             )}
           </Btn>
           <Btn className="min-h-9 sm:min-h-0" onClick={onOpenPrompt}>System prompt</Btn>
-          <Btn className="min-h-9 sm:min-h-0" tone="accent" onClick={onAdd} disabled={personas.length >= PERSONA_MAX}>
+          <Btn className="min-h-9 sm:min-h-0" tone="accent" onClick={onAdd} disabled={roster.length >= PERSONA_MAX}>
             + Add persona
           </Btn>
         </div>
       </div>
-      {view === 'list' && personas.length > 0 && (
+      {view === 'list' && roster.length > 0 && (
         <PersonaTable
           entries={roster}
           activePersonaId={activePersonaId}
@@ -81,7 +77,7 @@ export function PersonaRoster({
         />
       )}
 
-      {view === 'cards' && roster.map(({ persona: p, index: i }) => {
+      {view === 'cards' && roster.map(({ persona: p, index: i, position }) => {
         const isOnAir = p.id === onAirPersonaId;
         const isDefault = p.id === activePersonaId;
         const valid = !isPersonaInvalid(i);
@@ -102,7 +98,7 @@ export function PersonaRoster({
             key={p.id}
             role="button"
             tabIndex={0}
-            aria-label={`Edit ${p.name.trim() || `Persona ${i + 1}`}`}
+            aria-label={`Edit ${p.name.trim() || `Persona ${position}`}`}
             onClick={() => onSelect(i)}
             onKeyDown={(e) => {
               if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onSelect(i); }
@@ -145,7 +141,7 @@ export function PersonaRoster({
                       </div>
                     )}
                     <div className="truncate text-[17px] font-extrabold tracking-[-0.01em] text-ink">
-                      {p.name.trim() || `Persona ${i + 1}`}
+                      {p.name.trim() || `Persona ${position}`}
                     </div>
                   </div>
 

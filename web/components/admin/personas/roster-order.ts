@@ -2,7 +2,13 @@ import type { Persona } from './types';
 
 export interface PersonaRosterEntry {
   persona: Persona;
+  // Position in the form array. RHF field paths, validation, deletion and
+  // editing all key off this — never off display order.
   index: number;
+  // 1-based position in the DISPLAYED roster. Human-facing counters and the
+  // unnamed-persona placeholder read this, so what the operator is told
+  // matches what they are looking at.
+  position: number;
 }
 
 const PERSONA_NAME_COLLATOR = new Intl.Collator(undefined, {
@@ -31,5 +37,6 @@ export function orderPersonaRoster(
 
       const byName = PERSONA_NAME_COLLATOR.compare(leftName, rightName);
       return byName || left.index - right.index;
-    });
+    })
+    .map((entry, position) => ({ ...entry, position: position + 1 }));
 }

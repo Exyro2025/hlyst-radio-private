@@ -45,13 +45,13 @@ export function PersonaTable({
       key: 'name',
       label: 'DJ',
       className: 'whitespace-nowrap',
-      render: ({ persona: p, index }) => {
+      render: ({ persona: p, position }) => {
         const isOnAir = p.id === onAirPersonaId;
         const isDefault = p.id === activePersonaId;
         return (
           <span className="flex min-w-0 items-center gap-1.5">
             <span className="truncate font-extrabold text-ink">
-              {p.name.trim() || `Persona ${index + 1}`}
+              {p.name.trim() || `Persona ${position}`}
             </span>
             {isOnAir && <Pill tone="accent" dot>on air</Pill>}
             {isDefault && !isOnAir && <Pill>default</Pill>}
@@ -126,7 +126,7 @@ export function PersonaTable({
       cols={cols}
       rows={entries}
       rowKey={r => r.persona.id}
-      rowLabel={r => `Edit ${r.persona.name.trim() || `Persona ${r.index + 1}`}`}
+      rowLabel={r => `Edit ${r.persona.name.trim() || `Persona ${r.position}`}`}
       rowSpine={spineFor}
       onRowClick={r => onSelect(r.index)}
     />

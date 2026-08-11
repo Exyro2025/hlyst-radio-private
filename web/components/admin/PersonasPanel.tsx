@@ -35,6 +35,7 @@ import {
 import { PersonaHero } from './personas/PersonaHero';
 import { SystemPromptModal } from './personas/SystemPromptModal';
 import { PersonaRoster } from './personas/PersonaRoster';
+import { orderPersonaRoster } from './personas/roster-order';
 import { PersonaEditor } from './personas/PersonaEditor';
 
 // The RHF resolver is the two shared schemas the controller validates against,
@@ -466,6 +467,11 @@ export default function PersonasPanel() {
   const onAirPersonaId = data?.onAir?.personaId || activePersonaId;
   const onAirPersona = personas.find(p => p.id === onAirPersonaId) || activePersona;
   const onAirShow = data?.onAir?.show || null;
+  // Display order for the roster AND the editor's counter, so both name the
+  // same slot. Sits below the loading guards rather than in a useMemo, and at
+  // PERSONA_MAX rows the sort per render costs nothing.
+  const roster = orderPersonaRoster(personas, onAirPersonaId);
+  const focusedPosition = roster.find(e => e.index === safeIdx)?.position ?? safeIdx + 1;
   const focusedOk = !isPersonaInvalid(safeIdx);
   // Drives the confirm on ×/Escape: closing the editor keeps edits pending in
   // `personas`, which is how unsaved state used to ride along on the next save.
@@ -509,7 +515,7 @@ export default function PersonasPanel() {
       />
 
       <PersonaRoster
-        personas={personas}
+        roster={roster}
         activePersonaId={activePersonaId}
         onAirPersonaId={onAirPersonaId}
         avatarTick={avatarTick}
@@ -607,6 +613,7 @@ export default function PersonasPanel() {
       <PersonaEditor
         persona={focused}
         index={safeIdx}
+        position={focusedPosition}
         control={control}
         personaCount={personas.length}
         activePersonaId={activePersonaId}
