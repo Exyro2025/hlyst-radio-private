@@ -18,6 +18,7 @@ import {
   SectionHeader, SaveBar, KeyStatus, KeyTestResult, KEY_HINTS,
   type SectionProps,
 } from './shared';
+import { ProducerCard } from './ProducerCard';
 
 // Provider descriptors, the cloud-key env-var map and the badge logic live in
 // ./llm/providerMeta — don't redefine them here.
@@ -597,6 +598,17 @@ export function LlmSection({ data, form, setForm, busy, saveSettings, adminFetch
           )}
         </div>
       </Card>
+
+      <ProducerCard
+        data={data}
+        form={form}
+        setForm={setForm}
+        busy={busy}
+        saveSettings={saveSettings}
+        adminFetch={adminFetch}
+        refresh={refresh}
+        fieldErrors={fieldErrors}
+      />
 
       <Card title="Fallback" sub="backup when the primary is offline">
         <div className="grid gap-[18px]">

@@ -30,7 +30,7 @@ import {
 import {
   SectionHeader, SettingsFieldError, ELEVENLABS_VS_DEFAULTS, FISH_TTS_DEFAULTS,
   type FormState, type FormUpdater, type SettingsData, type SaveSettings,
-  type LoudnessSource, type LlmForm, type LlmFallbackForm,
+  type LoudnessSource, type LlmForm, type LlmFallbackForm, type LlmProducerForm,
 } from './settings/shared';
 import { TtsSection } from './settings/TtsSection';
 import { LlmSection } from './settings/LlmSection';
@@ -285,6 +285,25 @@ export default function SettingsPanel() {
         exemptRequests: v.llm?.exemptRequests !== false,
         maxOutputTokens: typeof v.llm?.maxOutputTokens === 'number' ? v.llm.maxOutputTokens : 0,
         discoverySteps: typeof v.llm?.discoverySteps === 'number' ? v.llm.discoverySteps : 0,
+        producer: {
+          enabled: !!v.llm?.producer?.enabled,
+          provider: v.llm?.producer?.provider ?? 'ollama',
+          model: v.llm?.producer?.model ?? '',
+          ollamaUrl: v.llm?.producer?.ollamaUrl ?? '',
+          numCtx: typeof v.llm?.producer?.numCtx === 'number' ? v.llm.producer.numCtx : 16384,
+          repeatPenalty: typeof v.llm?.producer?.repeatPenalty === 'number' ? v.llm.producer.repeatPenalty : 1.15,
+          discoverySteps: typeof v.llm?.producer?.discoverySteps === 'number' ? v.llm.producer.discoverySteps : 0,
+          providerBaseUrls: (() => {
+            const producer = v.llm?.producer as (LlmProducerForm & { baseUrl?: string; providerBaseUrls?: Record<string, string> }) | undefined;
+            const stored = producer?.providerBaseUrls;
+            if (stored && typeof stored === 'object') return { ...stored };
+            const legacy = producer?.baseUrl ?? '';
+            const prov = producer?.provider ?? 'ollama';
+            return legacy ? { [prov]: legacy } : {};
+          })(),
+          reasoning: !!v.llm?.producer?.reasoning,
+          toolChoice: v.llm?.producer?.toolChoice === 'auto' ? 'auto' : 'required',
+        },
         fallback: {
           enabled: !!v.llm?.fallback?.enabled,
           provider: v.llm?.fallback?.provider ?? 'ollama',

@@ -294,13 +294,16 @@ router.post('/settings/llm/probe-compat', requireAdmin, async (req, res) => {
       await settings.load();
       const s = settings.get();
       const fallbackUrl = (s.llm?.fallback?.baseUrl || '').trim().replace(/\/+$/, '');
+      const producerUrl = (s.llm?.producer?.baseUrl || '').trim().replace(/\/+$/, '');
       const targetUrl = baseUrl.trim().replace(/\/+$/, '');
       // Match the target server to a leg, then read that leg's provider's inline
       // key from the per-provider map (issue #657). Falls back to the
       // openai-compatible slot when neither leg's URL matches.
-      const legProvider = (targetUrl && targetUrl === fallbackUrl)
-        ? s.llm?.fallback?.provider
-        : s.llm?.provider;
+      const legProvider = targetUrl && targetUrl === producerUrl
+        ? s.llm?.producer?.provider
+        : targetUrl && targetUrl === fallbackUrl
+          ? s.llm?.fallback?.provider
+          : s.llm?.provider;
       resolvedApiKey = settings.llmKeyFor(legProvider || 'openai-compatible');
     }
 

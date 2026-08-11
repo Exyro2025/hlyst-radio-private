@@ -118,6 +118,10 @@ export interface LlmFallbackForm {
   discoverySteps: number;
 }
 
+export interface LlmProducerForm extends LlmFallbackForm {
+  toolChoice: string;
+}
+
 export interface LlmForm {
   provider: string;
   model: string;
@@ -138,6 +142,7 @@ export interface LlmForm {
   maxOutputTokens: number;
   // 0 = auto (follow the provider capability table); 1-5 overrides it.
   discoverySteps: number;
+  producer: LlmProducerForm;
   fallback: LlmFallbackForm;
 }
 
