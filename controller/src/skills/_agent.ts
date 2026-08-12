@@ -295,8 +295,8 @@ function producerSfxBlock(sfxCatalog) {
 
 // Split-mode director: the backstage model decides, researches and optionally
 // selects production SFX, but has no Persona prompt and no listener-facing text
-// field in its schema. Its raw tool result is recovered from `toolCalls` by the
-// caller and becomes the factual handoff to generatePersonaSegment.
+// field in its schema. Its selected tool result is recovered from `toolCalls`,
+// grounded by controller policy and handed to generatePersonaSegment.
 export const producerDirectorAgent = defineAgent({
   kind: 'djProducerSegment',
   schema: ProducerSegmentSchema,
@@ -336,6 +336,37 @@ function evidenceForCapability(cap, toolCalls) {
   return matches.length ? matches[matches.length - 1].result : null;
 }
 
+function searchableText(value: unknown): string {
+  return String(value || '').toLocaleLowerCase('en').replace(/[^\p{L}\p{N}]+/gu, ' ').trim();
+}
+
+function mentions(value: unknown, subject: unknown): boolean {
+  const haystack = ` ${searchableText(value)} `;
+  const needle = searchableText(subject);
+  return !!needle && haystack.includes(` ${needle} `);
+}
+
+// Search providers can return a plausible answer beside unrelated snippets.
+// Narrow the packet in code before Persona sees it: an exact-track dig must
+// name BOTH the artist and title, while an artist-news result must at least name
+// the artist. This is deliberately conservative — silence beats joining a
+// biography fact to whichever song happened to be on air.
+export function groundedSearchEvidence(kind: string, value: any): any {
+  if (!value || typeof value !== 'object') return value;
+  if (kind !== 'now-playing-dig' && kind !== 'web-search') return value;
+  const artist = String(value.artist || '').trim();
+  const title = String(value.title || '').trim();
+  const supports = (text: unknown) => kind === 'now-playing-dig'
+    ? mentions(text, artist) && mentions(text, title)
+    : mentions(text, artist);
+  const answer = supports(value.answer) ? String(value.answer).trim() : '';
+  const sources = Array.isArray(value.sources)
+    ? value.sources.filter((source) => supports(source))
+    : [];
+  if (!answer && sources.length === 0) return { available: false };
+  return { ...value, answer, sources };
+}
+
 // Conservative generic evidence gate. Skill-specific editorial judgment stays
 // with the Producer, but a failed tool, explicit unavailable result or wholly
 // empty payload cannot reach the Persona as if it were grounded research.
@@ -355,7 +386,7 @@ export function usableSegmentEvidence(value: any): boolean {
 }
 
 const TRACK_CONTEXT_SEGMENTS = new Set([
-  'album-anniversary', 'library-deep-cut', 'now-playing-dig', 'web-search',
+  'album-anniversary', 'library-deep-cut', 'now-playing-dig',
 ]);
 
 // Context crossing into Persona is selected by code, not copied from the
@@ -396,7 +427,7 @@ async function runSplitDirector(ctx, { caps, speaker, freq, sfxCatalog }) {
   const cap = caps.find((candidate) => candidate.kind === object?.kind);
   if (!cap) return { seg: null, reason: `Producer returned unoffered kind "${object?.kind || ''}"` };
 
-  const evidence = evidenceForCapability(cap, toolCalls);
+  const evidence = groundedSearchEvidence(cap.kind, evidenceForCapability(cap, toolCalls));
   if (typeof cap.toolFn === 'function' && !usableSegmentEvidence(evidence)) {
     return { seg: null, reason: `${cap.kind} returned no usable evidence` };
   }
@@ -621,7 +652,7 @@ export async function agenticTick(ctx) {
     let silentReason: string | undefined;
     if (settings.get().llm?.producer?.enabled) {
       // Advanced split mode: Producer chooses and researches; Persona receives
-      // only the selected skill's raw evidence and writes the spoken line.
+      // only the selected skill's grounded evidence and writes the spoken line.
       ({ seg, reason: silentReason } = await runSplitDirector(ctx, { caps, speaker, freq, sfxCatalog }));
     } else if (!settings.get().llm?.pickerAgent) {
       // Pool mode: the operator's model isn't trusted with tool loops, so the

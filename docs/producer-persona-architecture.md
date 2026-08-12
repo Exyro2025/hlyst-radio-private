@@ -167,8 +167,9 @@ production treatment, not the presenter's wording.
 `generatePersonaSegment` receives:
 
 - the selected kind and the operator-authored `SKILL.md` brief;
-- the selected tool's raw result, with no tool name, arguments, errors,
-  rejected results or discovery transcript;
+- the selected tool's result, with no tool name, arguments, errors, rejected
+  results or discovery transcript; search-backed results are conservatively
+  filtered before crossing the boundary;
 - the active show name and user-authored brief;
 - the on-air track only for track-related skills;
 - the minimum selected moment facts: date for curiosity, fuzzy time for
@@ -181,6 +182,13 @@ today it combines editorial reliability rules with delivery rules. A future
 skill format may split those into Producer and Persona sections; copying or
 guessing such a split during this migration would change operator-authored
 behaviour silently.
+
+The two search-backed skills have additional deterministic grounding rules.
+`now-playing-dig` retains only an answer or source that names both the exact
+artist and exact track. `web-search` retains only artist-matching evidence and
+does not receive the on-air track in its Persona packet: a general biographical
+fact must not be joined to the current song merely because it aired during the
+search. If filtering leaves no evidence, the segment resolves to silence.
 
 The Persona owns wording only. It cannot change kind, search again or reverse
 the air decision. A failed Producer call, missing evidence, or failed/empty
@@ -199,8 +207,8 @@ Every field crossing from Producer to Persona must answer this question:
 If not, omit it. In particular, the Persona should not normally receive:
 
 - tool names, schemas, arguments, errors, retries, completion protocols, or
-  unselected results (the selected skill's raw evidence is the explicit
-  segment exception);
+  unselected results (the selected skill's controller-grounded evidence is the
+  explicit segment exception);
 - candidate IDs, rejected candidates, scores, or selection weighting;
 - picker rationale or internal editorial deliberation;
 - sonic-journey, energy-target, mood-tag, or transition-planning terminology;

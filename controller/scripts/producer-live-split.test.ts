@@ -21,7 +21,7 @@ const {
   generatePersonaSegment,
   personaSegmentPrompt,
 } = await import('../src/llm/internal/prompts/scripts.js');
-const { buildProducerSituation, personaSegmentContext, producerDirectorAgent, usableSegmentEvidence } = await import('../src/skills/_agent.js');
+const { buildProducerSituation, groundedSearchEvidence, personaSegmentContext, producerDirectorAgent, usableSegmentEvidence } = await import('../src/skills/_agent.js');
 const { showMusicLean } = await import('../src/llm/internal/prompts/picker.js');
 const { queue } = await import('../src/broadcast/queue.js');
 
@@ -200,4 +200,40 @@ test('failed and empty tool payloads cannot reach the Persona as evidence', () =
   assert.equal(usableSegmentEvidence({ available: false }), false);
   assert.equal(usableSegmentEvidence({ headlines: [] }), false);
   assert.equal(usableSegmentEvidence({ headlines: [{ title: 'A real item' }] }), true);
+});
+
+test('now-playing evidence keeps only sources naming the exact artist and track', () => {
+  const evidence = groundedSearchEvidence('now-playing-dig', {
+    artist: 'Anna Meredith',
+    title: 'Dowager',
+    answer: '',
+    sources: [
+      'Women composers: the Dowager Countess of Radnor wrote from her armchair.',
+      'Anna Meredith: Varmints review: “Dowager” starts as a spinster lament.',
+    ],
+  });
+  assert.deepEqual(evidence.sources, [
+    'Anna Meredith: Varmints review: “Dowager” starts as a spinster lament.',
+  ]);
+});
+
+test('a track dig with no exact-track support becomes unavailable', () => {
+  assert.deepEqual(groundedSearchEvidence('now-playing-dig', {
+    artist: 'Anna Meredith',
+    title: 'Dowager',
+    answer: '',
+    sources: ['The role of women in the science city included several dowagers.'],
+  }), { available: false });
+});
+
+test('artist web search cannot borrow the on-air track as implied evidence', () => {
+  const ctx = {
+    activeShow: { name: 'Another Day, Another Spin', topic: 'Music and conversation.' },
+  };
+  assert.equal(personaSegmentContext({ kind: 'web-search', seeded: true }, ctx).includeTrack, false);
+  assert.deepEqual(groundedSearchEvidence('web-search', {
+    artist: 'Kate Bush',
+    answer: 'Kate Bush studied piano as a child.',
+    sources: ['Kate Bush biography: she studied piano as a child.'],
+  }).sources, ['Kate Bush biography: she studied piano as a child.']);
 });
