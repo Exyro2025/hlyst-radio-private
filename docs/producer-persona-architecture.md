@@ -255,6 +255,21 @@ role. Raising llama.cpp parallelism is not the default remedy: it increases
 shared CPU and memory pressure and still gives bulk work no priority boundary
 over an urgent live pick.
 
+## Deliberate exception: AI Playlist Builder
+
+The AI Playlist Builder remains on the established primary Persona route. A
+live trial routed `playlistCurate` to the CPU Producer, but a simple 25-track
+request ran at roughly 3 generated tokens per second. The call may present up
+to 90 candidates and must return a long ordered list of track ids, making it a
+creative bulk-curation workload rather than the small, deadline-sensitive
+operational work the Producer exists to protect.
+
+The builder has no downstream on-air speech hand-off, so leaving it on the
+primary route does not weaken the Producer/Persona prompt boundary. Revisit its
+routing only alongside a dedicated playlist engine or a broader integration
+designed for music-library curation; do not occupy the single CPU Producer slot
+with it by default.
+
 ## Boundary rules
 
 Every field crossing from Producer to Persona must answer this question:
