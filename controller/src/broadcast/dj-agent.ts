@@ -30,7 +30,7 @@ import * as library from '../music/library.js';
 import * as subsonic from '../music/subsonic.js';
 import * as dj from '../llm/dj.js';
 import { energyForDaypart, getClockContext, getDateContext, getTimeContext } from '../context.js';
-import { linkClockAt } from './queue/pure.js';
+import { linkClockAt, linkClockStampFor } from './queue/pure.js';
 import { djObject, nearestId, modelTolerant } from '../llm/sdk.js';
 import * as budget from './dj-budget.js';
 import { withTrace, logEvent } from '../observability/events.js';
@@ -566,11 +566,12 @@ async function pickViaPool(queue, ctx, { wantLink, current, showAt = null }: { w
   // when a clock was actually OFFERED. With the station clock off
   // (broadcast/clock-policy.ts) generateLink wrote this line under a flat ban
   // and it cannot contain a time, so a drift drop would cost the operator the
-  // whole link to protect a clock that isn't in it. Same reasoning as the agent
-  // path's `linkAirAt: airClock ? airAt : null` below. Gated HERE rather than on
-  // `airAt` itself, so linkAirContext still steps the daypart tags to air time —
-  // "after dark" stays accurate even when the numerals are withheld.
-  const queued = await enqueuePick(queue, result.song, result.reason, result.source || 'pool', link, current, fx, { linkClockAt: speakClockAllowed() ? airAt : null });
+  // whole link to protect a clock that isn't in it. Gated on the STAMP rather
+  // than on `airAt` itself, so linkAirContext still steps the daypart tags to
+  // air time — "after dark" stays accurate even when the numerals are withheld.
+  const queued = await enqueuePick(queue, result.song, result.reason, result.source || 'pool', link, current, fx, {
+    linkClockAt: linkClockStampFor(airAt, speakClockAllowed()),
+  });
   // Even the pool landed on an already-queued track (a tiny library whose pool
   // collapsed to recents). Skip the session turn and let auto.m3u backstop the
   // slot — the next track-start re-triggers runTrackEvent for a fresh pick.
@@ -783,9 +784,11 @@ export async function runTrackEvent(queue, ctx, { wantLink, showAt = null, prede
         // `linkAirAt` mirrors the clause above: stamp the item with the air
         // moment the model was TOLD to speak, and only when it was actually
         // told one — a run given no clock makes no claim to go stale (#1314).
+        // `airClock` carries both reasons it might not have been: no forecastable
+        // air moment, and the station clock switch (which already nulled `airAt`).
         const queued = await pickViaAgent(queue, ctx, {
           wantLink, audioWaypoint, current, showAt, rankTarget,
-          linkAirAt: airClock ? airAt : null,
+          linkAirAt: linkClockStampFor(airAt, !!airClock),
         });
         breakerSuccess();
         if (queued) return;
