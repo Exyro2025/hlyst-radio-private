@@ -30,7 +30,7 @@ import * as library from '../music/library.js';
 import * as subsonic from '../music/subsonic.js';
 import * as dj from '../llm/dj.js';
 import { energyForDaypart, getClockContext, getDateContext, getTimeContext } from '../context.js';
-import { linkClockAt } from './queue/pure.js';
+import { linkClockAt, linkClockStampFor } from './queue/pure.js';
 import { djObject, nearestId, modelTolerant } from '../llm/sdk.js';
 import * as budget from './dj-budget.js';
 import { withTrace, logEvent } from '../observability/events.js';
@@ -40,6 +40,7 @@ import { ARTIST_VARIETY_WINDOW, alternativeCandidates } from './dj-agent/artist-
 import { hasEraBound, genreResolutionWarningOnce, type VocalMode } from '../music/show-filter.js';
 import { djCallsAllowed } from './listeners.js';
 import { autoVoiceAllowed } from './voice-policy.js';
+import { speakClockAllowed } from './clock-policy.js';
 import { pickerAgent, requestAgent } from './dj-agent/agents.js';
 import { pickerScope } from '../llm/tools.js';
 import {
@@ -559,7 +560,18 @@ async function pickViaPool(queue, ctx, { wantLink, current, showAt = null }: { w
   };
   // `current` is the link's back-announce target (passed to generateLink as
   // `previous`); stamp it so the queue drops the link if a request jumps ahead.
-  const queued = await enqueuePick(queue, result.song, result.reason, result.source || 'pool', link, current, fx, { linkClockAt: airAt });
+  //
+  // The clock stamp is what linkClockDrifted (queue/pure.ts) drops a link on
+  // when the real seam lands far from the forecast — so it must only be set
+  // when a clock was actually OFFERED. With the station clock off
+  // (broadcast/clock-policy.ts) generateLink wrote this line under a flat ban
+  // and it cannot contain a time, so a drift drop would cost the operator the
+  // whole link to protect a clock that isn't in it. Gated on the STAMP rather
+  // than on `airAt` itself, so linkAirContext still steps the daypart tags to
+  // air time — "after dark" stays accurate even when the numerals are withheld.
+  const queued = await enqueuePick(queue, result.song, result.reason, result.source || 'pool', link, current, fx, {
+    linkClockAt: linkClockStampFor(airAt, speakClockAllowed()),
+  });
   // Even the pool landed on an already-queued track (a tiny library whose pool
   // collapsed to recents). Skip the session turn and let auto.m3u backstop the
   // slot — the next track-start re-triggers runTrackEvent for a fresh pick.
@@ -674,12 +686,23 @@ export async function runTrackEvent(queue, ctx, { wantLink, showAt = null, prede
     // of the on-air track left for this round to land before the seam, the
     // forecast is a coin flip and would name the wrong time for a whole filler
     // track.
-    const airAt = linkClockAt(showAt, Date.now());
+    //
+    // The station may also be set to keep the clock out entirely
+    // (broadcast/clock-policy.ts). That is a different question from the
+    // accuracy cases above: off wins over accurate, and it gets its own clause,
+    // because "you can't know when it airs" explains a reason that no longer
+    // applies. This clause and the `say` schema description are the ONLY clock
+    // the agent path ever sees — it never builds context lines — so the ban has
+    // to be stated here or it does not reach the model at all.
+    const clockOff = !speakClockAllowed();
+    const airAt = clockOff ? null : linkClockAt(showAt, Date.now());
     const airClock = airAt && ctx?.clock?.hhmm ? getClockContext(airAt) : null;
     const clockClause = wantLink
-      ? (airClock
-          ? ` The link airs at about ${airClock.display || airClock.hhmm} — if you mention the clock, that is the time to use, never an earlier one.`
-          : ` Never state the clock time in the link — you can't know exactly when it airs.`)
+      ? (clockOff
+          ? ` Never state the clock time, the hour, or the time of day in the link.`
+          : airClock
+            ? ` The link airs at about ${airClock.display || airClock.hhmm} — if you mention the clock, that is the time to use, never an earlier one.`
+            : ` Never state the clock time in the link — you can't know exactly when it airs.`)
       : '';
     const varietyClause = wantLink
       ? ` Approach for this link: ${linkAngle} Vary your first words — don't default to "here's", "this is", or "coming up".`
@@ -761,9 +784,11 @@ export async function runTrackEvent(queue, ctx, { wantLink, showAt = null, prede
         // `linkAirAt` mirrors the clause above: stamp the item with the air
         // moment the model was TOLD to speak, and only when it was actually
         // told one — a run given no clock makes no claim to go stale (#1314).
+        // `airClock` carries both reasons it might not have been: no forecastable
+        // air moment, and the station clock switch (which already nulled `airAt`).
         const queued = await pickViaAgent(queue, ctx, {
           wantLink, audioWaypoint, current, showAt, rankTarget,
-          linkAirAt: airClock ? airAt : null,
+          linkAirAt: linkClockStampFor(airAt, !!airClock),
         });
         breakerSuccess();
         if (queued) return;

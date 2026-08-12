@@ -169,6 +169,30 @@ export function linkClockDrifted(clockAtMs: number | null | undefined, nowMs: nu
   return Math.abs(nowMs - clockAtMs) > LINK_CLOCK_DRIFT_TOLERANCE_SEC * 1000;
 }
 
+// The other half of the rule above: what an enqueued item's `linkClockAt` may
+// be set to. `linkClockDrifted` can only honour "a link written under a clock
+// ban is never dropped" if the stamp is withheld at the point the item is
+// queued, and BOTH pick paths have to agree about that — they reach the same
+// `enqueuePick` from different code with different reasons to withhold.
+//
+// `clockOffered` is the question, and it is not the same as "we computed an
+// air time". `airAt` says the air moment is FORECASTABLE; whether the model
+// was actually handed a clock is a second decision on top of it — the agent
+// path also needs a clock in its context (`airClock`), and either path can be
+// overruled by the station clock switch (broadcast/clock-policy.ts). Stamping
+// on `airAt` alone is how a link written under a flat ban still got dropped for
+// drifting away from a time it was never allowed to say.
+//
+// Kept as a named helper rather than a ternary at each call site because the
+// two sites are 170 lines apart and the first one to be updated is the one that
+// looks correct in isolation — which is exactly how they diverged.
+export function linkClockStampFor(
+  airAt: Date | null | undefined,
+  clockOffered: boolean,
+): Date | null {
+  return airAt && clockOffered ? airAt : null;
+}
+
 // Seconds from NOW until the pick being made will start airing — the lead the
 // show look-ahead adds to the wall clock (see runPickCycle).
 //
