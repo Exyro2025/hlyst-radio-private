@@ -121,7 +121,12 @@ export function TrackRow({
             {energyLabel(t.energy)}{t.year ? ` · ${t.year}` : ''}
           </span>
         </div>
-        <div className="flex items-center gap-0.5 transition-opacity lg:opacity-0 lg:group-hover:opacity-100">
+        {/* `group-focus-within` is not decoration: at lg the cluster is hidden
+            until the row is hovered, and a keyboard user never hovers — without
+            it, tabbing lands on a button that is fully transparent, focus ring
+            and all. Hover reveals it for the mouse; focus reveals it for the
+            keyboard the same way. */}
+        <div className="flex items-center gap-0.5 transition-opacity lg:opacity-0 lg:group-focus-within:opacity-100 lg:group-hover:opacity-100">
           {/* The grip drags; these are the explicit one-step path, and on mobile
               they stay thumb-sized. */}
           <IconBtn className="size-9 sm:size-[30px]" onClick={() => onMove(i, i - 1)} disabled={i === 0} title="Move up"><ArrowUp className="size-[15px]" /></IconBtn>
