@@ -54,8 +54,15 @@ async function main() {
   // A library big enough to calibrate against (MIN_BASELINE_TRACKS = 200),
   // spread across the arousal range so each mood has real variance. These are
   // the population the baselines are computed from.
+  // Deliberately MORE than one write batch (500). A relabel writes as it walks
+  // the score maps, and better-sqlite3 refuses a write while a read cursor is
+  // open on the same connection — so a streamed implementation works on any
+  // library under one batch and throws on every library over it. That bug
+  // shipped through a 300-track fixture and was only caught against a real
+  // 1,405-track library; the fixture is sized to catch it here from now on.
+  const FILLER = 600;
   const filler: Array<{ id: string; scores: Record<string, number> }> = [];
-  for (let i = 0; i < 300; i++) {
+  for (let i = 0; i < FILLER; i++) {
     const id = `fill${i}`;
     db.upsertTrackMeta(id, { title: `Filler ${i}`, artist: 'V/A', album: 'Bed', duration: 200 });
     const t = (i % 100) / 100;
@@ -73,8 +80,8 @@ async function main() {
 
   await test('stored score maps stream back out', () => {
     const seen = [...db.iterateAudioMoodScores()];
-    assert.equal(seen.length, 300, 'every scored track is streamed');
-    assert.equal(db.audioMoodScoredCount(), 300);
+    assert.equal(seen.length, FILLER, 'every scored track is streamed');
+    assert.equal(db.audioMoodScoredCount(), FILLER);
     assert.ok(Number.isFinite(seen[0].scores.energetic), 'scores round-trip as numbers');
   });
 
@@ -141,6 +148,34 @@ async function main() {
     assert.equal(stats.skipped, null);
     assert.equal(stats.scope, 3);
     assert.equal(stats.corrected, 1);
+  });
+
+  await test('a relabel spanning more than one write batch completes', async () => {
+    // The regression: relabelFromStoredScores writes as it walks, and
+    // better-sqlite3 throws "This database connection is busy executing a
+    // query" if that walk is a live cursor. Under 500 tracks the flush only
+    // ever landed AFTER the loop, so the fixture has to exceed a batch.
+    const { relabelFromStoredScores } = await import('../src/music/audio-moods.js');
+    const { computeBaselines } = await import('../src/music/audio-calibration.js');
+    const baselines = computeBaselines(
+      (function* () { for (const r of db.iterateAudioMoodScores()) yield r.scores; })(),
+    );
+    const n = relabelFromStoredScores(baselines);
+    assert.equal(n, db.audioMoodScoredCount(), 'every scored track is relabelled');
+    assert.ok(n > 500, `fixture must exceed one write batch to pin this (got ${n})`);
+    assert.ok(
+      (db.getTrack('loud')!.audioMoods || []).length > 0,
+      'labels are actually written, not just counted',
+    );
+  });
+
+  await test('paging advances past a row whose score JSON is corrupt', () => {
+    // A page whose LAST row fails to parse still has to move the cursor, or
+    // the walk stalls on it forever.
+    const { items, lastId } = db.pageAudioMoodScores('', 2);
+    assert.equal(lastId, items[items.length - 1]?.id ?? lastId, 'cursor tracks the last SCANNED row');
+    const end = db.pageAudioMoodScores('zzzzzzzz', 10);
+    assert.equal(end.lastId, null, 'an exhausted walk reports done');
   });
 
   await test('re-running is idempotent — nothing left to correct', () => {

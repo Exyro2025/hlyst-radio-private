@@ -93,18 +93,23 @@ function loadBaselines(): MoodBaselines | null {
 // No analyzer round-trip: a calibration change invalidates the LABELS, not the
 // scores, and most installs do not run the CLAP text tower (ANALYZER_HEAVY is
 // opt-in), so demanding one here would strand them on stale labels.
-function relabelFromStoredScores(baselines: MoodBaselines | null): number {
+// PAGED, not streamed, and that is load-bearing: better-sqlite3 refuses a write
+// while a read cursor is open on the same connection ("This database connection
+// is busy executing a query"), and this loop writes as it walks. Streaming it
+// worked for any library under one batch and threw on every library over it.
+export function relabelFromStoredScores(baselines: MoodBaselines | null): number {
+  const PAGE = 500;
   let done = 0;
-  let batch: Array<{ id: string; moods: string[] }> = [];
-  for (const { id, scores } of db.iterateAudioMoodScores()) {
-    batch.push({ id, moods: selectAudioMoods(scores, baselines) });
-    done += 1;
-    if (batch.length >= 500) {
-      db.setTrackAudioMoodLabelsBulk(batch);
-      batch = [];
-    }
+  let cursor = '';
+  for (;;) {
+    const { items, lastId } = db.pageAudioMoodScores(cursor, PAGE);
+    if (lastId == null) break;
+    db.setTrackAudioMoodLabelsBulk(
+      items.map(({ id, scores }) => ({ id, moods: selectAudioMoods(scores, baselines) })),
+    );
+    done += items.length;
+    cursor = lastId;
   }
-  db.setTrackAudioMoodLabelsBulk(batch);
   return done;
 }
 

@@ -113,6 +113,43 @@ export function* iterateAudioMoodScores(): Generator<{ id: string; scores: Recor
   }
 }
 
+// One PAGE of stored score maps, keyset-paginated on id (`afterId` exclusive,
+// '' starts). Returns a fully-materialised array — the cursor is closed before
+// this returns.
+//
+// This exists because better-sqlite3 refuses a write on a connection that has
+// a live read cursor: "This database connection is busy executing a query".
+// Any pass that reads every score map AND writes as it goes (the relabel pass)
+// must therefore page rather than stream. iterateAudioMoodScores is still the
+// right shape for a pure read like the baselines, which writes nothing.
+// `lastId` is the last id SCANNED, not the last one returned — a page whose
+// final row had unparseable JSON still has to advance the caller's cursor past
+// it, or the walk stalls on that row forever. null = the walk is done.
+export function pageAudioMoodScores(
+  afterId: string,
+  limit: number,
+): { items: Array<{ id: string; scores: Record<string, number> }>; lastId: string | null } {
+  const rows = requireDb()
+    .prepare(
+      `SELECT id, audio_mood_scores_json AS s FROM tracks
+        WHERE audio_mood_scores_json IS NOT NULL AND id > ?
+        ORDER BY id LIMIT ?`,
+    )
+    .all(afterId, Math.max(1, Math.floor(limit))) as Array<{ id: string; s: string }>;
+  const items: Array<{ id: string; scores: Record<string, number> }> = [];
+  for (const row of rows) {
+    try {
+      const parsed = JSON.parse(row.s);
+      if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+        items.push({ id: row.id, scores: parsed as Record<string, number> });
+      }
+    } catch {
+      // Skip the row, but never the cursor — see lastId above.
+    }
+  }
+  return { items, lastId: rows.length ? rows[rows.length - 1].id : null };
+}
+
 // How many tracks carry a stored score map — the figure that decides whether
 // the library is big enough to calibrate against (MIN_BASELINE_TRACKS).
 export function audioMoodScoredCount(): number {
