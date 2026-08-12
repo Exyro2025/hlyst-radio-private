@@ -250,6 +250,33 @@ export async function generateLink({
   });
 }
 
+// Pick-attached links are rendered before their track reaches air. Even a good
+// seam forecast can move across a minute boundary while remaining well inside
+// the queue's 90-second stale-clock tolerance, making an exact time false on
+// air. Give the Persona only a deliberately broad phrase instead. The bands
+// overlap real-world transition jitter semantically: 10:39 and 10:41 are both
+// reasonably "around half past" / "approaching 11", unlike "10:40".
+export function fuzzyAirTime(clock: any): string | null {
+  const raw = clock?.hhmm || clock?.display;
+  const match = typeof raw === 'string' ? raw.match(/\b(\d{1,2}):(\d{2})\b/) : null;
+  if (!match) return null;
+  const hour = Number(match[1]);
+  const minute = Number(match[2]);
+  if (!Number.isInteger(hour) || hour < 0 || hour > 23 || minute < 0 || minute > 59) return null;
+
+  const hourLabel = (value: number, landmark = true) => {
+    const normalized = ((value % 24) + 24) % 24;
+    if (landmark && normalized === 0) return 'midnight';
+    if (landmark && normalized === 12) return 'noon';
+    const h12 = normalized % 12 || 12;
+    return `${h12}${normalized < 12 ? 'am' : 'pm'}`;
+  };
+
+  if (minute <= 20) return `just after ${hourLabel(hour)}`;
+  if (minute < 40) return `around half past ${hourLabel(hour, false)}`;
+  return `approaching ${hourLabel(hour + 1)}`;
+}
+
 // Stage C Persona packet for a Producer-selected track. This is intentionally
 // not built through generateLink/buildContextLines/decoratePrompt: those legacy
 // helpers add operational mood, station-wide history, rotating creative angles
@@ -261,6 +288,7 @@ export function personaLinkPrompt({
   recap = null,
   recentOpeners = null,
   persona = null,
+  includeIntroBudget = true,
 }: any): string {
   const speaker = persona || settings.getEffectivePersona();
   const rules = [
@@ -268,7 +296,13 @@ export function personaLinkPrompt({
     'The named track is already playing. Focus on it and do not refer to the previous track.',
     lengthPhrase('link', speaker) + '.',
   ];
-  const budget = introBudgetPhrase(introMsFor(current), firstVocalMsFor(current));
+  // Automatic links are attached to the track start, where measured intro and
+  // first-vocal timing is meaningful. An on-demand link can be fired anywhere
+  // in the song, so its original opening runway must not be presented as time
+  // still available to speak.
+  const budget = includeIntroBudget
+    ? introBudgetPhrase(introMsFor(current), firstVocalMsFor(current))
+    : '';
   if (budget) rules.push(budget);
 
   const facts = [
@@ -277,9 +311,10 @@ export function personaLinkPrompt({
   const show = context?.activeShow;
   if (show?.name) facts.push(`Show: "${show.name}".`);
   if (show?.topic) facts.push(`Show brief: ${show.topic}`);
-  if (clockIsAirTime && context?.clock?.display) {
-    facts.push(`Forecast air time: ${context.clock.display}.`);
-    rules.push('If you mention the time, use only the forecast air time supplied in the facts.');
+  const broadAirTime = clockIsAirTime ? fuzzyAirTime(context?.clock) : null;
+  if (broadAirTime) {
+    facts.push(`Approximate air time: ${broadAirTime}.`);
+    rules.push('If you mention the time, use only the approximate phrase supplied in the facts; do not turn it into an exact minute.');
   } else {
     rules.push('Do not state a clock time; no verified air time was supplied.');
   }

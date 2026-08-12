@@ -14,7 +14,7 @@ const {
   producerPickerAgent,
   producerPickerSystem,
 } = await import('../src/broadcast/dj-agent/agents.js');
-const { generatePersonaLink, personaLinkPrompt } = await import('../src/llm/internal/prompts/scripts.js');
+const { fuzzyAirTime, generatePersonaLink, personaLinkPrompt } = await import('../src/llm/internal/prompts/scripts.js');
 const { showMusicLean } = await import('../src/llm/internal/prompts/picker.js');
 const { queue } = await import('../src/broadcast/queue.js');
 
@@ -81,7 +81,9 @@ test('the Stage C Persona prompt contains only approved facts and negative memor
   assert.match(prompt, /Queen/);
   assert.match(prompt, /The Scenic Route/);
   assert.match(prompt, /Take the longer way home/);
-  assert.match(prompt, /16:29/);
+  assert.match(prompt, /around half past 4pm/);
+  assert.ok(!prompt.includes('16:29'));
+  assert.match(prompt, /do not turn it into an exact minute/i);
   assert.match(prompt, /supplied only to prevent repetition/i);
   assert.ok(!prompt.includes('Wednesday'));
   assert.ok(!prompt.includes('summer'));
@@ -95,6 +97,27 @@ test('the Stage C Persona prompt contains only approved facts and negative memor
   assert.ok(!prompt.includes('Tone for this segment'));
   assert.ok(!prompt.includes('Backstage editorial direction'));
   assert.equal(typeof generatePersonaLink, 'function');
+});
+
+test('queued Persona links receive resilient fuzzy time landmarks', () => {
+  assert.equal(fuzzyAirTime({ display: '10:56' }), 'approaching 11am');
+  assert.equal(fuzzyAirTime({ hhmm: '11:55' }), 'approaching noon');
+  assert.equal(fuzzyAirTime({ display: '23:55' }), 'approaching midnight');
+  assert.equal(fuzzyAirTime({ display: '00:08' }), 'just after midnight');
+  assert.equal(fuzzyAirTime({ display: 'broken' }), null);
+});
+
+test('an on-demand Persona link does not reuse the track opening as live runway', () => {
+  const prompt = personaLinkPrompt({
+    current: { title: 'Blow My Mind', artist: 'Robyn', introMs: 12_000, firstVocalMs: 9_000 },
+    context: { clock: { display: '10:56' } },
+    clockIsAirTime: true,
+    includeIntroBudget: false,
+    persona: { scriptLength: 'concise' },
+  });
+  assert.match(prompt, /approaching 11am/);
+  assert.ok(!prompt.includes('9s'));
+  assert.ok(!prompt.includes('vocals'));
 });
 
 test('recent speech and openers can be isolated to one Persona', () => {

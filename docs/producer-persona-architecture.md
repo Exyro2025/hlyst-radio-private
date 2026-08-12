@@ -91,7 +91,8 @@ enters the Persona request.
 
 - artist and title: the factual subject of the immediate introduction;
 - active show name and user-authored brief: the programme identity;
-- forecast air time only when it is considered safe: optional factual context;
+- a deterministic fuzzy air-time phrase only when the seam can be forecast
+  safely (for example, `approaching 11am`): optional factual context;
 - measured intro/vocal runway: a hard broadcast timing constraint;
 - the selected Persona: its Soul, user prompt and applicable broadcast rules;
 - recent speech and opening words filtered to that Persona: short negative
@@ -104,10 +105,27 @@ tools and sonic-journey state. It is built independently of the legacy
 `buildContextLines` and `decoratePrompt` helpers so later additions cannot
 quietly widen the boundary.
 
+Queued links never receive an exact minute. They are generated ahead of their
+track, and ordinary seam movement can cross a minute boundary while remaining
+inside the queue's stale-clock tolerance. Converting the forecast into broad
+twenty-minute bands before it reaches the Persona preserves useful situational
+language without asking the model to repeat a clock value that may be false by
+air time. Immediate clock functions such as the hourly check continue to use
+the live exact time; the queue's existing drift guard remains the backstop for
+a link that misses its intended seam altogether.
+
 The LLM call kind is `generatePersonaLink`, reflecting the role executing the
 call. If Producer selection fails, the established all-in-one agent remains the
 fallback. If Persona delivery fails, the selected track is retained and the
 legacy one-candidate link contract is attempted.
+
+The admin dashboard's on-demand **Track Link** is also a direct
+`generatePersonaLink` call. It needs no Producer because the operator has
+already made the editorial decision to speak about the track currently on air.
+It receives the same clean facts, fuzzy clock phrase and Persona-specific
+negative memory as an automatic link. It deliberately omits measured intro and
+first-vocal runway: the button may be pressed halfway through a track, when
+timings measured from the beginning no longer describe the available space.
 
 ## Boundary rules
 

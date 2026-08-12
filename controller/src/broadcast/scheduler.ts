@@ -590,25 +590,27 @@ async function hourlyCheck() {
   }
 }
 
-// Generate and air a between-track DJ link for whatever is playing now.
+// Generate and air a Persona-only DJ link for whatever is playing now.
 // Gate-free; used by the /dj/segment command route.
 export async function runLink() {
   return withTrace({ kind: 'link' }, async () => {
     const current = queue.current?.track;
     if (!current) throw new Error('nothing is playing — no track to link from');
-    const previous = queue.history[0]?.track || null;
     const ctx = await getFullContext();
     const speaker = settings.pickOnAirSpeaker();
-    const script = await dj.generateLink({
-      previous,
+    const personaId = speaker?.id || null;
+    const script = await dj.generatePersonaLink({
       current,
       context: ctx,
-      // Unlike a pick-attached link, this one airs right now (announce below),
-      // so the live clock in ctx is the air time — the model may speak it.
+      // This link airs immediately rather than riding a queued pick. The clean
+      // Persona prompt still turns the live clock into a broad phrase so Track
+      // Link has the same on-air clock vocabulary as automatic Persona links.
       clockIsAirTime: true,
-      recap: queue.getDjRecap(),
-      recentTracks: queue.getRecentTracks(),
-      recentOpeners: queue.getRecentOpeners(),
+      // A manual trigger can happen halfway through a track; its original intro
+      // and first-vocal measurements are no longer usable speech runway.
+      includeIntroBudget: false,
+      recap: queue.getDjRecap({ personaId }),
+      recentOpeners: queue.getRecentOpeners(6, personaId),
       persona: speaker,
     });
     await queue.announce(script, 'link', {
