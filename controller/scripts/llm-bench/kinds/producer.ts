@@ -69,9 +69,7 @@ function producerSegmentScenario(
   return {
     name,
     run: async () => {
-      const surfacedRefs = new Set<string>();
       const expose = (facts: Fact[]) => {
-        for (const fact of facts) surfacedRefs.add(fact.ref);
         return { facts };
       };
       const tools: Record<string, any> = {
@@ -117,7 +115,7 @@ function producerSegmentScenario(
       return {
         object: result.object,
         offeredKinds,
-        surfacedRefs: [...surfacedRefs],
+        researchedKinds: result.toolCalls.map((call: any) => call.name === 'getWeather' ? 'weather' : call.name === 'getNews' ? 'news' : null).filter(Boolean),
         toolCalls: result.toolCalls.length,
       };
     },
@@ -125,7 +123,7 @@ function producerSegmentScenario(
       const violations = checkProducerSegment(
         out?.object,
         new Set(out?.offeredKinds ?? []),
-        new Set(out?.surfacedRefs ?? []),
+        new Set(out?.researchedKinds ?? []),
         out?.toolCalls ?? 0,
       );
       if (out?.object?.air !== expectAir) violations.push(expectAir ? 'unexpected-silence' : 'unnecessary-segment');

@@ -33,7 +33,8 @@ import { queue } from '../broadcast/queue.js';
 import * as settings from '../settings.js';
 import { defineAgent } from '../llm/agent.js';
 import { djObject, modelTolerant } from '../llm/sdk.js';
-import { buildContextLines, CONTEXT_FIELDS, lengthMode, lengthPhrase } from '../llm/dj.js';
+import { buildContextLines, CONTEXT_FIELDS, fuzzyAirTime, generatePersonaSegment, lengthMode, lengthPhrase } from '../llm/dj.js';
+import { ProducerSegmentSchema, producerSegmentSystem } from '../llm/producer.js';
 import { buildSegmentTools, fetchSegmentData } from '../llm/segment-tools.js';
 import { recordCuriosity, recentAiredCuriosity } from './curiosity.js';
 import { loadedCapabilities } from './loader.js';
@@ -286,6 +287,145 @@ export const directorAgent = defineAgent({
   }),
 });
 
+function producerSfxBlock(sfxCatalog) {
+  if (!sfxCatalog?.length) return '\n\nNo production sound effects are offered; return sfx: null.';
+  const names = sfxCatalog.map((item) => `- ${item.name}: ${item.description || 'no description'}`).join('\n');
+  return `\n\nOptional production sound effects:\n${names}\nChoose at most one exact name. Usually return null.`;
+}
+
+// Split-mode director: the backstage model decides, researches and optionally
+// selects production SFX, but has no Persona prompt and no listener-facing text
+// field in its schema. Its raw tool result is recovered from `toolCalls` by the
+// caller and becomes the factual handoff to generatePersonaSegment.
+export const producerDirectorAgent = defineAgent({
+  kind: 'djProducerSegment',
+  schema: ProducerSegmentSchema,
+  maxSteps: 2,
+  timeoutMs: segmentDeadline,
+  role: 'producer',
+  buildSystem: ({ caps, freq, sfxCatalog }) => {
+    const capList = caps.map((cap) => `- ${cap.kind}: ${cap.desc}`).join('\n');
+    return `${producerSegmentSystem()}\n\nStation cadence: ${stationTone(freq)}\n\nOffered segment kinds:\n${capList}${producerSfxBlock(sfxCatalog)}`;
+  },
+  buildTools: ({ ctx, segmentState, caps, currentTrack }) => ({
+    tools: buildSegmentTools(ctx, segmentState, caps, currentTrack),
+  }),
+});
+
+export function buildProducerSituation(ctx, caps, currentTrack) {
+  const lines = ['Operational moment:'];
+  lines.push(...buildContextLines(ctx, { contextFields: unionContextFields(caps) }));
+  if (currentTrack) lines.push(`Track on air: "${currentTrack.title}" by ${currentTrack.artist || 'unknown'}`);
+  // Producer continuity is identifiers + timing, never historical Persona
+  // prose. Tool state owns factual dedup (headlines, curiosities, artist search)
+  // and this small ledger tells the Producer which segment kinds aired lately.
+  const skillKinds = new Set(caps.map((cap) => cap.kind));
+  const now = Date.now();
+  const recentKinds = queue.djLog
+    .filter((entry) => skillKinds.has(entry.kind))
+    .slice(0, 8)
+    .map((entry) => `${entry.kind} (${Math.max(0, Math.round((now - new Date(entry.t).getTime()) / 60_000))}m ago)`);
+  if (recentKinds.length) lines.push(`\nRecent segment kinds already aired:\n${recentKinds.map((item) => `- ${item}`).join('\n')}`);
+  lines.push('\nResearch one offered kind, then decide whether it is worth airing. Return production fields only; never write the line.');
+  return lines.join('\n');
+}
+
+function evidenceForCapability(cap, toolCalls) {
+  if (!cap?.toolName) return null;
+  const matches = (toolCalls || []).filter((call) => call?.name === cap.toolName);
+  return matches.length ? matches[matches.length - 1].result : null;
+}
+
+// Conservative generic evidence gate. Skill-specific editorial judgment stays
+// with the Producer, but a failed tool, explicit unavailable result or wholly
+// empty payload cannot reach the Persona as if it were grounded research.
+export function usableSegmentEvidence(value: any): boolean {
+  if (value == null) return false;
+  if (Array.isArray(value)) return value.length > 0;
+  if (typeof value === 'string') return value.trim().length > 0;
+  if (typeof value !== 'object') return true;
+  if (value.error || value.available === false) return false;
+  const entries = Object.entries(value).filter(([key]) => key !== 'available');
+  return entries.some(([, item]) => {
+    if (Array.isArray(item)) return item.length > 0;
+    if (typeof item === 'string') return item.trim().length > 0;
+    if (item && typeof item === 'object') return usableSegmentEvidence(item);
+    return typeof item === 'number' || item === true;
+  });
+}
+
+const TRACK_CONTEXT_SEGMENTS = new Set([
+  'album-anniversary', 'library-deep-cut', 'now-playing-dig', 'web-search',
+]);
+
+// Context crossing into Persona is selected by code, not copied from the
+// Producer prompt. Built-ins get the smallest known requirement; custom skills
+// may opt into date/clock/time/festival through their explicit `context:` field.
+export function personaSegmentContext(cap, ctx): { facts: string[]; includeTrack: boolean } {
+  const facts: string[] = [];
+  const show = ctx?.activeShow;
+  if (show?.name) facts.push(`Show: "${show.name}".`);
+  if (show?.topic) facts.push(`Show brief: ${show.topic}`);
+
+  let fields: string[] = [];
+  if (cap?.kind === 'curiosity') fields = ['date'];
+  else if (cap?.kind === 'weather') fields = ['clock'];
+  else if (!cap?.seeded && cap?.contextFields != null) fields = effectiveContextFields(cap);
+
+  if (fields.includes('date') && ctx?.date) {
+    facts.push(`Date: ${ctx.date.dayLabel}, ${ctx.date.dayOfMonth} ${ctx.date.monthLabel} (${ctx.date.season}).`);
+  }
+  if (fields.includes('clock')) {
+    const fuzzy = fuzzyAirTime(ctx?.clock);
+    if (fuzzy) facts.push(`Approximate time: ${fuzzy}.`);
+  }
+  if (fields.includes('time') && ctx?.time?.period) facts.push(`Period: ${ctx.time.period}.`);
+  if (fields.includes('festival') && ctx?.festival?.name) {
+    facts.push(`Festival: ${ctx.festival.name}${ctx.festival.description ? ` — ${ctx.festival.description}` : ''}.`);
+  }
+  return { facts, includeTrack: TRACK_CONTEXT_SEGMENTS.has(cap?.kind) };
+}
+
+async function runSplitDirector(ctx, { caps, speaker, freq, sfxCatalog }) {
+  const currentTrack = queue.current?.track ?? null;
+  const { object, toolCalls } = await producerDirectorAgent.run({
+    messages: [{ role: 'user', content: buildProducerSituation(ctx, caps, currentTrack) }],
+    caps, freq, sfxCatalog, ctx, segmentState, currentTrack,
+  });
+  if (!object?.air) return { seg: null, reason: object?.reason || 'Producer chose silence' };
+  const cap = caps.find((candidate) => candidate.kind === object?.kind);
+  if (!cap) return { seg: null, reason: `Producer returned unoffered kind "${object?.kind || ''}"` };
+
+  const evidence = evidenceForCapability(cap, toolCalls);
+  if (typeof cap.toolFn === 'function' && !usableSegmentEvidence(evidence)) {
+    return { seg: null, reason: `${cap.kind} returned no usable evidence` };
+  }
+
+  const { facts, includeTrack } = personaSegmentContext(cap, ctx);
+  if (includeTrack) {
+    const liveTrack = queue.current?.track ?? null;
+    const sameTrack = currentTrack && liveTrack && (
+      (currentTrack.id && liveTrack.id && currentTrack.id === liveTrack.id)
+      || (currentTrack.title === liveTrack.title && currentTrack.artist === liveTrack.artist)
+    );
+    if (!sameTrack) return { seg: null, reason: `${cap.kind} research became stale after the track changed` };
+  }
+  const personaId = speaker?.id || null;
+  const maxChars = speaker?.scriptLength === 'storyteller' ? 520 : speaker?.scriptLength === 'extended' ? 360 : 140;
+  const text = (await generatePersonaSegment({
+    kind: cap.kind,
+    brief: cap.desc,
+    evidence,
+    contextFacts: facts,
+    current: includeTrack ? currentTrack : null,
+    recap: queue.getDjRecap({ maxChars, personaId }),
+    recentOpeners: queue.getRecentOpeners(6, personaId),
+    persona: speaker,
+  })).trim();
+  if (!text) return { seg: null, reason: 'Persona produced no text' };
+  return { seg: { kind: cap.kind, text, sfx: object?.sfx ?? null }, reason: object?.reason };
+}
+
 // The concrete situation handed to the agent as its single user turn. Built
 // from what is on air and queue.getDjRecap() (what actually aired recently) —
 // NOT the track-pick session history, which derails small models.
@@ -479,7 +619,11 @@ export async function agenticTick(ctx) {
 
     let seg: { kind: string; text: string; sfx: string | null } | null = null;
     let silentReason: string | undefined;
-    if (!settings.get().llm?.pickerAgent) {
+    if (settings.get().llm?.producer?.enabled) {
+      // Advanced split mode: Producer chooses and researches; Persona receives
+      // only the selected skill's raw evidence and writes the spoken line.
+      ({ seg, reason: silentReason } = await runSplitDirector(ctx, { caps, speaker, freq, sfxCatalog }));
+    } else if (!settings.get().llm?.pickerAgent) {
       // Pool mode: the operator's model isn't trusted with tool loops, so the
       // director runs the code-driven single-call path instead of the agent.
       ({ seg, reason: silentReason } = await runSimpleDirector(ctx, { caps, speaker, freq, sfxCatalog }));

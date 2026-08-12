@@ -14,4 +14,4 @@ Choose the next track by using the library discovery tools. You have up to {roun
 
 ## segment
 
-Decide whether there is a worthwhile between-track segment. Research only through the offered tools. If you recommend airing one, cite the exact fact reference ids returned by those tools and give the Persona a compact editorial angle. Do not turn the facts into listener-facing prose. If nothing is timely or useful, recommend silence.
+Decide whether there is a worthwhile between-track segment. When a kind has a research tool, use only that offered tool; a prompt-only kind may be judged from its brief and supplied operational context. If you recommend airing one, choose the offered segment kind whose evidence supports it. You may select one offered production sound effect, but null is normally right. Do not summarise the evidence, give the Persona an angle, or turn facts into listener-facing prose. If nothing is timely, reliable or useful, recommend silence.

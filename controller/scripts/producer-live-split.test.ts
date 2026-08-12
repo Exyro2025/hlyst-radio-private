@@ -14,7 +14,14 @@ const {
   producerPickerAgent,
   producerPickerSystem,
 } = await import('../src/broadcast/dj-agent/agents.js');
-const { fuzzyAirTime, generatePersonaLink, personaLinkPrompt } = await import('../src/llm/internal/prompts/scripts.js');
+const {
+  fuzzyAirTime,
+  generatePersonaLink,
+  personaLinkPrompt,
+  generatePersonaSegment,
+  personaSegmentPrompt,
+} = await import('../src/llm/internal/prompts/scripts.js');
+const { buildProducerSituation, personaSegmentContext, producerDirectorAgent, usableSegmentEvidence } = await import('../src/skills/_agent.js');
 const { showMusicLean } = await import('../src/llm/internal/prompts/picker.js');
 const { queue } = await import('../src/broadcast/queue.js');
 
@@ -131,4 +138,66 @@ test('recent speech and openers can be isolated to one Persona', () => {
   assert.match(chrisRecap, /bicycle story/);
   assert.ok(!chrisRecap.includes('new discovery'));
   assert.deepEqual(chrisOpeners, ['Chris opens with a bicycle']);
+});
+
+test('the segment Producer has no listener-facing text field', () => {
+  assert.equal(producerDirectorAgent.kind, 'djProducerSegment');
+  assert.equal(producerDirectorAgent.role, 'producer');
+  const parsed = producerDirectorAgent.schema.parse({
+    air: true,
+    kind: 'weather',
+    reason: 'conditions changed',
+    sfx: null,
+    text: 'This must not cross the boundary.',
+    angle: 'Nor this.',
+  });
+  assert.ok(!('text' in parsed));
+  assert.ok(!('angle' in parsed));
+});
+
+test('the segment Producer receives operational history, not Persona prose', () => {
+  queue.djLog = [
+    { id: 1, kind: 'weather', message: 'The rain is holding its breath over the valley.', t: new Date().toISOString() },
+  ];
+  const situation = buildProducerSituation({}, [{ kind: 'weather', contextFields: [] }], null);
+  assert.match(situation, /weather \(0m ago\)/);
+  assert.ok(!situation.includes('holding its breath'));
+});
+
+test('the Persona segment packet contains evidence but no Producer rationale', () => {
+  const prompt = personaSegmentPrompt({
+    kind: 'weather',
+    brief: 'Mention only a genuine change.',
+    evidence: { condition: 'rain', changedSinceLastMention: true },
+    contextFacts: ['Show: "The Scenic Route".', 'Approximate time: approaching 11am.'],
+    recap: '- 5m ago [weather]: "A previous weather line."',
+    recentOpeners: ['A previous weather line'],
+    persona: { scriptLength: 'concise' },
+    reason: 'Producer thinks rain suits the mood',
+  });
+  assert.match(prompt, /changedSinceLastMention/);
+  assert.match(prompt, /approaching 11am/);
+  assert.ok(!prompt.includes('Producer thinks'));
+  assert.equal(typeof generatePersonaSegment, 'function');
+});
+
+test('segment context is selected for the chosen skill', () => {
+  const ctx = {
+    clock: { display: '10:56' },
+    date: { dayLabel: 'Wednesday', dayOfMonth: 12, monthLabel: 'August', season: 'summer' },
+    time: { period: 'morning' },
+    activeShow: { name: 'The Scenic Route', topic: 'Take the longer way home.' },
+  };
+  const weather = personaSegmentContext({ kind: 'weather', seeded: true }, ctx);
+  assert.match(weather.facts.join('\n'), /approaching 11am/);
+  assert.ok(!weather.facts.join('\n').includes('Wednesday'));
+  assert.equal(weather.includeTrack, false);
+  assert.equal(personaSegmentContext({ kind: 'now-playing-dig', seeded: true }, ctx).includeTrack, true);
+});
+
+test('failed and empty tool payloads cannot reach the Persona as evidence', () => {
+  assert.equal(usableSegmentEvidence({ error: 'timeout' }), false);
+  assert.equal(usableSegmentEvidence({ available: false }), false);
+  assert.equal(usableSegmentEvidence({ headlines: [] }), false);
+  assert.equal(usableSegmentEvidence({ headlines: [{ title: 'A real item' }] }), true);
 });

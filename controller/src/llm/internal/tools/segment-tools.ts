@@ -24,8 +24,14 @@ import { tool } from 'ai';
 import { z } from 'zod';
 import { buildStationServices } from './station-services.js';
 
-export function buildSegmentTools(ctx: any, state: any, caps: any[]) {
-  const services = buildStationServices();
+export function buildSegmentTools(ctx: any, state: any, caps: any[], nowPlayingTrack: any = undefined) {
+  const baseServices = buildStationServices();
+  // A split Producer→Persona run spans two model calls. Pin track-aware tools
+  // to the identity present when the run began so a seam during research cannot
+  // silently retarget artist/track lookup halfway through the packet.
+  const services = nowPlayingTrack === undefined
+    ? baseServices
+    : { ...baseServices, nowPlaying: () => nowPlayingTrack };
   const tools: any = {};
 
   for (const cap of caps as any[]) {

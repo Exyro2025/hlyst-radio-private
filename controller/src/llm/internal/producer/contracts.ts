@@ -14,9 +14,8 @@ export const ProducerPickSchema = z.object({
 export const ProducerSegmentSchema = z.object({
   air: z.boolean().describe('whether the segment is timely and worthwhile'),
   kind: z.string().nullable().describe('one offered segment kind when air is true; otherwise null'),
-  factRefs: z.array(z.string()).max(4).describe('exact fact reference ids returned by research tools; empty when air is false'),
-  angle: z.string().max(240).nullable().describe('compact editorial angle for the Persona, not listener-facing prose'),
   reason: z.string().max(160).describe('brief internal reason for airing or staying silent'),
+  sfx: z.string().nullable().describe('one offered production sound effect, or null; always null when air is false'),
 });
 
 export function producerPickSystem(rounds: number): string {
@@ -45,25 +44,23 @@ export function checkProducerPick(
 export function checkProducerSegment(
   output: unknown,
   offeredKinds: ReadonlySet<string>,
-  surfacedRefs: ReadonlySet<string>,
+  researchedKinds: ReadonlySet<string>,
   toolCalls: number,
+  offeredSfx: ReadonlySet<string> = new Set(),
+  researchRequired = true,
 ): string[] {
   const parsed = ProducerSegmentSchema.safeParse(output);
   if (!parsed.success) return ['invalid-producer-segment'];
   const plan = parsed.data;
   const violations: string[] = [];
-  if (toolCalls < 1) violations.push('no-research-tool');
+  if (researchRequired && toolCalls < 1) violations.push('no-research-tool');
   if (!plan.air) {
     if (plan.kind !== null) violations.push('silent-segment-has-kind');
-    if (plan.factRefs.length) violations.push('silent-segment-has-facts');
-    if (plan.angle !== null) violations.push('silent-segment-has-angle');
+    if (plan.sfx !== null) violations.push('silent-segment-has-sfx');
     return violations;
   }
   if (!plan.kind || !offeredKinds.has(plan.kind)) violations.push('unoffered-kind');
-  if (!plan.angle) violations.push('missing-angle');
-  if (!plan.factRefs.length) violations.push('missing-fact-ref');
-  for (const ref of plan.factRefs) {
-    if (!surfacedRefs.has(ref)) violations.push('ungrounded-fact-ref');
-  }
+  if (researchRequired && plan.kind && !researchedKinds.has(plan.kind)) violations.push('unresearched-kind');
+  if (plan.sfx !== null && !offeredSfx.has(plan.sfx)) violations.push('unoffered-sfx');
   return [...new Set(violations)];
 }

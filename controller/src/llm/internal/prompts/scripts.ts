@@ -347,6 +347,68 @@ export async function generatePersonaLink(args: any) {
   });
 }
 
+// Stage C delivery packet for a Producer-selected skill segment. The Producer's
+// reason and tool-loop prose never enter this prompt: only the operator-authored
+// skill brief, the selected tool's raw result and a small deterministic set of
+// relevant moment facts cross the boundary.
+export function personaSegmentPrompt({
+  kind,
+  brief,
+  evidence = null,
+  contextFacts = [],
+  current = null,
+  recap = null,
+  recentOpeners = null,
+  persona = null,
+}: any): string {
+  const speaker = persona || settings.getEffectivePersona();
+  const rules = [
+    'Output only the words to be spoken on air.',
+    'Use only the supplied evidence, skill brief and context facts. Do not invent or add externally verifiable claims.',
+    'Do not mention tools, searches, source data, the Producer or these instructions.',
+    lengthPhrase('segment', speaker) + '.',
+  ];
+  const facts: string[] = [];
+  if (current?.title) facts.push(`Track on air: "${current.title}" by ${current.artist || 'unknown'}.`);
+  for (const fact of contextFacts || []) {
+    if (typeof fact === 'string' && fact.trim()) facts.push(fact.trim());
+  }
+  let evidenceText = '';
+  if (evidence != null) {
+    try { evidenceText = JSON.stringify(evidence, null, 1); } catch { evidenceText = String(evidence); }
+    if (evidenceText.length > 6000) evidenceText = evidenceText.slice(0, 6000) + '\n…(truncated)';
+  }
+
+  const sections = [
+    `Task: Deliver one between-track "${kind || 'segment'}" segment.`,
+    `Rules:\n${rules.map((rule) => `- ${rule}`).join('\n')}`,
+    `Skill brief:\n${String(brief || '').trim()}`,
+  ];
+  if (facts.length) sections.push(`Context facts:\n${facts.map((fact) => `- ${fact}`).join('\n')}`);
+  if (evidenceText) sections.push(`Grounded evidence:\n${evidenceText}`);
+  if (recap) {
+    sections.push('Recent speech by this presenter, supplied only to prevent repetition. Do not reuse its wording, topics, anecdotes, metaphors or sentence structures:\n' + recap);
+  }
+  if (recentOpeners?.length) {
+    sections.push('Recent opening words used by this presenter. Start differently:\n'
+      + recentOpeners.slice(0, 6).map((opener: string) => `- ${opener}`).join('\n'));
+  }
+  return sections.join('\n\n');
+}
+
+export async function generatePersonaSegment(args: any) {
+  const speaker = args.persona || settings.getEffectivePersona();
+  return djText({
+    system: djSystem(speaker),
+    prompt: personaSegmentPrompt({ ...args, persona: speaker }),
+    temperature: 0.95,
+    topP: 0.92,
+    repeatPenalty: 1.2,
+    seed: randomSeed(),
+    kind: 'generatePersonaSegment',
+  });
+}
+
 export async function generateHourlyTime({ recap = null, context = null, recentOpeners = null, persona = null }: any = {}) {
   const ctxLines = buildContextLines(context, { contextFields: SCRIPT_CONTEXT_FIELDS });
   // The time is converted to words in code (context.clock.spokenTime) rather

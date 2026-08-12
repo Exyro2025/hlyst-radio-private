@@ -25,6 +25,9 @@ export {
   generateLink,
   generatePersonaLink,
   personaLinkPrompt,
+  fuzzyAirTime,
+  generatePersonaSegment,
+  personaSegmentPrompt,
   generateHourlyTime,
 } from './internal/prompts/scripts.js';
 export { generateBanter } from './internal/prompts/banter.js';

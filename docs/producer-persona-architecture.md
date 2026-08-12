@@ -127,6 +127,68 @@ negative memory as an automatic link. It deliberately omits measured intro and
 first-vocal runway: the button may be pressed halfway through a track, when
 timings measured from the beginning no longer describe the available space.
 
+## Stage C migration: autonomous skill segments
+
+The second migrated path is the five-minute autonomous segment director. The
+base installation remains on the established all-in-one path; this split is
+active only while the optional Producer leg is enabled. Operator-fired skills
+remain on their established path during the first live evaluation so automatic
+and manual behaviour are not changed simultaneously.
+
+### Original all-in-one contract
+
+`djAgentSegment` receives the Persona preamble, station cadence, every offered
+skill brief, selected moment context, recent on-air speech, optional SFX and
+the research tools. One tool loop decides whether to speak, performs research,
+chooses a skill and sound effect, and writes the final listener-facing `text`.
+Its output is `{ reason, air, segment: { kind, text, sfx } }`.
+
+### Split Producer contract
+
+`djProducerSegment` receives no Persona Soul and has no listener-facing text
+field. It receives operational cadence, the offered skill briefs, relevant
+moment context, recently aired skill identifiers, optional SFX and the same
+research tools. It returns only `{ air, kind, reason, sfx }`. The selected skill
+must have been offered. When that skill owns a data tool, the run must contain
+a usable result from that exact tool; errors, explicit `available: false` and
+empty payloads resolve to silence. A prompt-only custom skill remains eligible
+from its operator-authored brief and declared operational context; it does not
+invent a research result merely to satisfy the tool-oriented contract.
+
+The agent runtime already exposes discovery calls separately from its final
+object. The controller therefore recovers the selected tool's actual result
+without asking the Producer to paraphrase it and without running the external
+search a second time. The private `reason` remains diagnostic and never enters
+the Persona request. SFX remains a Producer decision because it changes the
+production treatment, not the presenter's wording.
+
+### Split Persona packet
+
+`generatePersonaSegment` receives:
+
+- the selected kind and the operator-authored `SKILL.md` brief;
+- the selected tool's raw result, with no tool name, arguments, errors,
+  rejected results or discovery transcript;
+- the active show name and user-authored brief;
+- the on-air track only for track-related skills;
+- the minimum selected moment facts: date for curiosity, fuzzy time for
+  weather, or explicitly declared fields for a custom skill;
+- the chosen Persona and repetition memory filtered to that Persona.
+
+Listener count, dominant mood, unrelated weather, the Producer reason and SFX
+choice do not cross the speech boundary. The shared skill brief is deliberate:
+today it combines editorial reliability rules with delivery rules. A future
+skill format may split those into Producer and Persona sections; copying or
+guessing such a split during this migration would change operator-authored
+behaviour silently.
+
+The Persona owns wording only. It cannot change kind, search again or reverse
+the air decision. A failed Producer call, missing evidence, or failed/empty
+Persona response results in silence. Optional talk has no legacy all-in-one
+fallback because preserving airtime is less important than avoiding an
+ungrounded on-air statement. The observable call kinds are
+`djProducerSegment` and `generatePersonaSegment`.
+
 ## Boundary rules
 
 Every field crossing from Producer to Persona must answer this question:
@@ -136,7 +198,9 @@ Every field crossing from Producer to Persona must answer this question:
 
 If not, omit it. In particular, the Persona should not normally receive:
 
-- tool names, schemas, results, errors, retries, or completion protocols;
+- tool names, schemas, arguments, errors, retries, completion protocols, or
+  unselected results (the selected skill's raw evidence is the explicit
+  segment exception);
 - candidate IDs, rejected candidates, scores, or selection weighting;
 - picker rationale or internal editorial deliberation;
 - sonic-journey, energy-target, mood-tag, or transition-planning terminology;

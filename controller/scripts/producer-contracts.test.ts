@@ -26,41 +26,56 @@ test('Producer pick reports missing discovery and an invented id', () => {
   ]);
 });
 
-test('Producer segment requires offered kinds and surfaced fact references', () => {
+test('Producer segment requires an offered, researched kind', () => {
   const plan = {
     air: true,
     kind: 'weather',
-    factRefs: ['weather.current'],
-    angle: 'Connect the sudden rain to the track’s reflective pace.',
     reason: 'conditions changed',
+    sfx: null,
   };
   assert.equal(ProducerSegmentSchema.safeParse(plan).success, true);
   assert.deepEqual(checkProducerSegment(
     plan,
     new Set(['weather']),
-    new Set(['weather.current']),
+    new Set(['weather']),
     1,
   ), []);
 });
 
-test('Producer segment silence carries no unused editorial payload', () => {
+test('Producer segment silence carries no unused production payload', () => {
   const plan = {
     air: false,
     kind: 'news',
-    factRefs: ['news.0'],
-    angle: 'Read the headline.',
     reason: 'not worthwhile',
+    sfx: 'sting',
   };
   assert.deepEqual(checkProducerSegment(
     plan,
     new Set(['news']),
-    new Set(['news.0']),
+    new Set(['news']),
     1,
+    new Set(['sting']),
   ), [
     'silent-segment-has-kind',
-    'silent-segment-has-facts',
-    'silent-segment-has-angle',
+    'silent-segment-has-sfx',
   ]);
+});
+
+test('Producer segment can select an offered prompt-only kind without a tool call', () => {
+  const plan = {
+    air: true,
+    kind: 'listener-mailbag',
+    reason: 'the supplied brief calls for it',
+    sfx: null,
+  };
+  assert.deepEqual(checkProducerSegment(
+    plan,
+    new Set(['listener-mailbag']),
+    new Set(),
+    0,
+    new Set(),
+    false,
+  ), []);
 });
 
 test('Producer prompt names the real discovery budget and forbids on-air planning', () => {
