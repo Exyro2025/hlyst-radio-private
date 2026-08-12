@@ -331,7 +331,11 @@ test('now-playing evidence requires an explicit answer and exact-track source', 
       'Anna Meredith: Varmints review: “Dowager” starts as a spinster lament.',
     ],
   });
-  assert.deepEqual(evidence.sources, [
+  assert.equal(evidence.available, true);
+  assert.deepEqual(evidence.claims.map((claim) => claim.text), [
+    'Anna Meredith described “Dowager” as beginning like a spinster lament.',
+  ]);
+  assert.deepEqual(evidence.sources.map((source) => source.label), [
     'Anna Meredith: Varmints review: “Dowager” starts as a spinster lament.',
   ]);
 });
@@ -345,7 +349,7 @@ test('exact-track snippets alone cannot authorise a Persona claim', () => {
       'Happy Mondays - Angel - CD (Single, Promo), 1992: View credits and track listing.',
       'Happy Mondays - Angel: Simon Machan programming; Tina Weymouth producer.',
     ],
-  }), { available: false });
+  }).available, false);
 });
 
 test('a track dig with no exact-track support becomes unavailable', () => {
@@ -354,7 +358,7 @@ test('a track dig with no exact-track support becomes unavailable', () => {
     title: 'Dowager',
     answer: '',
     sources: ['The role of women in the science city included several dowagers.'],
-  }), { available: false });
+  }).available, false);
 });
 
 test('artist web search cannot borrow the on-air track as implied evidence', () => {
@@ -362,11 +366,13 @@ test('artist web search cannot borrow the on-air track as implied evidence', () 
     activeShow: { name: 'Another Day, Another Spin', topic: 'Music and conversation.' },
   };
   assert.equal(personaSegmentContext({ kind: 'web-search', seeded: true }, ctx).includeTrack, false);
-  assert.deepEqual(groundedSearchEvidence('web-search', {
+  const evidence = groundedSearchEvidence('web-search', {
     artist: 'Kate Bush',
     answer: 'Kate Bush studied piano as a child.',
     sources: ['Kate Bush biography: she studied piano as a child.'],
-  }).sources, ['Kate Bush biography: she studied piano as a child.']);
+  });
+  assert.equal(evidence.available, true);
+  assert.deepEqual(evidence.claims.map((claim) => claim.text), ['Kate Bush studied piano as a child.']);
 });
 
 test('artist snippets alone cannot authorise an invented anecdote', () => {
@@ -377,5 +383,5 @@ test('artist snippets alone cannot authorise an invented anecdote', () => {
       'Limp Bizkit announced for Good Things festival.',
       'Limp Bizkit | NME: latest news and features.',
     ],
-  }), { available: false });
+  }).available, false);
 });

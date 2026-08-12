@@ -20,12 +20,15 @@ import { searchWeb, searchReady } from '../../../skills/web-search.js';
 import { fetchOnThisDay, curiositySeen, recordCuriosity } from '../../../skills/curiosity.js';
 import { fetchHeadlines, hashHeadline } from '../../../skills/news.js';
 import { getArtist, getAlbum, searchArtists } from '../../../music/subsonic.js';
+import { researchTrackOnMusicBrainz } from '../../../skills/musicbrainz.js';
 
 export interface StationServices {
   // Web search via the operator's configured provider (DuckDuckGo / Tavily /
   // SearXNG). `searchReady()` is false when no provider is usable.
   searchWeb: typeof searchWeb;
   searchReady: typeof searchReady;
+  // Exact-track, provenance-bearing research from specialist music sources.
+  researchTrack: typeof researchTrackOnMusicBrainz;
   // The track currently on air (artist/title/album/year/id), or null.
   nowPlaying: () => any | null;
   // Play-log lookup over the last `hours` — { ids, keys } sets for dedup.
@@ -64,6 +67,7 @@ export function buildStationServices(): StationServices {
   cached = {
     searchWeb,
     searchReady,
+    researchTrack: researchTrackOnMusicBrainz,
     nowPlaying: () => queue.current?.track ?? null,
     recentPlays: (hours: number) => queue.recentlyPlayed(hours),
     library: { getArtist, getAlbum, searchArtists },

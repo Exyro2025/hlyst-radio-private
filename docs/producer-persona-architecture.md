@@ -196,12 +196,65 @@ resolves to silence. This is a conservative floor, not semantic claim
 verification: a future evidence-appraisal stage may reject an explicit answer
 whose cited source does not actually support it.
 
+Grounded research uses a versioned, source-neutral evidence packet. Each packet
+identifies its artist/track subject, contains one or more explicit factual
+claims, and links every claim to one or more provenance records. A provenance
+record names the adapter and may retain a label, URL and retrieval time for
+debugging and future appraisal. Claims whose referenced sources are absent are
+discarded; a packet with no supported claim is unavailable. This contract lets
+MusicBrainz, Discogs, RSS or another specialist adapter feed the same policy
+without teaching Persona how each service works.
+
+The full packet remains backstage. Persona receives only the subject and the
+approved claim text as a list of facts. Provider names, URLs, search snippets,
+retrieval timestamps and the Producer's rationale do not cross the speech
+boundary. This keeps source mechanics from becoming on-air wording while
+preserving provenance for logs, tests and a future Rehearsal Room appraisal.
+
+The first specialist adapter is MusicBrainz for `now-playing-dig`. It requires
+an exact normalized recording title and credited artist match before accepting
+the recording. Because MusicBrainz search may rank a recent reissue above the
+original, the adapter selects the earliest explicitly dated exact match from a
+bounded result set. It currently emits only first-release and explicit producer
+relationship claims. Responses are cached for 24 hours; outbound requests are
+serialized at slightly below MusicBrainz's one-request-per-second public limit
+and carry an identifying User-Agent. No API key or general search provider is
+required. The broader skill wording remains as an explicit roadmap for sample,
+B-side, chart and backstory adapters, but those categories cannot be inferred
+from MusicBrainz data that does not state them.
+
+Built-in skills are editable copies under `state/skills`, so an existing station
+does not have its local `tool.mjs` silently overwritten by a new image. During
+development, **Reset to default** on `now-playing-dig` is therefore required
+once after deploying this adapter; this deliberately trades automatic migration
+for preserving operator edits.
+
 The Persona owns wording only. It cannot change kind, search again or reverse
 the air decision. A failed Producer call, missing evidence, or failed/empty
 Persona response results in silence. Optional talk has no legacy all-in-one
 fallback because preserving airtime is less important than avoiding an
 ungrounded on-air statement. The observable call kinds are
 `djProducerSegment` and `generatePersonaSegment`.
+
+### Autonomous research cooldowns
+
+Research completion and airtime are separate outcomes. When an autonomous
+skill tool completes, its ordinary configured cooldown begins even if the
+Producer declines the result, deterministic grounding rejects it, the track
+changes before speech, or Persona returns no usable line. Repeating the same
+empty or unsafe evidence on every five-minute scheduler tick would spend more
+tokens without improving its truthfulness.
+
+A tool or provider infrastructure error is different: it receives the shorter
+of the skill's configured cooldown and 15 minutes, allowing recovery without
+hammering a failed dependency. A Producer failure before any skill tool runs
+does not consume a skill cooldown. Successful airtime still updates the
+existing last-aired memory, which remains the basis for least-recently-aired
+rotation. These rules apply to autonomous split, agentic and pool-mode paths;
+manual **Run now** keeps its established override behaviour.
+
+Off-air rehearsal is intentionally excluded. It reports the same evidence
+decision but cannot change either research eligibility or last-aired state.
 
 ### Off-air skill rehearsal
 

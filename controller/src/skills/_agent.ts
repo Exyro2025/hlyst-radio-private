@@ -39,6 +39,8 @@ import { buildSegmentTools, fetchSegmentData } from '../llm/segment-tools.js';
 import { recordCuriosity, recentAiredCuriosity } from './curiosity.js';
 import { loadedCapabilities } from './loader.js';
 import { skillEligible } from './eligibility.js';
+import { researchAttemptDelayMs, researchAttemptsFromToolCalls, type SkillResearchAttempt } from './attempt-policy.js';
+import { createResearchEvidence, isResearchEvidence, personaResearchEvidence, unavailableResearchEvidence } from './research-evidence.js';
 import * as sfx from '../broadcast/sfx.js';
 
 // The capability registry now lives entirely in skills/loader.js, which loads
@@ -168,6 +170,7 @@ ${list}`;
 
 let tickBusy = false;
 const lastFired = new Map<string, number>(); // kind → ms timestamp of last aired segment
+const researchBlockedUntil = new Map<string, number>(); // kind → next eligible ms after a tool attempt
 
 // Dedup memory carried across ticks — passed straight into the segment tools.
 // Curiosity dedup is NOT here anymore: it lives in the durable ledger in
@@ -222,7 +225,9 @@ function availableCapabilities(ctx, now: Date) {
     // fires only when its dedicated cron task calls runCapability() directly
     // (scheduler.ts syncSkillCrons), which bypasses this function altogether.
     if (cap.cronOnly) continue;
-    if (now.getTime() - (lastFired.get(cap.kind) || 0) < cap.cooldownMs) continue;
+    const firedUntil = (lastFired.get(cap.kind) || 0) + cap.cooldownMs;
+    const attemptedUntil = researchBlockedUntil.get(cap.kind) || 0;
+    if (now.getTime() < Math.max(firedUntil, attemptedUntil)) continue;
     // Window gating: custom skills opt into commute-hours-only firing via
     // `window: commute` in their SKILL.md frontmatter. (No built-in is
     // commute-gated by default since the traffic skill was retired.)
@@ -366,6 +371,9 @@ function mentions(value: unknown, subject: unknown): boolean {
 export function groundedSearchEvidence(kind: string, value: any): any {
   if (!value || typeof value !== 'object') return value;
   if (kind !== 'now-playing-dig' && kind !== 'web-search') return value;
+  // Specialist adapters already return the controller's provenance-bearing
+  // contract; the legacy search normalizer below exists only during migration.
+  if (isResearchEvidence(value)) return value;
   const artist = String(value.artist || '').trim();
   const title = String(value.title || '').trim();
   const supports = (text: unknown) => kind === 'now-playing-dig'
@@ -382,9 +390,18 @@ export function groundedSearchEvidence(kind: string, value: any): any {
   // became an invented John Otto quotation). Require the provider's explicit
   // answer AND a subject-matching source for both search-backed factual skills.
   if (!answer || sources.length === 0) {
-    return { available: false };
+    return unavailableResearchEvidence({ artist, ...(title ? { title } : {}) }, 'search returned no subject-supported answer');
   }
-  return { ...value, answer, sources };
+  const evidenceSources = sources.map((source, index) => ({
+    id: `search-${index + 1}`,
+    provider: 'configured-search',
+    label: String(source).trim(),
+  }));
+  return createResearchEvidence({
+    subject: { artist, ...(title ? { title } : {}) },
+    claims: [{ text: answer, sourceIds: evidenceSources.map((source) => source.id) }],
+    sources: evidenceSources,
+  });
 }
 
 // Conservative generic evidence gate. Skill-specific editorial judgment stays
@@ -443,6 +460,7 @@ interface SplitSegmentResult {
   status: SplitSegmentStatus;
   seg: { kind: string; text: string; sfx: string | null } | null;
   reason: string;
+  attempts: SkillResearchAttempt[];
 }
 
 async function runSplitDirector(ctx, { caps, speaker, freq, sfxCatalog, state = segmentState, rehearsal = false }): Promise<SplitSegmentResult> {
@@ -451,13 +469,14 @@ async function runSplitDirector(ctx, { caps, speaker, freq, sfxCatalog, state = 
     messages: [{ role: 'user', content: buildProducerSituation(ctx, caps, currentTrack) }],
     caps, freq, sfxCatalog, ctx, segmentState: state, currentTrack, rehearsal,
   });
-  if (!object?.air) return { status: 'producer-declined', seg: null, reason: object?.reason || 'Producer chose silence' };
+  const attempts = researchAttemptsFromToolCalls(caps, toolCalls);
+  if (!object?.air) return { status: 'producer-declined', seg: null, reason: object?.reason || 'Producer chose silence', attempts };
   const cap = caps.find((candidate) => candidate.kind === object?.kind);
-  if (!cap) return { status: 'producer-invalid', seg: null, reason: `Producer returned unoffered kind "${object?.kind || ''}"` };
+  if (!cap) return { status: 'producer-invalid', seg: null, reason: `Producer returned unoffered kind "${object?.kind || ''}"`, attempts };
 
   const evidence = groundedSearchEvidence(cap.kind, evidenceForCapability(cap, toolCalls));
   if (typeof cap.toolFn === 'function' && !usableSegmentEvidence(evidence)) {
-    return { status: 'evidence-rejected', seg: null, reason: `${cap.kind} returned no usable evidence` };
+    return { status: 'evidence-rejected', seg: null, reason: `${cap.kind} returned no usable evidence`, attempts };
   }
 
   const { facts, includeTrack } = personaSegmentContext(cap, ctx);
@@ -467,22 +486,22 @@ async function runSplitDirector(ctx, { caps, speaker, freq, sfxCatalog, state = 
       (currentTrack.id && liveTrack.id && currentTrack.id === liveTrack.id)
       || (currentTrack.title === liveTrack.title && currentTrack.artist === liveTrack.artist)
     );
-    if (!sameTrack) return { status: 'stale', seg: null, reason: `${cap.kind} research became stale after the track changed` };
+    if (!sameTrack) return { status: 'stale', seg: null, reason: `${cap.kind} research became stale after the track changed`, attempts };
   }
   const personaId = speaker?.id || null;
   const maxChars = speaker?.scriptLength === 'storyteller' ? 520 : speaker?.scriptLength === 'extended' ? 360 : 140;
   const text = (await generatePersonaSegment({
     kind: cap.kind,
     brief: cap.desc,
-    evidence,
+    evidence: personaResearchEvidence(evidence),
     contextFacts: facts,
     current: includeTrack ? currentTrack : null,
     recap: queue.getDjRecap({ maxChars, personaId }),
     recentOpeners: queue.getRecentOpeners(6, personaId),
     persona: speaker,
   })).trim();
-  if (!text) return { status: 'persona-empty', seg: null, reason: 'Persona produced no text' };
-  return { status: 'draft', seg: { kind: cap.kind, text, sfx: object?.sfx ?? null }, reason: object?.reason || 'Producer approved the segment' };
+  if (!text) return { status: 'persona-empty', seg: null, reason: 'Persona produced no text', attempts };
+  return { status: 'draft', seg: { kind: cap.kind, text, sfx: object?.sfx ?? null }, reason: object?.reason || 'Producer approved the segment', attempts };
 }
 
 // The concrete situation handed to the agent as its single user turn. Built
@@ -615,9 +634,12 @@ async function deadlinedSegmentObject(args: Record<string, unknown>) {
 // model call: the model can't say anything true about data it never got.
 async function runSimpleDirector(ctx, { caps, speaker, freq, sfxCatalog }) {
   const cap = chooseCapability(caps, ctx);
-  if (!cap) return { seg: null, reason: 'nothing fresh to say' };
+  if (!cap) return { seg: null, reason: 'nothing fresh to say', attempts: [] };
   const data = await fetchSegmentData(cap, ctx, segmentState);
-  if (data?.error) return { seg: null, reason: `${cap.kind} data fetch failed (${data.error})` };
+  const attempts: SkillResearchAttempt[] = typeof cap.toolFn === 'function'
+    ? [{ kind: cap.kind, outcome: data?.error ? 'infrastructure-failure' : 'completed' }]
+    : [];
+  if (data?.error) return { seg: null, reason: `${cap.kind} data fetch failed (${data.error})`, attempts };
   const recentCuriosity = cap.kind === 'curiosity' ? recentAiredCuriosity() : undefined;
   const out = await deadlinedSegmentObject({
     system: simpleSystem(speaker, cap, freq, sfxCatalog),
@@ -627,8 +649,22 @@ async function runSimpleDirector(ctx, { caps, speaker, freq, sfxCatalog }) {
     kind: 'generateSegment',
   });
   const text = out?.air ? String(out?.text || '').trim() : '';
-  if (!text) return { seg: null, reason: out?.reason || 'nothing to add' };
-  return { seg: { kind: cap.kind, text, sfx: out?.sfx ?? null }, reason: out?.reason };
+  if (!text) return { seg: null, reason: out?.reason || 'nothing to add', attempts };
+  return { seg: { kind: cap.kind, text, sfx: out?.sfx ?? null }, reason: out?.reason, attempts };
+}
+
+function applyResearchAttemptCooldowns(caps, attempts: SkillResearchAttempt[], now: number) {
+  const notes: string[] = [];
+  for (const attempt of attempts) {
+    const cap = caps.find((candidate) => candidate.kind === attempt.kind);
+    if (!cap) continue;
+    const delay = researchAttemptDelayMs(attempt.outcome, cap.cooldownMs);
+    const blockedUntil = now + delay;
+    researchBlockedUntil.set(attempt.kind, Math.max(researchBlockedUntil.get(attempt.kind) || 0, blockedUntil));
+    const minutes = Math.ceil(delay / 60_000);
+    notes.push(`${attempt.kind} ${attempt.outcome === 'completed' ? 'completed' : 'infrastructure retry'} (${minutes}m)`);
+  }
+  return notes;
 }
 
 // Called by the scheduler's 5-minute cron. Picks at most one segment to air,
@@ -678,19 +714,20 @@ export async function agenticTick(ctx) {
 
     let seg: { kind: string; text: string; sfx: string | null } | null = null;
     let silentReason: string | undefined;
+    let attempts: SkillResearchAttempt[] = [];
     if (settings.get().llm?.producer?.enabled) {
       // Advanced split mode: Producer chooses and researches; Persona receives
       // only the selected skill's grounded evidence and writes the spoken line.
-      ({ seg, reason: silentReason } = await runSplitDirector(ctx, { caps, speaker, freq, sfxCatalog }));
+      ({ seg, reason: silentReason, attempts } = await runSplitDirector(ctx, { caps, speaker, freq, sfxCatalog }));
     } else if (!settings.get().llm?.pickerAgent) {
       // Pool mode: the operator's model isn't trusted with tool loops, so the
       // director runs the code-driven single-call path instead of the agent.
-      ({ seg, reason: silentReason } = await runSimpleDirector(ctx, { caps, speaker, freq, sfxCatalog }));
+      ({ seg, reason: silentReason, attempts } = await runSimpleDirector(ctx, { caps, speaker, freq, sfxCatalog }));
     } else {
       // When curiosity is on offer, brief the agent with what it already aired so
       // a pool-exhausted fallback doesn't repeat itself (issue #577).
       const recentCuriosity = caps.some(c => c.kind === 'curiosity') ? recentAiredCuriosity() : undefined;
-      const { object } = await directorAgent.run({
+      const { object, toolCalls } = await directorAgent.run({
         messages: [{ role: 'user', content: buildSituation(ctx, { contextFields: unionContextFields(caps), recentCuriosity }) }],
         persona: speaker, caps, freq, sfxCatalog,
         ctx, segmentState,
@@ -699,10 +736,17 @@ export async function agenticTick(ctx) {
       // despite air=true still degrades to silence rather than erroring.
       seg = object?.air ? object?.segment : null;
       silentReason = object?.reason;
+      attempts = researchAttemptsFromToolCalls(caps, toolCalls);
     }
 
+    // A completed research call consumes the normal skill cooldown even when
+    // its evidence is empty or rejected. Tool/provider errors get a shorter
+    // retry window. Rehearsals never reach this mutation point.
+    const researchCooldowns = applyResearchAttemptCooldowns(caps, attempts, Date.now());
+
     if (!seg || !seg.text || !seg.text.trim()) {
-      queue.log('scheduler', `Segment agent stayed silent — ${silentReason || 'nothing to add'}`);
+      const cooldownNote = researchCooldowns.length ? ` · research cooldown: ${researchCooldowns.join(', ')}` : '';
+      queue.log('scheduler', `Segment agent stayed silent — ${silentReason || 'nothing to add'}${cooldownNote}`);
       return;
     }
 

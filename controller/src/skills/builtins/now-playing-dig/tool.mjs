@@ -1,10 +1,12 @@
 // Now-playing dig — a concrete, verifiable detail about the EXACT track on air
-// (producer, sample, B-side, chart, backstory), grounded in a real web search.
-// `ready` gates on a search provider; returns available:false when nothing
-// solid comes back so the DJ never invents trivia.
-export const description = 'Search the web for a specific, verifiable detail about the exact track currently on air (producer, sample, B-side, chart, backstory).';
+// (producer, sample, B-side, chart, backstory), grounded in specialist music
+// sources. The broad description is intentional: adapters will be added by
+// category, while unsupported categories remain silent rather than guessed.
+export const description = 'Research a specific, verifiable detail about the exact track currently on air (producer, sample, B-side, chart, backstory).';
 
-export const ready = (services) => services.searchReady();
+// MusicBrainz needs no operator API key. A provider/network failure is returned
+// by the tool fence and receives the scheduler's shorter infrastructure retry.
+export const ready = () => true;
 
 export default async function digCurrentTrack(ctx, state, services) {
   const cur = services.nowPlaying();
@@ -13,12 +15,7 @@ export default async function digCurrentTrack(ctx, state, services) {
   if (!artist || !title || /^unknown/i.test(artist) || /^unknown/i.test(title)) return { available: false };
   const trackKey = `${artist} — ${title}`;
   const alreadyDug = trackKey === state.lastDugTrack;
-  const data = await services.searchWeb(`${artist} "${title}" song producer sample b-side chart story`);
+  const evidence = await services.researchTrack(artist, title);
   state.lastDugTrack = trackKey;
-  const answer = (data.answer || '').trim();
-  const sources = (data.results || [])
-    .slice(0, 3)
-    .map(r => `${r.title}: ${(r.content || '').replace(/\s+/g, ' ').trim().slice(0, 240)}`);
-  if (!answer && sources.length === 0) return { available: false };
-  return { artist, title, alreadyDug, answer, sources };
+  return { ...evidence, alreadyDug };
 }
