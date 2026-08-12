@@ -249,3 +249,14 @@ test('artist web search cannot borrow the on-air track as implied evidence', () 
     sources: ['Kate Bush biography: she studied piano as a child.'],
   }).sources, ['Kate Bush biography: she studied piano as a child.']);
 });
+
+test('artist snippets alone cannot authorise an invented anecdote', () => {
+  assert.deepEqual(groundedSearchEvidence('web-search', {
+    artist: 'Limp Bizkit',
+    answer: '',
+    sources: [
+      'Limp Bizkit announced for Good Things festival.',
+      'Limp Bizkit | NME: latest news and features.',
+    ],
+  }), { available: false });
+});

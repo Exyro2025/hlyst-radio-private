@@ -184,13 +184,16 @@ guessing such a split during this migration would change operator-authored
 behaviour silently.
 
 The two search-backed skills have additional deterministic grounding rules.
-`now-playing-dig` requires both a non-empty provider answer that names the exact
-artist and track and at least one source that does the same. Search snippets
-alone are not evidence of a relationship between adjacent facts and cannot
-authorise speech. `web-search` retains only artist-matching evidence and does
-not receive the on-air track in its Persona packet: a general biographical fact
-must not be joined to the current song merely because it aired during the
-search. If filtering leaves no evidence, the segment resolves to silence.
+Both require a non-empty provider answer plus at least one subject-matching
+source; search snippets alone are not evidence of a relationship between
+adjacent facts and cannot authorise speech. For `now-playing-dig`, both answer
+and source must name the exact artist and track. `web-search` requires the
+artist in both and does not receive the on-air track in its Persona packet: a
+general biographical fact must not be joined to the current song merely because
+it aired during the search. If filtering leaves no evidence, the segment
+resolves to silence. This is a conservative floor, not semantic claim
+verification: a future evidence-appraisal stage may reject an explicit answer
+whose cited source does not actually support it.
 
 The Persona owns wording only. It cannot change kind, search again or reverse
 the air decision. A failed Producer call, missing evidence, or failed/empty
