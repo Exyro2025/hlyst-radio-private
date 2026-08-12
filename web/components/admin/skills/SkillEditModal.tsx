@@ -100,6 +100,11 @@ interface SkillFileResponse {
   label?: string;
   cooldown?: string;
   cron?: string | null;
+  // Set when the file on disk carries an expression node-cron can't register.
+  // Only a hand-edited SKILL.md can produce one — every save route refuses it —
+  // and the scheduler's skip is logged where the operator won't see it, so the
+  // editor is the surface that has to say so.
+  cronInvalid?: boolean;
   cronOnly?: boolean;
   context?: string;
   knownContextFields?: string[];
@@ -188,6 +193,7 @@ export default function SkillEditModal({ mode, skill, personas, tagSuggestions, 
   const [custom, setCustom] = useState(mode === 'create' ? true : !!skill?.custom);
   const [configFields, setConfigFields] = useState<SkillConfigField[]>([]);
   const [hasTool, setHasTool] = useState(false);
+  const [cronInvalid, setCronInvalid] = useState(false);
   const [knownContext, setKnownContext] = useState<string[]>(CONTEXT_FIELDS_FALLBACK);
 
   // The skill's own declared knobs (news' feed/feedMaxItems, …) — runtime data
@@ -279,6 +285,7 @@ export default function SkillEditModal({ mode, skill, personas, tagSuggestions, 
         setCustom(!!j.custom);
         setConfigFields(Array.isArray(j.configFields) ? j.configFields : []);
         setHasTool(!!j.hasTool);
+        setCronInvalid(!!j.cronInvalid);
         setDefaults(j.defaults || null);
         setKnownContext(
           Array.isArray(j.knownContextFields) && j.knownContextFields.length
@@ -748,8 +755,13 @@ export default function SkillEditModal({ mode, skill, personas, tagSuggestions, 
                   className="w-50"
                 />
               </div>
+              {cronInvalid && (
+                <div style={{ fontSize: 12, color: 'var(--danger, #e5484d)', marginTop: 12, lineHeight: 1.6, maxWidth: '72ch' }}>
+                  This skill&apos;s SKILL.md carries a cron expression the scheduler can&apos;t run, so no timer is registered for it. Fix or clear the field to save.
+                </div>
+              )}
               <div style={{ fontSize: 12, color: 'var(--muted)', marginTop: 12, lineHeight: 1.6, maxWidth: '72ch' }}>
-                Standard 5-field cron expression (e.g. <code>0 * * * *</code> = top of every hour, <code>*/30 * * * *</code> = every 30 min). Leave blank to rely on the cooldown / normal frequency gating. When a cron timer fires it runs the skill immediately, bypassing the frequency floor and cooldown — same as pressing Run Now. Uses the station timezone set in Settings.
+                Standard 5-field cron expression (e.g. <code>0 * * * *</code> = top of every hour, <code>*/30 * * * *</code> = every 30 min); a leading seconds field is accepted too. Leave blank to rely on the cooldown / normal frequency gating. When a cron timer fires it runs the skill immediately, bypassing the frequency floor and cooldown — but unlike Run Now it still stands down when the station voice is off, a programme is on air, nobody is listening, the daily token budget is spent, or the skill is disabled / not assigned to the on-air DJ. Uses the station timezone set in Settings.
               </div>
               <Controller
                 control={control}

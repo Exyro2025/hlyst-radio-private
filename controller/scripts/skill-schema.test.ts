@@ -243,6 +243,25 @@ test('cronOnly defaults to false and rejects a non-boolean', () => {
   assert.throws(() => builtinSkillFileSchema.parse({ brief: 'b', cronOnly: 'yes' }));
 });
 
+test('cron accepts 5 fields and node-cron\'s optional 6th (seconds)', () => {
+  // The 6-field arm is load-bearing, not generosity: node-cron 3.x registers
+  // and fires `0 0 8 * * *`, so a 5-only shape check would refuse the admin
+  // form's save of ANY field on a skill whose SKILL.md carries one — the
+  // editor round-trips the cron value it loaded. A working config the UI
+  // cannot edit is worse than one it never accepted.
+  assert.equal(builtinSkillFileSchema.parse({ brief: 'b', cron: '0 8 * * *' }).cron, '0 8 * * *');
+  assert.equal(builtinSkillFileSchema.parse({ brief: 'b', cron: '0 0 8 * * *' }).cron, '0 0 8 * * *');
+  assert.throws(() => builtinSkillFileSchema.parse({ brief: 'b', cron: '0 8 * *' }), /cron/);
+  assert.throws(() => builtinSkillFileSchema.parse({ brief: 'b', cron: '0 0 0 8 * * *' }), /cron/);
+});
+
+test('cron shape-checks only — the range rules belong to node-cron', () => {
+  // schemas/ may import nothing but zod, so "99 * * * *" passes here and is
+  // refused by routes/dj.ts's rejectInvalidCron() at save time. Pinning it
+  // stops someone "fixing" the regex into a half-copy of node-cron's parser.
+  assert.equal(builtinSkillFileSchema.parse({ brief: 'b', cron: '99 * * * *' }).cron, '99 * * * *');
+});
+
 test('an empty label is undefined, not "" — writeSkillFile omits the line', () => {
   const parsed = builtinSkillFileSchema.parse({ brief: 'b', label: '   ' });
   assert.equal(skillFieldsFrom('weather', parsed).label, undefined);

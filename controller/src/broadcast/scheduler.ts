@@ -31,7 +31,8 @@ import { autoVoiceAllowed } from './voice-policy.js';
 import { optionalSegmentsAllowed } from './dj-budget.js';
 import { agenticTick, skillCatalog, runCapability } from '../skills/_agent.js';
 import { loadedCapabilities } from '../skills/loader.js';
-import { getStationTimezone } from '../time.js';
+import { skillEligible } from '../skills/eligibility.js';
+import { getStationTimezone, onStationTimezoneChange } from '../time.js';
 import { withTrace, pruneOldEvents } from '../observability/events.js';
 import * as archives from './archives.js';
 import * as stemCacheStore from '../music/stem-cache.js';
@@ -884,12 +885,18 @@ async function nightlyDoctor() {
 // SKILL CRONS
 // Per-skill cron tasks, registered from the `cron:` frontmatter field in
 // SKILL.md. When a timer fires it calls runCapability() directly — same path
-// as the operator-override /dj/skill endpoint, bypassing the frequency floor,
-// cooldowns, and the enabled toggle. Unlike that route, a cron firing is NOT
-// an explicit operator action, so it still owes the same station-wide talk
-// gates every other autonomous tick applies (skillsTick, above): voice off,
-// mid-programme-episode, no listeners, and over the daily token budget all
-// stand it down. Rebuilt on every syncSkillCrons() call so a rescan picks up
+// as the operator-override /dj/skill endpoint, bypassing the frequency floor
+// and the cooldown. Unlike that route, a cron firing is NOT an explicit
+// operator action, so it owes two sets of rules that route is exempt from:
+//   - the station-wide talk gates every other autonomous tick applies
+//     (skillCronAllowed, mirroring skillsTick): voice off, mid-programme,
+//     no listeners, over the daily token budget;
+//   - the per-skill eligibility rules (skills/eligibility.ts): the operator's
+//     enabled toggle and the on-air persona's skill allowlist. Both are
+//     re-read at FIRE time, not at registration — a skill disabled at 07:00
+//     must not still speak at 08:00, and the persona on air is a fact about
+//     the moment the timer fires.
+// Rebuilt on every syncSkillCrons() call so a rescan picks up
 // added/removed/changed expressions without a restart.
 // ---------------------------------------------------------------------------
 
@@ -926,9 +933,25 @@ export function syncSkillCrons() {
         optionalSegmentsAllowed: optionalSegmentsAllowed(), // over the daily token budget
       });
       if (!allowed) return;
+      // Same enabled + persona-allowlist rules the autonomous director applies.
+      // Logged rather than silent: a cron that stands itself down leaves no
+      // other trace, and "my 8am skill never spoke" is otherwise undiagnosable.
+      const now = new Date();
+      const eligible = skillEligible({
+        seeded: cap.seeded,
+        skill: cap.skill,
+        enabled: settings.get().skills?.enabled || {},
+        personaSkills: settings.getEffectivePersona(now)?.skills,
+      });
+      if (!eligible.allowed) {
+        queue.log('scheduler', `[skills] cron "${cap.kind}" stood down — ${eligible.reason}`);
+        return;
+      }
       try {
-        const ctx = await getFullContext();
-        await runCapability(cap.kind, ctx);
+        await withTrace({ kind: 'segment' }, async () => {
+          const ctx = await getFullContext();
+          await runCapability(cap.kind, ctx);
+        });
       } catch (err: any) {
         queue.log('error', `[skills] cron "${expr}" skill "${cap.kind}" failed: ${err.message}`);
       }
@@ -1001,6 +1024,13 @@ export function startScheduler() {
   cron.schedule('17 4 * * *', nightlyDoctor);
 
   syncSkillCrons();
+  // Each task bakes the zone in at registration, so a live timezone change has
+  // to re-register them. Subscribing at the source covers every writer of the
+  // setting (admin panel, onboarding, backup restore) rather than one route.
+  onStationTimezoneChange(() => {
+    queue.log('scheduler', '[skills] station timezone changed — re-registering skill crons');
+    syncSkillCrons();
+  });
 
   queue.log('scheduler', `Scheduler started · skills: ${skillCatalog().map((s: any) => s.name).join(', ')}`);
 }

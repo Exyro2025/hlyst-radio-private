@@ -132,23 +132,38 @@ tick-box per field. An empty selection resets the skill to the default profile.
 ### `cron:` — fire on a fixed schedule
 
 `cron:` is an OPTIONAL standard 5-field cron expression (`"0 * * * *"` = top of
-every hour, `"*/30 * * * *"` = every 30 minutes). When set, the scheduler
-registers a dedicated timer for that skill and fires it directly the moment the
-expression matches — bypassing the cooldown and the DJ's frequency floor
-entirely, the same posture as pressing **Run now** in the admin UI. Leave it
-blank (the default) and the skill only airs through the normal cooldown /
-frequency-gated segment tick.
+every hour, `"*/30 * * * *"` = every 30 minutes); a leading seconds field is
+accepted too (`"0 0 8 * * *"`). When set, the scheduler registers a dedicated
+timer for that skill and fires it the moment the expression matches — bypassing
+the cooldown and the DJ's frequency floor. Leave it blank (the default) and the
+skill only airs through the normal cooldown / frequency-gated segment tick.
 
 The expression runs in the station's own timezone (Settings → Station), so a
 `cron: 0 8 * * *` fires at 8am local time wherever the station is configured to
-be, not the container's UTC clock. A skill can carry both a `cooldown:` and a
-`cron:` — the cooldown still applies to any *autonomous* firing from the
-segment tick, while the cron timer ignores it. An invalid expression is logged
-and skipped rather than refused at save
-time, since the deeper per-field range validation only runs when the scheduler
-registers the task.
+be, not the container's UTC clock. Changing the station timezone re-registers
+every skill cron immediately — no restart, no rescan. A skill can carry both a
+`cooldown:` and a `cron:` — the cooldown still applies to any *autonomous*
+firing from the segment tick, while the cron timer ignores it.
+
+An expression saved through the admin UI (or installed from the community
+catalog) is **refused** if it isn't one the scheduler can run, with the error on
+the field. One typed into `SKILL.md` by hand is logged and skipped instead, so a
+typo costs the skill its timer rather than stopping it loading — the admin
+editor flags it the next time you open that skill.
 
 Set it from the admin UI too: **/admin/skills → Edit → Cron timer**.
+
+**A cron timer is not the same override as "Run now".** Pressing **Run now** is
+an explicit operator action and fires whatever it names. A timer firing on its
+own is autonomous, so it stands down exactly where the normal segment tick
+does: the station voice switch is off (`tts.enabled: false`, "music only"), a
+programme episode is on air, nobody is listening, the daily LLM token budget is
+spent — and, because they're rules about the skill itself, if the skill is
+**disabled** or isn't assigned to the **on-air DJ**. That last pair matters for
+an imported skill: a zip import or a community install arrives disabled pending
+your review, and a `cron:` line in it does not air anything until you enable it.
+Each stand-down is written to the booth log with its reason, since a silent
+timer is otherwise undiagnosable.
 
 **A `cron:` timer is a second trigger, not a replacement one.** By default the
 skill stays eligible for the normal autonomous segment tick too, off-cooldown,
