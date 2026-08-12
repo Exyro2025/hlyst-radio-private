@@ -255,27 +255,6 @@ role. Raising llama.cpp parallelism is not the default remedy: it increases
 shared CPU and memory pressure and still gives bulk work no priority boundary
 over an urgent live pick.
 
-## AI Playlist Builder
-
-The AI-assisted Playlist Builder is routed to the optional Producer as
-`generateProducerPlaylist`. This is a backstage curation task rather than a
-Persona task: it receives a compact candidate projection, the operator's
-playlist request and deterministic controls such as target size, energy arc,
-artist spacing, moods and genres. It returns ordered track ids plus an optional
-name and one-sentence description for the saved playlist.
-
-There is deliberately no Persona stage and no cross-role packet. The generated
-name and description are operator-facing playlist metadata; they are not added
-to later DJ prompts or spoken on air. Unknown ids are discarded, too-short
-selections are completed deterministically, and any failed Producer call falls
-back to the existing deterministic arranger. Consequently an unavailable or
-incapable Producer cannot interrupt the live broadcast.
-
-This route should not be used as precedent for programme planning. Programme
-plan angles, feature topics and intro/outro notes are creative material that is
-later inserted directly into Persona prompts, so moving that call wholesale to
-the Producer would breach the clean speech boundary.
-
 ## Boundary rules
 
 Every field crossing from Producer to Persona must answer this question:

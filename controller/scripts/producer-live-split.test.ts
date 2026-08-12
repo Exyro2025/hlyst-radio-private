@@ -25,19 +25,11 @@ const { buildProducerSituation, groundedSearchEvidence, isolatedSegmentState, pe
 const { rehearsalStationServices } = await import('../src/llm/internal/tools/station-services.js');
 const { showMusicLean } = await import('../src/llm/internal/prompts/picker.js');
 const { queue } = await import('../src/broadcast/queue.js');
-const { PLAYLIST_LLM_ROUTE } = await import('../src/music/playlist-llm-route.js');
 
 test('live picker agents declare separate Persona and Producer routes', () => {
   assert.equal(pickerAgent.role, 'persona');
   assert.equal(producerPickerAgent.role, 'producer');
   assert.equal(producerPickerAgent.kind, 'djProducerPick');
-});
-
-test('AI playlist curation declares an observable Producer-only route', () => {
-  assert.deepEqual(PLAYLIST_LLM_ROUTE, {
-    kind: 'generateProducerPlaylist',
-    role: 'producer',
-  });
 });
 
 test('the Producer picker system excludes the on-air Persona preamble', () => {

@@ -18,7 +18,6 @@ import * as library from './library.js';
 import * as embeddings from './embeddings.js';
 import * as analyzer from './analyzer.js';
 import { djObject } from '../llm/sdk.js';
-import { PLAYLIST_LLM_ROUTE } from './playlist-llm-route.js';
 import {
   mergePools,
   capPool,
@@ -453,10 +452,7 @@ export async function curatePlaylist(
       prompt: JSON.stringify({ target: targetCount, candidates: projectForLlm(pool) }),
       schema: CURATE_SCHEMA,
       temperature: 0.6,
-      // Playlist curation is a backstage selection task. Its track ids and
-      // admin-facing metadata never enter an on-air Persona prompt, so it can
-      // use the optional Producer without creating a speech-boundary leak.
-      ...PLAYLIST_LLM_ROUTE,
+      kind: 'playlistCurate',
     });
     // djObject (via withFailover) returns the validated object DIRECTLY — NOT
     // wrapped in `{ value }`. (An earlier `out?.value` read undefined here, so
