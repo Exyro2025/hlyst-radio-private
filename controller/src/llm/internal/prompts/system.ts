@@ -33,7 +33,7 @@ const FISH_S21_TAG_HINT =
   '\n\nYou may sparingly add a short natural-language performance cue in square brackets, such as [laughing nervously], [whispers], or [soft and warm]. Use at most one per segment, only when it genuinely improves the delivery, and never as filler.';
 
 // `persona` overrides the on-air persona — used by the persona-handoff
-// generators (generateSignoff / generateHandoffGreeting) to render the sign-off
+// generators (generatePersonaSignoff / generatePersonaHandoffGreeting) to render the sign-off
 // under the OUTGOING persona and the greeting under the incoming one, since the
 // clock-driven getEffectivePersona() has already moved on by the time they run —
 // and by the guest-speaker rotation (settings.pickOnAirSpeaker) to voice a

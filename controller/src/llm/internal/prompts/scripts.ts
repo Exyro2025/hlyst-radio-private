@@ -141,41 +141,49 @@ export async function generatePersonaStationId(args: any = {}) {
 // line), but the recent-openers blocklist still steers the first words clear of
 // what just aired. A handoff fires at most ~once an hour, so that's plenty.
 
-export async function generateSignoff({ personaOut, personaIn, showIn = null, context = null, recap = null, recentOpeners = null }: any) {
-  const ctxLines = buildContextLines(context, { contextFields: SCRIPT_CONTEXT_FIELDS });
+export function personaSignoffPrompt({ personaOut, personaIn, showIn = null, recap = null, recentOpeners = null }: any) {
   const outName = personaOut?.name || 'your host';
   const inName = personaIn?.name || 'the next host';
   const handTo = showIn ? `${inName}, who's bringing you "${showIn}"` : inName;
-  ctxLines.push(`Task: your time on air is wrapping up. Sign off in character as ${outName} and hand the mic over to ${handTo}. Say ${inName}'s name as you pass it along. ${lengthPhrase('link', personaOut)}. This is a real DJ passing the baton, warm and natural — not a formal announcement, and don't over-explain the schedule.`);
+  const prompt = `Outgoing presenter: ${outName}.\nIncoming presenter: ${inName}.${showIn ? `\nIncoming show: "${showIn}".` : ''}\nTask: your time on air is wrapping up. Sign off in character and hand the mic over to ${handTo}. Say ${inName}'s name as you pass it along. ${lengthPhrase('link', personaOut)}. Make it a natural handover, not a formal schedule announcement.`;
+  return decoratePrompt(prompt, { kind: 'persona_handoff', recap, recentOpeners });
+}
+
+export async function generatePersonaSignoff(args: any) {
   return djText({
-    system: djSystem(personaOut),
-    prompt: decoratePrompt(ctxLines.join('\n'), { kind: 'handoff', recap, recentOpeners }),
+    system: djSystem(args.personaOut),
+    prompt: personaSignoffPrompt(args),
     temperature: 1.0, topP: 0.9, repeatPenalty: 1.25, seed: randomSeed(),
-    kind: 'generateSignoff',
+    kind: 'generatePersonaSignoff',
   });
 }
 
-export async function generateHandoffGreeting({ personaIn, personaOut, signoffText = null, showIn = null, episodeAngle = null, context = null, recap = null, recentOpeners = null }: any) {
-  const ctxLines = buildContextLines(context, { contextFields: SCRIPT_CONTEXT_FIELDS });
+export function personaHandoffGreetingPrompt({ personaIn, personaOut, signoffText = null, showIn = null, showBrief = null, episodeAngle = null, recap = null, recentOpeners = null }: any) {
   const inName = personaIn?.name || 'your host';
   const outName = personaOut?.name || 'the previous host';
+  const lines = [`Incoming presenter: ${inName}.`, `Outgoing presenter: ${outName}.`];
+  if (showIn) lines.push(`Current show: "${showIn}".`);
+  if (showBrief) lines.push(`Show brief: ${String(showBrief).trim()}`);
   // The predecessor's actual sign-off rides in the prompt so the greeting can
   // genuinely respond to it ("Cheers Johnny…") rather than a generic hello.
   if (signoffText) {
     const clipped = String(signoffText).replace(/\s+/g, ' ').trim().slice(0, 240);
-    if (clipped) ctxLines.push(`${outName} just signed off with: "${clipped}"`);
+    if (clipped) lines.push(`${outName} just signed off with: "${clipped}"`);
   }
   // Programme shows: this greeting doubles as the episode's intro, so the
-  // producer's angle rides in (broadcast/programme.ts skips the standalone
-  // intro when a handoff opened the show).
-  const angleClause = showIn && episodeAngle ? ` Today's episode angle: ${episodeAngle} — set it up as you open.` : '';
-  const showClause = showIn ? ` You're kicking off "${showIn}".${angleClause}` : '';
-  ctxLines.push(`Task: you're ${inName}, just taking over the mic from ${outName}. Acknowledge ${outName} warmly and naturally — a quick nod to what they said if it fits — then ease into your shift.${showClause} ${lengthPhrase('link', personaIn)}. Keep it easy and in character; you're stepping up to the decks, not reading a bulletin.`);
+  // programme plan's creative angle remains available (broadcast/programme.ts
+  // skips the standalone intro when a handoff opened the show).
+  if (showIn && episodeAngle) lines.push(`Episode angle: ${String(episodeAngle).trim()}`);
+  lines.push(`Task: acknowledge ${outName} naturally — a quick response to the sign-off if it fits — then open your shift${showIn ? ` and "${showIn}"` : ''}. ${lengthPhrase('link', personaIn)}. Stay in character; do not read a schedule bulletin.`);
+  return decoratePrompt(lines.join('\n'), { kind: 'persona_handoff', recap, recentOpeners });
+}
+
+export async function generatePersonaHandoffGreeting(args: any) {
   return djText({
-    system: djSystem(personaIn),
-    prompt: decoratePrompt(ctxLines.join('\n'), { kind: 'handoff', recap, recentOpeners }),
+    system: djSystem(args.personaIn),
+    prompt: personaHandoffGreetingPrompt(args),
     temperature: 0.95, topP: 0.92, repeatPenalty: 1.2, seed: randomSeed(),
-    kind: 'generateHandoffGreeting',
+    kind: 'generatePersonaHandoffGreeting',
   });
 }
 

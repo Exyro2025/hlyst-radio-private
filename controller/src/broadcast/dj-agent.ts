@@ -1139,7 +1139,7 @@ async function runRequestViaAgent(queue: any, { requester, text }: { requester: 
 // Never throws (callers still need to run the pick after it) and is idempotent:
 // it marks the handoff aired up front, so a concurrent second call — or a
 // mid-way failure — can't double-air or retry into the middle of the new show.
-export async function runPersonaHandoff(queue: any, ctx: any): Promise<void> {
+export async function runPersonaHandoff(queue: any, _ctx: any): Promise<void> {
   const pending = session.pendingHandoff();
   if (!pending) return;
 
@@ -1183,7 +1183,6 @@ export async function runPersonaHandoff(queue: any, ctx: any): Promise<void> {
   session.markHandoffAired();
 
   await withTrace({ kind: 'handoff', from: personaOut.name, to: personaIn.name }, async () => {
-    const recentOpeners = queue.getRecentOpeners();
     let aired = false;
 
     // 1. Sign-off, in the OUTGOING persona's voice. Tag the session turn with
@@ -1193,9 +1192,11 @@ export async function runPersonaHandoff(queue: any, ctx: any): Promise<void> {
     //    sign-off as its own words.
     let signoffText: string | null = null;
     try {
-      signoffText = await dj.generateSignoff({
+      const personaOutId = personaOut.id || null;
+      signoffText = await dj.generatePersonaSignoff({
         personaOut, personaIn, showIn,
-        context: ctx, recap: queue.getDjRecap(), recentOpeners,
+        recap: queue.getDjRecap({ personaId: personaOutId }),
+        recentOpeners: queue.getRecentOpeners(6, personaOutId),
       });
       await queue.announce(signoffText, 'handoff', {
         persona: personaOut, meta: { personaId: personaOut.id, personaName: personaOut.name },
@@ -1212,10 +1213,13 @@ export async function runPersonaHandoff(queue: any, ctx: any): Promise<void> {
     //    the producer's angle (planned before this runs — see the call sites)
     //    rides along; the standalone intro is then skipped (programme.ts).
     try {
-      const greeting = await dj.generateHandoffGreeting({
+      const personaInId = personaIn.id || null;
+      const greeting = await dj.generatePersonaHandoffGreeting({
         personaIn, personaOut, signoffText, showIn,
+        showBrief: cur?.show?.topic || null,
         episodeAngle: session.getProgramme()?.plan?.angle || null,
-        context: ctx, recap: queue.getDjRecap(), recentOpeners,
+        recap: queue.getDjRecap({ personaId: personaInId }),
+        recentOpeners: queue.getRecentOpeners(6, personaInId),
       });
       await queue.announce(greeting, 'handoff', {
         persona: personaIn, meta: { personaId: personaIn.id, personaName: personaIn.name },

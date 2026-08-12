@@ -285,6 +285,28 @@ an operational fact the immediate task requires, and queued voice latency also
 makes clock-derived wording fragile. Character and phrasing remain the
 responsibility of the selected Persona Soul.
 
+## Persona handover
+
+The hourly presenter change is two consecutive Persona calls:
+`generatePersonaSignoff` for the outgoing presenter and
+`generatePersonaHandoffGreeting` for the incoming presenter. There is no
+Producer decision to make. Each call uses the appropriate Persona Soul and
+anti-repetition memory scoped to that Persona.
+
+The outgoing packet contains both presenter names and the incoming show name.
+The incoming packet additionally receives the outgoing signoff that just aired,
+because responding to the actual handover is the conversational bridge between
+the two voices. It also receives the incoming show's user-authored brief. When
+a programme handover doubles as its episode introduction, the existing creative
+episode angle remains available for that immediate task.
+
+Neither packet receives the generic context bundle: date, clock, daypart,
+festival, listener count and show moods cannot improve the mechanics of passing
+the microphone and previously gave hidden context another route into both
+voices. The outgoing presenter's broader speech history is never shown to the
+incoming presenter; only the single signoff being answered crosses Persona
+identity.
+
 ## Boundary rules
 
 Every field crossing from Producer to Persona must answer this question:

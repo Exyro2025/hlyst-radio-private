@@ -116,7 +116,7 @@ export function stripThinking(s: string): string {
   //    (b) a runaway loop where a reasoning model (thinking not actually
   //        suppressed by the endpoint, e.g. an Ollama :cloud GLM) emits </think>
   //        as a separator between repeated near-identical answers until it hits
-  //        the output-token cap (live incident 2026-07-07, generateSignoff). The
+//        the output-token cap (live incident 2026-07-07, now generatePersonaSignoff). The
   //        tail is a truncated duplicate, so keep the FIRST complete segment.
   if (CLOSE_THINK_RE.test(t)) {
     const segs = t.split(/<\/think>/i).map((x) => x.trim()).filter(Boolean);

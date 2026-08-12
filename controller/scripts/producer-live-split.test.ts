@@ -18,6 +18,10 @@ const {
   fuzzyAirTime,
   generatePersonaStationId,
   personaStationIdPrompt,
+  generatePersonaSignoff,
+  personaSignoffPrompt,
+  generatePersonaHandoffGreeting,
+  personaHandoffGreetingPrompt,
   generatePersonaLink,
   personaLinkPrompt,
   generatePersonaSegment,
@@ -67,6 +71,57 @@ test('Persona station ids receive only identity, show name and anti-repeat memor
   assert.ok(!prompt.includes('energetic'));
   assert.ok(!prompt.includes('Tone for this segment'));
   assert.equal(typeof generatePersonaStationId, 'function');
+});
+
+test('Persona handover prompts keep the conversational bridge but drop generic context', () => {
+  const context = {
+    date: { dayLabel: 'Wednesday' },
+    clock: { display: '10:59' },
+    time: { period: 'morning', vibe: 'slow start' },
+    festival: { name: 'Example Festival' },
+    listeners: { count: 9 },
+    activeShow: { name: 'Wrong implicit show', moods: ['calm'] },
+  };
+  const signoff = personaSignoffPrompt({
+    personaOut: { name: 'Chris', scriptLength: 'concise' },
+    personaIn: { name: 'Carrie' },
+    showIn: 'Lunchtime Rocks',
+    context,
+    recap: '- 5m ago [link]: "Chris already said this."',
+    recentOpeners: ['Chris already said'],
+  });
+  assert.match(signoff, /Outgoing presenter: Chris/);
+  assert.match(signoff, /Incoming presenter: Carrie/);
+  assert.match(signoff, /Lunchtime Rocks/);
+  assert.match(signoff, /Chris already said this/);
+
+  const greeting = personaHandoffGreetingPrompt({
+    personaIn: { name: 'Carrie', scriptLength: 'concise' },
+    personaOut: { name: 'Chris' },
+    signoffText: 'Carrie is here now, so I am handing over.',
+    showIn: 'Lunchtime Rocks',
+    showBrief: 'Big guitars and loud opinions.',
+    episodeAngle: 'How distortion changed rock.',
+    context,
+    recap: '- 2h ago [handoff]: "Carrie already used this opener."',
+    recentOpeners: ['Carrie already used'],
+  });
+  assert.match(greeting, /Carrie is here now/);
+  assert.match(greeting, /Big guitars and loud opinions/);
+  assert.match(greeting, /How distortion changed rock/);
+  assert.match(greeting, /Carrie already used this opener/);
+  for (const prompt of [signoff, greeting]) {
+    assert.ok(!prompt.includes('Wednesday'));
+    assert.ok(!prompt.includes('10:59'));
+    assert.ok(!prompt.includes('slow start'));
+    assert.ok(!prompt.includes('Example Festival'));
+    assert.ok(!prompt.includes('Listeners'));
+    assert.ok(!prompt.includes('Wrong implicit show'));
+    assert.ok(!prompt.includes('calm'));
+    assert.ok(!prompt.includes('Tone for this segment'));
+  }
+  assert.equal(typeof generatePersonaSignoff, 'function');
+  assert.equal(typeof generatePersonaHandoffGreeting, 'function');
 });
 
 test('the Producer picker system excludes the on-air Persona preamble', () => {
