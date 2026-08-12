@@ -18,7 +18,10 @@ import {
   composeMoodStateHash,
   parseMoodStateHash,
   moodPassAction,
+  moodStateHashFor,
+  prunedBaselines,
   CALIBRATION_VERSION,
+  UNCALIBRATED_VERSION,
   MIN_BASELINE_TRACKS,
   ENERGY_HIGH_Z,
 } from '../src/music/audio-calibration.js';
@@ -72,6 +75,48 @@ test('baselines are refused below the calibration floor', () => {
   assert.equal(baselinesUsable(computeBaselines(syntheticLibrary(MIN_BASELINE_TRACKS))), true);
   assert.equal(baselinesUsable(null), false);
   assert.equal(baselinesUsable({}), false, 'empty baseline set is unusable');
+});
+
+test('a mood below the floor is pruned, not allowed to ride an established one', () => {
+  // The failure this guards: gating on the MAXIMUM n let a mood scored on a
+  // handful of tracks into the baselines beside moods scored on thousands. Its
+  // sd is near-degenerate, so its z explodes and it wins every track — the very
+  // failure calibration exists to fix, one mood at a time.
+  const rows = syntheticLibrary(MIN_BASELINE_TRACKS);
+  rows[0].newcomer = 0.9; // a vocabulary entry added since the last re-score
+  const pruned = prunedBaselines(computeBaselines(rows))!;
+  assert.ok(pruned, 'the library is still calibrated on its established moods');
+  assert.ok(pruned.energetic, 'a mood that clears the floor survives');
+  assert.equal(pruned.newcomer, undefined, 'the thin mood is dropped from the baselines');
+  // Dropped from the baselines means centeredScores drops it too, rather than
+  // passing a raw cosine through onto a z axis.
+  assert.equal(centeredScores({ energetic: 0.35, newcomer: 0.9 }, pruned).newcomer, undefined);
+});
+
+test('pruning everything is the same as having no baselines', () => {
+  assert.equal(prunedBaselines(computeBaselines(syntheticLibrary(10))), null);
+  assert.equal(prunedBaselines(null), null);
+  assert.equal(prunedBaselines({}), null);
+});
+
+// ── the uncalibrated stamp ──────────────────────────────────────────────────
+
+test('a pass that could not calibrate does not stamp itself as current', () => {
+  // The bug: a library under the floor was labelled on raw cosines but stamped
+  // with the real CALIBRATION_VERSION, so once it grew past the floor
+  // moodPassAction said 'none' and those tracks stayed on raw selection
+  // forever. Stamping version 0 leaves the relabel owed.
+  const vocab = 'abc123';
+  const uncalibrated = moodStateHashFor(vocab, false);
+  assert.equal(parseMoodStateHash(uncalibrated)!.version, UNCALIBRATED_VERSION);
+  assert.equal(
+    moodPassAction(uncalibrated, vocab),
+    'relabel',
+    'a grown library re-derives labels rather than reporting nothing to do',
+  );
+  // And a real calibrated pass still settles.
+  assert.equal(moodStateHashFor(vocab, true), composeMoodStateHash(vocab, CALIBRATION_VERSION));
+  assert.equal(moodPassAction(moodStateHashFor(vocab, true), vocab), 'none');
 });
 
 // ── centeredScores ──────────────────────────────────────────────────────────

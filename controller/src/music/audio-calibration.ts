@@ -84,14 +84,32 @@ export function computeBaselines(rows: Iterable<Record<string, number>>): MoodBa
   return out;
 }
 
+// Drop moods whose OWN sample count falls short of the floor, returning null
+// when nothing survives (the caller then falls back to raw selection).
+//
+// Per-mood n can lag the library's: a mood added to the vocabulary since the
+// last full re-score is only scored on tracks analysed after it, so an
+// established mood can sit at n=5000 beside a new one at n=12. A mood with a
+// handful of samples has a near-degenerate sd that MIN_SD barely restrains, so
+// its z explodes and it wins every track — the exact failure calibration exists
+// to fix, one mood at a time. Gating on the MAXIMUM n let that straight
+// through. Pruning per mood is the targeted answer: the library stays
+// calibrated on its established moods, and the thin one is simply absent from
+// the baselines, which centeredScores already drops rather than passing raw.
+export function prunedBaselines(baselines: MoodBaselines | null): MoodBaselines | null {
+  if (!baselines) return null;
+  const out: MoodBaselines = {};
+  for (const [mood, b] of Object.entries(baselines)) {
+    if (b.n >= MIN_BASELINE_TRACKS) out[mood] = b;
+  }
+  return Object.keys(out).length > 0 ? out : null;
+}
+
 // Is this baseline set usable? A set built from too few tracks, or one that
 // somehow carries no moods, is refused so callers fall back to raw selection
 // rather than centering on noise.
 export function baselinesUsable(baselines: MoodBaselines | null): boolean {
-  if (!baselines) return false;
-  const entries = Object.values(baselines);
-  if (entries.length === 0) return false;
-  return Math.max(...entries.map((b) => b.n)) >= MIN_BASELINE_TRACKS;
+  return prunedBaselines(baselines) !== null;
 }
 
 // A track's scores expressed as per-mood z-scores. Moods with no baseline (a
@@ -249,6 +267,27 @@ export function audioEnergy(
 // a new column so this needs no schema migration.
 export function composeMoodStateHash(vocabHash: string, version = CALIBRATION_VERSION): string {
   return `${vocabHash}:${version}`;
+}
+
+// The version a pass stamps when it could NOT calibrate — the library was under
+// MIN_BASELINE_TRACKS and its labels came from the raw-cosine fallback.
+//
+// Deliberately 0, the same value a legacy bare hash parses as, because it means
+// the same thing: these labels were picked on raw cosines and are due a
+// re-derivation. Stamping the real CALIBRATION_VERSION here would tell the next
+// pass the labels are current, so a station that started under the floor and
+// then grew past it would keep its original tracks on raw selection forever —
+// only tracks scored after the crossing would ever be calibrated.
+export const UNCALIBRATED_VERSION = 0;
+
+// The state hash to stamp for a pass, given whether it actually calibrated.
+// The ONE place that decision is encoded — never call composeMoodStateHash
+// directly from a pass, or the uncalibrated case silently stamps as done.
+export function moodStateHashFor(vocabHash: string, calibrated: boolean): string {
+  return composeMoodStateHash(
+    vocabHash,
+    calibrated ? CALIBRATION_VERSION : UNCALIBRATED_VERSION,
+  );
 }
 
 export interface MoodState {

@@ -22,7 +22,7 @@
 // is not.
 
 import * as db from './library-db.js';
-import { audioEnergy, computeBaselines, baselinesUsable } from './audio-calibration.js';
+import { audioEnergy, computeBaselines, prunedBaselines } from './audio-calibration.js';
 import { makeEventLogger } from './tagger-progress.js';
 
 const logEvent = makeEventLogger('audio-energy');
@@ -54,12 +54,19 @@ export function runPropagatedEnergyPass(): PropagatedEnergyStats {
   // the question is "is this track high-arousal for this library", and a
   // distribution built only from the tracks the tagger found hardest to read
   // would be a biased yardstick.
-  const baselines = computeBaselines(
-    (function* () {
-      for (const row of db.iterateAudioMoodScores()) yield row.scores;
-    })(),
+  //
+  // Pruned per mood before use: a mood scored on too few tracks carries a
+  // near-degenerate sd, and one of those on either arousal list would swing the
+  // whole axis on float noise. Dropping it costs a term; keeping it costs
+  // correctness.
+  const baselines = prunedBaselines(
+    computeBaselines(
+      (function* () {
+        for (const row of db.iterateAudioMoodScores()) yield row.scores;
+      })(),
+    ),
   );
-  if (!baselinesUsable(baselines)) {
+  if (!baselines) {
     return { ...empty, scope: rows.length, skipped: 'library too small to calibrate against' };
   }
 

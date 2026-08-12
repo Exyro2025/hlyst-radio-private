@@ -14,21 +14,6 @@ import { analysisFailureExclusion } from './tracks.js';
 // vector. Sound-derived, so they complement the LLM's metadata-guessed `moods`.
 // ---------------------------------------------------------------------------
 
-// Transactional bulk write for the scoring pass — one commit per batch instead
-// of one per track (the pass touches every vector-carrying row).
-export function setTrackAudioMoodsBulk(
-  rows: Array<{ id: string; moods: string[]; scores: Record<string, number> }>,
-): void {
-  if (rows.length === 0) return;
-  const d = requireDb();
-  const stmt = d.prepare(
-    `UPDATE tracks SET audio_moods = ?, audio_mood_scores_json = ? WHERE id = ?`,
-  );
-  d.transaction((rs: typeof rows) => {
-    for (const r of rs) stmt.run(JSON.stringify(r.moods), JSON.stringify(r.scores), r.id);
-  })(rows);
-}
-
 // Write raw cosines WITHOUT deriving labels — phase one of a calibrated pass.
 // Labels can only be picked once every track's scores are on disk, because the
 // per-mood baselines they are centred against are a property of the whole

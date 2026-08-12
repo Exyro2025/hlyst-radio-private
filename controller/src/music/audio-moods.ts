@@ -20,11 +20,11 @@ import * as analyzer from './analyzer.js';
 import { moodVocab, moodPromptFor } from '../settings.js';
 import { makeEventLogger } from './tagger-progress.js';
 import {
-  composeMoodStateHash,
   computeBaselines,
   moodPassAction,
+  moodStateHashFor,
+  prunedBaselines,
   selectAudioMoods,
-  baselinesUsable,
   type MoodBaselines,
 } from './audio-calibration.js';
 
@@ -86,7 +86,10 @@ function loadBaselines(): MoodBaselines | null {
       for (const row of db.iterateAudioMoodScores()) yield row.scores;
     })(),
   );
-  return baselinesUsable(baselines) ? baselines : null;
+  // Pruned, not merely gated: a mood scored on too few tracks is dropped from
+  // the set so it can't dominate selection on a degenerate sd, while the
+  // library stays calibrated on the moods that do clear the floor.
+  return prunedBaselines(baselines);
 }
 
 // Re-derive labels for every scored track from the cosines already on disk.
@@ -137,7 +140,7 @@ export async function runAudioMoodPass(): Promise<AudioMoodStats> {
     if (action !== 'relabel') return { scored: 0, scope: 0, skipped: null };
     const baselines = loadBaselines();
     const relabelled = relabelFromStoredScores(baselines);
-    db.setAudioMoodVocabHash(composeMoodStateHash(hash));
+    db.setAudioMoodVocabHash(moodStateHashFor(hash, !!baselines));
     logEvent(
       'success',
       `Re-derived audio mood labels for ${relabelled.toLocaleString('en-GB')} tracks ` +
@@ -182,7 +185,13 @@ export async function runAudioMoodPass(): Promise<AudioMoodStats> {
   // Cosines only. Labels cannot be picked yet: selection is centred on per-mood
   // baselines drawn from the WHOLE library, and on a full re-score those
   // baselines are a property of the scores being written right now.
-  const scoredIds: string[] = [];
+  // A full re-score relabels the whole library from disk in phase 3 (paged), so
+  // holding this pass's own score maps would be a second copy of every row for
+  // nothing. An incremental pass labels exactly what it scored, so keeping those
+  // maps saves one SELECT per track re-reading what we just wrote — and its
+  // scope is only the newly-analysed tracks, which is what bounds the memory.
+  const relabelAll = vocabChanged || action === 'relabel';
+  const scoredRows: Array<{ id: string; scores: Record<string, number> }> = [];
   let scored = 0;
   let batch: Array<{ id: string; scores: Record<string, number> }> = [];
   for (const id of ids) {
@@ -195,7 +204,7 @@ export async function runAudioMoodPass(): Promise<AudioMoodStats> {
       scores[vocab[i]] = Math.round(dot(v, vecs[i]) * 1000) / 1000;
     }
     batch.push({ id, scores });
-    scoredIds.push(id);
+    if (!relabelAll) scoredRows.push({ id, scores });
     scored += 1;
     if (batch.length >= 500) {
       db.setTrackAudioMoodScoresBulk(batch);
@@ -213,13 +222,11 @@ export async function runAudioMoodPass(): Promise<AudioMoodStats> {
   // incremental pass labels only what it scored, since a handful of new tracks
   // cannot meaningfully shift a library-wide distribution.
   let relabelled = 0;
-  if (vocabChanged || action === 'relabel') {
+  if (relabelAll) {
     relabelled = relabelFromStoredScores(baselines);
   } else {
     let labels: Array<{ id: string; moods: string[] }> = [];
-    for (const id of scoredIds) {
-      const scores = db.getAudioMoodScores(id);
-      if (!scores) continue;
+    for (const { id, scores } of scoredRows) {
       labels.push({ id, moods: selectAudioMoods(scores, baselines) });
       relabelled += 1;
       if (labels.length >= 500) {
@@ -230,7 +237,7 @@ export async function runAudioMoodPass(): Promise<AudioMoodStats> {
     db.setTrackAudioMoodLabelsBulk(labels);
   }
 
-  db.setAudioMoodVocabHash(composeMoodStateHash(hash));
+  db.setAudioMoodVocabHash(moodStateHashFor(hash, !!baselines));
   logEvent(
     'success',
     `Audio moods scored — ${scored.toLocaleString('en-GB')} tracks` +
