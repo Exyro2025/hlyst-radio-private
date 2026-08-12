@@ -76,6 +76,13 @@ let _voiceChain: Promise<void> = Promise.resolve();
 
 export const VOICE_LEADIN_MS = 800;   // /sounds/leadin.wav pushed before each spoken clip
 const VOICE_TAIL_MS = 700;     // duck ramp-back + poll/scheduling slack
+// Handoff → first word, for the voice.queued forecast only (#1382 follow-up).
+// The mixer polls say.txt/intro.txt every 0.5s (so 0-500ms, ~250 on average)
+// and then pushes the silent lead-in ahead of the clip; the marker stamps the
+// first WORD, i.e. after that head. Never used to decide anything — the real
+// air time comes from the marker, and this is the number the forecast admits
+// it is guessing.
+export const HANDOFF_TO_AIR_MS = 250 + VOICE_LEADIN_MS;
 // Cap a single hold so a wildly-wrong duration estimate (or a clip that never
 // really aired) can't wedge the voice channel for minutes.
 const VOICE_HOLD_MAX_MS = 90_000;
@@ -98,11 +105,48 @@ export interface VoiceHandoff {
   aired: Promise<number | null>;
 }
 
+// What a consumer is told the moment the station commits to speaking, before
+// any of the waiting starts. `estimatedAirInMs` is a FORECAST and says so in
+// its name — voice.start remains the only measured answer.
+export interface QueuedVoice {
+  voiceId: string;
+  clipMs: number;
+  estimatedAirInMs: number;
+}
+
+// When the voice chain is expected to be free again, in epoch ms. Tracked here
+// rather than derived from _voiceChain because a promise can't be asked how
+// much longer it has — and the forecast has to be available synchronously, at
+// the moment the clip joins the queue.
+//
+// It is an ESTIMATE of an estimate: each clip's hold is its own measured length
+// plus fixed padding, and the handoff write itself can wait up to 1.5s on a
+// file the mixer hasn't polled yet. Nothing decides anything on this value; it
+// only tells a consumer roughly how long it has to get ready.
+let _chainFreeAt = 0;
+
+// Pure so the arithmetic is testable without a mixer. Both inputs are epoch ms
+// deadlines the clip has to clear: the serialiser's current holder, and any
+// jingle still audible (airVoice sleeps out the same window below).
+export function airInEstimate(
+  { now, chainFreeAt, jingleClearAt }: { now: number; chainFreeAt: number; jingleClearAt: number },
+): { waitMs: number; estimatedAirInMs: number } {
+  const jingleWait = Math.min(JINGLE_WAIT_MAX_MS, Math.max(0, jingleClearAt - now));
+  const chainWait = Math.max(0, chainFreeAt - now);
+  const waitMs = Math.max(chainWait, jingleWait);
+  return { waitMs, estimatedAirInMs: waitMs + HANDOFF_TO_AIR_MS };
+}
+
 export async function airVoice(
   path: string,
   wavPath: string,
   text: string,
   gainDb = 0,
+  // Fired SYNCHRONOUSLY, before this clip joins the voice chain — the early
+  // half of the lifecycle a consumer needs in order to prepare for speech
+  // rather than react to it (#1382 follow-up). Everything it reports is known
+  // by now; nothing here waits on anything.
+  { onQueued }: { onQueued?: (q: QueuedVoice) => void } = {},
 ): Promise<VoiceHandoff> {
   // Duration is read from the bare WAV path (header parse), so compute it BEFORE
   // wrapping — the annotate URI isn't a real file. The wrapped URI is only what
@@ -111,6 +155,17 @@ export async function airVoice(
   const holdMs = Math.min(VOICE_HOLD_MAX_MS, clipMs + VOICE_LEADIN_MS + VOICE_TAIL_MS);
   const voiceId = mintVoiceId();
   const uri = voiceUri(wavPath, gainDb, voiceId);
+  const now = Date.now();
+  const { waitMs, estimatedAirInMs } = airInEstimate({
+    now, chainFreeAt: _chainFreeAt, jingleClearAt: jingleClearAtMs(),
+  });
+  // This clip's own turn, then its hold — what the NEXT caller will wait for.
+  _chainFreeAt = now + waitMs + holdMs;
+  if (onQueued) {
+    // A misbehaving consumer must not take the air path down with it. The clip
+    // still airs; only its early warning is lost.
+    try { onQueued({ voiceId, clipMs, estimatedAirInMs }); } catch { /* ignore */ }
+  }
   const turn = _voiceChain
     .catch(() => undefined)
     .then(async () => {

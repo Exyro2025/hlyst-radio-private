@@ -52,6 +52,23 @@ export interface SpokenSegment {
   legacy?: boolean;
 }
 
+// What is known BEFORE a segment airs: the identity it will carry, plus a
+// forecast of how long the wait is. Fired the moment the station commits to
+// speaking, so a consumer can prepare (close a reply gate, hand back from a
+// caller, start a duck ramp) rather than react after the first words are out.
+export interface QueuedSegment {
+  /** The same id the eventual voice.start / voice.end carry. */
+  voiceId: string;
+  kind: string;
+  channel: 'say' | 'intro';
+  text: string;
+  durationMs: number;
+  /** Rough ms until the first word. A forecast, never a measurement — see below. */
+  estimatedAirInMs: number;
+  personaId?: string | null;
+  personaName?: string | null;
+}
+
 // A clip can't outrun the voice serialiser's own hold, so neither can the
 // voice.end timer. Guards against a mangled WAV header parking a timer hours out.
 const MAX_SEGMENT_MS = 90_000;
@@ -64,6 +81,45 @@ function bufferSeconds(): number {
   } catch {
     return 22;
   }
+}
+
+// The early half of the lifecycle: voice.queued → voice.start → voice.end, all
+// three paired by `voiceId`.
+//
+// This one fires when the station COMMITS to a clip — the rendered WAV joins
+// the voice serialiser — which is before the queue wait, the mixer's poll and
+// the silent lead-in. That is the whole point: a consumer that only learns of
+// speech from voice.start learns at the moment the words are already audible,
+// which is too late to hand over gracefully or to start a duck ramp. Anything
+// syncing to the audio still keys off voice.start/voice.end; this is for
+// getting ready.
+//
+// `estimatedAirInMs` is a FORECAST and is never anything else. The wait it
+// measures is mostly the serialiser's own hold, which is known, but the mixer
+// poll and the handoff write are not, and a jingle can extend it. `expectedAirAt`
+// is the same figure as a timestamp, for convenience. `estimated: true` says the
+// same thing the other two events say when they can't measure: do not treat
+// these as observations. There is deliberately no `airedAt` here — a field
+// named for a measurement must never carry a guess.
+export function notifyQueued(seg: QueuedSegment): void {
+  const durationMs = Math.max(0, Math.min(MAX_SEGMENT_MS, Math.round(seg.durationMs) || 0));
+  const estimatedAirInMs = Math.max(0, Math.round(seg.estimatedAirInMs) || 0);
+  webhooks.notify('voice.queued', {
+    voiceId: seg.voiceId,
+    kind: seg.kind,
+    channel: seg.channel,
+    text: seg.text,
+    durationMs,
+    estimatedAirInMs,
+    expectedAirAt: new Date(Date.now() + estimatedAirInMs).toISOString(),
+    estimated: true,
+    // Same reason it rides voice.start: a consumer syncing to what LISTENERS
+    // hear (rather than to the live edge) needs the offset, and shouldn't have
+    // to go and fetch /now-playing for it (#1114).
+    streamBufferSeconds: bufferSeconds(),
+    ...(seg.personaId ? { personaId: seg.personaId } : {}),
+    ...(seg.personaName ? { personaName: seg.personaName } : {}),
+  });
 }
 
 // Fire everything one segment owes the outside world:

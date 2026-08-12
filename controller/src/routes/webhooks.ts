@@ -14,6 +14,9 @@
 //   dj.link          { event, t, text, kind, voiceId, channel, durationMs,
 //                      airedAt?, estimated }
 //   request.received { event, t, requestedBy, text }   // text is the listener's raw ask
+//   voice.queued     { event, t, voiceId, kind, channel, text, durationMs,
+//                      estimatedAirInMs, expectedAirAt, estimated (always true),
+//                      streamBufferSeconds, personaId?, personaName? }
 //   voice.start      { event, t, voiceId, kind, channel, text, durationMs,
 //                      airedAt?, endsAt?, estimated, streamBufferSeconds,
 //                      personaId?, personaName? }
@@ -41,6 +44,26 @@
 // that predates the voice marker, or a clip that never aired); `airedAt`/
 // `endsAt`/`endedAt` are then ABSENT rather than guessed, and `t` is the best
 // available approximation. Treat a missing field as unknown, never as zero.
+//
+// voice.queued is the one event in the set that is a FORECAST by nature, and it
+// carries `estimated: true` for exactly that reason. It fires when the station
+// commits to a clip — before the serialiser queue, the mixer poll and the
+// lead-in — so a consumer can PREPARE for speech (hand back from a call, close
+// a reply gate, start a ramp) instead of reacting once the words are already
+// out. `estimatedAirInMs` is roughly how long it has; `expectedAirAt` is the
+// same figure as a timestamp. Neither is measured, and neither is corrected
+// afterwards: voice.start is the measurement, and a consumer that needs the
+// truth waits for it. Note there is no `airedAt` on this event — a field named
+// for a measurement never carries a guess.
+//
+// The lifecycle, all three paired by `voiceId`:
+//   voice.queued  → it is going to speak
+//   voice.start   → it is speaking (measured)
+//   voice.end     → it stopped
+//
+// The early warning is as long as the wait happens to be: a clip landing behind
+// another segment gets many seconds, one landing on an idle chain gets ~1s. It
+// is a head start, never a guarantee.
 import express from 'express';
 import { requireAdmin } from '../middleware/auth.js';
 import { validateBody } from '../middleware/validate.js';
