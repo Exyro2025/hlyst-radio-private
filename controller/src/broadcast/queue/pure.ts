@@ -10,6 +10,44 @@ import * as settings from '../../settings.js';
 import { DRAIN_DEADLINE_SEC } from '../drain-policy.js';
 import type { Track } from './types.js';
 
+interface TransitionItem {
+  track: Track;
+  sent?: boolean;
+  stemSeam?: boolean;
+}
+
+// Human-readable description of the NEXT FINALISED seam the operator will
+// hear. applyMixTransition and the pair/stem stamps run only when `incoming`
+// drains, so flags on an unsent item are still agent proposals: vetoes may
+// remove them and drain-time policy may add another. Returning null keeps the
+// admin honest until `sent` makes the pair authoritative. Exit gestures ride
+// the outgoing track while entry gestures ride the incoming track, so the
+// answer has to inspect both sides. Washout may combine with sweep/blend; stem
+// rendering owns the whole seam and therefore overrides every live effect.
+export function nextTransitionLabel(
+  outgoing: TransitionItem | null | undefined,
+  incoming: TransitionItem | null | undefined,
+): string | null {
+  if (!incoming || incoming.sent !== true) return null;
+  if (incoming.stemSeam) return 'Stem blend';
+
+  const labels: string[] = [];
+  const washing = outgoing?.track.washout === true;
+  const looping = outgoing?.track.loop === true && !washing;
+
+  if (washing) labels.push('Washout');
+  else if (looping) labels.push('Loop');
+
+  // Mirrors radio.liq's precedence: loop suppresses every entry effect;
+  // washout suppresses dissolve/chop but can coexist with sweep/blend.
+  if (!looping && incoming.track.sweep) labels.push('Sweep');
+  if (!looping && incoming.track.blend) labels.push('Blend');
+  if (!washing && !looping && incoming.track.dissolve) labels.push('Dissolve');
+  if (!washing && !looping && incoming.track.chop) labels.push('Chop');
+
+  return labels.length > 0 ? labels.join(' + ') : 'Normal';
+}
+
 export function pickLinkInterval() {
   const f = settings.effectiveFrequency();
   if (f === 'silent')     return Infinity;
