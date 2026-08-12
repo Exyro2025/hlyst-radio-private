@@ -103,6 +103,7 @@ test('WEBHOOK_EVENTS holds exactly the fan-out events', () => {
     'dj.say',
     'dj.link',
     'request.received',
+    'voice.queued',
     'voice.start',
     'voice.end',
   ]);

@@ -30,9 +30,9 @@ const {
   awaitVoiceAir,
   resetVoiceMarkers,
 } = await import('../src/broadcast/queue/voice-marker.js');
-const { voiceUri, clipDurationMs, speechDurationMs, VOICE_LEADIN_MS } =
+const { voiceUri, clipDurationMs, speechDurationMs, VOICE_LEADIN_MS, HANDOFF_TO_AIR_MS, airInEstimate } =
   await import('../src/broadcast/queue/voice-io.js');
-const { notifySpoken } = await import('../src/broadcast/voice-events.js');
+const { notifySpoken, notifyQueued } = await import('../src/broadcast/voice-events.js');
 // The settings cache seam every other test uses — settings.js itself does not
 // re-export it.
 const { setCache } = await import('../src/settings/store.js');
@@ -192,7 +192,7 @@ async function withHookServer(fn: (received: Received[]) => Promise<void>) {
     webhooks: [{
       id: 'test_hook',
       url: `http://127.0.0.1:${port}/hook`,
-      events: ['dj.say', 'dj.link', 'voice.start', 'voice.end'],
+      events: ['dj.say', 'dj.link', 'voice.queued', 'voice.start', 'voice.end'],
       enabled: true,
       authHeader: '',
     }],
@@ -284,6 +284,87 @@ test('a banter line keeps voice.* per line while dj.say stays one per exchange',
     // announceExchange fires ONE aggregate dj.say for the whole conversation;
     // per-line legacy events would read as five separate segments to a relay.
     assert.ok(!received.some(r => r.event === 'dj.say'), 'no per-line dj.say');
+  });
+});
+
+// --- the early warning (voice.queued) --------------------------------------
+//
+// The air-time fix above traded away the ~1-2s of accidental warning that
+// firing at handoff used to give, which is what a consumer ducking live audio
+// against the station used to plan with. voice.queued gives it back honestly:
+// early, explicitly a forecast, and paired to the measured events by voiceId.
+
+test('the forecast is the wait plus the fixed handoff-to-air head', () => {
+  const now = 1_770_000_000_000;
+  // Idle chain, no jingle: only the poll + lead-in stand between the handoff
+  // and the first word. This is the floor — the warning is short, not absent.
+  assert.deepEqual(
+    airInEstimate({ now, chainFreeAt: 0, jingleClearAt: 0 }),
+    { waitMs: 0, estimatedAirInMs: HANDOFF_TO_AIR_MS },
+  );
+  // A segment already speaking pushes this one out by whatever it has left.
+  assert.equal(
+    airInEstimate({ now, chainFreeAt: now + 8_000, jingleClearAt: 0 }).estimatedAirInMs,
+    8_000 + HANDOFF_TO_AIR_MS,
+  );
+  // A jingle on air delays the handoff the same way (airVoice sleeps it out),
+  // and the two waits overlap rather than stack — whichever clears last wins.
+  assert.equal(
+    airInEstimate({ now, chainFreeAt: now + 3_000, jingleClearAt: now + 9_000 }).waitMs,
+    9_000,
+  );
+  // A stale marker computes a window in the past; it must not pull the forecast
+  // backwards into a negative wait.
+  assert.equal(
+    airInEstimate({ now, chainFreeAt: now - 60_000, jingleClearAt: now - 60_000 }).waitMs,
+    0,
+  );
+});
+
+test('voice.queued lands before the words and admits it is a forecast', async () => {
+  await withHookServer(async received => {
+    notifyQueued({
+      voiceId: 'v4', kind: 'link', channel: 'intro',
+      text: 'staying in the deep end', durationMs: 6200, estimatedAirInMs: 1300,
+    });
+    const q = await waitFor(received, 'voice.queued');
+    // The id is the whole point: it pairs with the voice.start/voice.end that
+    // follow, so a consumer never has to guess which clip fired.
+    assert.equal(q.body.voiceId, 'v4');
+    assert.equal(q.body.channel, 'intro');
+    assert.equal(q.body.durationMs, 6200);
+    assert.equal(q.body.estimatedAirInMs, 1300);
+    assert.ok(q.body.expectedAirAt, 'the same figure as a timestamp, for convenience');
+    // Always a forecast — the field says so rather than leaving a consumer to
+    // infer it from the event name.
+    assert.equal(q.body.estimated, true);
+    // A field named for a measurement must never carry a guess.
+    assert.ok(!('airedAt' in q.body), 'no airedAt on a forecast');
+    assert.equal(q.body.streamBufferSeconds, 22);
+    // Nothing else fires yet: the segment has not aired.
+    assert.ok(!received.some(r => r.event === 'voice.start'));
+    assert.ok(!received.some(r => r.event === 'dj.link'));
+  });
+});
+
+test('a hook subscribed only to the measured events never sees the forecast', async () => {
+  await withHookServer(async received => {
+    // Same voiceId through the whole lifecycle, and voice.queued is opt-in like
+    // every other event — an existing hook's payload stream is unchanged.
+    notifyQueued({
+      voiceId: 'v5', kind: 'station-id', channel: 'say',
+      text: "you're locked into SUB/WAVE", durationMs: 120, estimatedAirInMs: 900,
+    });
+    await waitFor(received, 'voice.queued');
+    notifySpoken({
+      voiceId: 'v5', kind: 'station-id', channel: 'say',
+      text: "you're locked into SUB/WAVE", durationMs: 120, airedAt: Date.now(),
+    });
+    const start = await waitFor(received, 'voice.start');
+    assert.equal(start.body.voiceId, 'v5', 'queued and start pair on the id');
+    assert.equal(start.body.estimated, false, 'the measured event is still measured');
+    const end = await waitFor(received, 'voice.end');
+    assert.equal(end.body.voiceId, 'v5');
   });
 });
 

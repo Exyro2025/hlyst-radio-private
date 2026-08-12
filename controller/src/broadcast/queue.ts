@@ -87,9 +87,29 @@ import {
   airVoice,
   speechDurationMs,
   writeHandoff,
+  type QueuedVoice,
   type VoiceHandoff,
 } from './queue/voice-io.js';
-import { notifySpoken } from './voice-events.js';
+import { notifyQueued, notifySpoken } from './voice-events.js';
+
+// Everything the outside world is told about ONE spoken segment, held in a
+// single value because it is now read twice — once when the clip is committed
+// (onQueued) and once when it airs (onSpoken). Two hand-built copies at each of
+// the four call sites is exactly the drift #1382 removed.
+interface SegmentDesc {
+  kind: string;
+  /** Which handoff file carried the clip — the caller picked it, so it says
+   *  so rather than letting the payload re-derive it from `kind` and get a
+   *  boundary-deferred ident (say-kind, intro channel) wrong. */
+  channel: 'say' | 'intro';
+  text: string;
+  meta?: TurnMeta;
+  persona?: Persona | null;
+  /** Booth-log line when it differs from the spoken text (banter prefixes the speaker). */
+  logText?: string | null;
+  /** Whether this segment also fires the legacy dj.say/dj.link event. */
+  legacy?: boolean;
+}
 
 // Re-exported so every existing `from './queue.js'` import keeps working.
 export { BACKFILL_DEDUP_MAX_GAP_MS, boundaryCarriesTrackVoice, playAlreadyRecorded, shouldDropStaleLink } from './queue/pure.js';
@@ -1242,13 +1262,16 @@ class Queue {
       const targetFile = kind === 'link'
         ? config.liquidsoap.introFile
         : config.liquidsoap.sayFile;
-      const handoff = await airVoice(targetFile, wavPath, text, voiceGainDb(kind, persona));
+      const seg: SegmentDesc = { kind, channel: kind === 'link' ? 'intro' : 'say', text, meta, persona };
+      const handoff = await airVoice(targetFile, wavPath, text, voiceGainDb(kind, persona), {
+        onQueued: q => this.onQueued(q, seg),
+      });
       // Bookkeeping runs when the words reach the stream, not when the file was
       // handed over (#1382) — the same rule announceAtNextTrack already states:
       // the DJ's memory, and everything downstream of it, should reflect what
       // aired. On a mixer that writes no marker this resolves immediately with a
       // null stamp, which is byte-for-byte the old timing.
-      this.onSpoken(handoff, { kind, channel: kind === 'link' ? 'intro' : 'say', text, meta, persona });
+      this.onSpoken(handoff, seg);
     } catch (err) {
       this.log('error', `Announce failed: ${(err as Error).message}`);
     }
@@ -1268,22 +1291,31 @@ class Queue {
   // in which case this is exactly the old timing and the old (unstamped) data.
   // It never rejects, so there is no path where a segment airs and the booth log
   // never hears about it.
+  // The pre-air half of the same bookkeeping: announce that speech is COMING.
+  // Passed to airVoice as a callback because the commitment happens inside it,
+  // before the handoff this method's caller is awaiting has resolved — the
+  // whole value of the event is that it lands early. Nothing is logged or
+  // persisted here: this is a forecast, and the booth log records what aired.
+  onQueued(q: QueuedVoice, { kind, channel, text, meta = {}, persona = null }: SegmentDesc) {
+    try {
+      notifyQueued({
+        voiceId: q.voiceId,
+        kind,
+        channel,
+        text,
+        durationMs: q.clipMs,
+        estimatedAirInMs: q.estimatedAirInMs,
+        personaId: persona?.id ?? (meta.personaId as string | undefined) ?? null,
+        personaName: persona?.name ?? (meta.personaName as string | undefined) ?? null,
+      });
+    } catch (err) {
+      this.log('error', `Queued-voice notify failed: ${(err as Error).message}`);
+    }
+  }
+
   onSpoken(handoff: VoiceHandoff, {
     kind, channel, text, meta = {}, persona = null, logText = null, legacy = true,
-  }: {
-    kind: string;
-    /** Which handoff file carried the clip — the caller picked it, so it says
-     *  so rather than letting the payload re-derive it from `kind` and get a
-     *  boundary-deferred ident (say-kind, intro channel) wrong. */
-    channel: 'say' | 'intro';
-    text: string;
-    meta?: TurnMeta;
-    persona?: Persona | null;
-    /** Booth-log line when it differs from the spoken text (banter prefixes the speaker). */
-    logText?: string | null;
-    /** Whether this segment also fires the legacy dj.say/dj.link event. */
-    legacy?: boolean;
-  }) {
+  }: SegmentDesc) {
     void handoff.aired.then(airedAt => {
       try {
         this.log(kind, logText ?? text);
@@ -1337,8 +1369,7 @@ class Queue {
     }
     for (const l of rendered) {
       try {
-        const handoff = await airVoice(config.liquidsoap.sayFile, l.wavPath, l.text, voiceGainDb(kind, l.persona));
-        this.onSpoken(handoff, {
+        const seg: SegmentDesc = {
           kind,
           channel: 'say',
           text: l.text,
@@ -1349,7 +1380,11 @@ class Queue {
           // exchange; voice.start/voice.end still fire per line, because each
           // line is its own real speech window.
           legacy: false,
+        };
+        const handoff = await airVoice(config.liquidsoap.sayFile, l.wavPath, l.text, voiceGainDb(kind, l.persona), {
+          onQueued: q => this.onQueued(q, seg),
         });
+        this.onSpoken(handoff, seg);
       } catch (err) {
         this.log('error', `Exchange line failed to air: ${(err as Error).message}`);
       }
@@ -1462,10 +1497,13 @@ class Queue {
     this._pendingVoice = null;
     if (!existsSync(p.wavPath)) return;
     try {
-      const handoff = await airVoice(config.liquidsoap.introFile, p.wavPath, p.text, voiceGainDb(p.kind, p.persona));
       // Deferred idents ride the INTRO file (light duck at a track boundary),
       // whatever their kind — see announceAtNextTrack.
-      this.onSpoken(handoff, { kind: p.kind, channel: 'intro', text: p.text, meta: p.meta, persona: p.persona });
+      const seg: SegmentDesc = { kind: p.kind, channel: 'intro', text: p.text, meta: p.meta, persona: p.persona };
+      const handoff = await airVoice(config.liquidsoap.introFile, p.wavPath, p.text, voiceGainDb(p.kind, p.persona), {
+        onQueued: q => this.onQueued(q, seg),
+      });
+      this.onSpoken(handoff, seg);
     } catch (err) {
       this.log('error', `Air pending voice failed: ${(err as Error).message}`);
     }
@@ -1546,11 +1584,7 @@ class Queue {
       // gain trim is per-persona, so re-resolving here would apply one DJ's
       // trim to another DJ's audio. This was the last voiceGainDb call site
       // still resolving from the wall clock.
-      const handoff = await airVoice(targetFile, item.introWav, item.introScript || '', voiceGainDb(kind, item.introPersona || undefined));
-      // Not deferred: introAired is already set and the queue state has to reach
-      // disk whether or not the words are audible yet.
-      this.persist();
-      this.onSpoken(handoff, {
+      const seg: SegmentDesc = {
         kind,
         channel: kind === 'link' ? 'intro' : 'say',
         text: item.introScript!,
@@ -1561,7 +1595,14 @@ class Queue {
         meta: item.introPersona
           ? { personaId: item.introPersona.id, personaName: item.introPersona.name }
           : {},
+      };
+      const handoff = await airVoice(targetFile, item.introWav, item.introScript || '', voiceGainDb(kind, item.introPersona || undefined), {
+        onQueued: q => this.onQueued(q, seg),
       });
+      // Not deferred: introAired is already set and the queue state has to reach
+      // disk whether or not the words are audible yet.
+      this.persist();
+      this.onSpoken(handoff, seg);
     } catch (err) {
       this.log('error', `Air intro failed: ${(err as Error).message}`);
     }
