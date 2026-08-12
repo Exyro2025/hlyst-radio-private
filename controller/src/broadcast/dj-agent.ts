@@ -52,7 +52,7 @@ import {
 import { dropEchoedLink, enqueuePick, trackFields, trimLinkToIntro } from './dj-agent/enqueue.js';
 import { advanceRun, runActive } from './dj-agent/runs.js';
 import { pickSchemaBase, pickSystem, requestSystem } from './dj-agent/schemas.js';
-import { guardIntro, screenAck } from '../util/request-guard.js';
+import { guardIntro, screenAck, isNamedRequester } from '../util/request-guard.js';
 import * as likes from './likes.js';
 import { classifyPickFailure, type PickFailure } from '../util/pick-seed.js';
 
@@ -146,7 +146,7 @@ async function repickRequestFromSeen({ seen, badId, requester, text }:
     return await djObject({
       system: requestSystem(),
       prompt: JSON.stringify({ candidates: [...seen.values()] }, null, 2)
-        + `\n\nListener "${requester}" asked: "${text}". The id you returned (${badId ?? 'none'}) matches none of the candidates above. Choose the best candidate id from the list for this request, and write "ack"${wantIntro ? ' and "intro"' : ''} to match.`,
+        + `\n\n${isNamedRequester(requester) ? `Listener "${requester}" asked` : 'An unnamed listener asked'}: "${text}". The id you returned (${badId ?? 'none'}) matches none of the candidates above. Choose the best candidate id from the list for this request, and write "ack"${wantIntro ? ' and "intro"' : ''} to match.`,
       schema,
       temperature: 0.3,
       kind: 'djAgentRequestRepick',
@@ -865,7 +865,13 @@ async function runRequestViaAgent(queue: any, { requester, text }: { requester: 
     // trailing user message because some providers require strict alternation;
     // windowMessages() returns fresh copies, so appending in place is safe.
     const cur = queue.current?.track || null;
-    const tail = `The request to resolve now — listener "${requester}" asks: "${text}"`
+    // Name the listener in the tail ONLY when there is a real name. The
+    // system prompt now tells the agent to greet whoever the tail names
+    // (REQUESTER_GREETING_CLAUSE), so handing it the ledger stand-in 'anon'
+    // would put that word on air as a name (#1347).
+    const tail = (isNamedRequester(requester)
+      ? `The request to resolve now — listener "${requester}" asks: "${text}"`
+      : `The request to resolve now — an unnamed listener asks: "${text}"`)
       + (cur ? ` (currently playing "${cur.title}" by ${cur.artist}${cur.id ? ` [id: ${cur.id}]` : ''})` : '');
     const messages = session.windowMessages();
     const last = messages[messages.length - 1];
@@ -979,7 +985,9 @@ async function runRequestViaAgent(queue: any, { requester, text }: { requester: 
     // is never falsy and a downstream `||` is unreachable. Threading it in here
     // means the listener gets the named line in both cases the fallback covers
     // — the model wrote nothing, and the model echoed their own text back.
-    const screened = screenAck(object.ack, text, `Coming up for you, ${requester}.`);
+    const screened = screenAck(object.ack, text, isNamedRequester(requester)
+      ? `Coming up for you, ${requester}.`
+      : 'Coming up for you.');
     if (screened.guard) queue.log('request-guard', `agent ack echoed request text — replaced`);
     const ack = screened.ack;
     // Both guards can fire on one request (the model echoed in the ack AND in
