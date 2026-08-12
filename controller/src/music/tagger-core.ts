@@ -5,8 +5,9 @@
 // bulk tag-library.ts script. Both produce identical shapes per track.
 
 import { z } from 'zod';
-import { moodVocab } from '../settings.js';
+import { get as getSettings, moodVocab } from '../settings.js';
 import { djObject } from '../llm/sdk.js';
+import { activeModelLabel, producerLeg, type LlmRole } from '../llm/provider.js';
 import { songGenres } from './subsonic.js';
 
 export const TagSchema = z.object({
@@ -109,6 +110,17 @@ function formatSong(song: TaggableSong): string {
 export interface TagOpts {
   leg?: 'primary' | 'fallback';
   role?: 'persona' | 'producer';
+}
+
+// Mood classification is an editorial/library task, never listener-facing
+// performance. Split installations route it to Producer; untouched stations
+// retain the established Persona primary/fallback topology.
+export function taggerRole(): LlmRole {
+  return getSettings().llm?.producer?.enabled ? 'producer' : 'persona';
+}
+
+export function taggerModelLabel(): string {
+  return taggerRole() === 'producer' ? producerLeg().label : activeModelLabel();
 }
 
 export async function tagOne(song: TaggableSong, opts: TagOpts = {}): Promise<TagResult> {

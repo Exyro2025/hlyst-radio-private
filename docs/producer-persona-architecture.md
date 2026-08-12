@@ -220,6 +220,28 @@ Persona draft. The UI reports the terminal stage and reason in a short toast.
 Tests require the optional Producer leg to be enabled; the established **Run
 now** action remains available regardless.
 
+## Stage C migration: library mood tagging
+
+Library mood tagging is a backstage classification task rather than an on-air
+speech task. Its existing prompt already has a narrow operational boundary:
+title, artist, album, year and genre are classified into the operator's mood
+vocabulary plus low/medium/high energy. It receives no Persona Soul, show
+brief, recent speech or Producer prose, and it produces no listener-facing
+copy, so the prompt itself is retained unchanged.
+
+When the optional Producer leg is enabled, both bulk Library Scan batches and
+the Library page's single-track **Retag** action use the Producer role. The
+stored model label records the model that owns this classification work. A
+Producer connection failure may take the established one-hop safety route to
+the primary Persona model rather than abandoning the scan.
+
+The existing dual-LLM tagging pool is preserved for base installations: a
+configured primary and fallback may continue consuming batches in parallel.
+In split mode only one Producer consumer is started; the Persona model is held
+as failure recovery and does not quietly classify a share of the library in
+parallel. The observable call kinds remain `tag-library` and
+`tag-library-batch`, because they describe the task rather than on-air speech.
+
 ## Boundary rules
 
 Every field crossing from Producer to Persona must answer this question:

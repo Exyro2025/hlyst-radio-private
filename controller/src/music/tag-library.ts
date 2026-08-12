@@ -42,9 +42,8 @@ import { selectSeeds } from './seed-selector.js';
 import { selectEnrichIds } from './enrich-scope.js';
 import { vote, fuseNeighbours } from './tag-propagator.js';
 import { summariseEval, formatEvalSummary } from './propagation-eval.js';
-import { activeModelLabel } from '../llm/provider.js';
 import { setRawDebugStderrMirror } from '../llm/log.js';
-import { taggerBatchSystem } from './tagger-core.js';
+import { taggerBatchSystem, taggerModelLabel } from './tagger-core.js';
 import { runAnalysisPass } from './analyze.js';
 import { reportProgress, formatPhaseBreakdown, sortedPhaseTimings } from './tagger-progress.js';
 import { planRun } from './rescan-scope.js';
@@ -240,7 +239,7 @@ async function main() {
   };
 
   logEvent('info', `Starting up — ${db.allTaggedIds().length.toLocaleString('en-GB')} tracks already tagged`);
-  logEvent('info', `Tagging model — ${activeModelLabel()}`);
+  logEvent('info', `Tagging model — ${taggerModelLabel()}`);
   logEvent('info', `Embedding model — ${embeddings.activeModelLabel()} (dim=${embeddingDim})`);
   console.log(
     `[tag] batch=${tagBatchSize} maxRounds=${maxRounds} knnK=${knnK} ` +
@@ -278,7 +277,7 @@ async function main() {
   }
 
   const promptHash = embeddings.promptVocabHash(taggerBatchSystem());
-  const modelLabel = activeModelLabel();
+  const modelLabel = taggerModelLabel();
 
   // Single- vs dual-LLM tagging. Decided once and shared by the seed + active-
   // learn phases. Probed here (not per phase) so the banner prints once.

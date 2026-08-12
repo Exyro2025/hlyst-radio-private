@@ -22,6 +22,7 @@ const {
   producerPromptDiscoverySteps,
 } = await import('../src/llm/internal/provider/legs.js');
 const { withFailover } = await import('../src/llm/internal/core/failover.js');
+const { taggerModelLabel, taggerRole } = await import('../src/music/tagger-core.js');
 
 const SETTINGS_PATH = path.join(stateRoot, 'settings.json');
 const PRIMARY = {
@@ -55,6 +56,8 @@ test('Producer is disabled by default and resolves to the primary Persona leg', 
   assert.equal(producerLeg().slot, 'primary');
   assert.equal(producerLeg().label, primaryLeg().label);
   assert.equal(producerPromptDiscoverySteps(), promptDiscoverySteps());
+  assert.equal(taggerRole(), 'persona');
+  assert.equal(taggerModelLabel(), primaryLeg().label);
 });
 
 test('the complete Producer connection survives a controller restart', async () => {
@@ -77,6 +80,8 @@ test('the complete Producer connection survives a controller restart', async () 
   assert.equal(leg.slot, 'producer');
   assert.equal(leg.cfg.model, PRODUCER.model);
   assert.equal(leg.cfg.baseUrl, PRODUCER.baseUrl);
+  assert.equal(taggerRole(), 'producer');
+  assert.equal(taggerModelLabel(), leg.label);
 });
 
 test('saving Producer settings applies immediately and survives the next restart', async () => {
