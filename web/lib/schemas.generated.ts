@@ -3908,6 +3908,11 @@ export const WEBHOOK_EVENTS = [
   'dj.say',              // station ID / weather / hourly — heavy-ducked voice
   'dj.link',              // between-track auto-DJ link — light-ducked voice
   'request.received',    // a listener submitted a request
+  // The same speech as dj.say/dj.link, but as a WINDOW rather than a ping:
+  // start carries the measured duration, end fires when the words finish (#1382).
+  // Subscribe to these instead of dj.* when you need the segment's real extent.
+  'voice.start',         // a spoken segment became audible on the stream
+  'voice.end',           // …and finished
 ] as const;
 
 export type WebhookEvent = (typeof WEBHOOK_EVENTS)[number];
