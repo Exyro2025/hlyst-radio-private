@@ -230,6 +230,14 @@ was structurally capable but projected roughly thirteen minutes for only 132
 pending tracks at a batch size of ten. That cost would make an initial library
 scan needlessly slow.
 
+The same trial exposed a harder scheduling failure. The local Producer server
+ran with `--parallel 1`, so a long `tag-library-batch` occupied its only
+inference slot. Live `djProducerPick` requests queued behind the background
+batch and timed out. This is priority inversion: a non-urgent maintenance job
+can make the time-sensitive broadcast controller miss its deadline even though
+both tasks work correctly in isolation. Raw tagging accuracy cannot make that
+topology safe.
+
 Both bulk Library Scan batches and the Library page's single-track **Retag**
 therefore remain on the established primary Persona route, including when the
 optional Producer leg is enabled. A configured fallback may continue operating
@@ -242,7 +250,10 @@ The trade-off is explicit: a future roleplay-focused Persona model must retain
 basic structured classification ability. The evaluation harness should test
 `tag-library-batch` before such a model is adopted. If a future installation
 needs an independent high-throughput classifier, that should be a dedicated
-library-routing setting rather than overloading the live Producer role.
+library-routing setting or process rather than overloading the live Producer
+role. Raising llama.cpp parallelism is not the default remedy: it increases
+shared CPU and memory pressure and still gives bulk work no priority boundary
+over an urgent live pick.
 
 ## Boundary rules
 
