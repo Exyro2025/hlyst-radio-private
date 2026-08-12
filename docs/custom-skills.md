@@ -153,6 +153,23 @@ editor flags it the next time you open that skill.
 
 Set it from the admin UI too: **/admin/skills → Edit → Cron timer**.
 
+**Daylight saving.** A normal daily cron survives a clock change: `cron: 0 8 * * *`
+fires once at 08:00 local on the spring-forward day, the autumn day, and every
+ordinary day, which is the whole point of running in the station zone. Two edge
+cases fall out of the scheduler and are worth knowing about:
+
+- On the **autumn** change, the hour that repeats (in the UK, 01:00–01:59) is
+  skipped: a `*/10` cron fires 19 times that day instead of 25, and an hourly one
+  misses a single beat. Nothing fires twice, which is the safer direction — the
+  same guard that drops the hour is what stops the duplicate.
+- On the **spring** change, a cron pointed at a time that does not exist that day
+  (again in the UK, anything in 01:00–01:59) simply does not fire, silently.
+
+So avoid pinning a skill to the small hours if it genuinely has to run every day,
+and expect a once-a-year gap otherwise. This is `node-cron` 3.x behaviour rather
+than anything SUB/WAVE decides, and it applies to every cron in the scheduler,
+not only skill timers.
+
 **A cron timer is not the same override as "Run now".** Pressing **Run now** is
 an explicit operator action and fires whatever it names. A timer firing on its
 own is autonomous, so it stands down exactly where the normal segment tick
