@@ -9,11 +9,38 @@
 //                    `sourceTrackId` is the music backend's own id (Subsonic/
 //                    Navidrome), null when unknown; `source` is how the track got
 //                    queued (auto | ai | request) — two different things.
-//   dj.say           { event, t, text, kind }      // kind is the original `announce` kind
-//   dj.link          { event, t, text }
+//   dj.say           { event, t, text, kind, voiceId, channel, durationMs,
+//                      airedAt?, estimated }        // kind is the original `announce` kind
+//   dj.link          { event, t, text, kind, voiceId, channel, durationMs,
+//                      airedAt?, estimated }
 //   request.received { event, t, requestedBy, text }   // text is the listener's raw ask
+//   voice.start      { event, t, voiceId, kind, channel, text, durationMs,
+//                      airedAt?, endsAt?, estimated, streamBufferSeconds,
+//                      personaId?, personaName? }
+//   voice.end        { event, t, voiceId, kind, channel, durationMs,
+//                      airedAt?, endedAt?, estimated }
 //
 // All payloads carry `event` (one of the above) and `t` (ISO timestamp).
+//
+// TIMEBASE (#1382). The voice events fire when the words are actually AUDIBLE
+// on the stream, not when the clip was handed to the mixer — `airedAt` is the
+// live-edge moment they began, measured by Liquidsoap itself. Every listener is
+// `streamBufferSeconds` behind that live edge for their whole connection
+// (Icecast bursts already-broadcast audio on connect, #1114), so a consumer
+// syncing to what people HEAR wants `airedAt + streamBufferSeconds`, and one
+// driving an operator display wants `airedAt` as-is. `durationMs` is the clip's
+// own measured length, so [airedAt, airedAt + durationMs] is the speech window.
+//
+// `airedAt` is the first WORD. The mixer pushes a short silent lead-in ahead of
+// every clip so the music has finished ducking before the DJ speaks, so the duck
+// itself begins up to a second earlier — measured 0.795s on the bundled
+// leadin.wav. Anything mirroring the duck (rather than the words) should allow
+// for that head.
+//
+// `estimated: true` means the station could not measure the air time (a mixer
+// that predates the voice marker, or a clip that never aired); `airedAt`/
+// `endsAt`/`endedAt` are then ABSENT rather than guessed, and `t` is the best
+// available approximation. Treat a missing field as unknown, never as zero.
 import express from 'express';
 import { requireAdmin } from '../middleware/auth.js';
 import { validateBody } from '../middleware/validate.js';

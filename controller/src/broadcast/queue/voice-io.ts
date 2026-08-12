@@ -11,10 +11,12 @@
 
 import { existsSync, readFileSync, openSync, readSync, closeSync, statSync } from 'node:fs';
 import { stat } from 'node:fs/promises';
+import { randomBytes } from 'node:crypto';
 import { config } from '../../config.js';
 import { writeFileAtomic } from '../../util/atomic-file.js';
 import * as settings from '../../settings.js';
 import { sleep } from './pure.js';
+import { awaitVoiceAir } from './voice-marker.js';
 
 const _handoffChains: Map<string, Promise<void>> = new Map();
 
@@ -78,12 +80,37 @@ const VOICE_TAIL_MS = 700;     // duck ramp-back + poll/scheduling slack
 // really aired) can't wedge the voice channel for minutes.
 const VOICE_HOLD_MAX_MS = 90_000;
 
-export async function airVoice(path: string, wavPath: string, text: string, gainDb = 0) {
+// What a caller gets back once its clip has been handed to Liquidsoap. The
+// handoff itself is still awaited (this resolves at the same moment airVoice
+// always did); `aired` is the new half — the air-time signal every consumer of
+// a spoken segment was previously missing (#1382).
+export interface VoiceHandoff {
+  /** Correlation id, stamped into the clip's annotate: URI and echoed by the
+   *  mixer's marker. Published on the voice.start/voice.end webhooks so a
+   *  consumer can pair them. */
+  voiceId: string;
+  /** The clip's own length, WITHOUT the lead-in and duck-tail padding the
+   *  serialiser's hold adds — i.e. how long the words actually last. */
+  clipMs: number;
+  /** Epoch ms the words hit the live edge, or null when that can't be known
+   *  (a mixer that writes no marker, or a clip that never aired). Never
+   *  rejects: bookkeeping has to run either way. */
+  aired: Promise<number | null>;
+}
+
+export async function airVoice(
+  path: string,
+  wavPath: string,
+  text: string,
+  gainDb = 0,
+): Promise<VoiceHandoff> {
   // Duration is read from the bare WAV path (header parse), so compute it BEFORE
   // wrapping — the annotate URI isn't a real file. The wrapped URI is only what
   // gets written to the handoff file for Liquidsoap to consume.
-  const holdMs = Math.min(VOICE_HOLD_MAX_MS, speechDurationMs(wavPath, text));
-  const uri = voiceUriWithGain(wavPath, gainDb);
+  const clipMs = clipDurationMs(wavPath, text);
+  const holdMs = Math.min(VOICE_HOLD_MAX_MS, clipMs + VOICE_LEADIN_MS + VOICE_TAIL_MS);
+  const voiceId = mintVoiceId();
+  const uri = voiceUri(wavPath, gainDb, voiceId);
   const turn = _voiceChain
     .catch(() => undefined)
     .then(async () => {
@@ -94,7 +121,18 @@ export async function airVoice(path: string, wavPath: string, text: string, gain
     });
   // Extend the shared lock until this clip has (about) finished playing.
   _voiceChain = turn.then(() => sleep(holdMs)).then(() => {}, () => {});
-  return turn;
+  await turn;
+  // Registered AFTER the handoff resolves, so the timeout measures the wait for
+  // AIR and not the wait for this clip's turn on the shared voice chain (which
+  // can legitimately be a whole segment long). The marker reader keeps a short
+  // buffer of ids it saw first, so losing this race costs nothing.
+  return { voiceId, clipMs, aired: awaitVoiceAir(voiceId) };
+}
+
+// Short, URI-safe, and unique per clip — the whole job is telling one segment's
+// marker from the next one's.
+function mintVoiceId(): string {
+  return randomBytes(6).toString('hex');
 }
 
 // --- Jingle collision guard (issue #997) -----------------------------------
@@ -141,21 +179,38 @@ async function waitForJingleClear() {
   if (waitMs > 0) await sleep(waitMs);
 }
 
-// Wrap a rendered voice-clip path in a Liquidsoap `annotate:` URI carrying a
-// liq_amplify gain, so the per-engine/persona voice trim is applied as the clip
-// plays (radio.liq wraps the voice queues in amplify(override="liq_amplify")).
-// 0 dB → the bare path, no annotation — byte-for-byte today's behaviour. Mirrors
-// subsonic.getAnnotatedUri's liq_amplify="<n> dB" form (the music loudness path).
-function voiceUriWithGain(wavPath: string, gainDb: number): string {
-  return gainDb !== 0 ? `annotate:liq_amplify="${gainDb} dB":${wavPath}` : wavPath;
+// Wrap a rendered voice-clip path in a Liquidsoap `annotate:` URI. Two keys ride
+// along: `liq_amplify` applies the per-engine/persona voice trim as the clip
+// plays (radio.liq wraps the voice queues in amplify(override="liq_amplify")),
+// mirroring subsonic.getAnnotatedUri's `liq_amplify="<n> dB"` form; and
+// `subwave_voice` is the id radio.liq echoes into voice-playing.json, which is
+// how an air-time marker is matched to the segment that produced it (#1382).
+//
+// Every clip is annotated now, where a 0 dB trim used to send the bare path —
+// the id has to reach the mixer somehow, and metadata is the channel this
+// codebase already uses for exactly that (subsonic_id, subwave_kind). The
+// annotate protocol is not new here: any station with a non-zero tts.gainDb has
+// been driving these same WAV paths through it all along. The silent lead-in is
+// deliberately NOT annotated: it is pushed as its own request, and the missing
+// id is what tells the mixer's hook to skip it and mark the real clip instead.
+export function voiceUri(wavPath: string, gainDb: number, voiceId: string): string {
+  const meta = [`subwave_voice="${voiceId}"`];
+  if (gainDb !== 0) meta.unshift(`liq_amplify="${gainDb} dB"`);
+  return `annotate:${meta.join(',')}:${wavPath}`;
 }
 
-// Best-effort playback duration of a rendered voice clip, plus the lead-in and
-// duck-tail padding. Reads the exact length from a WAV header (the local
-// engines), and estimates from word count for anything else (cloud mp3).
+// Best-effort playback duration of the clip ITSELF. Reads the exact length from
+// a WAV header (the local engines), and estimates from word count for anything
+// else (cloud mp3). This is the figure published to consumers as `durationMs` —
+// the padding below belongs to the serialiser's hold, not to the speech.
+export function clipDurationMs(wavPath: string, text: string): number {
+  return wavDurationMs(wavPath) ?? estimateSpeechMs(text);
+}
+
+// The clip plus the lead-in and duck-tail padding: what the voice chain holds
+// its lock for, and what the drain budgets a segment at.
 export function speechDurationMs(wavPath: string, text: string): number {
-  const body = wavDurationMs(wavPath) ?? estimateSpeechMs(text);
-  return body + VOICE_LEADIN_MS + VOICE_TAIL_MS;
+  return clipDurationMs(wavPath, text) + VOICE_LEADIN_MS + VOICE_TAIL_MS;
 }
 
 // ~140 wpm, deliberately on the slow side so we over-, never under-estimate
