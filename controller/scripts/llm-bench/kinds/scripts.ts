@@ -3,7 +3,7 @@
 // breaking the spoken hard rules (tells, markup, digits, opener repeats).
 
 import type { KindSpec } from './types.js';
-import { generateIntro, generateLink, generateStationId, generateHourlyTime } from '../../../src/llm/dj.js';
+import { generateIntro, generateLink, generatePersonaStationId, generateHourlyTime } from '../../../src/llm/dj.js';
 import { checkSpokenLine } from '../rules.js';
 import { benchContext, HOST, LIBRARY, RECENT_OPENERS, CURRENT_TRACK, PREVIOUS_TRACK } from '../fixtures.js';
 
@@ -52,13 +52,13 @@ export const specs: KindSpec[] = [
     ],
   },
   {
-    kind: 'generateStationId',
+    kind: 'generatePersonaStationId',
     group: 'scripts',
     mode: 'any',
     scenarios: [
       {
         name: 'normal',
-        run: () => generateStationId({ context: benchContext(), persona: HOST }),
+        run: () => generatePersonaStationId({ context: benchContext(), persona: HOST }),
         check: (out: any) => checkSpokenLine(out),
       },
     ],

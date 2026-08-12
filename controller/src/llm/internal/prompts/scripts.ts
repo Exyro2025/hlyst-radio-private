@@ -105,20 +105,28 @@ export async function generateIntro({ track, context, requestedBy = null, reques
   });
 }
 
-export async function generateStationId({ recap = null, context = null, recentOpeners = null, persona = null }: any = {}) {
+export function personaStationIdPrompt({ recap = null, context = null, recentOpeners = null, persona = null }: any = {}) {
   const speaker = persona || settings.getEffectivePersona();
   const djName = speaker?.name || 'your host';
   const stationName = settings.get().station;
-  const ctxLines = buildContextLines(context, { contextFields: SCRIPT_CONTEXT_FIELDS });
-  // Loose clock only: an ident is generated at the cron tick but airs after
-  // LLM + TTS + voice-queue latency — an exact "18:15" routinely lands on air
-  // minutes late (issue #864). Time-of-day colour is fine; minutes are not.
-  ctxLines.push(`Task: ${lengthPhrase('stationId', speaker)} for ${stationName} with ${djName}. A little understated. If you nod to the clock, keep it loose — the time of day, never the exact minutes (this airs a few minutes after you write it).`);
+  const showName = context?.activeShow?.name;
+  const lines = [`Station: "${stationName}".`, `Presenter: ${djName}.`];
+  if (showName) lines.push(`Current show: "${showName}".`);
+  lines.push(`Task: ${lengthPhrase('stationId', speaker)} identifying the station and presenter. Mention the current show when it fits naturally. Keep it understated and in character.`);
+  // No rotating angle: the old station_id angles injected clock, daypart,
+  // station mythology and listener-address material unrelated to an ident.
+  // The Persona Soul owns expression; decoration remains only to supply this
+  // Persona's anti-repetition memory.
+  return decoratePrompt(lines.join('\n'), { kind: 'persona_station_id', recap, recentOpeners });
+}
+
+export async function generatePersonaStationId(args: any = {}) {
+  const speaker = args.persona || settings.getEffectivePersona();
   return djText({
     system: djSystem(speaker),
-    prompt: decoratePrompt(ctxLines.join('\n'), { kind: 'station_id', recap, recentOpeners }),
+    prompt: personaStationIdPrompt({ ...args, persona: speaker }),
     temperature: 1.0, topP: 0.9, repeatPenalty: 1.25, seed: randomSeed(),
-    kind: 'generateStationId',
+    kind: 'generatePersonaStationId',
   });
 }
 

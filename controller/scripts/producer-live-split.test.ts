@@ -16,6 +16,8 @@ const {
 } = await import('../src/broadcast/dj-agent/agents.js');
 const {
   fuzzyAirTime,
+  generatePersonaStationId,
+  personaStationIdPrompt,
   generatePersonaLink,
   personaLinkPrompt,
   generatePersonaSegment,
@@ -30,6 +32,41 @@ test('live picker agents declare separate Persona and Producer routes', () => {
   assert.equal(pickerAgent.role, 'persona');
   assert.equal(producerPickerAgent.role, 'producer');
   assert.equal(producerPickerAgent.kind, 'djProducerPick');
+});
+
+test('Persona station ids receive only identity, show name and anti-repeat memory', () => {
+  const prompt = personaStationIdPrompt({
+    persona: { name: 'Chris', scriptLength: 'concise' },
+    context: {
+      date: { dayLabel: 'Wednesday', dayOfMonth: 12, monthLabel: 'August', season: 'summer' },
+      clock: { display: '13:15' },
+      time: { period: 'afternoon', vibe: 'drive home' },
+      festival: { name: 'Example Festival' },
+      listeners: { count: 7 },
+      activeShow: {
+        name: 'Lunchtime Rocks',
+        topic: 'Big guitars and loud opinions.',
+        episodeAngle: 'The history of distortion.',
+        moods: ['energetic'],
+      },
+    },
+    recap: '- 4m ago [station-id]: "A previous Chris ident."',
+    recentOpeners: ['A previous Chris ident'],
+  });
+  assert.match(prompt, /Presenter: Chris/);
+  assert.match(prompt, /Lunchtime Rocks/);
+  assert.match(prompt, /previous Chris ident/);
+  assert.ok(!prompt.includes('Wednesday'));
+  assert.ok(!prompt.includes('13:15'));
+  assert.ok(!prompt.includes('afternoon'));
+  assert.ok(!prompt.includes('drive home'));
+  assert.ok(!prompt.includes('Example Festival'));
+  assert.ok(!prompt.includes('Listeners'));
+  assert.ok(!prompt.includes('Big guitars'));
+  assert.ok(!prompt.includes('history of distortion'));
+  assert.ok(!prompt.includes('energetic'));
+  assert.ok(!prompt.includes('Tone for this segment'));
+  assert.equal(typeof generatePersonaStationId, 'function');
 });
 
 test('the Producer picker system excludes the on-air Persona preamble', () => {

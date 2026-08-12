@@ -270,6 +270,21 @@ routing only alongside a dedicated playlist engine or a broader integration
 designed for music-library curation; do not occupy the single CPU Producer slot
 with it by default.
 
+## Persona station identification
+
+Station identification is pure on-air writing and has no Producer stage. The
+call is named `generatePersonaStationId` and receives only the station name,
+the speaking Persona, the active show's name and anti-repetition memory scoped
+to that Persona. The show name is useful listener-facing identity; its brief,
+episode angle and moods are not needed to identify the station.
+
+The former generic context packet and rotating `station_id` angle are omitted.
+They exposed the ident to date, clock, daypart, festival, listener count and
+hidden suggestions about station mythology or direct listener address. None is
+an operational fact the immediate task requires, and queued voice latency also
+makes clock-derived wording fragile. Character and phrasing remain the
+responsibility of the selected Persona Soul.
+
 ## Boundary rules
 
 Every field crossing from Producer to Persona must answer this question:

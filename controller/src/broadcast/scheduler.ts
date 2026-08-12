@@ -765,10 +765,11 @@ export async function runStationId({ atNextTrack = false } = {}) {
   return withTrace({ kind: 'station-id' }, async () => {
     const ctx = await getFullContext();
     const speaker = settings.pickOnAirSpeaker();
-    const script = await dj.generateStationId({
-      recap: queue.getDjRecap(),
+    const personaId = speaker?.id || null;
+    const script = await dj.generatePersonaStationId({
+      recap: queue.getDjRecap({ personaId }),
       context: ctx,
-      recentOpeners: queue.getRecentOpeners(),
+      recentOpeners: queue.getRecentOpeners(6, personaId),
       persona: speaker,
     });
     const opts = { persona: speaker, meta: { personaId: speaker?.id, personaName: speaker?.name } };
