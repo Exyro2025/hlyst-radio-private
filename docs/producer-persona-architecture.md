@@ -220,27 +220,29 @@ Persona draft. The UI reports the terminal stage and reason in a short toast.
 Tests require the optional Producer leg to be enabled; the established **Run
 now** action remains available regardless.
 
-## Stage C migration: library mood tagging
+## Deliberate exception: library mood tagging
 
-Library mood tagging is a backstage classification task rather than an on-air
-speech task. Its existing prompt already has a narrow operational boundary:
-title, artist, album, year and genre are classified into the operator's mood
-vocabulary plus low/medium/high energy. It receives no Persona Soul, show
-brief, recent speech or Producer prose, and it produces no listener-facing
-copy, so the prompt itself is retained unchanged.
+Library mood tagging looks like a Producer task because it classifies tracks
+rather than writing speech. A live CPU trial established that this is the wrong
+routing criterion: tagging is a bulk-throughput workload, while the Producer
+leg is sized for short, latency-tolerant editorial decisions. Qwen3-4B on CPU
+was structurally capable but projected roughly thirteen minutes for only 132
+pending tracks at a batch size of ten. That cost would make an initial library
+scan needlessly slow.
 
-When the optional Producer leg is enabled, both bulk Library Scan batches and
-the Library page's single-track **Retag** action use the Producer role. The
-stored model label records the model that owns this classification work. A
-Producer connection failure may take the established one-hop safety route to
-the primary Persona model rather than abandoning the scan.
+Both bulk Library Scan batches and the Library page's single-track **Retag**
+therefore remain on the established primary Persona route, including when the
+optional Producer leg is enabled. A configured fallback may continue operating
+as the existing second parallel tagging worker. This is not a Producer-to-
+Persona speech-boundary leak: the tagging prompt contains only title, artist,
+album, year, genre and the mood vocabulary, and its structured mood/energy
+result is never listener-facing prose.
 
-The existing dual-LLM tagging pool is preserved for base installations: a
-configured primary and fallback may continue consuming batches in parallel.
-In split mode only one Producer consumer is started; the Persona model is held
-as failure recovery and does not quietly classify a share of the library in
-parallel. The observable call kinds remain `tag-library` and
-`tag-library-batch`, because they describe the task rather than on-air speech.
+The trade-off is explicit: a future roleplay-focused Persona model must retain
+basic structured classification ability. The evaluation harness should test
+`tag-library-batch` before such a model is adopted. If a future installation
+needs an independent high-throughput classifier, that should be a dedicated
+library-routing setting rather than overloading the live Producer role.
 
 ## Boundary rules
 

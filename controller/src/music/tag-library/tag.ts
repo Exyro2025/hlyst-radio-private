@@ -1,16 +1,16 @@
 // The LLM tagging worker pool, reused by phases 2 and 4.
 //
-// `pin` selects which Persona leg a parallel consumer targets; `role` selects
-// the ordinary Persona route or the optional Producer route. `label` is stamped
+// `pin` selects which leg each consumer targets (undefined = normal
+// primary->fallback failover, used in single-LLM mode); `label` is stamped
 // on every track a consumer tags, so per-track provenance stays honest when two
 // different models are working the same run (discussion #320).
 //
 // Part of the tag-library/ split - see ../tag-library.ts for main().
 
 import * as db from '../library-db.js';
-import { primaryLeg, fallbackLeg, producerLeg, probeLegReachable } from '../../llm/provider.js';
+import { primaryLeg, fallbackLeg, probeLegReachable } from '../../llm/provider.js';
 import { isUnreachable, isQuotaOrAuthError, errReason } from '../../llm/sdk.js';
-import { tagBatch, tagOne, taggerRole, type TagOpts, type TagResult } from '../tagger-core.js';
+import { tagBatch, tagOne, type TagResult } from '../tagger-core.js';
 import { reportProgress } from '../tagger-progress.js';
 import { logEvent } from './log.js';
 
@@ -19,12 +19,11 @@ import { logEvent } from './log.js';
 // LLM tagging helper (reused by phase 2 + phase 4)
 // ---------------------------------------------------------------------------
 
-// A single worker the batch loop pulls through. `pin` selects a specific
-// Persona leg; `role` selects the routed Producer path in split mode. `label`
-// records which configured model owns the batch.
+// A single LLM worker the batch loop pulls through. `pin` selects which leg
+// each call targets (undefined → normal primary→fallback failover, used in
+// single-LLM mode); `label` records which configured model owns the batch.
 interface TagConsumer {
   pin?: 'primary' | 'fallback';
-  role: 'persona' | 'producer';
   label: string;
 }
 
@@ -67,8 +66,7 @@ async function processBatch(
     year: t.year ?? undefined,
     genres: t.genres,
   }));
-  const opts: TagOpts = { role: consumer.role };
-  if (consumer.pin) opts.leg = consumer.pin;
+  const opts = consumer.pin ? { leg: consumer.pin } : {};
 
   let results: Array<TagResult | null>;
   try {
@@ -235,37 +233,31 @@ export async function llmTagInBatches(
   return { tagged: state.tagged, callCount: state.callCount, byLeg: state.byLeg };
 }
 
-// Decide the LLM consumers for this run. Base mode may feed a configured primary
-// and fallback in parallel. Split mode starts one Producer consumer and keeps
-// Persona out of the shared queue, available only through routed failure recovery.
+// Decide the LLM consumers for this run. Dual-LLM mode activates automatically
+// when a fallback is configured, distinct from primary, and answers a cheap
+// probe — then both boxes tag in parallel off a shared queue.
 export async function resolveTagConsumers(): Promise<TagConsumer[]> {
-  if (taggerRole() === 'producer') {
-    const producer = producerLeg();
-    logEvent('info', `Producer tagging active: ${producer.label} (Persona reserved for failure recovery)`);
-    return [{ role: 'producer', label: producer.label }];
-  }
-
   const primary = primaryLeg();
   const fb = fallbackLeg();
-  if (!fb) return [{ role: 'persona', label: primary.label }];
+  if (!fb) return [{ label: primary.label }];
 
   const sameHost =
     (primary.cfg.ollamaUrl || '') === (fb.cfg.ollamaUrl || '') &&
     (primary.cfg.baseUrl || '') === (fb.cfg.baseUrl || '');
   if (fb.label === primary.label && sameHost) {
     logEvent('info', 'Fallback LLM identical to primary — single-LLM mode');
-    return [{ role: 'persona', label: primary.label }];
+    return [{ label: primary.label }];
   }
 
   if (!(await probeLegReachable(fb))) {
     logEvent('info', `Fallback LLM (${fb.label}) unreachable — single-LLM mode`);
-    return [{ role: 'persona', label: primary.label }];
+    return [{ label: primary.label }];
   }
 
   logEvent('info', `Dual-LLM mode active: primary=${primary.label} + fallback=${fb.label}`);
   return [
-    { pin: 'primary', role: 'persona', label: primary.label },
-    { pin: 'fallback', role: 'persona', label: fb.label },
+    { pin: 'primary', label: primary.label },
+    { pin: 'fallback', label: fb.label },
   ];
 }
 

@@ -17,8 +17,9 @@ import * as settings from '../settings.js';
 import * as embeddings from '../music/embeddings.js';
 import { resolveEraYear } from '../music/show-filter.js';
 import { buildGenreSuggest } from '../music/genre-suggest.js';
-import { tagBatch, taggerBatchSystem, taggerModelLabel, taggerRole } from '../music/tagger-core.js';
+import { tagBatch, taggerBatchSystem } from '../music/tagger-core.js';
 import { promptVocabHash } from '../music/embeddings.js';
+import { activeModelLabel } from '../llm/provider.js';
 import { queue } from '../broadcast/queue.js';
 import { tagger, taggerView, startAnalyzer, startReconcile } from '../broadcast/tagger.js';
 import { refreshAutoPlaylist } from '../broadcast/scheduler.js';
@@ -839,7 +840,7 @@ router.post('/library/retag', requireAdmin, async (req, res) => {
     }
 
     // 4. LLM tag through the same batch path the bulk pipeline uses.
-    const [{ moods, energy }] = await tagBatch([song], { role: taggerRole() });
+    const [{ moods, energy }] = await tagBatch([song]);
     library.set(id, {
       title: song.title,
       artist: song.artist,
@@ -850,7 +851,7 @@ router.post('/library/retag', requireAdmin, async (req, res) => {
       energy,
       source: 'llm',
       promptHash: promptVocabHash(taggerBatchSystem()),
-      model: taggerModelLabel(),
+      model: activeModelLabel(),
     });
     await library.save();
     const tagged = library.get(id);
