@@ -338,6 +338,14 @@ export default function DashPanel() {
   // and its transition flags are final. Never reconstruct it from raw queue
   // flags here: an unsent proposal can still be vetoed or replaced.
   const nextTransition = q.nextTransition ?? '—';
+  // Under pair-aware drain the first upcoming item is held unsent for most of
+  // each track, so the em dash is the NORMAL reading rather than a fault — say
+  // so, or it reads as a broken panel. The armed tooltip names the pair the
+  // label describes: this is the seam out of the on-air track, not out of the
+  // queue row it sits above.
+  const nextTransitionHint = q.nextTransition
+    ? 'How the on-air track hands over to the first queued track'
+    : 'Not armed yet — the seam is decided when the next track is handed to the mixer';
   // `sessionMessages` arrives in air order and is shown newest first. Each turn
   // carries its ORIGINAL index: turnKey() folds the index into the React key, and
   // a display index would shift under every new turn, remounting the whole list.
@@ -392,7 +400,10 @@ export default function DashPanel() {
             title="Queue"
             sub={`${upcoming.length} upcoming`}
             right={
-              <span className="text-[9px] font-bold tracking-[0.18em] text-muted uppercase">
+              <span
+                title={nextTransitionHint}
+                className="text-[9px] font-bold tracking-[0.18em] text-muted uppercase"
+              >
                 Next transition: <span className="text-ink">{nextTransition}</span>
               </span>
             }
