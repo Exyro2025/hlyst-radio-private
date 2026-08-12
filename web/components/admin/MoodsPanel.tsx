@@ -31,6 +31,8 @@ import {
   SETTINGS_MOOD_PROMPT_MAX,
 } from '@/lib/schemas.generated';
 import { VoicePreviewButton } from './tts/VoicePreviewButton';
+import { defaultEngineVoice } from './tts/defaultVoice';
+import { ENGINE_META } from './tts/engineMeta';
 
 interface MoodEntry {
   name: string;
@@ -52,6 +54,9 @@ interface TestVoiceDefaults {
   cloudProvider?: string;
   cloudModel?: string;
   speed?: number;
+  // Kokoro's language code, so the test sample auditions the same voice the
+  // Settings → TTS "Play sample" button does.
+  lang?: string;
 }
 
 // The 8 fixed day-periods (controller context.ts getTimeContext) — only each
@@ -231,7 +236,7 @@ export default function MoodsPanel() {
           tts?: {
             corrections?: unknown;
             defaultEngine?: string;
-            kokoro?: { voice?: string };
+            kokoro?: { voice?: string; lang?: string };
             chatterbox?: { referenceVoice?: string };
             pocketTts?: { voice?: string };
             cloud?: { provider?: string; model?: string; voice?: string };
@@ -267,21 +272,17 @@ export default function MoodsPanel() {
       setLoaded(true);
 
       // Which voice the "Test corrections" sample uses — the station's
-      // configured default engine, resolved the same way tts.ts picks it.
+      // configured default engine, resolved through the one shared ladder
+      // (admin/tts/defaultVoice.ts) the Settings → TTS preview also walks.
       const rawTts = v.tts || {};
       const previewEngine = rawTts.defaultEngine || 'piper';
-      const previewVoiceValue =
-        previewEngine === 'kokoro' ? (rawTts.kokoro?.voice || '')
-        : previewEngine === 'chatterbox' ? (rawTts.chatterbox?.referenceVoice || '')
-        : previewEngine === 'pocket-tts' ? (rawTts.pocketTts?.voice || '')
-        : previewEngine === 'cloud' ? (rawTts.cloud?.voice || '')
-        : '';
       setPreviewVoice({
         engine: previewEngine,
-        voice: previewVoiceValue,
+        voice: defaultEngineVoice(previewEngine, rawTts),
         cloudProvider: rawTts.cloud?.provider,
         cloudModel: previewEngine === 'cloud' ? rawTts.cloud?.model : undefined,
         speed: rawTts.speed?.[previewEngine],
+        lang: rawTts.kokoro?.lang || undefined,
       });
       setErr(null);
     } catch (e) {
@@ -653,7 +654,7 @@ export default function MoodsPanel() {
               <div className="field-hint">
                 Uses the corrections list above exactly as it stands right now, unsaved
                 changes included, spoken by the station&apos;s default voice
-                ({previewVoice.engine}).
+                ({ENGINE_META[previewVoice.engine]?.label || previewVoice.engine}).
               </div>
               <Input
                 aria-label="Test sentence"
@@ -669,6 +670,7 @@ export default function MoodsPanel() {
                 cloudProvider={previewVoice.cloudProvider}
                 cloudModel={previewVoice.cloudModel}
                 speed={previewVoice.speed}
+                lang={previewVoice.lang}
                 text={testText}
                 corrections={effectiveCorr}
                 disabled={!testText.trim()}

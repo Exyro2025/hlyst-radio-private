@@ -100,15 +100,3 @@ export function localizedPreviewText(language?: string): string | null {
   if (!language || typeof language !== 'string') return null;
   return LOOKUP.get(normalizeLanguage(language)) ?? null;
 }
-
-// English display name for each recognized language, for the admin
-// "Test corrections" language dropdown (web/components/admin/LanguageSelect.tsx,
-// used to pick the localized sample sentence — not a correction-scoping
-// filter, corrections stay language-agnostic) — GET /settings surfaces this
-// as tts.speechLanguages. Sorted for a stable, alphabetical dropdown.
-export const PREVIEW_LANGUAGES: string[] = ENTRIES
-  .map(e => {
-    const k = e.keys[0];
-    return k.charAt(0).toUpperCase() + k.slice(1);
-  })
-  .sort((a, b) => a.localeCompare(b));
