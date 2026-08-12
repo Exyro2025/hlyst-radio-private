@@ -26,7 +26,7 @@ Three problems:
 ## Solution
 
 One full-width **State dir** card containing a lazy, read-only directory tree
-(kibo-ui `tree`), backed by a new non-recursive listing endpoint. The DJ-voices
+(ai-elements `file-tree`), backed by a new non-recursive listing endpoint. The DJ-voices
 card is deleted; `voice/` is expanded by default so its WAVs stay one glance away.
 
 "Read-only" here means **metadata only** — names, sizes, mtimes, dir/file/symlink.
@@ -127,28 +127,51 @@ Section 5 of the `/debug` handler (`out.stateFiles` / `out.voiceFiles`, `control
 
 ### Vendoring the tree
 
-`npx shadcn@latest add https://www.kibo-ui.com/r/tree.json` →
-`web/components/kibo-ui/tree/index.tsx`. One file. Declared deps are `motion` and
-`lucide-react`, both already in `web/package.json`; no new Radix primitive, no new
-dependency to install.
+`npx ai-elements@latest add file-tree` → `web/components/ai-elements/file-tree.tsx`,
+joining the 16 ai-elements components already vendored here (the debug panel's own
+Liquidsoap log runs on `ai-elements/terminal`). One file. Declared deps are
+`lucide-react` plus the `collapsible` registry item — both already present, so
+there is nothing to install.
 
-**The vendored file imports `cn` from `@/lib/utils`, which does not exist in this repo.**
-Rewrite that import to `@/lib/cn` immediately after adding it. This is the recurring
-shadcn-CLI trap in `web/` — the CLI assumes upstream's layout.
+Chosen over kibo-ui's `tree`, which was the first candidate, for three concrete
+reasons rather than familiarity:
 
-The component is fully composable (`TreeProvider` / `TreeView` / `TreeNode` /
-`TreeNodeTrigger` / `TreeExpander` / `TreeIcon` / `TreeLabel` / `TreeNodeContent`),
-so children are rendered by us — which is exactly what makes lazy per-node loading
-possible without patching the component.
+1. **`onExpandedChange` is a real callback.** Lazy loading needs a hook at the
+   moment a folder opens. kibo's tree keeps `expandedIds` entirely internal with
+   no callback out, so the fetch had to hang off `onClick` on both the row AND
+   the chevron — two call sites for one event, and neither fires for a keyboard
+   expand.
+2. **No inline styles.** kibo indents by an inline `level * indent` pixel padding,
+   which this repo forbids (issue #50) and which would have needed an eslint
+   exemption plus a hand-rolled indent scale for the status rows. `FileTreeFolder`
+   nests its children in a `ml-4 border-l pl-2` wrapper instead, so indentation
+   is DOM structure and every row is lint-clean.
+3. **Real buttons and keyboard handling.** kibo's rows are `motion.div`s with
+   click handlers — no tab stop, no Enter/Space. ai-elements ships `<button>`
+   elements and an explicit `onKeyDown`.
+
+Two import aliases are rewritten on the way in: `@/registry/default/ui/collapsible`
+→ `@/components/ui/collapsible`, and `@/lib/utils` → `@/lib/cn`. (`components.json`
+already maps the `utils` alias to `@/lib/cn`, so the CLI does the second one itself.)
+
+**`FileTreeFile` renders `children ?? (icon + name)` — children REPLACE the default
+row, they do not append to it.** Passing only a size/mtime column erases the
+filename. The whole row is composed at the call site through the exported
+`FileTreeIcon` / `FileTreeName` subcomponents.
 
 ### `components/admin/debug/StateTree.tsx`
 
 New, self-contained, owns all tree state:
 
-- A `Map<relPath, DirState>` cache, where `DirState` is
+- A `Record<relPath, DirState>` cache, where `DirState` is
   `{ status: 'loading' | 'ready' | 'error', entries, shown, total, error }`.
-- Expanding a directory with no cache entry fires one `adminFetch('/debug/state-tree?path=…')`.
-  An already-cached directory expands instantly; collapse keeps the cache.
+- The tree is driven **controlled** (`expanded` + `onExpandedChange`) rather than
+  left to its own internal state, because expanding a folder is what triggers the
+  fetch: the callback IS the load hook. A path that has just been expanded and was
+  never fetched gets one `adminFetch('/debug/state-tree?path=…')`; an already-cached
+  directory re-opens with no request, and collapse keeps the cache.
+- An `inFlight` ref de-dupes a directory already being fetched, so expand →
+  collapse → expand cannot fire the same listing twice.
 - On mount it prefetches **two** paths: the root and `voice`, so the default-expanded
   `voice/` node is populated on first paint.
 - A **Refresh** button clears the cache and re-fetches the currently expanded paths.

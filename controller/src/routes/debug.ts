@@ -1,6 +1,6 @@
 // Admin-gated GET /debug — everything-at-a-glance for the debug UI.
 import express from 'express';
-import { readFile, readdir, stat } from 'node:fs/promises';
+import { readFile, readdir } from 'node:fs/promises';
 import { config } from '../config.js';
 import * as dj from '../llm/dj.js';
 import * as llmProvider from '../llm/provider.js';
@@ -26,6 +26,7 @@ import * as requestLog from '../broadcast/request-log.js';
 import { getStationTimezone } from '../time.js';
 import { publicOrigin } from './public.js';
 import { requireAdmin } from '../middleware/auth.js';
+import { BadStatePathError, listStateDir } from '../util/state-tree.js';
 
 export const router = express.Router();
 
@@ -205,27 +206,10 @@ async function buildDebugSnapshot(req: express.Request): Promise<any> {
     out.liquidsoapLog = `error: ${err.message}`;
   }
 
-  // 5. State dir listing
-  try {
-    const dir = config.stateDir;
-    const entries = await readdir(dir);
-    out.stateFiles = await Promise.all(entries.map(async (name) => {
-      try {
-        const s = await stat(`${dir}/${name}`);
-        return { name, size: s.size, mtime: s.mtime.toISOString(), isDir: s.isDirectory() };
-      } catch { return { name, error: true }; }
-    }));
-    const voiceDir = `${dir}/voice`;
-    try {
-      const v = await readdir(voiceDir);
-      out.voiceFiles = await Promise.all(v.map(async (name) => {
-        const s = await stat(`${voiceDir}/${name}`);
-        return { name, size: s.size, mtime: s.mtime.toISOString() };
-      }));
-    } catch {}
-  } catch (err) {
-    out.stateFiles = { error: err.message };
-  }
+  // 5. State dir listing — deliberately NOT here. It used to run a readdir plus
+  // a stat fan-out over the state dir AND state/voice on every 2s poll of this
+  // handler. The debug panel now browses the tree lazily via GET /debug/state-tree
+  // below, one directory per expand, on mount rather than on a timer.
 
   // 6. Recent LLM calls — `llm` reflects the active provider/model resolved
   // by the registry; `ollamaUrl` is the effective endpoint (settings or default).
@@ -346,6 +330,28 @@ router.get('/sessions', requireAdmin, async (req, res) => {
     });
   } catch (err) {
     res.status(500).json({ error: err.message });
+  }
+});
+
+// GET /debug/state-tree — ONE directory of the state dir, for the debug panel's
+// read-only tree. Metadata only: names, sizes, mtimes, dir/file/symlink. There is
+// deliberately no content endpoint beside it — settings.json, secrets.env and
+// icecast-secrets.env all live in this tree and hold live credentials.
+//
+// Rooted at config.stateDir (the ACTIVE station dir), which is what the old flat
+// State dir card listed. Install-level files at stateRoot stay out of scope.
+router.get('/debug/state-tree', requireAdmin, async (req, res) => {
+  const rel = typeof req.query.path === 'string' ? req.query.path : '';
+  try {
+    res.json(await listStateDir(config.stateDir, rel));
+  } catch (err: any) {
+    // A malformed path is a bad REQUEST; a path that is merely missing or
+    // unreadable is a listing that failed, and the panel renders it inline.
+    if (err instanceof BadStatePathError) {
+      res.status(400).json({ error: err.message });
+      return;
+    }
+    res.json({ root: config.stateDir, path: rel, entries: [], shown: 0, total: 0, error: err.message });
   }
 });
 
