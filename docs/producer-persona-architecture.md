@@ -131,9 +131,10 @@ timings measured from the beginning no longer describe the available space.
 
 The second migrated path is the five-minute autonomous segment director. The
 base installation remains on the established all-in-one path; this split is
-active only while the optional Producer leg is enabled. Operator-fired skills
-remain on their established path during the first live evaluation so automatic
-and manual behaviour are not changed simultaneously.
+active only while the optional Producer leg is enabled. The existing **Run
+now** action remains on its established on-air path so automatic and manual
+behaviour are not changed simultaneously. A separate **Off-air test** action
+exercises the split path without replacing that operator override.
 
 ### Original all-in-one contract
 
@@ -201,6 +202,23 @@ Persona response results in silence. Optional talk has no legacy all-in-one
 fallback because preserving airtime is less important than avoiding an
 ungrounded on-air statement. The observable call kinds are
 `djProducerSegment` and `generatePersonaSegment`.
+
+### Off-air skill rehearsal
+
+The Skills page's **Off-air test** action is the first deliberately small seam
+for a future Rehearsal Room. It offers only the selected skill to the same
+`djProducerSegment` contract used by the autonomous scheduler. The Producer
+may decline, or it may research and approve the skill; the controller applies
+the same selected-tool and evidence-grounding rules before
+`generatePersonaSegment` creates a draft.
+
+The test is observational. It never calls TTS, plays SFX, appends Persona
+speech to the live session, advances skill cooldowns, burns headline or artist
+dedup state, consumes the durable curiosity ledger, or writes an on-air event.
+The normal LLM debug records retain the Producer response, tool evidence and
+Persona draft. The UI reports the terminal stage and reason in a short toast.
+Tests require the optional Producer leg to be enabled; the established **Run
+now** action remains available regardless.
 
 ## Boundary rules
 

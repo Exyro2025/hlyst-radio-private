@@ -171,7 +171,7 @@ const lastFired = new Map<string, number>(); // kind → ms timestamp of last ai
 // Dedup memory carried across ticks — passed straight into the segment tools.
 // Curiosity dedup is NOT here anymore: it lives in the durable ledger in
 // skills/curiosity.js (issue #577) so it survives a controller restart.
-interface SegmentState {
+export interface SegmentState {
   seenHeadlines: Set<string>;
   lastWeatherCondition: string | null;
   lastSearchedArtist: string | null;
@@ -184,6 +184,10 @@ const segmentState: SegmentState = {
   lastSearchedArtist: null,
   lastAnySegment: 0,
 };
+
+export function isolatedSegmentState(source: SegmentState): SegmentState {
+  return { ...source, seenHeadlines: new Set(source.seenHeadlines) };
+}
 
 // Minimum gap between ANY two segments, by station frequency. The cron fires
 // every 5 min; aggressive stations get no extra floor. Infinity for silent —
@@ -307,8 +311,8 @@ export const producerDirectorAgent = defineAgent({
     const capList = caps.map((cap) => `- ${cap.kind}: ${cap.desc}`).join('\n');
     return `${producerSegmentSystem()}\n\nStation cadence: ${stationTone(freq)}\n\nOffered segment kinds:\n${capList}${producerSfxBlock(sfxCatalog)}`;
   },
-  buildTools: ({ ctx, segmentState, caps, currentTrack }) => ({
-    tools: buildSegmentTools(ctx, segmentState, caps, currentTrack),
+  buildTools: ({ ctx, segmentState, caps, currentTrack, rehearsal }) => ({
+    tools: buildSegmentTools(ctx, segmentState, caps, currentTrack, { rehearsal }),
   }),
 });
 
@@ -425,19 +429,27 @@ export function personaSegmentContext(cap, ctx): { facts: string[]; includeTrack
   return { facts, includeTrack: TRACK_CONTEXT_SEGMENTS.has(cap?.kind) };
 }
 
-async function runSplitDirector(ctx, { caps, speaker, freq, sfxCatalog }) {
+export type SplitSegmentStatus = 'draft' | 'producer-declined' | 'producer-invalid' | 'evidence-rejected' | 'stale' | 'persona-empty';
+
+interface SplitSegmentResult {
+  status: SplitSegmentStatus;
+  seg: { kind: string; text: string; sfx: string | null } | null;
+  reason: string;
+}
+
+async function runSplitDirector(ctx, { caps, speaker, freq, sfxCatalog, state = segmentState, rehearsal = false }): Promise<SplitSegmentResult> {
   const currentTrack = queue.current?.track ?? null;
   const { object, toolCalls } = await producerDirectorAgent.run({
     messages: [{ role: 'user', content: buildProducerSituation(ctx, caps, currentTrack) }],
-    caps, freq, sfxCatalog, ctx, segmentState, currentTrack,
+    caps, freq, sfxCatalog, ctx, segmentState: state, currentTrack, rehearsal,
   });
-  if (!object?.air) return { seg: null, reason: object?.reason || 'Producer chose silence' };
+  if (!object?.air) return { status: 'producer-declined', seg: null, reason: object?.reason || 'Producer chose silence' };
   const cap = caps.find((candidate) => candidate.kind === object?.kind);
-  if (!cap) return { seg: null, reason: `Producer returned unoffered kind "${object?.kind || ''}"` };
+  if (!cap) return { status: 'producer-invalid', seg: null, reason: `Producer returned unoffered kind "${object?.kind || ''}"` };
 
   const evidence = groundedSearchEvidence(cap.kind, evidenceForCapability(cap, toolCalls));
   if (typeof cap.toolFn === 'function' && !usableSegmentEvidence(evidence)) {
-    return { seg: null, reason: `${cap.kind} returned no usable evidence` };
+    return { status: 'evidence-rejected', seg: null, reason: `${cap.kind} returned no usable evidence` };
   }
 
   const { facts, includeTrack } = personaSegmentContext(cap, ctx);
@@ -447,7 +459,7 @@ async function runSplitDirector(ctx, { caps, speaker, freq, sfxCatalog }) {
       (currentTrack.id && liveTrack.id && currentTrack.id === liveTrack.id)
       || (currentTrack.title === liveTrack.title && currentTrack.artist === liveTrack.artist)
     );
-    if (!sameTrack) return { seg: null, reason: `${cap.kind} research became stale after the track changed` };
+    if (!sameTrack) return { status: 'stale', seg: null, reason: `${cap.kind} research became stale after the track changed` };
   }
   const personaId = speaker?.id || null;
   const maxChars = speaker?.scriptLength === 'storyteller' ? 520 : speaker?.scriptLength === 'extended' ? 360 : 140;
@@ -461,8 +473,8 @@ async function runSplitDirector(ctx, { caps, speaker, freq, sfxCatalog }) {
     recentOpeners: queue.getRecentOpeners(6, personaId),
     persona: speaker,
   })).trim();
-  if (!text) return { seg: null, reason: 'Persona produced no text' };
-  return { seg: { kind: cap.kind, text, sfx: object?.sfx ?? null }, reason: object?.reason };
+  if (!text) return { status: 'persona-empty', seg: null, reason: 'Persona produced no text' };
+  return { status: 'draft', seg: { kind: cap.kind, text, sfx: object?.sfx ?? null }, reason: object?.reason || 'Producer approved the segment' };
 }
 
 // The concrete situation handed to the agent as its single user turn. Built
@@ -799,6 +811,48 @@ export const forcedDirectorAgent = defineAgent({
     tools: buildSegmentTools(ctx, segmentState, [cap]),
   }),
 });
+
+export interface SkillTestResult {
+  name: string;
+  kind: string;
+  status: SplitSegmentStatus;
+  reason: string;
+  draft?: string;
+  sfx?: string | null;
+}
+
+// Off-air rehearsal of the autonomous split path. Exactly one skill is offered
+// to the Producer, but silence remains a valid decision and every ordinary
+// evidence guard still applies. The cloned state and rehearsal services make
+// discovery non-consuming: no cooldown, headline/artist memory, curiosity
+// ledger, session speech, TTS, SFX or queue state is changed.
+export async function testCapability(which, ctx): Promise<SkillTestResult> {
+  if (!settings.get().llm?.producer?.enabled) {
+    throw new Error('Off-air skill tests require the optional Producer LLM to be enabled');
+  }
+
+  const cap = allCapabilities().find(c => c.kind === which || c.skill === which);
+  if (!cap) throw new Error(`unknown skill: ${which}`);
+  if (cap.ready && !cap.ready()) throw new Error(`skill "${cap.skill}" is not ready`);
+
+  const speaker = settings.getEffectivePersona(new Date());
+  const freq = settings.effectiveFrequency(speaker);
+  const sfxCatalog = settings.get().sfx?.enabled === false ? [] : await sfx.catalog();
+  const rehearsalState = isolatedSegmentState(segmentState);
+  const result = await runSplitDirector(ctx, {
+    caps: [cap], speaker, freq, sfxCatalog, state: rehearsalState, rehearsal: true,
+  });
+
+  const output: SkillTestResult = {
+    name: cap.skill,
+    kind: cap.kind,
+    status: result.status,
+    reason: result.reason,
+    ...(result.seg ? { draft: result.seg.text, sfx: result.seg.sfx } : {}),
+  };
+  queue.log('scheduler', `[skill-test] ${cap.kind}: ${result.status} — ${result.reason}`);
+  return output;
+}
 
 // Operator override — fire one capability on demand, bypassing cooldowns, the
 // frequency floor, persona ownership and the enable toggle. Backs POST

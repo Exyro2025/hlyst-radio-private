@@ -44,6 +44,16 @@ export interface StationServices {
   log: (msg: string) => void;
 }
 
+// Rehearsals share live read paths but cannot consume durable evidence or add
+// tool-authored booth lines. Kept pure so the no-write boundary is testable.
+export function rehearsalStationServices(services: StationServices): StationServices {
+  return {
+    ...services,
+    recall: { ...services.recall, remember: () => {} },
+    log: () => {},
+  };
+}
+
 let cached: StationServices | null = null;
 
 // Build (once) the services facade. The wrappers are stateless — `nowPlaying`,

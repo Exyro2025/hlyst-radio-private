@@ -14,7 +14,7 @@ import * as subsonic from '../music/subsonic.js';
 import * as library from '../music/library.js';
 import * as settings from '../settings.js';
 import { runStationId, runHourlyCheck, runLink, runBanter, runProgrammeIntro, runProgrammeFeature, runProgrammeOutro, refreshAutoPlaylist } from '../broadcast/scheduler.js';
-import { skillCatalog, runCapability, effectiveContextFields } from '../skills/_agent.js';
+import { skillCatalog, runCapability, testCapability, effectiveContextFields } from '../skills/_agent.js';
 import * as sfxLib from '../broadcast/sfx.js';
 import { loadSkills, loadedCapabilities, parseFrontmatter, parseTags, SEEDED_KINDS, RESERVED_KINDS, SLUG_RE, readTemplate, listCommunitySkills, readCommunitySkill } from '../skills/loader.js';
 import {
@@ -751,6 +751,27 @@ router.post('/dj/skill', requireAdmin, async (req, res) => {
     res.json({ ok: true, name, spoken });
   } catch (err) {
     queue.log('error', `/dj/skill ${name} failed: ${err.message}`);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ---------------------------------------------------------------------------
+// POST /dj/skill-test — rehearse one autonomous split skill without airing it
+// Body: { name }
+// ---------------------------------------------------------------------------
+router.post('/dj/skill-test', requireAdmin, async (req, res) => {
+  const name = req.body?.name;
+  if (!name || typeof name !== 'string') {
+    return res.status(400).json({ error: 'name is required' });
+  }
+  if (!settings.get().llm?.producer?.enabled) {
+    return res.status(409).json({ error: 'Off-air skill tests require the optional Producer LLM to be enabled' });
+  }
+  try {
+    const result = await testCapability(name, await getFullContext());
+    res.json({ ok: true, ...result });
+  } catch (err) {
+    queue.log('error', `/dj/skill-test ${name} failed: ${err.message}`);
     res.status(500).json({ error: err.message });
   }
 });

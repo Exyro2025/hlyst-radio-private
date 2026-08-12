@@ -21,7 +21,8 @@ const {
   generatePersonaSegment,
   personaSegmentPrompt,
 } = await import('../src/llm/internal/prompts/scripts.js');
-const { buildProducerSituation, groundedSearchEvidence, personaSegmentContext, producerDirectorAgent, usableSegmentEvidence } = await import('../src/skills/_agent.js');
+const { buildProducerSituation, groundedSearchEvidence, isolatedSegmentState, personaSegmentContext, producerDirectorAgent, usableSegmentEvidence } = await import('../src/skills/_agent.js');
+const { rehearsalStationServices } = await import('../src/llm/internal/tools/station-services.js');
 const { showMusicLean } = await import('../src/llm/internal/prompts/picker.js');
 const { queue } = await import('../src/broadcast/queue.js');
 
@@ -200,6 +201,32 @@ test('failed and empty tool payloads cannot reach the Persona as evidence', () =
   assert.equal(usableSegmentEvidence({ available: false }), false);
   assert.equal(usableSegmentEvidence({ headlines: [] }), false);
   assert.equal(usableSegmentEvidence({ headlines: [{ title: 'A real item' }] }), true);
+});
+
+test('off-air rehearsal isolates in-memory and durable tool state', () => {
+  const liveState = {
+    seenHeadlines: new Set(['already aired']),
+    lastWeatherCondition: 'cloudy',
+    lastSearchedArtist: 'Queen',
+    lastAnySegment: 123,
+  };
+  const rehearsalState = isolatedSegmentState(liveState);
+  rehearsalState.seenHeadlines.add('test headline');
+  rehearsalState.lastSearchedArtist = 'Robyn';
+  assert.deepEqual([...liveState.seenHeadlines], ['already aired']);
+  assert.equal(liveState.lastSearchedArtist, 'Queen');
+
+  let remembered = 0;
+  let logged = 0;
+  const services = rehearsalStationServices({
+    recall: { seen: () => true, remember: () => { remembered += 1; } },
+    log: () => { logged += 1; },
+  } as any);
+  assert.equal(services.recall.seen('known fact'), true);
+  services.recall.remember('new fact');
+  services.log('test');
+  assert.equal(remembered, 0);
+  assert.equal(logged, 0);
 });
 
 test('now-playing evidence requires an explicit answer and exact-track source', () => {

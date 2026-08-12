@@ -2,8 +2,8 @@
 
 // Skills editor. A skill only fires autonomously when it is enabled here AND
 // assigned to the persona on air (/admin/personas). "Run now" is an operator
-// override: it bypasses the enable toggle, the persona assignment, the
-// frequency gate and the cooldown.
+// override that airs immediately; "Off-air test" rehearses the autonomous
+// Producer → Persona path without changing broadcast or dedup state.
 import type { ReactNode } from 'react';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { cn } from '../../lib/cn';
@@ -73,6 +73,13 @@ interface SkillRunResponse {
   error?: string;
 }
 
+interface SkillTestResponse {
+  status?: 'draft' | 'producer-declined' | 'producer-invalid' | 'evidence-rejected' | 'stale' | 'persona-empty';
+  reason?: string;
+  draft?: string;
+  error?: string;
+}
+
 type ModalState = { mode: 'create' } | { mode: 'edit'; skill: Skill };
 
 interface SkillDescriptionProps {
@@ -107,6 +114,7 @@ export default function SkillsPanel() {
   const [skills, setSkills] = useState<Skill[] | null>(null);
   const [err, setErr] = useState<string | null>(null);
   const [busy, setBusy] = useState<string | null>(null);   // skill name currently mutating, or null
+  const [testing, setTesting] = useState<string | null>(null);
   const [rescanning, setRescanning] = useState(false);
   const [modal, setModal] = useState<ModalState | null>(null); // open editor sheet, or null
   const [community, setCommunity] = useState<CommunitySkill[] | null>(null);
@@ -235,6 +243,30 @@ export default function SkillsPanel() {
     } catch (e) {
       notify.err(`Run failed: ${errorMessage(e)}`);
     } finally { setBusy(null); }
+  };
+
+  const testOffAir = async (name: string) => {
+    setTesting(name);
+    try {
+      const r = await adminFetch('/dj/skill-test', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name }),
+      });
+      const j = (await r.json().catch(() => ({}))) as SkillTestResponse;
+      if (!r.ok) throw new Error(j.error || `failed (${r.status})`);
+      if (j.status === 'draft' && j.draft) {
+        notify.ok(`Off-air draft: “${j.draft}”`);
+      } else if (j.status === 'producer-declined') {
+        notify.info(`Producer declined: ${j.reason || 'nothing worth airing'}`);
+      } else if (j.status === 'evidence-rejected') {
+        notify.info(`Evidence rejected: ${j.reason || 'no usable evidence'}`);
+      } else {
+        notify.info(`Off-air test: ${j.reason || j.status || 'no draft created'}`);
+      }
+    } catch (e) {
+      notify.err(`Off-air test failed: ${errorMessage(e)}`);
+    } finally { setTesting(null); }
   };
 
   // An import may have flipped an entry's installed flag. Best-effort: leaves
@@ -648,15 +680,26 @@ export default function SkillsPanel() {
                   </div>
 
                   <div className="flex items-center justify-between gap-3">
-                    <button
-                      type="button"
-                      onClick={(e) => { e.stopPropagation(); runNow(s.name); }}
-                      disabled={busy === s.name}
-                      className={cn('seg-pad seg-pad--slim min-h-9 sm:min-h-0', busy === s.name && 'is-firing')}
-                    >
-                      <span className="seg-led" aria-hidden />
-                      <span className="seg-label">{busy === s.name ? 'Working…' : 'Run now'}</span>
-                    </button>
+                    <div className="flex flex-wrap items-center gap-2">
+                      <button
+                        type="button"
+                        onClick={(e) => { e.stopPropagation(); runNow(s.name); }}
+                        disabled={busy === s.name || testing === s.name}
+                        className={cn('seg-pad seg-pad--slim min-h-9 sm:min-h-0', busy === s.name && 'is-firing')}
+                      >
+                        <span className="seg-led" aria-hidden />
+                        <span className="seg-label">{busy === s.name ? 'Working…' : 'Run now'}</span>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={(e) => { e.stopPropagation(); testOffAir(s.name); }}
+                        disabled={busy === s.name || testing === s.name}
+                        className={cn('seg-pad seg-pad--slim min-h-9 sm:min-h-0', testing === s.name && 'is-firing')}
+                      >
+                        <span className="seg-led" aria-hidden />
+                        <span className="seg-label">{testing === s.name ? 'Testing…' : 'Off-air test'}</span>
+                      </button>
+                    </div>
                     <span className="inline-flex items-center gap-1 text-[10px] font-bold tracking-[0.16em] text-muted uppercase transition-colors group-hover:text-vermilion">
                       Edit <span aria-hidden="true">→</span>
                     </span>
@@ -667,7 +710,7 @@ export default function SkillsPanel() {
                   <span onClick={e => e.stopPropagation()}>
                     <Toggle
                       on={s.enabled}
-                      disabled={busy === s.name}
+                      disabled={busy === s.name || testing === s.name}
                       onClick={() => toggle(s.name, !s.enabled)}
                       ariaLabel={`Enable ${s.label || s.name}`}
                     />

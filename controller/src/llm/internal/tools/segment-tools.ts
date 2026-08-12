@@ -22,16 +22,29 @@
 
 import { tool } from 'ai';
 import { z } from 'zod';
-import { buildStationServices } from './station-services.js';
+import { buildStationServices, rehearsalStationServices } from './station-services.js';
 
-export function buildSegmentTools(ctx: any, state: any, caps: any[], nowPlayingTrack: any = undefined) {
+export function buildSegmentTools(
+  ctx: any,
+  state: any,
+  caps: any[],
+  nowPlayingTrack: any = undefined,
+  { rehearsal = false }: { rehearsal?: boolean } = {},
+) {
   const baseServices = buildStationServices();
   // A split Producer→Persona run spans two model calls. Pin track-aware tools
   // to the identity present when the run began so a seam during research cannot
   // silently retarget artist/track lookup halfway through the packet.
-  const services = nowPlayingTrack === undefined
+  let services = nowPlayingTrack === undefined
     ? baseServices
     : { ...baseServices, nowPlaying: () => nowPlayingTrack };
+  // Off-air rehearsals may read durable recall so they see the same evidence
+  // as a live run, but must not burn an item merely by testing it. The cloned
+  // per-run state handles headline/artist memory; this wrapper covers the
+  // curiosity ledger and custom tools using the curated log hook.
+  if (rehearsal) {
+    services = rehearsalStationServices(services);
+  }
   const tools: any = {};
 
   for (const cap of caps as any[]) {
