@@ -9,7 +9,7 @@ import { config } from '../../config.js';
 import * as subsonic from '../../music/subsonic.js';
 import { clearPoolCache } from '../../music/picker.js';
 import { clearNavidromeCache } from '../../doctor.js';
-import { refreshAutoPlaylist } from '../../broadcast/scheduler.js';
+import { refreshAutoPlaylist, syncSkillCrons } from '../../broadcast/scheduler.js';
 import { applyNavidromeToLiveConfig, saveSetupConfig } from '../../setup/config.js';
 import * as library from '../../music/library.js';
 import * as jingles from '../../broadcast/jingles.js';
@@ -246,6 +246,12 @@ router.post('/settings', requireAdmin, validateSettingsBody(), async (req, res) 
     }
     if (result.requiresRestart) {
       queue.log('scheduler', `mixer settings changed — Liquidsoap restart required`);
+    }
+    // Skill crons bake the station timezone in at registration (cron.schedule's
+    // { timezone } option) — a live change here would otherwise keep firing on
+    // the old zone until an unrelated skill edit/rescan re-registers them.
+    if ('timezone' in (req.body || {})) {
+      syncSkillCrons();
     }
     // A changed remote-TTS URL re-probes immediately so availability (and the
     // admin "ready/unreachable" badge) reflects the new endpoint on the next

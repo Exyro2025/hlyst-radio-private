@@ -885,11 +885,27 @@ async function nightlyDoctor() {
 // Per-skill cron tasks, registered from the `cron:` frontmatter field in
 // SKILL.md. When a timer fires it calls runCapability() directly — same path
 // as the operator-override /dj/skill endpoint, bypassing the frequency floor,
-// cooldowns, and the enabled toggle. Rebuilt on every syncSkillCrons() call so
-// a rescan picks up added/removed/changed expressions without a restart.
+// cooldowns, and the enabled toggle. Unlike that route, a cron firing is NOT
+// an explicit operator action, so it still owes the same station-wide talk
+// gates every other autonomous tick applies (skillsTick, above): voice off,
+// mid-programme-episode, no listeners, and over the daily token budget all
+// stand it down. Rebuilt on every syncSkillCrons() call so a rescan picks up
+// added/removed/changed expressions without a restart.
 // ---------------------------------------------------------------------------
 
 const skillCronTasks = new Map<string, cron.ScheduledTask>();
+
+// Pure composition of the same four gates skillsTick applies above, injected
+// rather than read live so the rule itself can be pinned (scripts/skill-cron-gates.test.ts)
+// without exercising real settings/listener/budget/programme state.
+export function skillCronAllowed(gates: {
+  voiceAllowed: boolean;
+  programmeOnAir: boolean;
+  djCallsAllowed: boolean;
+  optionalSegmentsAllowed: boolean;
+}): boolean {
+  return gates.voiceAllowed && !gates.programmeOnAir && gates.djCallsAllowed && gates.optionalSegmentsAllowed;
+}
 
 export function syncSkillCrons() {
   for (const task of skillCronTasks.values()) task.stop();
@@ -903,6 +919,13 @@ export function syncSkillCrons() {
     }
     const tz = getStationTimezone();
     const task = cron.schedule(expr, async () => {
+      const allowed = skillCronAllowed({
+        voiceAllowed: autoVoiceAllowed(),      // station voice is off — music only
+        programmeOnAir: programme.onAir(),      // a programme episode owns its talk moments
+        djCallsAllowed: djCallsAllowed(),        // nobody listening
+        optionalSegmentsAllowed: optionalSegmentsAllowed(), // over the daily token budget
+      });
+      if (!allowed) return;
       try {
         const ctx = await getFullContext();
         await runCapability(cap.kind, ctx);
