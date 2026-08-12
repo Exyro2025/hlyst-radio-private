@@ -19,6 +19,14 @@ import * as db from './library-db.js';
 import * as analyzer from './analyzer.js';
 import { moodVocab, moodPromptFor } from '../settings.js';
 import { makeEventLogger } from './tagger-progress.js';
+import {
+  composeMoodStateHash,
+  computeBaselines,
+  moodPassAction,
+  selectAudioMoods,
+  baselinesUsable,
+  type MoodBaselines,
+} from './audio-calibration.js';
 
 const logEvent = makeEventLogger('audio-moods');
 
@@ -41,22 +49,17 @@ export function moodVocabHash(vocab: readonly string[] = moodVocab()): string {
   return h.digest('hex').slice(0, 16);
 }
 
-// Pick the top audio moods from a {mood: cosine} score map. Absolute CLAP
-// text–audio cosines are small and library-dependent, so selection is
-// RELATIVE: the best-scoring mood plus any within `margin` of it, capped at
-// `max`. Pure — unit-pinned by scripts/audio-moods.test.ts.
+// Pick the top audio moods from a {mood: cosine} score map, on the RAW cosine
+// axis — no per-mood calibration. Kept as the uncalibrated selection (a library
+// with too few scored tracks to build baselines from still lands here, via
+// selectAudioMoods' own fallback), and as the pre-#1362 behaviour the unit
+// tests pin. Live passes go through selectAudioMoods with baselines.
+// Pure — unit-pinned by scripts/audio-moods.test.ts.
 export function topAudioMoods(
   scores: Record<string, number>,
   { max = 3, margin = 0.05 }: { max?: number; margin?: number } = {},
 ): string[] {
-  const entries = Object.entries(scores).filter(([, v]) => Number.isFinite(v));
-  if (entries.length === 0) return [];
-  entries.sort((a, b) => b[1] - a[1]);
-  const best = entries[0][1];
-  return entries
-    .filter(([, v]) => v >= best - margin)
-    .slice(0, Math.max(1, max))
-    .map(([m]) => m);
+  return selectAudioMoods(scores, null, { max, margin });
 }
 
 function dot(a: Float32Array, b: number[]): number {
@@ -70,6 +73,39 @@ export interface AudioMoodStats {
   scored: number;
   scope: number;
   skipped: string | null; // reason when the pass didn't run (null = ran/empty)
+  relabelled?: number;    // tracks whose labels were re-derived from stored cosines
+  calibrated?: boolean;   // whether per-mood baselines were applied to selection
+}
+
+// Build the per-mood baselines from every score map on disk. Returns null when
+// the library is too small to calibrate against, which callers pass straight
+// through to selectAudioMoods (raw selection, pre-#1362 behaviour).
+function loadBaselines(): MoodBaselines | null {
+  const baselines = computeBaselines(
+    (function* () {
+      for (const row of db.iterateAudioMoodScores()) yield row.scores;
+    })(),
+  );
+  return baselinesUsable(baselines) ? baselines : null;
+}
+
+// Re-derive labels for every scored track from the cosines already on disk.
+// No analyzer round-trip: a calibration change invalidates the LABELS, not the
+// scores, and most installs do not run the CLAP text tower (ANALYZER_HEAVY is
+// opt-in), so demanding one here would strand them on stale labels.
+function relabelFromStoredScores(baselines: MoodBaselines | null): number {
+  let done = 0;
+  let batch: Array<{ id: string; moods: string[] }> = [];
+  for (const { id, scores } of db.iterateAudioMoodScores()) {
+    batch.push({ id, moods: selectAudioMoods(scores, baselines) });
+    done += 1;
+    if (batch.length >= 500) {
+      db.setTrackAudioMoodLabelsBulk(batch);
+      batch = [];
+    }
+  }
+  db.setTrackAudioMoodLabelsBulk(batch);
+  return done;
 }
 
 // Score audio moods for every track that needs it. Incremental by default
@@ -82,10 +118,27 @@ export async function runAudioMoodPass(): Promise<AudioMoodStats> {
   }
 
   const hash = moodVocabHash();
-  const vocabChanged = db.getAudioMoodVocabHash() !== hash;
+  const stored = db.getAudioMoodVocabHash();
+  // Two independent reasons to redo work, and they cost very differently — a
+  // vocabulary change invalidates the cosines (full CLAP re-score), a
+  // calibration change invalidates only the labels (re-derive from disk).
+  const action = moodPassAction(stored, hash);
+  const vocabChanged = action === 'rescore';
   const ids = vocabChanged ? db.audioVectorIds() : db.idsNeedingAudioMoods();
+
+  // Nothing new to score. A pending relabel still has to run — it is the whole
+  // point of the calibration version, and it needs no analyzer.
   if (ids.length === 0) {
-    return { scored: 0, scope: 0, skipped: null };
+    if (action !== 'relabel') return { scored: 0, scope: 0, skipped: null };
+    const baselines = loadBaselines();
+    const relabelled = relabelFromStoredScores(baselines);
+    db.setAudioMoodVocabHash(composeMoodStateHash(hash));
+    logEvent(
+      'success',
+      `Re-derived audio mood labels for ${relabelled.toLocaleString('en-GB')} tracks ` +
+        `(per-mood calibration${baselines ? '' : ' unavailable — library too small, raw selection'})`,
+    );
+    return { scored: 0, scope: 0, skipped: null, relabelled, calibrated: !!baselines };
   }
 
   // One round-trip for the whole vocabulary. Generous timeout: the first call
@@ -120,8 +173,13 @@ export async function runAudioMoodPass(): Promise<AudioMoodStats> {
       (vocabChanged ? ' (vocabulary changed — full re-score)' : '') + '…',
   );
 
+  // ── Phase 1: score ────────────────────────────────────────────────────────
+  // Cosines only. Labels cannot be picked yet: selection is centred on per-mood
+  // baselines drawn from the WHOLE library, and on a full re-score those
+  // baselines are a property of the scores being written right now.
+  const scoredIds: string[] = [];
   let scored = 0;
-  let batch: Array<{ id: string; moods: string[]; scores: Record<string, number> }> = [];
+  let batch: Array<{ id: string; scores: Record<string, number> }> = [];
   for (const id of ids) {
     const v = db.getAudioVector(id);
     if (!v) continue;
@@ -131,16 +189,47 @@ export async function runAudioMoodPass(): Promise<AudioMoodStats> {
       // plenty of precision and keeps the stored JSON small.
       scores[vocab[i]] = Math.round(dot(v, vecs[i]) * 1000) / 1000;
     }
-    batch.push({ id, moods: topAudioMoods(scores), scores });
+    batch.push({ id, scores });
+    scoredIds.push(id);
     scored += 1;
     if (batch.length >= 500) {
-      db.setTrackAudioMoodsBulk(batch);
+      db.setTrackAudioMoodScoresBulk(batch);
       batch = [];
       console.log(`[audio-moods] ${scored}/${ids.length}`);
     }
   }
-  db.setTrackAudioMoodsBulk(batch);
-  db.setAudioMoodVocabHash(hash);
-  logEvent('success', `Audio moods scored — ${scored.toLocaleString('en-GB')} tracks`);
-  return { scored, scope: ids.length, skipped: null };
+  db.setTrackAudioMoodScoresBulk(batch);
+
+  // ── Phase 2: calibrate ────────────────────────────────────────────────────
+  const baselines = loadBaselines();
+
+  // ── Phase 3: label ────────────────────────────────────────────────────────
+  // A full re-score relabels everything (every track's axis just moved); an
+  // incremental pass labels only what it scored, since a handful of new tracks
+  // cannot meaningfully shift a library-wide distribution.
+  let relabelled = 0;
+  if (vocabChanged || action === 'relabel') {
+    relabelled = relabelFromStoredScores(baselines);
+  } else {
+    let labels: Array<{ id: string; moods: string[] }> = [];
+    for (const id of scoredIds) {
+      const scores = db.getAudioMoodScores(id);
+      if (!scores) continue;
+      labels.push({ id, moods: selectAudioMoods(scores, baselines) });
+      relabelled += 1;
+      if (labels.length >= 500) {
+        db.setTrackAudioMoodLabelsBulk(labels);
+        labels = [];
+      }
+    }
+    db.setTrackAudioMoodLabelsBulk(labels);
+  }
+
+  db.setAudioMoodVocabHash(composeMoodStateHash(hash));
+  logEvent(
+    'success',
+    `Audio moods scored — ${scored.toLocaleString('en-GB')} tracks` +
+      (baselines ? ' (per-mood calibration applied)' : ' (uncalibrated — library too small)'),
+  );
+  return { scored, scope: ids.length, skipped: null, relabelled, calibrated: !!baselines };
 }
