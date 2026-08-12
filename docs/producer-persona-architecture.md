@@ -184,10 +184,12 @@ guessing such a split during this migration would change operator-authored
 behaviour silently.
 
 The two search-backed skills have additional deterministic grounding rules.
-`now-playing-dig` retains only an answer or source that names both the exact
-artist and exact track. `web-search` retains only artist-matching evidence and
-does not receive the on-air track in its Persona packet: a general biographical
-fact must not be joined to the current song merely because it aired during the
+`now-playing-dig` requires both a non-empty provider answer that names the exact
+artist and track and at least one source that does the same. Search snippets
+alone are not evidence of a relationship between adjacent facts and cannot
+authorise speech. `web-search` retains only artist-matching evidence and does
+not receive the on-air track in its Persona packet: a general biographical fact
+must not be joined to the current song merely because it aired during the
 search. If filtering leaves no evidence, the segment resolves to silence.
 
 The Persona owns wording only. It cannot change kind, search again or reverse

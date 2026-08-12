@@ -202,11 +202,11 @@ test('failed and empty tool payloads cannot reach the Persona as evidence', () =
   assert.equal(usableSegmentEvidence({ headlines: [{ title: 'A real item' }] }), true);
 });
 
-test('now-playing evidence keeps only sources naming the exact artist and track', () => {
+test('now-playing evidence requires an explicit answer and exact-track source', () => {
   const evidence = groundedSearchEvidence('now-playing-dig', {
     artist: 'Anna Meredith',
     title: 'Dowager',
-    answer: '',
+    answer: 'Anna Meredith described “Dowager” as beginning like a spinster lament.',
     sources: [
       'Women composers: the Dowager Countess of Radnor wrote from her armchair.',
       'Anna Meredith: Varmints review: “Dowager” starts as a spinster lament.',
@@ -215,6 +215,18 @@ test('now-playing evidence keeps only sources naming the exact artist and track'
   assert.deepEqual(evidence.sources, [
     'Anna Meredith: Varmints review: “Dowager” starts as a spinster lament.',
   ]);
+});
+
+test('exact-track snippets alone cannot authorise a Persona claim', () => {
+  assert.deepEqual(groundedSearchEvidence('now-playing-dig', {
+    artist: 'Happy Mondays',
+    title: 'Angel',
+    answer: '',
+    sources: [
+      'Happy Mondays - Angel - CD (Single, Promo), 1992: View credits and track listing.',
+      'Happy Mondays - Angel: Simon Machan programming; Tina Weymouth producer.',
+    ],
+  }), { available: false });
 });
 
 test('a track dig with no exact-track support becomes unavailable', () => {

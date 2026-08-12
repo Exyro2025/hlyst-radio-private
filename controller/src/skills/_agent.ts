@@ -363,6 +363,14 @@ export function groundedSearchEvidence(kind: string, value: any): any {
   const sources = Array.isArray(value.sources)
     ? value.sources.filter((source) => supports(source))
     : [];
+  // Exact-track trivia is too high-risk to construct from snippets alone. A
+  // snippet can prove only that the page mentions both names; it does not prove
+  // the relationship Persona may infer between neighbouring facts (observed:
+  // a promo listing for Happy Mondays' "Angel" became an invented Beatles
+  // B-side). Require the provider's explicit answer AND a matching source.
+  if (kind === 'now-playing-dig' && (!answer || sources.length === 0)) {
+    return { available: false };
+  }
   if (!answer && sources.length === 0) return { available: false };
   return { ...value, answer, sources };
 }
