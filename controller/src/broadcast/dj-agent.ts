@@ -560,7 +560,17 @@ async function pickViaPool(queue, ctx, { wantLink, current, showAt = null }: { w
   };
   // `current` is the link's back-announce target (passed to generateLink as
   // `previous`); stamp it so the queue drops the link if a request jumps ahead.
-  const queued = await enqueuePick(queue, result.song, result.reason, result.source || 'pool', link, current, fx, { linkClockAt: airAt });
+  //
+  // The clock stamp is what linkClockDrifted (queue/pure.ts) drops a link on
+  // when the real seam lands far from the forecast — so it must only be set
+  // when a clock was actually OFFERED. With the station clock off
+  // (broadcast/clock-policy.ts) generateLink wrote this line under a flat ban
+  // and it cannot contain a time, so a drift drop would cost the operator the
+  // whole link to protect a clock that isn't in it. Same reasoning as the agent
+  // path's `linkAirAt: airClock ? airAt : null` below. Gated HERE rather than on
+  // `airAt` itself, so linkAirContext still steps the daypart tags to air time —
+  // "after dark" stays accurate even when the numerals are withheld.
+  const queued = await enqueuePick(queue, result.song, result.reason, result.source || 'pool', link, current, fx, { linkClockAt: speakClockAllowed() ? airAt : null });
   // Even the pool landed on an already-queued track (a tiny library whose pool
   // collapsed to recents). Skip the session turn and let auto.m3u backstop the
   // slot — the next track-start re-triggers runTrackEvent for a fresh pick.
