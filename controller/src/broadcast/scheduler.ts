@@ -905,13 +905,30 @@ const skillCronTasks = new Map<string, cron.ScheduledTask>();
 // Pure composition of the same four gates skillsTick applies above, injected
 // rather than read live so the rule itself can be pinned (scripts/skill-cron-gates.test.ts)
 // without exercising real settings/listener/budget/programme state.
-export function skillCronAllowed(gates: {
+export interface SkillCronGates {
   voiceAllowed: boolean;
   programmeOnAir: boolean;
   djCallsAllowed: boolean;
   optionalSegmentsAllowed: boolean;
-}): boolean {
-  return gates.voiceAllowed && !gates.programmeOnAir && gates.djCallsAllowed && gates.optionalSegmentsAllowed;
+}
+
+// Which gate closed, or null when the cron may fire. Separate from the boolean
+// below because the reason has to reach the booth log: a registered cron that
+// silently never speaks is undiagnosable, and the eligibility half already
+// names its reason — an operator should not have to learn that one kind of
+// stand-down is explained and the other is not. (Found while verifying this
+// PR: a cron sat registered and mute for four ticks and the only way to learn
+// why was to read listeners.ts.)
+export function skillCronStandDownReason(gates: SkillCronGates): string | null {
+  if (!gates.voiceAllowed) return 'the station voice is off (music only)';
+  if (gates.programmeOnAir) return 'a programme episode is on air';
+  if (!gates.djCallsAllowed) return 'nobody is listening';
+  if (!gates.optionalSegmentsAllowed) return 'the daily token budget is spent';
+  return null;
+}
+
+export function skillCronAllowed(gates: SkillCronGates): boolean {
+  return skillCronStandDownReason(gates) === null;
 }
 
 export function syncSkillCrons() {
@@ -926,13 +943,16 @@ export function syncSkillCrons() {
     }
     const tz = getStationTimezone();
     const task = cron.schedule(expr, async () => {
-      const allowed = skillCronAllowed({
+      const gated = skillCronStandDownReason({
         voiceAllowed: autoVoiceAllowed(),      // station voice is off — music only
         programmeOnAir: programme.onAir(),      // a programme episode owns its talk moments
         djCallsAllowed: djCallsAllowed(),        // nobody listening
         optionalSegmentsAllowed: optionalSegmentsAllowed(), // over the daily token budget
       });
-      if (!allowed) return;
+      if (gated) {
+        queue.log('scheduler', `[skills] cron "${cap.kind}" stood down — ${gated}`);
+        return;
+      }
       // Same enabled + persona-allowlist rules the autonomous director applies.
       // Logged rather than silent: a cron that stands itself down leaves no
       // other trace, and "my 8am skill never spoke" is otherwise undiagnosable.
