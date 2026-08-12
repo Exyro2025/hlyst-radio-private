@@ -673,13 +673,11 @@ export default function SkillEditModal({ mode, skill, personas, tagSuggestions, 
         <div style={{ opacity: isEdit && !enabled ? 0.6 : 1, transition: 'opacity .2s ease' }}>
 
             <div className="sw-section">
-              <div style={sectionLabel}>SKILL NAME</div>
               <TextField
                 control={control}
                 name="label"
                 label="Skill name"
                 placeholder={displayName}
-                className="mt-4"
               />
               {mode === 'create' && (
                 <Controller
