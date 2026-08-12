@@ -4,7 +4,7 @@
 //   - station IDs (every ~45 min, varied by frequency setting)
 //   - agentic segment tick (weather, news, now-playing digs, facts, web search) every 5 min
 
-import cron from 'node-cron';
+import cron, { type ScheduledTask } from 'node-cron';
 import { config } from '../config.js';
 import { writeFileAtomic } from '../util/atomic-file.js';
 import { shuffle } from '../util/shuffle.js';
@@ -900,7 +900,7 @@ async function nightlyDoctor() {
 // added/removed/changed expressions without a restart.
 // ---------------------------------------------------------------------------
 
-const skillCronTasks = new Map<string, cron.ScheduledTask>();
+const skillCronTasks = new Map<string, ScheduledTask>();
 
 // Pure composition of the same four gates skillsTick applies above, injected
 // rather than read live so the rule itself can be pinned (scripts/skill-cron-gates.test.ts)
@@ -932,7 +932,11 @@ export function skillCronAllowed(gates: SkillCronGates): boolean {
 }
 
 export function syncSkillCrons() {
-  for (const task of skillCronTasks.values()) task.stop();
+  // destroy(), not stop(): node-cron 4 keeps every task in a process-global
+  // registry, and stop() only halts firing — the entry stays. This runs on
+  // every skill mutation, so stop() would leak one dead task per skill per
+  // save, forever. destroy() deregisters (verified against cron.getTasks()).
+  for (const task of skillCronTasks.values()) task.destroy();
   skillCronTasks.clear();
   for (const cap of loadedCapabilities()) {
     const expr: string | undefined = cap.cronExpression;
