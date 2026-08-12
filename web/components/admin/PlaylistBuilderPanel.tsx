@@ -6,6 +6,7 @@
    picker immediately. */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useDebounceValue } from 'usehooks-ts';
 import {
   Plus, X, Search, ArrowUp, ArrowDown, ChevronRight, ChevronUp, ChevronDown,
   GripVertical, RefreshCw, Trash2, FolderOpen, FilePlus2, Save,
@@ -202,6 +203,17 @@ export default function PlaylistBuilderPanel() {
   const [artistResults, setArtistResults] = useState<string[] | null>(null);
   const [genreList, setGenreList] = useState<{ value: string; songCount: number }[] | null>(null);
 
+  // The three suggestion boxes below all search /dj/search on a 250ms debounce
+  // and all ignore a query under two characters. Blanking the term is what
+  // clears the dropdown, and it happens off the RAW query so backspacing feels
+  // instant; only a term long enough to search waits for the debounce.
+  const [debouncedSeedQuery] = useDebounceValue(seedQuery, 250);
+  const [debouncedAddQuery] = useDebounceValue(addQuery, 250);
+  const [debouncedArtistQuery] = useDebounceValue(artistQuery, 250);
+  const seedTerm = seedQuery.trim().length < 2 ? '' : debouncedSeedQuery.trim();
+  const addTerm = addQuery.trim().length < 2 ? '' : debouncedAddQuery.trim();
+  const artistTerm = artistQuery.trim().length < 2 ? '' : debouncedArtistQuery.trim();
+
   const dragIndex = useRef<number | null>(null);
   const toastTimer = useRef<number | null>(null);
   const lastMode = useRef<GenMode>('fresh');
@@ -377,34 +389,35 @@ export default function PlaylistBuilderPanel() {
   }, [tracks, adminFetch, buildBody, flash, name]);
 
   // Seed search; `stale` guards a slow response clobbering a newer query.
+  // Only the FETCH waits on the debounce — a query that falls under two
+  // characters clears the dropdown off the raw value, so backspacing out of a
+  // search doesn't leave suggestions hanging for another 250ms.
   useEffect(() => {
-    const q = seedQuery.trim();
-    if (q.length < 2) { setSeedResults(null); return; }
+    if (!seedTerm) { setSeedResults(null); return; }
     let stale = false;
-    const h = window.setTimeout(async () => {
+    void (async () => {
       try {
-        const r = await adminFetch(`/dj/search?q=${encodeURIComponent(q)}&limit=8`);
+        const r = await adminFetch(`/dj/search?q=${encodeURIComponent(seedTerm)}&limit=8`);
         const j = await r.json();
         if (!stale) setSeedResults(j.results || j.songs || j.tracks || []);
       } catch { if (!stale) setSeedResults([]); }
-    }, 250);
-    return () => { stale = true; window.clearTimeout(h); };
-  }, [seedQuery, adminFetch]);
+    })();
+    return () => { stale = true; };
+  }, [seedTerm, adminFetch]);
 
   // Manual add search (debounced, same staleness guard)
   useEffect(() => {
-    const q = addQuery.trim();
-    if (q.length < 2) { setAddResults(null); return; }
+    if (!addTerm) { setAddResults(null); return; }
     let stale = false;
-    const h = window.setTimeout(async () => {
+    void (async () => {
       try {
-        const r = await adminFetch(`/dj/search?q=${encodeURIComponent(q)}&limit=10`);
+        const r = await adminFetch(`/dj/search?q=${encodeURIComponent(addTerm)}&limit=10`);
         const j = await r.json();
         if (!stale) setAddResults(j.results || j.songs || j.tracks || []);
       } catch { if (!stale) setAddResults([]); }
-    }, 250);
-    return () => { stale = true; window.clearTimeout(h); };
-  }, [addQuery, adminFetch]);
+    })();
+    return () => { stale = true; };
+  }, [addTerm, adminFetch]);
 
   // Genre vocabulary — fetched once on first focus; suggestions filter locally.
   const loadGenres = useCallback(async () => {
@@ -427,12 +440,11 @@ export default function PlaylistBuilderPanel() {
 
   // Artist-filter search (debounced) — suggests distinct artist credits.
   useEffect(() => {
-    const q = artistQuery.trim();
-    if (q.length < 2) { setArtistResults(null); return; }
+    if (!artistTerm) { setArtistResults(null); return; }
     let stale = false;
-    const h = window.setTimeout(async () => {
+    void (async () => {
       try {
-        const r = await adminFetch(`/dj/search?q=${encodeURIComponent(q)}&limit=20`);
+        const r = await adminFetch(`/dj/search?q=${encodeURIComponent(artistTerm)}&limit=20`);
         const j = await r.json();
         const seen = new Set(recipeValues.artists.map(a => a.toLowerCase()));
         const names: string[] = [];
@@ -443,9 +455,9 @@ export default function PlaylistBuilderPanel() {
         }
         if (!stale) setArtistResults(names);
       } catch { if (!stale) setArtistResults([]); }
-    }, 250);
-    return () => { stale = true; window.clearTimeout(h); };
-  }, [artistQuery, adminFetch, recipeValues.artists]);
+    })();
+    return () => { stale = true; };
+  }, [artistTerm, adminFetch, recipeValues.artists]);
 
   // Distinct artists in the seed results — the "seed the artist" rows.
   const seedArtists = useMemo(() => {
