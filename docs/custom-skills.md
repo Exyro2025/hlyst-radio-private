@@ -153,6 +153,24 @@ editor flags it the next time you open that skill.
 
 Set it from the admin UI too: **/admin/skills → Edit → Cron timer**.
 
+**A cron always speaks.** This is the thing to get right before adding one. The
+autonomous segment tick asks the agent whether to air at all, and silence is a
+first-class answer it takes whenever the data is dull or unchanged. A cron takes
+the same path as **Run now**, which is *forced*: the model is handed a schema
+with no "stay silent" option, and the segment is required to produce a line. A
+skill's own `{ available: false }` signal is passed along as data but decides
+nothing here.
+
+So a cron suits a skill that is worth hearing at a fixed moment every time — a
+morning bulletin, a sign-off, a running joke tied to a particular hour. It suits
+a skill that speaks *only when something is notable* far less well, because it
+will be made to speak anyway. Both example skills in
+[`docs/examples/skills`](examples/skills) are in that second group and
+deliberately carry no `cron:` — `moon-phase` is meant to skip an unremarkable
+gibbous, and `sunset` tracks a time that moves through the year, so pinning it to
+a fixed clock reading would be wrong in a different way. Leave those on
+`cooldown:` and let the director decide.
+
 **Daylight saving.** A normal daily cron survives a clock change: `cron: 0 8 * * *`
 fires once at 08:00 local on the spring-forward day, the autumn day, and every
 ordinary day, which is the whole point of running in the station zone. Two edge
