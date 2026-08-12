@@ -1,5 +1,13 @@
 "use client";
 
+// Vendored from the AI Elements registry (`npx ai-elements@latest add file-tree`).
+// Local edits, kept minimal so a re-add stays a one-line command:
+//   - `@/registry/default/ui/collapsible` -> `@/components/ui/collapsible`
+//   - `@/lib/utils` -> `@/lib/cn`
+//   - folder icons `text-blue-500` -> `text-vermilion`, the colour the State dir
+//     card has always used for directories. Upstream's raw blue is the one thing
+//     here that ignores the theme tokens entirely.
+
 import {
   Collapsible,
   CollapsibleContent,
@@ -195,9 +203,9 @@ export const FileTreeFolder = ({
             >
               <FileTreeIcon>
                 {isExpanded ? (
-                  <FolderOpenIcon className="size-4 text-blue-500" />
+                  <FolderOpenIcon className="size-4 text-vermilion" />
                 ) : (
-                  <FolderIcon className="size-4 text-blue-500" />
+                  <FolderIcon className="size-4 text-vermilion" />
                 )}
               </FileTreeIcon>
               <FileTreeName>{name}</FileTreeName>

@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { File, Link2 } from 'lucide-react';
 import { useAdminAuth } from '../../../lib/adminAuth';
 import { fmtSize } from '../../../lib/format';
@@ -126,6 +126,35 @@ export function StateTree() {
     }
   }, [dirs, load]);
 
+  // Every path known to be a directory, so a click on a folder's NAME can be told
+  // apart from a click on a file's.
+  const dirPaths = useMemo(() => {
+    const out = new Set<string>();
+    for (const [parent, state] of Object.entries(dirs)) {
+      if (state.status !== 'ready') continue;
+      for (const e of state.entries) {
+        if (e.isDir) out.add(parent ? `${parent}/${e.name}` : e.name);
+      }
+    }
+    return out;
+  }, [dirs]);
+
+  /** A folder row carries TWO buttons: the chevron toggles expansion, the name
+   *  only fires onSelect. For a file browser that reads as a broken row — the
+   *  name is the bigger target and clicking it did nothing — so selecting a
+   *  directory toggles it, and only the chevron-sized hit area stays optional. */
+  const onSelect = useCallback((path: string) => {
+    if (!dirPaths.has(path)) return; // a file: nothing to open
+    const next = new Set(expanded);
+    if (next.has(path)) {
+      next.delete(path);
+    } else {
+      next.add(path);
+      if (!dirs[path]) void load(path);
+    }
+    setExpanded(next);
+  }, [dirPaths, expanded, dirs, load]);
+
   const refresh = useCallback(() => {
     const open = Object.keys(dirs);
     setDirs({});
@@ -153,6 +182,7 @@ export function StateTree() {
           className="border-separator-strong bg-transparent text-[11px]"
           expanded={expanded}
           onExpandedChange={onExpandedChange}
+          onSelect={onSelect}
         >
           <DirNodes dirs={dirs} path="" />
         </FileTree>
