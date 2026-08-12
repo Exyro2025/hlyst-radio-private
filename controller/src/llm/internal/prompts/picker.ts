@@ -43,7 +43,7 @@ function eraWindowText(e: ShowEra): string {
 // as one prompt line shared by both pick paths (the pool picker here and the
 // conversational agent in broadcast/dj-agent.ts). Returns '' when the show
 // pins nothing, so callers can append it unconditionally.
-export function showMusicLean(show?: ShowMusic | null): string {
+export function showMusicLean(show?: ShowMusic | null, { includeTalk = true }: { includeTalk?: boolean } = {}): string {
   if (!show) return '';
   const genres = show.genres ?? [];
   const moods = show.moods ?? [];
@@ -71,7 +71,8 @@ export function showMusicLean(show?: ShowMusic | null): string {
     if (moods.length) locks.push(`the ${or(moods)} mood${moods.length > 1 ? 's' : ''}`);
     if (energies.length) locks.push(`${or(energies)}-energy tracks`);
     if (vocalText) locks.push(vocalText);
-    return `\n\nThis show's music filters are STRICT — every pick must fit: ${locks.join('; ')}. Keep your talk inside them too; only step outside if there is genuinely nothing left that fits (never leave dead air).`;
+    const escape = includeTalk ? ' Keep your talk inside them too; only' : ' Only';
+    return `\n\nThis show's music filters are STRICT — every pick must fit: ${locks.join('; ')}.${escape} step outside if there is genuinely nothing left that fits (never leave dead air).`;
   }
 
   // Soft preferences. Mood is deliberately absent — it steers the room context

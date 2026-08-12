@@ -46,11 +46,55 @@ export interface PickerExtras {
   seen: Map<string, any>;
 }
 
+// Stage C Producer input. This is deliberately rebuilt from operational state
+// for each pick rather than copied from session.windowMessages(), because that
+// shared window contains the Persona's listener-facing prose. Keep the track
+// shapes small: selection needs identity and sequence, not generated speech or
+// the full analysis record.
+export function producerPickMessage({
+  current = null,
+  recentTracks = [],
+  recentArtists = [],
+  recentTransitions = [],
+  selectionContext = null,
+  instructions = [],
+}: {
+  current?: any;
+  recentTracks?: any[];
+  recentArtists?: string[];
+  recentTransitions?: string[];
+  selectionContext?: any;
+  instructions?: string[];
+} = {}): string {
+  const track = (value: any) => value ? {
+    id: value.id ?? null,
+    title: value.title ?? null,
+    artist: value.artist ?? null,
+  } : null;
+  const payload = {
+    task: 'pick_next_track',
+    currentTrack: track(current),
+    recentTracks: recentTracks.slice(0, 6).map(track),
+    recentArtists: recentArtists.slice(0, 6),
+    recentTransitions: recentTransitions.slice(-6),
+    selectionContext: selectionContext ? {
+      period: selectionContext.time?.period ?? null,
+      vibe: selectionContext.time?.vibe ?? null,
+      dominantMood: selectionContext.dominantMood ?? null,
+      weather: selectionContext.weather?.condition ?? null,
+      festival: selectionContext.festival?.name ?? null,
+    } : null,
+  };
+  const coaching = instructions.map((line) => String(line || '').trim()).filter(Boolean);
+  return `Operational pick request:\n${JSON.stringify(payload, null, 2)}`
+    + (coaching.length ? `\n\nOperational guidance:\n${coaching.map((line) => `- ${line}`).join('\n')}` : '');
+}
+
 // The live Producer sees the same editorial/show constraints and transition
 // vocabulary as the established picker, but none of the Persona preamble,
 // speech style, listener-facing schema text or request-to-perform wording.
-// That separation is the point of the split: this prompt chooses and briefs;
-// generateProducerLink later turns the brief into on-air language.
+// That separation is the point of the split: this prompt chooses; the later
+// generatePersonaLink call independently performs the on-air task.
 export function producerPickerSystem(showAt: Date | null = null, playlistResolved = true): string {
   const activeShow = settings.resolveActiveShow(showAt ?? undefined);
   const showLine = activeShow?.topic
@@ -59,7 +103,7 @@ export function producerPickerSystem(showAt: Date | null = null, playlistResolve
   const playlistLine = activeShow?.playlistIds?.length && playlistResolved
     ? `\n\nThe current show has a ${activeShow.playlistStrict ? 'strict' : 'preferred'} pinned playlist. Use the playlist-aware discovery tool and ${activeShow.playlistStrict ? 'stay inside it' : 'treat it as the strong first source'}.`
     : '';
-  return `${producerPickSystem(producerPromptDiscoverySteps())}${showLine}${showMusicLean(activeShow)}${playlistLine}
+  return `${producerPickSystem(producerPromptDiscoverySteps())}${showLine}${showMusicLean(activeShow, { includeTalk: false })}${playlistLine}
 
 ${PICKER_CRITERIA}${effectsGuidance()}`;
 }

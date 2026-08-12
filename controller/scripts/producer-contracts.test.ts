@@ -12,7 +12,6 @@ test('Producer pick accepts a grounded backstage decision', () => {
   const pick = {
     id: 'track-1',
     reason: 'new artist, gently lifts energy',
-    speechBrief: 'Notice the warmer pulse without naming the previous track.',
     transition: 'blend',
   };
   assert.equal(ProducerPickSchema.safeParse(pick).success, true);
@@ -20,7 +19,7 @@ test('Producer pick accepts a grounded backstage decision', () => {
 });
 
 test('Producer pick reports missing discovery and an invented id', () => {
-  const pick = { id: 'invented', reason: 'fits', speechBrief: null, transition: null };
+  const pick = { id: 'invented', reason: 'fits', transition: null };
   assert.deepEqual(checkProducerPick(pick, new Set(['real']), 0), [
     'no-discovery-tool',
     'ungrounded-track-id',
@@ -64,9 +63,10 @@ test('Producer segment silence carries no unused editorial payload', () => {
   ]);
 });
 
-test('Producer prompt names the real discovery budget and forbids on-air copy', () => {
+test('Producer prompt names the real discovery budget and forbids on-air planning', () => {
   const prompt = producerPickSystem(3);
   assert.match(prompt, /up to 3 discovery rounds/);
   assert.match(prompt, /Never imitate the presenter/);
-  assert.match(prompt, /rather than a script/);
+  assert.match(prompt, /Do not plan, suggest or write anything/i);
+  assert.ok(!prompt.includes('speechBrief'));
 });

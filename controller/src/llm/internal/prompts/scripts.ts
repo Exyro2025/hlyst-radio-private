@@ -186,16 +186,6 @@ export async function generateAdLib({ instruction, context = null, recap = null,
   });
 }
 
-// The entire data bridge from Producer to Persona. Keeping it pure and tiny
-// makes the boundary testable: no candidate list, tool result or reasoning
-// trail can enter the speech prompt except through this capped direction.
-export function producerBriefClause(editorialBrief: unknown): string {
-  const clipped = String(editorialBrief || '').replace(/\s+/g, ' ').trim().slice(0, 240);
-  return clipped
-    ? ` Backstage editorial direction: "${clipped}". Treat it as an angle, not wording to quote or explain.`
-    : '';
-}
-
 export async function generateLink({
   previous,
   current,
@@ -205,7 +195,6 @@ export async function generateLink({
   recentTracks = null,
   recentOpeners = null,
   persona = null,
-  editorialBrief = null,
   llmKind = 'generateLink',
 }: any) {
   const speaker = persona || settings.getEffectivePersona();
@@ -251,8 +240,7 @@ export async function generateLink({
   // phrase to "skip the spoken intro" on vocals-immediate tracks — the
   // deterministic backstop would drop the line anyway; better not to write it.
   const budget = introBudgetPhrase(introMsFor(current), firstVocalMsFor(current));
-  const briefClause = producerBriefClause(editorialBrief);
-  const prompt = `Write a short DJ link to carry into the track now starting — set it up, capture its feel, weave in the moment.${briefClause}${teaseClause}${patterClause}${budget ? ' ' + budget : ''} ${lengthPhrase('link', speaker)}, conversational. Vary how you open — don't default to "here's", "this is", "coming up", or "that was"; find a different way in each time. Keep it forward-looking: don't back-announce, recap, or name the track that just played — focus on what's playing now.${clockClause}\n\n${ctxLines.join('\n')}`;
+  const prompt = `Write a short DJ link to carry into the track now starting — set it up, capture its feel, weave in the moment.${teaseClause}${patterClause}${budget ? ' ' + budget : ''} ${lengthPhrase('link', speaker)}, conversational. Vary how you open — don't default to "here's", "this is", "coming up", or "that was"; find a different way in each time. Keep it forward-looking: don't back-announce, recap, or name the track that just played — focus on what's playing now.${clockClause}\n\n${ctxLines.join('\n')}`;
 
   return djText({
     system: djSystem(speaker),
@@ -262,14 +250,65 @@ export async function generateLink({
   });
 }
 
-// Producer/Persona split delivery. The Producer's structured decision is
-// reduced to one short editorial brief; the Persona receives no library tools,
-// discovery trail, candidate list, transition schema or Producer system text.
-export async function generateProducerLink({ speechBrief = null, ...args }: any) {
-  return generateLink({
-    ...args,
-    editorialBrief: speechBrief,
-    llmKind: 'generateProducerLink',
+// Stage C Persona packet for a Producer-selected track. This is intentionally
+// not built through generateLink/buildContextLines/decoratePrompt: those legacy
+// helpers add operational mood, station-wide history, rotating creative angles
+// and other context that this clean boundary is designed to exclude.
+export function personaLinkPrompt({
+  current,
+  context = null,
+  clockIsAirTime = false,
+  recap = null,
+  recentOpeners = null,
+  persona = null,
+}: any): string {
+  const speaker = persona || settings.getEffectivePersona();
+  const rules = [
+    'Output only the words to be spoken on air.',
+    'The named track is already playing. Focus on it and do not refer to the previous track.',
+    lengthPhrase('link', speaker) + '.',
+  ];
+  const budget = introBudgetPhrase(introMsFor(current), firstVocalMsFor(current));
+  if (budget) rules.push(budget);
+
+  const facts = [
+    `Track: "${current?.title || 'Unknown'}" by ${current?.artist || 'unknown'}.`,
+  ];
+  const show = context?.activeShow;
+  if (show?.name) facts.push(`Show: "${show.name}".`);
+  if (show?.topic) facts.push(`Show brief: ${show.topic}`);
+  if (clockIsAirTime && context?.clock?.display) {
+    facts.push(`Forecast air time: ${context.clock.display}.`);
+    rules.push('If you mention the time, use only the forecast air time supplied in the facts.');
+  } else {
+    rules.push('Do not state a clock time; no verified air time was supplied.');
+  }
+
+  const sections = [
+    'Task: Give a brief spoken introduction to the track now playing.',
+    `Rules:\n${rules.map((rule) => `- ${rule}`).join('\n')}`,
+    `Facts:\n${facts.map((fact) => `- ${fact}`).join('\n')}`,
+  ];
+  if (recap) {
+    sections.push('Recent speech by this presenter, supplied only to prevent repetition. Do not reuse its wording, topics, anecdotes, metaphors or sentence structures:\n' + recap);
+  }
+  if (recentOpeners?.length) {
+    sections.push('Recent opening words used by this presenter. Start differently:\n'
+      + recentOpeners.slice(0, 6).map((opener: string) => `- ${opener}`).join('\n'));
+  }
+  return sections.join('\n\n');
+}
+
+export async function generatePersonaLink(args: any) {
+  const speaker = args.persona || settings.getEffectivePersona();
+  return djText({
+    system: djSystem(speaker),
+    prompt: personaLinkPrompt({ ...args, persona: speaker }),
+    temperature: 0.95,
+    topP: 0.92,
+    repeatPenalty: 1.2,
+    seed: randomSeed(),
+    kind: 'generatePersonaLink',
   });
 }
 

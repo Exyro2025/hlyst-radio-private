@@ -8,7 +8,6 @@ export const PRODUCER_TRANSITIONS = [
 export const ProducerPickSchema = z.object({
   id: z.string().describe('exact id returned by a library discovery tool in this run'),
   reason: z.string().max(160).describe('brief internal editorial reason; never listener-facing copy'),
-  speechBrief: z.string().max(240).nullable().describe('optional compact angle for the Persona, not a broadcast-ready script'),
   transition: z.enum(PRODUCER_TRANSITIONS).nullable().describe('transition treatment, or null for the station default'),
 });
 

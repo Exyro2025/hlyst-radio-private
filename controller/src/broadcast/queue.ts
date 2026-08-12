@@ -284,13 +284,14 @@ class Queue {
   // null when nothing relevant has aired. Wider window catches slow-firing
   // kinds (hourly, station ID) so the DJ doesn't echo something it said
   // an hour ago.
-  getDjRecap({ limit = 10, withinMinutes = 120, maxChars = 140 } = {}) {
+  getDjRecap({ limit = 10, withinMinutes = 120, maxChars = 140, personaId = null }: { limit?: number; withinMinutes?: number; maxChars?: number; personaId?: string | null } = {}) {
     const cutoff = Date.now() - withinMinutes * 60_000;
     const seenDedupe = new Set<string>();
     const picked: DjLogEntry[] = [];
     for (const entry of this.djLog) {
       if (!VOICE_KINDS.has(entry.kind)) continue;
       if (new Date(entry.t).getTime() < cutoff) break;
+      if (personaId && entry.meta?.personaId !== personaId) continue;
       if (DEDUPE_KINDS.has(entry.kind)) {
         if (seenDedupe.has(entry.kind)) continue;
         seenDedupe.add(entry.kind);
@@ -335,11 +336,12 @@ class Queue {
   // First ~5 words of recent DJ utterances — fed to the prompt as an
   // explicit "don't open with any of these" list. Catches repeated openers
   // that the recap text alone glosses over.
-  getRecentOpeners(n = 6) {
+  getRecentOpeners(n = 6, personaId: string | null = null) {
     const seen = new Set<string>();
     const out: string[] = [];
     for (const entry of this.djLog) {
       if (!VOICE_KINDS.has(entry.kind)) continue;
+      if (personaId && entry.meta?.personaId !== personaId) continue;
       const msg = (entry.message || '').replace(/^["'\s]+/, '').replace(/\s+/g, ' ').trim();
       if (!msg) continue;
       const opener = msg.split(/\s+/).slice(0, 5).join(' ');
@@ -1240,8 +1242,14 @@ class Queue {
         ? config.liquidsoap.introFile
         : config.liquidsoap.sayFile;
       await airVoice(targetFile, wavPath, text, voiceGainDb(kind, persona));
-      this.log(kind, text);
-      session.appendTurn({ role: 'segment', kind, text, meta });
+      const speaker = persona || session.onAirPersona();
+      const voiceMeta = {
+        ...meta,
+        ...(speaker?.id && !meta.personaId ? { personaId: speaker.id } : {}),
+        ...(speaker?.name && !meta.personaName ? { personaName: speaker.name } : {}),
+      };
+      this.log(kind, text, voiceMeta);
+      session.appendTurn({ role: 'segment', kind, text, meta: voiceMeta });
       // The auto-DJ link channel is its own event; everything else (station
       // IDs, weather, hourly) is `dj.say`. Operators that pipe these into
       // Discord usually want to filter the chatty link stream separately.
@@ -1274,7 +1282,10 @@ class Queue {
     for (const l of rendered) {
       try {
         await airVoice(config.liquidsoap.sayFile, l.wavPath, l.text, voiceGainDb(kind, l.persona));
-        this.log(kind, `${l.persona?.name ? `${l.persona.name}: ` : ''}${l.text}`);
+        this.log(kind, `${l.persona?.name ? `${l.persona.name}: ` : ''}${l.text}`, {
+          personaId: l.persona?.id,
+          personaName: l.persona?.name,
+        });
         session.appendTurn({
           role: 'segment', kind, text: l.text,
           meta: { personaId: l.persona?.id, personaName: l.persona?.name },
@@ -1392,8 +1403,14 @@ class Queue {
     if (!existsSync(p.wavPath)) return;
     try {
       await airVoice(config.liquidsoap.introFile, p.wavPath, p.text, voiceGainDb(p.kind, p.persona));
-      this.log(p.kind, p.text);
-      session.appendTurn({ role: 'segment', kind: p.kind, text: p.text, meta: p.meta });
+      const speaker = p.persona || session.onAirPersona();
+      const voiceMeta = {
+        ...p.meta,
+        ...(speaker?.id && !p.meta.personaId ? { personaId: speaker.id } : {}),
+        ...(speaker?.name && !p.meta.personaName ? { personaName: speaker.name } : {}),
+      };
+      this.log(p.kind, p.text, voiceMeta);
+      session.appendTurn({ role: 'segment', kind: p.kind, text: p.text, meta: voiceMeta });
       webhooks.notify('dj.say', { text: p.text, kind: p.kind });
     } catch (err) {
       this.log('error', `Air pending voice failed: ${(err as Error).message}`);
@@ -1477,15 +1494,16 @@ class Queue {
       // still resolving from the wall clock.
       await airVoice(targetFile, item.introWav, item.introScript || '', voiceGainDb(kind, item.introPersona || undefined));
       this.persist();
-      this.log(kind, item.introScript!);
+      const voiceMeta = item.introPersona
+        ? { personaId: item.introPersona.id, personaName: item.introPersona.name }
+        : {};
+      this.log(kind, item.introScript!, voiceMeta);
       session.appendTurn({
         role: 'segment', kind, text: item.introScript!,
         // Attribute the turn so windowMessages() can name the real speaker when
         // it wasn't the session's own persona (a link written by the outgoing
         // DJ airing just after the roll).
-        meta: item.introPersona
-          ? { personaId: item.introPersona.id, personaName: item.introPersona.name }
-          : {},
+        meta: voiceMeta,
       });
       webhooks.notify(kind === 'link' ? 'dj.link' : 'dj.say',
         kind === 'link' ? { text: item.introScript } : { text: item.introScript, kind });

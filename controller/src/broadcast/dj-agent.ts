@@ -12,9 +12,10 @@
 //
 // The system posts events into the session ("a track started, pick the next
 // one"; "a listener requested X"); this module hands the session chat window
-// to a tool-loop agent that explores the library and decides. Its output (the
-// chosen track, an optional spoken link/intro) is enqueued and appended back
-// to the session as turns, so the next event sees what the DJ just did.
+// to a tool-loop agent that explores the library and decides. On the legacy
+// path it also writes the optional spoken link. With Producer routing enabled,
+// selection instead receives a fresh operational message and a separate
+// Persona call writes the link without seeing picker reasoning or chat history.
 //
 // The conversational path is gated on `settings.llm.pickerAgent`. When it is
 // off — or when the agent fails for any reason — this falls back to the
@@ -42,6 +43,7 @@ import { djCallsAllowed } from './listeners.js';
 import { autoVoiceAllowed } from './voice-policy.js';
 import {
   pickerAgent,
+  producerPickMessage,
   producerPickerAgent,
   producerPickerSystem,
   requestAgent,
@@ -68,7 +70,7 @@ export { runActive } from './dj-agent/runs.js';
 export {
   PICK_SCHEMA, PICK_SCHEMA_NO_FX, pickSchema, pickSystem, requestSchema, requestSystem,
 } from './dj-agent/schemas.js';
-export { pickerAgent, producerPickerAgent, producerPickerSystem, requestAgent } from './dj-agent/agents.js';
+export { pickerAgent, producerPickMessage, producerPickerAgent, producerPickerSystem, requestAgent } from './dj-agent/agents.js';
 
 // ---------------------------------------------------------------------------
 // Track event — a track started; pick the next one and maybe air a link.
@@ -128,14 +130,12 @@ async function repickFromSeen({ seen, badId, wantLink, showAt = null, playlistRe
 async function repickProducerFromSeen({
   seen,
   badId,
-  wantLink,
   showAt = null,
   playlistResolved = true,
   reason = null,
 }: {
   seen: Map<string, any>;
   badId: string | null;
-  wantLink: boolean;
   showAt?: Date | null;
   playlistResolved?: boolean;
   reason?: string | null;
@@ -151,10 +151,7 @@ async function repickProducerFromSeen({
     return await djObject({
       system: producerPickerSystem(showAt, playlistResolved),
       prompt: JSON.stringify({ candidates: [...seen.values()] }, null, 2)
-        + `\n\n${why}`
-        + (wantLink
-          ? ' Supply a compact speechBrief for the separate Persona.'
-          : ' Set speechBrief to null because this pick stays silent.'),
+        + `\n\n${why}`,
       schema,
       temperature: 0.4,
       kind: 'djProducerRepick',
@@ -209,7 +206,7 @@ async function repickRequestFromSeen({ seen, badId, requester, text }:
 // (#1187) — the agent's own run needs neither. They're the same values
 // runTrackEvent hands the ordinary pool fallback, so a rescued pick is built
 // from exactly the pool a failed agent run would have produced.
-async function pickViaAgent(queue, ctx, { wantLink, audioWaypoint = null, current = null, showAt = null, rankTarget = null, linkAirAt = null }: { wantLink: boolean; audioWaypoint?: number[] | null; current?: any; showAt?: Date | null; rankTarget?: { bpm: number | null; key: string | null } | null; linkAirAt?: Date | null }): Promise<boolean> {
+async function pickViaAgent(queue, ctx, { wantLink, audioWaypoint = null, current = null, showAt = null, rankTarget = null, linkAirAt = null, producerMessage = null }: { wantLink: boolean; audioWaypoint?: number[] | null; current?: any; showAt?: Date | null; rankTarget?: { bpm: number | null; key: string | null } | null; linkAirAt?: Date | null; producerMessage?: string | null }): Promise<boolean> {
   await library.load();
   const stats = library.stats();
   // Sized off the MIRROR, not `stats.total` (TAGGED tracks only) — see the same
@@ -328,7 +325,11 @@ async function pickViaAgent(queue, ctx, { wantLink, audioWaypoint = null, curren
   let run;
   if (producerRequested) {
     try {
-      run = await producerPickerAgent.run({ messages, scope, showAt });
+      // Stage C boundary: the Producer receives only the immediate operational
+      // request assembled by runTrackEvent. It must never inherit the shared
+      // session window, which contains listener-facing Persona prose.
+      const producerMessages = [{ role: 'user' as const, content: producerMessage || 'Pick the next track using the offered discovery tools.' }];
+      run = await producerPickerAgent.run({ messages: producerMessages, scope, showAt });
       splitProducer = true;
     } catch (err) {
       // A failed backstage decision drops back to the complete established
@@ -370,7 +371,7 @@ async function pickViaAgent(queue, ctx, { wantLink, audioWaypoint = null, curren
   }
   if (!song && extras.seen.size) {
     const repicked = splitProducer
-      ? await repickProducerFromSeen({ seen: extras.seen, badId: object?.id ?? null, wantLink, showAt, playlistResolved: !!playlistTracks?.length })
+      ? await repickProducerFromSeen({ seen: extras.seen, badId: object?.id ?? null, showAt, playlistResolved: !!playlistTracks?.length })
       : await repickFromSeen({ seen: extras.seen, badId: object?.id ?? null, wantLink, showAt, playlistResolved: !!playlistTracks?.length });
     if (repicked) {
       logEvent('pick.repicked', { agent: 'pick', from: object?.id ?? null, to: repicked.id, candidates: extras.seen.size });
@@ -497,16 +498,15 @@ async function pickViaAgent(queue, ctx, { wantLink, audioWaypoint = null, curren
   let rawSay = '';
   if (splitProducer && wantLink) {
     try {
-      rawSay = (await dj.generateProducerLink({
-        previous: current,
+      const speaker = session.onAirPersona();
+      const personaId = speaker?.id || null;
+      rawSay = (await dj.generatePersonaLink({
         current: song,
         context: linkAirContext(ctx, linkAirAt),
         clockIsAirTime: !!linkAirAt,
-        persona: session.onAirPersona(),
-        speechBrief: typeof object.speechBrief === 'string' ? object.speechBrief : null,
-        recap: queue.getDjRecap(),
-        recentTracks: queue.getRecentTracks(),
-        recentOpeners: queue.getRecentOpeners(),
+        persona: speaker,
+        recap: queue.getDjRecap({ personaId }),
+        recentOpeners: queue.getRecentOpeners(6, personaId),
       })).trim();
       if (!rawSay) throw new Error('Persona returned an empty link');
     } catch (err) {
@@ -752,6 +752,9 @@ export async function runTrackEvent(queue, ctx, { wantLink, showAt = null, prede
       ? ` You're mid-run — keep the energy moving in the same direction (a touch ${energyForDaypart().speed >= 1 ? 'brisker' : 'mellower'}).`
         + (wantLink ? ' You may nod to it in the link, but never say tempo numbers.' : '')
       : '';
+    const producerRunClause = inRun
+      ? `A mini-run is active: keep the selected track's energy moving in the same direction, a touch ${energyForDaypart().speed >= 1 ? 'brisker' : 'mellower'}.`
+      : '';
     // Gated on the waypoint itself, not inRun: on a run's final pick the run
     // state is already cleared (advanceRun) but the last waypoint — the
     // destination itself — is still the one to land on.
@@ -848,6 +851,14 @@ export async function runTrackEvent(queue, ctx, { wantLink, showAt = null, prede
       && Math.random() < EXPLORE_SEED_PROBABILITY
       ? ' Exploration nudge: include deepCuts in your discovery round this pick — surface something the station has never aired (or hasn\'t in weeks) and give it real consideration when it can fit the moment.'
       : '';
+    const producerMessage = producerPickMessage({
+      current,
+      recentTracks: queue.getRecentTracks(),
+      recentArtists: queue.getRecentArtists(),
+      recentTransitions: recentT,
+      selectionContext: ctx,
+      instructions: [favClause, effectClause, producerRunClause, journeyClause, exploreClause],
+    });
     const eventText = `Now playing "${current?.title}" by ${current?.artist}`
       + (current?.id ? ` [id: ${current.id}]` : '')
       + (previous ? ` (after "${previous.title}" by ${previous.artist})` : '')
@@ -869,6 +880,7 @@ export async function runTrackEvent(queue, ctx, { wantLink, showAt = null, prede
         const queued = await pickViaAgent(queue, ctx, {
           wantLink, audioWaypoint, current, showAt, rankTarget,
           linkAirAt: airClock ? airAt : null,
+          producerMessage,
         });
         breakerSuccess();
         if (queued) return;
