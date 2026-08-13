@@ -18,6 +18,8 @@ import * as settings from '../settings.js';
 import { requireAdmin } from '../middleware/auth.js';
 import { validateBody, validateBodyAsync } from '../middleware/validate.js';
 import {
+  GENRE_LOCK_SHOW_ID,
+  genreLockRequestSchema,
   resolveScheduleSlots,
   scheduleOverrideRequestSchema,
   scheduleSaveSchema,
@@ -217,6 +219,76 @@ router.post('/schedule/override', requireAdmin, validateBody(scheduleOverrideReq
     res.json({ override });
   } catch (err: any) {
     queue.log('error', `POST /schedule/override failed: ${err.message}`);
+    res.status(400).json({ error: err.message });
+  }
+});
+
+// ---------------------------------------------------------------------------
+// POST /schedule/genre-lock — the quick "only this genre, for N minutes"
+// control: one reserved show (GENRE_LOCK_SHOW_ID) carries the genre filter,
+// upserted here, then pinned exactly like POST /schedule/override. Re-hitting
+// this route while a lock is live replaces the genre list and/or extends the
+// window — same "re-POST to replace" contract the takeover route itself
+// documents.
+//
+// The reserved show is a NORMAL show — it lists at /admin/shows, can be
+// hand-edited (a different host, an extra mood/era), and is not deleted when
+// the lock ends. That is deliberate: hidden state an operator can't see or
+// fix is worse than one more row in the roster, and re-locking just updates
+// this same row rather than accumulating a new show per lock.
+//
+// Host persona: kept from a previous lock if one exists (so relocking doesn't
+// jump the DJ's voice mid-window), else the station's active persona — same
+// default the community show install route uses.
+// ---------------------------------------------------------------------------
+router.post('/schedule/genre-lock', requireAdmin, validateBody(genreLockRequestSchema), async (req, res) => {
+  const { genres, minutes } = req.body as { genres: string[]; minutes: number };
+
+  await settings.load();
+  const s = settings.get();
+  const shows = s.shows || [];
+  const existing = shows.find((sh: any) => sh.id === GENRE_LOCK_SHOW_ID);
+
+  const personaId = existing?.personaId || s.activePersonaId || s.personas?.[0]?.id;
+  if (!personaId) {
+    return res.status(409).json({ error: 'no persona in the roster to host the genre lock — add a persona first' });
+  }
+  if (!existing && shows.length >= settings.SHOWS_LIMIT) {
+    return res.status(409).json({ error: `the show list is full (${settings.SHOWS_LIMIT} shows max) — remove one first` });
+  }
+
+  const label = genres.length > 2 ? `${genres.slice(0, 2).join(', ')} +${genres.length - 2}` : genres.join(', ');
+  // Spread the existing row first so a hand-edited field (a mood, an era, a
+  // different host) survives a relock — only what this control owns is
+  // overwritten. A brand-new lock has no `existing` to spread, so it starts
+  // from the show schema's own defaults via settings.update()'s validator.
+  const lockShow = {
+    ...existing,
+    id: GENRE_LOCK_SHOW_ID,
+    name: `🔒 ${label}`,
+    personaId,
+    genres,
+    filtersStrict: true,
+  };
+  const nextShows = existing
+    ? shows.map((sh: any) => (sh.id === GENRE_LOCK_SHOW_ID ? lockShow : sh))
+    : [...shows, lockShow];
+
+  const startedAt = Date.now();
+  const override = { showId: GENRE_LOCK_SHOW_ID, startedAt, expiresAt: startedAt + minutes * 60_000 };
+  try {
+    // Both keys in ONE update() call: settings.ts validates shows before
+    // scheduleOverride (see settings.ts's patch handling) and checks the
+    // override's showId against the just-validated shows array, so the
+    // brand-new/updated lock show is already "real" by the time the override
+    // is checked — no two-step save where the second call could 404.
+    await settings.update({ shows: nextShows, scheduleOverride: override });
+    queue.log('scheduler', `[genre lock] "${label}" pinned for ${minutes} min via admin UI`);
+    void rollSessionNow();
+    const saved = settings.get().shows?.find((sh: any) => sh.id === GENRE_LOCK_SHOW_ID) || null;
+    res.json({ override, show: saved });
+  } catch (err: any) {
+    queue.log('error', `POST /schedule/genre-lock failed: ${err.message}`);
     res.status(400).json({ error: err.message });
   }
 });
