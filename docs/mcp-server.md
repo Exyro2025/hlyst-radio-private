@@ -157,8 +157,8 @@ is the right tool.
 
 ### `subwave_list_skills` and `subwave_run_skill`
 
-`list` returns the skill catalogue — the seven built-ins (weather, news,
-traffic, curiosity, album-anniversary, library-deep-cut, web-search) plus any
+`list` returns the skill catalogue — the established built-ins plus the opt-in
+`now-playing-dig-v2` and `web-search-v2` research alternatives, and any
 operator-authored skills from `state/skills/`. `run` fires one by name through
 the segment director, which fetches real data (forecast, headlines, …) before
 voicing it. Manual runs ignore cooldowns and work even on disabled skills.

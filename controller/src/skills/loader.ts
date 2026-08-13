@@ -6,7 +6,7 @@
 //     SKILL.md     frontmatter (→ metadata) + body (→ the agent's brief)
 //     tool.mjs     OPTIONAL: a data fetcher the segment director calls first
 //
-// The seven built-ins are not special at load time: they are *seeded* into
+// The shipped built-ins are not special at load time: they are *seeded* into
 // state/skills on first boot from read-only templates that ship in the image
 // (src/skills/builtins/<kind>/, see scaffold.js → seedBuiltinSkills), then loaded
 // exactly like an operator skill. The only residue of "built-in" is the
@@ -173,6 +173,14 @@ function parseCooldownMs(raw: string | undefined): number {
   return n * mult;
 }
 
+function parseBoolean(raw: string | undefined, fallback: boolean): boolean {
+  if (raw == null || String(raw).trim() === '') return fallback;
+  const value = String(raw).trim().toLowerCase();
+  if (value === 'true') return true;
+  if (value === 'false') return false;
+  return fallback;
+}
+
 function titleCase(slug: string): string {
   return slug.replace(/-/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
 }
@@ -330,6 +338,15 @@ async function loadSkillDir(dir: string, slug: string, { seeded }: { seeded: boo
     // Provenance, NOT trust: a shipped kind (seeded into state) vs an operator
     // skill. Drives enabled-by-default + the admin delete/reset affordances.
     seeded,
+    // Activation is separate from provenance so an alternative built-in can
+    // ship disabled beside its established predecessor.
+    defaultEnabled: parseBoolean(data.defaultEnabled, seeded),
+    // Opt-in research cadence: a completed lookup may consume the cooldown
+    // even when editorial judgment chooses silence.
+    cooldownOnAttempt: parseBoolean(data.cooldownOnAttempt, false),
+    // Code-enforced factual boundary: the skill may only air after its own
+    // tool returns an explicitly available evidence packet.
+    requiresEvidence: parseBoolean(data.requiresEvidence, false),
     window: data.window === 'commute' ? 'commute' : 'any',
     requiresKey,
     // Absent → effectiveContextFields() falls back to the default profile (#471).

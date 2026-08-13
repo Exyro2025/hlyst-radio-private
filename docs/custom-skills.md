@@ -54,6 +54,9 @@ a folder into `state/skills/` and hit **Rescan** in the admin Skills page:
 name: moon-phase          # the slug / "kind" (defaults to the folder name)
 label: Moon phase         # human label in /admin/skills (defaults to title-cased name)
 cooldown: 6h              # hard min gap between autonomous firings — "90m" | "6h" | "2d" | "45" (bare = minutes)
+defaultEnabled: false     # OPTIONAL: shipped alternatives can be opt-in; custom skills already default off
+cooldownOnAttempt: true   # OPTIONAL: a completed tool lookup consumes cooldown even when nothing airs
+requiresEvidence: true    # OPTIONAL: code refuses to air unless this skill's tool returns available: true
 cron: 0 * * * *           # OPTIONAL: fire on a fixed schedule instead of/alongside the cooldown gate (see below)
 cronOnly: true            # OPTIONAL: with a cron: set, withhold this skill from random autonomous picks entirely
 window: any               # "any" (default) | "commute" — only offered during commute hours
@@ -314,8 +317,9 @@ alone.
 
 ## Editing the built-in skills
 
-The 7 built-ins — `weather`, `news`, `now-playing-dig`, `curiosity`, `album-anniversary`,
-`library-deep-cut`, `web-search` — ship as read-only templates under
+The established built-ins — `weather`, `news`, `now-playing-dig`, `curiosity`,
+`album-anniversary`, `library-deep-cut`, `web-search` — plus the opt-in
+`now-playing-dig-v2` and `web-search-v2` alternatives ship as read-only templates under
 `controller/src/skills/builtins/<kind>/` and are **seeded** into
 `state/skills/<kind>/` — both `SKILL.md` and `tool.mjs` — the first time the
 controller boots. After that they're ordinary editable skills: edit the brief /
@@ -326,8 +330,10 @@ weather ticked on, the rest with the default (no-weather) profile.
 
 How a built-in still differs from a skill you add:
 
-- **Enabled by default.** A built-in airs out of the box; a *new* skill starts in
-  the discovered-but-disabled state until you enable it.
+- **Activation default.** Established built-ins air out of the box; the shipped
+  v2 research alternatives and every operator-created skill start disabled until
+  you enable them. `defaultEnabled` changes activation only — it does not turn a
+  local folder into a protected/resettable built-in.
 - **Can't be deleted, only disabled.** Toggle it off to silence it. If you delete
   its folder on disk, the seeder restores it (both files) on the next boot.
 - **Reset to default.** `/admin/skills → <built-in> → ↺ Reset to default`
@@ -339,6 +345,48 @@ How a built-in still differs from a skill you add:
 > The seeder never clobbers a file that already exists, so your edits survive a
 > restart and an upgrade. Only **Reset to default** (or deleting the file on disk)
 > brings the shipped version back.
+
+### Opt-in research safety
+
+Shipped v2 research skills must be useful immediately after the operator enables
+them. Their default source path therefore must not require the operator to open
+another account, request an API token or add another secret to `.env`. A source
+that requires credentials may be considered later as an optional extension, but
+it must not be required for the built-in skill to work. This keeps installation
+simple and avoids making factual airtime dependent on third-party account setup.
+
+`cooldownOnAttempt: true` separates research cadence from airtime. Once the
+skill's tool completes, its ordinary cooldown begins even if the data is empty
+or the DJ chooses silence; an infrastructure error retries after at most 15
+minutes. Without the field, the historical behaviour remains: cooldown begins
+only after a segment airs.
+
+`requiresEvidence: true` is the matching hard gate. An autonomous run may air
+the skill only when that skill's own tool was called and returned
+`{ available: true, ... }`. A missing call, error or `available: false` is silence
+regardless of what the model attempted to write. Use both fields for factual
+research skills; neither is appropriate for prompt-only creative skills.
+
+The two shipped v2 skills demonstrate the contract without replacing the
+legacy defaults:
+
+- `now-playing-dig-v2` asks the existing, globally throttled MusicBrainz client
+  for an exact artist/title recording. Only explicit first-release, producer,
+  mixer and remixer relationships become claims; a fuzzy match or a recording
+  with none of those facts stays silent. It never passes general web snippets to the model. The Persona
+  may frame that one claim with a short subjective reaction, but the claim
+  remains the complete boundary for factual content.
+- `web-search-v2` uses the configured search provider but restricts discovery
+  to NME, Stereogum, Pitchfork, Music Week, Songkick, Bandsintown and Setlist.fm.
+  The URL must belong to one of those domains and the headline itself must name
+  the artist. Only that headline crosses as a claim; the neighbouring search
+  snippet is discarded. This is intentionally narrower than the legacy general
+  web-search and leaves room for future first-party API/RSS adapters.
+
+Both are seeded disabled. To trial one, disable its legacy predecessor, enable
+the v2 skill and include it in any persona that uses an explicit skill allowlist.
+The broader direction and reasoning for successors to all seven established
+built-ins is recorded in [Built-in skills v2: design notes](skills-v2.md).
 
 ### News: swapping the feed
 
