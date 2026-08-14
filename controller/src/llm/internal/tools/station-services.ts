@@ -25,6 +25,7 @@ import { relevantMusicNews, safeGeneralHeadline } from '../../../skills/news-sel
 import { researchExactTrack } from '../../../skills/track-research.js';
 import { fetchMusicNews, researchArtistMusicNews } from '../../../skills/music-news.js';
 import { researchAlbumAnniversary } from '../../../skills/album-anniversary.js';
+import { researchWeatherOutlook } from '../../../skills/weather-outlook.js';
 
 interface NewsRelevanceContext {
   activeShow?: { genres?: string[] | null } | null;
@@ -41,6 +42,7 @@ export interface StationServices {
   fetchMusicNews: typeof fetchMusicNews;
   researchArtistNews: typeof researchArtistMusicNews;
   researchAlbumAnniversary: typeof researchAlbumAnniversary;
+  researchWeatherOutlook: typeof researchWeatherOutlook;
   // The track currently on air (artist/title/album/year/id), or null.
   nowPlaying: () => any | null;
   // Play-log lookup over the last `hours` — { ids, keys } sets for dedup.
@@ -84,6 +86,7 @@ export function buildStationServices(): StationServices {
     fetchMusicNews,
     researchArtistNews: researchArtistMusicNews,
     researchAlbumAnniversary,
+    researchWeatherOutlook,
     nowPlaying: () => queue.current?.track ?? null,
     recentPlays: (hours: number) => queue.recentlyPlayed(hours),
     library: { getArtist, getAlbum, searchArtists, artistGenreProfiles },

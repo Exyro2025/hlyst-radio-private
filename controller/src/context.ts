@@ -88,11 +88,30 @@ export async function getWeather() {
   const tempUnit = imperial ? 'F' : 'C';
   try {
     const unitParam = imperial ? '&temperature_unit=fahrenheit' : '';
-    const url = `https://api.open-meteo.com/v1/forecast?latitude=${config.weather.lat}&longitude=${config.weather.lng}&current=temperature_2m,weather_code,is_day${unitParam}`;
+    const url = `https://api.open-meteo.com/v1/forecast?latitude=${config.weather.lat}&longitude=${config.weather.lng}&current=temperature_2m,weather_code,is_day&hourly=temperature_2m,weather_code&forecast_hours=13&timezone=UTC${unitParam}`;
     const res = await fetchWithTimeout(url, { timeoutMs: 10_000 });
     const data = await res.json() as any;
     const code = data.current.weather_code;
     const condition = mapWeatherCode(code);
+    const parseUtc = (value: unknown) => {
+      const text = String(value || '').trim();
+      return Date.parse(/[zZ]$|[+-]\d{2}:?\d{2}$/.test(text) ? text : `${text}Z`);
+    };
+    const currentMs = parseUtc(data.current?.time);
+    const hourlyTimes = Array.isArray(data.hourly?.time) ? data.hourly.time : [];
+    const hourlyTemps = Array.isArray(data.hourly?.temperature_2m) ? data.hourly.temperature_2m : [];
+    const hourlyCodes = Array.isArray(data.hourly?.weather_code) ? data.hourly.weather_code : [];
+    const outlook = hourlyTimes.flatMap((value: unknown, index: number) => {
+      const stamp = parseUtc(value);
+      const hoursAhead = Math.round((stamp - currentMs) / 3_600_000);
+      if (!Number.isFinite(stamp) || !Number.isFinite(currentMs) || hoursAhead < 1 || hoursAhead > 12) return [];
+      const temp = Number(hourlyTemps[index]);
+      return [{
+        hoursAhead,
+        condition: mapWeatherCode(Number(hourlyCodes[index])),
+        temp: Number.isFinite(temp) ? Math.round(temp) : null,
+      }];
+    });
     const result = {
       condition,
       mood: weatherToMood(condition),
@@ -100,6 +119,7 @@ export async function getWeather() {
       tempUnit,
       isDay: data.current.is_day === 1,
       location: attributedLocation(),
+      outlook,
     };
     weatherCache = { data: result, fetchedAt: Date.now() };
     return result;

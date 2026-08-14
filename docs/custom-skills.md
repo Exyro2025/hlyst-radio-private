@@ -324,7 +324,8 @@ alone.
 
 The established built-ins — `weather`, `news`, `now-playing-dig`, `curiosity`,
 `album-anniversary`, `library-deep-cut`, `web-search` — plus the opt-in
-`now-playing-dig-v2`, `web-search-v2`, `news-v2` and `album-anniversary-v2` alternatives ship as read-only templates under
+`now-playing-dig-v2`, `web-search-v2`, `news-v2`, `album-anniversary-v2` and
+`weather-v2` alternatives ship as read-only templates under
 `controller/src/skills/builtins/<kind>/` and are **seeded** into
 `state/skills/<kind>/` — both `SKILL.md` and `tool.mjs` — the first time the
 controller boots. After that they're ordinary editable skills: edit the brief /
@@ -400,8 +401,13 @@ legacy defaults:
   OpenSubsonic `originalReleaseDate`, an album release type and a non-compilation
   record. Singles, EPs, compilations, remixes and mixtapes stay silent. The
   track's plain year is never used, so a reissue cannot create a false birthday.
+- `weather-v2` extends the existing cached Open-Meteo request with a compact
+  12-hour outlook. Controller code selects at most one meaningful current or
+  forecast change and assigns broad station-local timing before the result
+  reaches Persona. The hourly forecast itself never enters an LLM prompt;
+  unchanged or insignificant conditions return unavailable evidence.
 
-Both are seeded disabled. To trial one, disable its legacy predecessor, enable
+All v2 alternatives are seeded disabled. To trial one, disable its legacy predecessor, enable
 the v2 skill and include it in any persona that uses an explicit skill allowlist.
 The broader direction and reasoning for successors to all seven established
 built-ins is recorded in [Built-in skills v2: design notes](skills-v2.md).

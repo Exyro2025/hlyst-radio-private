@@ -149,9 +149,10 @@ inferred from neighbouring track order.
 explicitly forbids forecasting. It cannot warn listeners about a meaningful
 change later in the day.
 
-**Data boundary:** extend the existing keyless Open-Meteo request with a bounded
-hourly outlook. Derive a compact next-change result in code rather than passing
-an hourly table to the model.
+**Implemented data boundary:** the existing keyless Open-Meteo request now
+includes a 12-hour hourly outlook in the same cached response. Deterministic
+controller code reduces that table to one evidence-backed change; neither the
+Producer nor Persona receives the forecast array.
 
 **Acceptance:** surface either a genuine change since the last weather mention
 or the next significant change within a limited horizon. Significant changes
@@ -162,6 +163,12 @@ times.
 
 **Speech:** one or two in-character sentences. Use broad timing such as "later
 this afternoon" unless the forecast supports a useful, stable time window.
+
+Weather v2 ships disabled beside the established current-conditions skill. It
+recognises precipitation and fog beginning or ending, a changed current
+condition, or temperature movement of at least 4 degrees Celsius / 7 degrees
+Fahrenheit. It handles the midnight boundary explicitly (for example,
+"tomorrow morning") and ordinary persistence produces unavailable evidence.
 
 ### Web search v2
 
@@ -184,7 +191,8 @@ Music. It refreshes the feeds concurrently, caches each publisher separately,
 deduplicates matching headlines and retains a short stale copy across temporary
 publisher failures. A failed feed receives its own retry delay so it cannot be
 hammered by each scheduler pass. The same reader is the data foundation for
-News v2; its show-relevance gate remains future work.
+News v2, whose show-relevance gate is applied separately when selecting a music
+headline.
 
 **Speech:** one current artist update based only on the selected headline. Do
 not infer tour locations, collaborations, quotations or release details absent
@@ -195,7 +203,7 @@ from that headline.
 1. Finish and live-test Now-playing dig v2.
 2. Build the shared music RSS cache and use it for News v2 and Web search v2.
 3. Correct Album anniversary v2 using OpenSubsonic album metadata.
-4. Add Weather v2's bounded look-ahead.
+4. Add Weather v2's bounded look-ahead. **Implemented; live trial pending.**
 5. Make Curiosity v2 evidence-only.
 6. Revisit Library deep-cut v2 only after defining a stronger on-air purpose.
 
