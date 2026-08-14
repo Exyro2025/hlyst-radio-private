@@ -14,6 +14,7 @@ export interface ResearchSource {
   provider: string;
   label: string;
   url?: string;
+  publishedAt?: string;
   retrievedAt?: string;
 }
 
@@ -72,6 +73,7 @@ export function createResearchEvidence({
     provider: String(source?.provider || '').trim(),
     label: String(source?.label || '').trim(),
     ...(source?.url ? { url: String(source.url).trim() } : {}),
+    ...(source?.publishedAt ? { publishedAt: String(source.publishedAt).trim() } : {}),
     ...(source?.retrievedAt ? { retrievedAt: String(source.retrievedAt).trim() } : {}),
   })).filter((source) => source.id && source.provider && source.label);
   const sourceIds = new Set(cleanedSources.map((source) => source.id));

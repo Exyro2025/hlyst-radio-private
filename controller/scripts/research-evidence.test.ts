@@ -19,12 +19,14 @@ test('a valid evidence packet retains claim provenance', () => {
       provider: 'musicbrainz',
       label: 'MusicBrainz recording relationships',
       url: 'https://musicbrainz.org/recording/example',
+      publishedAt: '1983-01-01T00:00:00.000Z',
     }],
   });
   assert.equal(evidence.format, RESEARCH_EVIDENCE_FORMAT);
   assert.equal(evidence.available, true);
   if (!evidence.available) return;
   assert.equal(evidence.claims[0].sourceIds[0], evidence.sources[0].id);
+  assert.equal(evidence.sources[0].publishedAt, '1983-01-01T00:00:00.000Z');
 });
 
 test('claims without a matching source become unavailable', () => {

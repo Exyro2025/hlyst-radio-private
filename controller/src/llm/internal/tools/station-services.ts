@@ -21,6 +21,7 @@ import { fetchOnThisDay, curiositySeen, recordCuriosity } from '../../../skills/
 import { fetchHeadlines, hashHeadline } from '../../../skills/news.js';
 import { getArtist, getAlbum, searchArtists } from '../../../music/subsonic.js';
 import { researchExactTrack } from '../../../skills/track-research.js';
+import { fetchMusicNews, researchArtistMusicNews } from '../../../skills/music-news.js';
 
 export interface StationServices {
   // Web search via the operator's configured provider (DuckDuckGo / Tavily /
@@ -29,6 +30,9 @@ export interface StationServices {
   searchReady: typeof searchReady;
   // Provenance-bearing exact-track facts from specialist music data sources.
   researchTrack: typeof researchExactTrack;
+  // Cached keyless music headlines and exact-artist evidence for v2 skills.
+  fetchMusicNews: typeof fetchMusicNews;
+  researchArtistNews: typeof researchArtistMusicNews;
   // The track currently on air (artist/title/album/year/id), or null.
   nowPlaying: () => any | null;
   // Play-log lookup over the last `hours` — { ids, keys } sets for dedup.
@@ -58,6 +62,8 @@ export function buildStationServices(): StationServices {
     searchWeb,
     searchReady,
     researchTrack: researchExactTrack,
+    fetchMusicNews,
+    researchArtistNews: researchArtistMusicNews,
     nowPlaying: () => queue.current?.track ?? null,
     recentPlays: (hours: number) => queue.recentlyPlayed(hours),
     library: { getArtist, getAlbum, searchArtists },

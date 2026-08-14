@@ -298,7 +298,9 @@ identical footing. It's read-mostly (no settings writes, no secrets):
 | `services.recentPlays(hours)` | play-log dedup sets `{ ids, keys }` over the last *hours* |
 | `services.library.getArtist(id)` / `.getAlbum(id)` / `.searchArtists(name, opts?)` | Navidrome/Subsonic reads |
 | `services.onThisDay()` | Wikipedia "on this day" events for today |
-| `services.fetchHeadlines({ feedUrl?, maxItems? })` | fetch + parse an RSS feed |
+| `services.fetchHeadlines({ feedUrl?, maxItems?, timeoutMs? })` | fetch + parse an RSS/Atom feed, preserving article URL and publication time |
+| `services.fetchMusicNews()` | cached headlines from Subwave's keyless music-feed set |
+| `services.researchArtistNews(artist)` | source-bound claims for feed headlines that explicitly name an artist |
 | `services.recall.seen(key)` / `.remember(key)` | durable, cross-restart dedup ledger |
 | `services.log(msg)` | append a line to the station event log |
 
@@ -376,12 +378,14 @@ legacy defaults:
   with none of those facts stays silent. It never passes general web snippets to the model. The Persona
   may frame that one claim with a short subjective reaction, but the claim
   remains the complete boundary for factual content.
-- `web-search-v2` uses the configured search provider but restricts discovery
-  to NME, Stereogum, Pitchfork, Music Week, Songkick, Bandsintown and Setlist.fm.
-  The URL must belong to one of those domains and the headline itself must name
-  the artist. Only that headline crosses as a claim; the neighbouring search
-  snippet is discarded. This is intentionally narrower than the legacy general
-  web-search and leaves room for future first-party API/RSS adapters.
+- `web-search-v2` first checks a shared, keyless cache of Stereogum, Pitchfork
+  News and The Guardian Music feeds. Publishers are fetched concurrently and
+  fail independently; successful items retain their article URL, publisher and
+  publication time. When no feed headline explicitly names the artist, an
+  already-configured search provider may fall back to NME, Stereogum, Pitchfork,
+  Music Week, Songkick, Bandsintown and Setlist.fm. Only a qualifying headline
+  crosses as a claim; descriptions and neighbouring search snippets are
+  discarded. The skill therefore remains usable without SearXNG or a paid API.
 
 Both are seeded disabled. To trial one, disable its legacy predecessor, enable
 the v2 skill and include it in any persona that uses an explicit skill allowlist.

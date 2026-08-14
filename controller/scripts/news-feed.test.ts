@@ -63,6 +63,31 @@ test('Atom falls back from summary to content for the blurb', () => {
   assert.equal(second.description, 'Body two');
 });
 
+test('RSS and Atom preserve article URLs and publication times', () => {
+  const rss = `<rss><channel><item>
+    <title>RSS story</title><link>https://example.test/rss-story</link>
+    <pubDate>Fri, 14 Aug 2026 09:30:00 GMT</pubDate>
+  </item></channel></rss>`;
+  const atom = `<feed><entry>
+    <title>Atom story</title>
+    <link rel="self" href="https://example.test/feed-entry" />
+    <link rel="alternate" href="https://example.test/atom-story" />
+    <published>2026-08-14T10:30:00Z</published>
+  </entry></feed>`;
+  assert.deepEqual(parseFeed(rss, 1)[0], {
+    title: 'RSS story',
+    description: '',
+    url: 'https://example.test/rss-story',
+    publishedAt: '2026-08-14T09:30:00.000Z',
+  });
+  assert.deepEqual(parseFeed(atom, 1)[0], {
+    title: 'Atom story',
+    description: '',
+    url: 'https://example.test/atom-story',
+    publishedAt: '2026-08-14T10:30:00.000Z',
+  });
+});
+
 test('RDF / RSS 1.0 parses — items at the root, prefixed root tag', () => {
   const items = parseFeed(RDF, 10);
   assert.equal(items.length, 1);

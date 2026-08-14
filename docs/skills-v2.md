@@ -154,7 +154,7 @@ model, allowing neighbouring search results to become invented artist facts. It
 also requires a usable search provider even when a public music feed could have
 answered the artist-news use case.
 
-**Data boundary:** check the shared music RSS cache first. A headline qualifies
+**Implemented data boundary:** check the shared music RSS cache first. A headline qualifies
 only when it explicitly names the current artist. Preserve its source and date
 as evidence and never promote the article description into a claim.
 
@@ -162,6 +162,13 @@ as evidence and never promote the article description into a claim.
 provider, issue the existing trusted-domain query and apply the same headline
 and artist-name checks. RSS remains fully functional without SearXNG or a paid
 search API.
+
+The shared reader currently uses Stereogum, Pitchfork News and The Guardian
+Music. It refreshes the feeds concurrently, caches each publisher separately,
+deduplicates matching headlines and retains a short stale copy across temporary
+publisher failures. A failed feed receives its own retry delay so it cannot be
+hammered by each scheduler pass. The same reader is the data foundation for
+News v2; its show-relevance gate remains future work.
 
 **Speech:** one current artist update based only on the selected headline. Do
 not infer tour locations, collaborations, quotations or release details absent

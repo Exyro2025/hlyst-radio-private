@@ -13,7 +13,9 @@ const TRUSTED_DOMAINS = [
 
 export const description = 'Find a recent, artist-specific headline from a trusted music or live-event source. Use only an explicit returned headline; unavailable means stay silent.';
 
-export const ready = (services) => services.searchReady();
+// The shared RSS reader is keyless, so this remains usable when no general
+// web-search provider is configured. Search is only the fallback.
+export const ready = () => true;
 
 function normalized(value) {
   return String(value || '')
@@ -27,7 +29,9 @@ function normalized(value) {
 function mentionsArtist(value, artist) {
   const haystack = ` ${normalized(value)} `;
   const needle = normalized(artist);
-  return !!needle && haystack.includes(` ${needle} `);
+  if (!needle || !haystack.includes(` ${needle} `)) return false;
+  if (!needle.includes(' ') && haystack.includes(` the ${needle} `)) return false;
+  return true;
 }
 
 function trustedHost(rawUrl) {
@@ -78,6 +82,10 @@ export default async function searchArtistNews(ctx, state, services) {
   if (!artist || /^unknown/i.test(artist)) {
     return { available: false, reason: 'the current track has no usable artist identity' };
   }
+  const feedEvidence = await services.researchArtistNews(artist);
+  if (feedEvidence?.available) return feedEvidence;
+  if (!services.searchReady()) return feedEvidence;
+
   const sites = TRUSTED_DOMAINS.map((domain) => `site:${domain}`).join(' OR ');
   const data = await services.searchWeb(`"${artist}" (${sites})`, { recency: 'week' });
   return trustedArtistHeadlineEvidence(artist, data.results);

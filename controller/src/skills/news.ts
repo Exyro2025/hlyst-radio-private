@@ -24,6 +24,8 @@ import { fetchWithTimeout } from '../util/fetch-timeout.js';
 export interface Headline {
   title: string;
   description: string;
+  url?: string;
+  publishedAt?: string;
 }
 
 const parser = new XMLParser({
@@ -49,6 +51,30 @@ function textOf(node: unknown): string {
   if (Array.isArray(node)) return textOf(node[0]);
   if (typeof node === 'object') return textOf((node as Record<string, unknown>)['#text']);
   return String(node);
+}
+
+// RSS normally carries a plain <link> value. Atom carries one or more
+// <link href="..."> objects, sometimes including a non-article `self` link.
+// Prefer the alternate/article URL and gracefully accept the RSS form.
+function linkOf(node: unknown): string {
+  if (node == null) return '';
+  if (Array.isArray(node)) {
+    const links = node.map(asRecord).filter((link): link is Record<string, unknown> => link !== null);
+    const alternate = links.find((link) => !link['@_rel'] || link['@_rel'] === 'alternate');
+    return linkOf(alternate || node[0]);
+  }
+  if (typeof node === 'object') {
+    const link = node as Record<string, unknown>;
+    return String(link['@_href'] || textOf(link)).trim();
+  }
+  return String(node).trim();
+}
+
+function publishedAtOf(entry: Record<string, unknown>): string {
+  const raw = textOf(entry.pubDate ?? entry.published ?? entry.updated ?? entry.date).trim();
+  if (!raw) return '';
+  const stamp = Date.parse(raw);
+  return Number.isFinite(stamp) ? new Date(stamp).toISOString() : '';
 }
 
 function stripHtml(s: string): string {
@@ -116,7 +142,14 @@ export function parseFeed(xml: string, cap: number): Headline[] {
     // to <content> (which, post-removeNSPrefix, is also where RSS's
     // <content:encoded> lands).
     const description = stripHtml(textOf(entry.description ?? entry.summary ?? entry.content));
-    out.push({ title, description });
+    const url = linkOf(entry.link);
+    const publishedAt = publishedAtOf(entry);
+    out.push({
+      title,
+      description,
+      ...(url ? { url } : {}),
+      ...(publishedAt ? { publishedAt } : {}),
+    });
   }
   return out;
 }
@@ -127,7 +160,15 @@ export function hashHeadline(title: string): string {
   return h.toString(36);
 }
 
-export async function fetchHeadlines({ feedUrl, maxItems }: { feedUrl?: string; maxItems?: number } = {}) {
+export async function fetchHeadlines({
+  feedUrl,
+  maxItems,
+  timeoutMs = 15_000,
+}: {
+  feedUrl?: string;
+  maxItems?: number;
+  timeoutMs?: number;
+} = {}) {
   const url = feedUrl || config.news.feedUrl;
   const cap = maxItems || config.news.maxItems;
   // Bounded like the web-search backends. The feed URL is operator-set
@@ -135,8 +176,10 @@ export async function fetchHeadlines({ feedUrl, maxItems }: { feedUrl?: string; 
   // deadline is about liveness. It runs inside the segment director on the
   // autonomous DJ path, where a hung socket would otherwise park the whole
   // segment on undici's ~300s default and eat the agent's own 45s budget many
-  // times over. 15s is generous for an RSS document.
-  const res = await fetchWithTimeout(url, { timeoutMs: 15_000 });
+  // times over. The legacy caller keeps the generous 15s default; the shared
+  // multi-feed reader supplies a shorter per-publisher deadline and runs its
+  // sources concurrently.
+  const res = await fetchWithTimeout(url, { timeoutMs, bodyDeadline: true });
   if (!res.ok) throw new Error(`News feed HTTP ${res.status}`);
   return parseFeed(await res.text(), cap);
 }
