@@ -33,11 +33,12 @@ import { queue } from '../broadcast/queue.js';
 import * as settings from '../settings.js';
 import { defineAgent } from '../llm/agent.js';
 import { djObject, modelTolerant } from '../llm/sdk.js';
-import { buildContextLines, CONTEXT_FIELDS, lengthMode, lengthPhrase } from '../llm/dj.js';
+import { buildContextLines, CONTEXT_FIELDS, lengthMode, lengthPhrase, personaExpressionCueHint } from '../llm/dj.js';
 import { buildSegmentTools, fetchSegmentData } from '../llm/segment-tools.js';
 import { recordCuriosity, recentAiredCuriosity } from './curiosity.js';
 import { loadedCapabilities } from './loader.js';
 import { skillEligible } from './eligibility.js';
+import { enforceSkillSpeech, skillSpeechLimits } from './speech-policy.js';
 import {
   directResearchAttempt,
   hasRequiredEvidence,
@@ -106,7 +107,7 @@ function unionContextFields(caps): string[] {
 // nullable nested object alone, emitting bare top-level `null` or prose instead
 // (isBareNullSilent / isSilentFailure below); `air: false` gives them an
 // unambiguous silence token.
-function segmentSchema() {
+function segmentSchema(persona = settings.getEffectivePersona()) {
   return modelTolerant(z.object({
     reason: z.string().describe('one short internal sentence on why this segment (or why silent) — never shown to the listener; write this BEFORE deciding the segment'),
     air: z.boolean().describe('true to air one segment now, false to stay silent — silence is a perfectly good answer, often the best one, when the data is dull, stale, unchanged, or there is nothing fresh worth a listener\'s attention'),
@@ -121,7 +122,7 @@ function segmentSchema() {
       // the system prompt, and agenticTick drops any kind it wasn't offered.
       kind: z.string()
         .describe('the segment kind — MUST be one of the kinds offered in the system prompt for this tick'),
-      text: z.string().describe(`the spoken line in the DJ voice — ${lengthPhrase('segment')}`),
+      text: z.string().describe(`the spoken line in the DJ voice — ${lengthPhrase('segment', persona)}`),
       sfx: z.string().nullable().describe('the exact name of one sound effect from the catalogue in the system prompt to play under this line, or null for no effect (null is usually right — most segments need none)'),
     }).describe('the segment to air when air is true; ignored when air is false (empty strings for kind/text, null sfx when silent)'),
   }), {
@@ -150,9 +151,9 @@ function segmentSchema() {
 
 // Operator-override schema: the segment is mandatory, the kind is already
 // known, so the agent only returns the spoken line.
-export function forcedSchema() {
+export function forcedSchema(persona = settings.getEffectivePersona()) {
   return modelTolerant(z.object({
-    text: z.string().describe(`the spoken line in the DJ voice — ${lengthPhrase('segment')}`),
+    text: z.string().describe(`the spoken line in the DJ voice — ${lengthPhrase('segment', persona)}`),
     sfx: z.string().nullable().describe('the exact name of one sound effect from the catalogue in the system prompt to play under this line, or null for no effect'),
   }));
 }
@@ -248,7 +249,7 @@ function directorSystem(persona, caps, freq: string, sfxCatalog) {
   const capList = caps.map((c) => `- ${c.kind}: ${c.desc}`).join('\n');
   const tone = stationTone(freq);
 
-  return `${settings.agentPersonaPreamble(persona)}
+  return `${skillPersonaPreamble(persona)}
 
 Your job: decide whether to air ONE between-track segment, or stay silent. You are NOT choosing music. ${tone}
 
@@ -268,6 +269,37 @@ function stationTone(freq: string) {
         : 'This is a measured station — speak only when there is something worth saying.';
 }
 
+// Skill-only Persona prompt. Tool-loop agents cannot use the full djSystem
+// template, but listener-facing skill text should still inherit the Persona's
+// tone dials and only the expression cues its resolved TTS engine understands.
+// Keeping this local prevents those creative instructions from influencing the
+// picker's operational fields.
+export function skillPersonaPreamble(persona) {
+  return settings.agentPersonaPreamble(persona)
+    + settings.personaToneDirectives(persona)
+    + personaExpressionCueHint(persona)
+    + `\n\nLength ceiling for this skill: ${lengthPhrase('segment', persona)}. Treat this as a maximum, not a target; follow a shorter requirement in the skill brief.`;
+}
+
+function skillAgentOutputTokens(persona): number {
+  // Tool calls and the internal reason need some headroom beyond the final
+  // spoken field. This remains dramatically below the station-wide 8k escape
+  // hatch, which is unsafe for a short between-track segment.
+  return Math.max(512, skillSpeechLimits(persona).maxOutputTokens + 256);
+}
+
+function boundedSkillSpeech(text: unknown, persona, kind: string): string {
+  const result = enforceSkillSpeech(text, persona);
+  if (result.clipped) {
+    const limits = skillSpeechLimits(persona);
+    queue.log(
+      'scheduler',
+      `Skill speech bounded for ${kind} (${result.originalWords} words/${result.originalChars} chars → max ${limits.maxWords}/${limits.maxChars})`,
+    );
+  }
+  return result.text;
+}
+
 // Wall-clock ceiling for a single segment-director run, resolved live so it
 // tracks the admin-tunable setting. Same source/default as the picker's
 // agentDeadline (dj-agent.ts) — segments shouldn't hang longer than picks.
@@ -280,7 +312,7 @@ function segmentDeadline(): number {
 // caller (agenticTick) only feeds the dynamic per-tick state.
 export const directorAgent = defineAgent({
   kind: 'djAgentSegment',
-  schema: () => segmentSchema(),
+  schema: (args: any = {}) => segmentSchema(args.persona),
   // Discovery (step 0) + exactly one committed done-tool attempt (step 1),
   // same reasoning as pickerAgent.maxSteps in dj-agent.ts: a taller budget
   // just grows an increasingly "I already declined" trail on providers that
@@ -297,6 +329,7 @@ export const directorAgent = defineAgent({
   // into a multi-step stall (86s observed in issue #555) and hang the tick;
   // the deadline turns that into a clean throw → handled as silence below.
   timeoutMs: segmentDeadline,
+  maxOutputTokens: (args: any = {}) => skillAgentOutputTokens(args.persona),
   buildSystem: ({ persona, caps, freq, sfxCatalog }) =>
     directorSystem(persona, caps, freq, sfxCatalog),
   buildTools: ({ ctx, segmentState, caps }) => ({
@@ -390,17 +423,17 @@ export function dataBlock(data: unknown) {
 // Same decision surface as segmentSchema minus `kind` (code already chose it)
 // and minus the nested object (nothing here needs the agent path's GLM
 // armour — djObject's own repair layers cover a flat shape fine).
-export function simpleSegmentSchema() {
+export function simpleSegmentSchema(persona = settings.getEffectivePersona()) {
   return modelTolerant(z.object({
     reason: z.string().describe('one short internal sentence on why this segment (or why silent) — never shown to the listener; write this BEFORE deciding'),
     air: z.boolean().describe('true to air this segment now, false to stay silent — silence is a perfectly good answer when the data is dull, stale, unchanged, or not worth a listener\'s attention'),
-    text: z.string().describe(`the spoken line in the DJ voice — ${lengthPhrase('segment')}; empty string when air is false`),
+    text: z.string().describe(`the spoken line in the DJ voice — ${lengthPhrase('segment', persona)}; empty string when air is false`),
     sfx: z.string().nullable().describe('the exact name of one sound effect from the catalogue in the system prompt to play under this line, or null for no effect (null is usually right)'),
   }));
 }
 
 export function simpleSystem(persona, cap, freq: string, sfxCatalog) {
-  return `${settings.agentPersonaPreamble(persona)}
+  return `${skillPersonaPreamble(persona)}
 
 Your job: decide whether to air ONE between-track "${cap.kind}" segment, or stay silent. You are NOT choosing music. ${stationTone(freq)}
 
@@ -445,7 +478,8 @@ async function runSimpleDirector(ctx, { caps, speaker, freq, sfxCatalog }) {
   const out = await deadlinedSegmentObject({
     system: simpleSystem(speaker, cap, freq, sfxCatalog),
     prompt: buildSituation(ctx, { contextFields: effectiveContextFields(cap), recentCuriosity }) + dataBlock(data),
-    schema: simpleSegmentSchema(),
+    schema: simpleSegmentSchema(speaker),
+    maxOutputTokens: skillSpeechLimits(speaker).maxOutputTokens,
     temperature: 0.9,
     kind: 'generateSegment',
   });
@@ -564,13 +598,15 @@ export async function agenticTick(ctx) {
     // queue.announce appends the segment turn into the live session. The
     // speaker's id rides in meta so session.windowMessages names a guest's
     // turn as theirs rather than the host's own words.
-    await queue.announce(seg.text.trim(), seg.kind, {
+    const spoken = boundedSkillSpeech(seg.text, speaker, seg.kind);
+    if (!spoken) return;
+    await queue.announce(spoken, seg.kind, {
       persona: speaker, meta: { personaId: speaker?.id, personaName: speaker?.name },
     });
 
     // Record what actually aired so the durable ledger can keep both the tool
     // and the fallback path from repeating it after a restart (issue #577).
-    if (seg.kind === 'curiosity') recordCuriosity(seg.text.trim(), { aired: true });
+    if (seg.kind === 'curiosity') recordCuriosity(spoken, { aired: true });
 
     // Optional sound effect mixed under the voice. Only honour a name the
     // agent was actually offered — anything else is dropped, like an
@@ -642,7 +678,7 @@ function isBareNullSilent(err) {
 // Same ultra-minimal treatment as directorSystem — the forcedSchema text
 // description and the segment-tools.js tool descriptions carry the rest.
 export function forcedSystem(persona, cap, sfxCatalog) {
-  return `${settings.agentPersonaPreamble(persona)}
+  return `${skillPersonaPreamble(persona)}
 
 The operator asked you to air ONE ${cap.kind} segment now — you must produce a line, silence is not an option. You are NOT choosing music.
 
@@ -653,9 +689,10 @@ ${cap.desc}${sfxBlock(sfxCatalog)}${settings.agentLanguageReminder(persona, 'the
 // the segment is mandatory, silence is not an option.
 export const forcedDirectorAgent = defineAgent({
   kind: 'djAgentSegment',
-  schema: () => forcedSchema(),
+  schema: (args: any = {}) => forcedSchema(args.persona),
   // Same wall-clock ceiling as the autonomous director (issue #555).
   timeoutMs: segmentDeadline,
+  maxOutputTokens: (args: any = {}) => skillAgentOutputTokens(args.persona),
   buildSystem: ({ persona, cap, sfxCatalog }) => forcedSystem(persona, cap, sfxCatalog),
   buildTools: ({ ctx, segmentState, cap }) => ({
     tools: buildSegmentTools(ctx, segmentState, [cap]),
@@ -709,7 +746,8 @@ export async function runCapability(which, ctx, { brief = null, persona = null }
     object = await deadlinedSegmentObject({
       system: forcedSystem(speaker, cap, sfxCatalog),
       prompt: situation + (data && !data.error ? dataBlock(data) : ''),
-      schema: forcedSchema(),
+      schema: forcedSchema(speaker),
+      maxOutputTokens: skillSpeechLimits(speaker).maxOutputTokens,
       temperature: 0.9,
       kind: 'generateSegment',
     });
@@ -725,7 +763,7 @@ export async function runCapability(which, ctx, { brief = null, persona = null }
     object = run.object;
   }
 
-  const text = object?.text?.trim();
+  const text = boundedSkillSpeech(object?.text, speaker, cap.kind);
   if (!text) throw new Error(`skill "${cap.skill}" produced no text`);
 
   // Update cooldown/dedup memory so a follow-up autonomous tick doesn't

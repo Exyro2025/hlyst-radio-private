@@ -175,3 +175,22 @@ from that headline.
 4. Add Weather v2's bounded look-ahead.
 5. Make Curiosity v2 evidence-only.
 6. Revisit Library deep-cut v2 only after defining a stronger on-air purpose.
+
+## Skill speech safety
+
+Listener-facing skill speech inherits the selected speaker's Persona settings.
+Name, Soul, language, Humour, Local Colour, Warmth and supported TTS expression
+cues are applied to the skill prompt. Script length is both a creative direction
+and a controller-enforced ceiling: each rung has finite sentence, word,
+character and generation-token bounds. A skill may request something shorter,
+but no skill can expand beyond the Persona's safety envelope.
+
+Before a skill reaches TTS, the controller keeps complete sentences where
+possible. If one pathological sentence alone exceeds the limit, it is shortened
+at a word boundary and marked with an ellipsis. The booth log records whenever
+this safety guard changes model output.
+
+Future work: allow a skill to declare an explicit cast and roles across several
+Personas. Today's automatic guest rotation only chooses one speaker after the
+skill is selected; it is not a multi-persona skill contract and the manual Run
+Now control cannot select a guest.
