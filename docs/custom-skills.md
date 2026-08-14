@@ -300,8 +300,11 @@ identical footing. It's read-mostly (no settings writes, no secrets):
 | `services.onThisDay()` | Wikipedia "on this day" events for today |
 | `services.fetchHeadlines({ feedUrl?, maxItems?, timeoutMs? })` | fetch + parse an RSS/Atom feed, preserving article URL and publication time |
 | `services.fetchMusicNews()` | cached headlines from Subwave's keyless music-feed set |
+| `services.researchTrack(track)` | source-bound exact-track claims from specialist music metadata |
 | `services.researchArtistNews(artist)` | source-bound claims for feed headlines that explicitly name an artist |
 | `services.researchAlbumAnniversary(track, ctx)` | validate an original non-compilation album anniversary from OpenSubsonic metadata |
+| `services.researchWeatherOutlook(weather, lastCondition, clock)` | reduce the cached 12-hour Open-Meteo outlook to one meaningful change |
+| `services.researchCuriosity()` | return one fresh, source-bound Wikimedia on-this-day event |
 | `services.relevantMusicNews(items, ctx)` | retain headlines naming a local-library artist whose genres fit the active show |
 | `services.safeGeneralHeadline(title)` | reject obviously grave stories before they reach a speaking model |
 | `services.recall.seen(key)` / `.remember(key)` | durable, cross-restart dedup ledger |
@@ -324,8 +327,8 @@ alone.
 
 The established built-ins — `weather`, `news`, `now-playing-dig`, `curiosity`,
 `album-anniversary`, `library-deep-cut`, `web-search` — plus the opt-in
-`now-playing-dig-v2`, `web-search-v2`, `news-v2`, `album-anniversary-v2` and
-`weather-v2` alternatives ship as read-only templates under
+`now-playing-dig-v2`, `web-search-v2`, `news-v2`, `album-anniversary-v2`,
+`weather-v2` and `curiosity-v2` alternatives ship as read-only templates under
 `controller/src/skills/builtins/<kind>/` and are **seeded** into
 `state/skills/<kind>/` — both `SKILL.md` and `tool.mjs` — the first time the
 controller boots. After that they're ordinary editable skills: edit the brief /
@@ -406,6 +409,9 @@ legacy defaults:
   forecast change and assigns broad station-local timing before the result
   reaches Persona. The hourly forecast itself never enters an LLM prompt;
   unchanged or insignificant conditions return unavailable evidence.
+- `curiosity-v2` selects one fresh event from the existing filtered Wikimedia
+  On This Day feed and binds it to the date-specific source endpoint. Empty or
+  exhausted pools stay silent; there is no model-generated factoid fallback.
 
 All v2 alternatives are seeded disabled. To trial one, disable its legacy predecessor, enable
 the v2 skill and include it in any persona that uses an explicit skill allowlist.

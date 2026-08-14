@@ -48,6 +48,10 @@ import {
 } from './attempt-policy.js';
 import * as sfx from '../broadcast/sfx.js';
 
+function isCuriosityKind(kind: string): boolean {
+  return kind === 'curiosity' || kind.startsWith('curiosity-');
+}
+
 // The capability registry now lives entirely in skills/loader.js, which loads
 // every skill — shipped and operator-added — from a directory (SKILL.md +
 // optional tool.mjs). Each cap carries: kind/skill (the queue.announce kind +
@@ -474,7 +478,7 @@ async function runSimpleDirector(ctx, { caps, speaker, freq, sfxCatalog }) {
   if (cap.requiresEvidence && data?.available !== true) {
     return { seg: null, reason: `${cap.kind} returned no usable evidence`, attempts };
   }
-  const recentCuriosity = cap.kind === 'curiosity' ? recentAiredCuriosity() : undefined;
+  const recentCuriosity = isCuriosityKind(cap.kind) ? recentAiredCuriosity() : undefined;
   const out = await deadlinedSegmentObject({
     system: simpleSystem(speaker, cap, freq, sfxCatalog),
     prompt: buildSituation(ctx, { contextFields: effectiveContextFields(cap), recentCuriosity }) + dataBlock(data),
@@ -556,7 +560,7 @@ export async function agenticTick(ctx) {
     } else {
       // When curiosity is on offer, brief the agent with what it already aired so
       // a pool-exhausted fallback doesn't repeat itself (issue #577).
-      const recentCuriosity = caps.some(c => c.kind === 'curiosity') ? recentAiredCuriosity() : undefined;
+      const recentCuriosity = caps.some(c => isCuriosityKind(c.kind)) ? recentAiredCuriosity() : undefined;
       const { object, toolCalls } = await directorAgent.run({
         messages: [{ role: 'user', content: buildSituation(ctx, { contextFields: unionContextFields(caps), recentCuriosity }) }],
         persona: speaker, caps, freq, sfxCatalog,
@@ -606,7 +610,7 @@ export async function agenticTick(ctx) {
 
     // Record what actually aired so the durable ledger can keep both the tool
     // and the fallback path from repeating it after a restart (issue #577).
-    if (seg.kind === 'curiosity') recordCuriosity(spoken, { aired: true });
+    if (isCuriosityKind(seg.kind)) recordCuriosity(spoken, { aired: true });
 
     // Optional sound effect mixed under the voice. Only honour a name the
     // agent was actually offered — anything else is dropped, like an
@@ -728,7 +732,7 @@ export async function runCapability(which, ctx, { brief = null, persona = null }
   const speaker = persona || settings.getEffectivePersona(new Date());
   // Empty catalogue when SFX are disabled — the agent is never offered effects.
   const sfxCatalog = settings.get().sfx?.enabled === false ? [] : await sfx.catalog();
-  const recentCuriosity = cap.kind === 'curiosity' ? recentAiredCuriosity() : undefined;
+  const recentCuriosity = isCuriosityKind(cap.kind) ? recentAiredCuriosity() : undefined;
   const situation = buildSituation(ctx, { forced: true, contextFields: effectiveContextFields(cap), recentCuriosity })
     + (brief ? `\n\n${brief}` : '');
 
@@ -782,7 +786,7 @@ export async function runCapability(which, ctx, { brief = null, persona = null }
 
   // Record an operator-fired curiosity line in the durable ledger too, so a
   // later autonomous tick doesn't repeat it (issue #577).
-  if (cap.kind === 'curiosity') recordCuriosity(text, { aired: true });
+  if (isCuriosityKind(cap.kind)) recordCuriosity(text, { aired: true });
 
   // Optional sound effect under the voice — only a name the agent was offered.
   const pick = object?.sfx;

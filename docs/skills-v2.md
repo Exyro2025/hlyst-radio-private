@@ -54,14 +54,21 @@ track's year.
 but the established brief permits unsourced fallback generation when the lookup
 is empty.
 
-**Data boundary:** retain the keyless Wikimedia on-this-day feed, its cultural,
-scientific and sporting filters, and the durable dedup ledger.
+**Implemented data boundary:** retain the keyless Wikimedia on-this-day feed,
+its cultural, scientific and sporting filters, and the durable dedup ledger.
+Controller code selects exactly one fresh event and binds it to the
+date-specific Wikimedia endpoint before Persona generation.
 
 **Acceptance:** only an explicit returned event may air. An empty feed or an
 exhausted daily pool stays silent. Remove the LLM-generated factoid fallback.
 
 **Speech:** preserve the current light, oddly specific delivery. This is a
 safety revision rather than a creative redesign and is therefore low priority.
+
+Curiosity v2 ships disabled beside the established skill. Its research attempt
+consumes only the single event it offered, even if speech generation is later
+rejected, and an empty or exhausted pool returns unavailable evidence. Both the
+source event and the final aired wording remain in durable recall.
 
 ### Library deep-cut v2
 
@@ -204,7 +211,7 @@ from that headline.
 2. Build the shared music RSS cache and use it for News v2 and Web search v2.
 3. Correct Album anniversary v2 using OpenSubsonic album metadata.
 4. Add Weather v2's bounded look-ahead. **Implemented; live trial pending.**
-5. Make Curiosity v2 evidence-only.
+5. Make Curiosity v2 evidence-only. **Implemented; live trial pending.**
 6. Revisit Library deep-cut v2 only after defining a stronger on-air purpose.
 
 ## Skill speech safety

@@ -21,6 +21,11 @@ import { existsSync, readFileSync } from 'node:fs';
 import { writeFile } from 'node:fs/promises';
 import { config } from '../config.js';
 import { zonedParts, zonedISODate } from '../time.js';
+import {
+  createResearchEvidence,
+  unavailableResearchEvidence,
+  type ResearchEvidence,
+} from './research-evidence.js';
 
 const ON_THIS_DAY_TTL_MS = 12 * 60 * 60 * 1000; // 12h — events for a date are stable
 
@@ -29,7 +34,7 @@ const ON_THIS_DAY_TTL_MS = 12 * 60 * 60 * 1000; // 12h — events for a date are
 // is informative if their abuse desk ever wants to reach a human.
 const USER_AGENT = 'subwave-radio/0.1 (+https://github.com/perminder-klair/subwave)';
 
-type CuriosityItem = {
+export type CuriosityItem = {
   source: 'on-this-day';
   year: number;
   text: string;
@@ -100,6 +105,47 @@ export async function fetchOnThisDay(date = new Date()): Promise<CuriosityItem[]
   }
   onThisDayCache = { date: iso, items, fetchedAt: Date.now() };
   return items;
+}
+
+export function selectFreshOnThisDay(
+  items: CuriosityItem[],
+  seen: (text: string) => boolean,
+): CuriosityItem | null {
+  return items.find((item) => item?.text && !seen(item.text)) || null;
+}
+
+export function onThisDayEvidence(item: CuriosityItem, date = new Date()): ResearchEvidence {
+  const { mm, dd, iso } = mmdd(date);
+  const sourceId = `wikimedia-on-this-day-${iso}`;
+  return createResearchEvidence({
+    subject: { topic: 'on-this-day' },
+    claims: [{
+      text: `On this day in ${item.year}, ${item.text}`,
+      sourceIds: [sourceId],
+      topic: 'historical-event',
+    }],
+    sources: [{
+      id: sourceId,
+      provider: 'wikimedia',
+      label: `Wikimedia On This Day for ${dd}/${mm}`,
+      url: `https://api.wikimedia.org/feed/v1/wikipedia/en/onthisday/events/${mm}/${dd}`,
+      retrievedAt: new Date().toISOString(),
+    }],
+  });
+}
+
+export async function researchOnThisDay(date = new Date()): Promise<ResearchEvidence> {
+  const item = selectFreshOnThisDay(await fetchOnThisDay(date), curiositySeen);
+  if (!item) {
+    return unavailableResearchEvidence(
+      { topic: 'on-this-day' },
+      'no fresh filtered Wikimedia event remains for the station-local date',
+    );
+  }
+  // Research cadence is burn-on-read: a failed or rejected speech generation
+  // must not offer the same fact again at the next scheduler opportunity.
+  recordCuriosity(item.text);
+  return onThisDayEvidence(item, date);
 }
 
 // Stable hash for the dedup ledger. Same shape as hashHeadline() in news.ts.

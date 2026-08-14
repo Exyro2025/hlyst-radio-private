@@ -17,7 +17,12 @@
 
 import { queue } from '../../../broadcast/queue.js';
 import { searchWeb, searchReady } from '../../../skills/web-search.js';
-import { fetchOnThisDay, curiositySeen, recordCuriosity } from '../../../skills/curiosity.js';
+import {
+  fetchOnThisDay,
+  curiositySeen,
+  recordCuriosity,
+  researchOnThisDay,
+} from '../../../skills/curiosity.js';
 import { fetchHeadlines, hashHeadline } from '../../../skills/news.js';
 import { getArtist, getAlbum, searchArtists } from '../../../music/subsonic.js';
 import { artistGenreProfiles, get as getLibraryTrack } from '../../../music/library.js';
@@ -43,6 +48,7 @@ export interface StationServices {
   researchArtistNews: typeof researchArtistMusicNews;
   researchAlbumAnniversary: typeof researchAlbumAnniversary;
   researchWeatherOutlook: typeof researchWeatherOutlook;
+  researchCuriosity: typeof researchOnThisDay;
   // The track currently on air (artist/title/album/year/id), or null.
   nowPlaying: () => any | null;
   // Play-log lookup over the last `hours` — { ids, keys } sets for dedup.
@@ -87,6 +93,7 @@ export function buildStationServices(): StationServices {
     researchArtistNews: researchArtistMusicNews,
     researchAlbumAnniversary,
     researchWeatherOutlook,
+    researchCuriosity: researchOnThisDay,
     nowPlaying: () => queue.current?.track ?? null,
     recentPlays: (hours: number) => queue.recentlyPlayed(hours),
     library: { getArtist, getAlbum, searchArtists, artistGenreProfiles },
