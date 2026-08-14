@@ -29,6 +29,10 @@ export interface SkillEligibilityInput {
   // are DISCOVERED-BUT-DISABLED and must be explicitly enabled before they can
   // air. The asymmetry is the review gate, not a default-value convenience.
   seeded: boolean;
+  // Shipped skills historically default on and operator skills default off.
+  // A shipped alternative may explicitly opt out without losing the built-in
+  // reset/delete affordances carried by `seeded`.
+  defaultEnabled?: boolean;
   // The skill's slug — the key `settings.skills.enabled` and a persona's
   // `skills[]` allowlist are both written in terms of.
   skill: string;
@@ -38,8 +42,8 @@ export interface SkillEligibilityInput {
   personaSkills?: string[] | null;
 }
 
-export function skillEnabled({ seeded, skill, enabled }: SkillEligibilityInput): boolean {
-  return seeded ? enabled[skill] !== false : enabled[skill] === true;
+export function skillEnabled({ seeded, defaultEnabled, skill, enabled }: SkillEligibilityInput): boolean {
+  return enabled[skill] ?? defaultEnabled ?? seeded;
 }
 
 export function personaRunsSkill({ skill, personaSkills }: SkillEligibilityInput): boolean {

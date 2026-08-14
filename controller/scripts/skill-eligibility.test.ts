@@ -32,6 +32,13 @@ test('an operator skill is discovered-but-disabled — it must be turned ON', ()
   assert.equal(skillEnabled({ seeded: false, skill: 'dabbers', enabled: { dabbers: false } }), false);
 });
 
+test('a shipped opt-in skill remains disabled until explicitly enabled', () => {
+  const base = { seeded: true, defaultEnabled: false, skill: 'now-playing-dig-v2' };
+  assert.equal(skillEnabled({ ...base, enabled: {} }), false);
+  assert.equal(skillEnabled({ ...base, enabled: { 'now-playing-dig-v2': true } }), true);
+  assert.equal(skillEnabled({ ...base, enabled: { 'now-playing-dig-v2': false } }), false);
+});
+
 test('no persona allowlist means the persona runs every skill', () => {
   const base = { seeded: true, skill: 'weather', enabled: {} };
   assert.equal(personaRunsSkill({ ...base, personaSkills: undefined }), true);

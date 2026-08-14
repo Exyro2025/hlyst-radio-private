@@ -180,6 +180,34 @@ export function allTagged(limit?: number): ObservatoryTrackRow[] {
   return (requireDb().prepare(sql).all() as TrackRow[]).map(rowToObservatory);
 }
 
+export interface ArtistGenreProfile {
+  name: string;
+  genres: string[];
+}
+
+// One compact row per tagged library artist for editorial relevance checks.
+// This is deliberately a GROUP BY query rather than materialising every track
+// through allTagged(): News v2 may run on the live controller while a large
+// station is broadcasting, and artist matching needs names + genres only.
+export function artistGenreProfiles(): ArtistGenreProfile[] {
+  const rows = requireDb().prepare(`
+    SELECT MIN(TRIM(t.artist)) AS name,
+           json_group_array(DISTINCT j.value) AS genres
+    FROM tracks t
+    JOIN json_each(t.genres) j
+    WHERE ${SQL_HAS_MOODS}
+      AND t.artist IS NOT NULL
+      AND TRIM(t.artist) <> ''
+      AND j.value IS NOT NULL
+      AND TRIM(j.value) <> ''
+    GROUP BY LOWER(TRIM(t.artist))
+  `).all() as Array<{ name: string; genres: string }>;
+  return rows.map((row) => ({
+    name: row.name,
+    genres: safeParseArray(row.genres).filter((genre): genre is string => typeof genre === 'string' && !!genre),
+  }));
+}
+
 // A *stratified* sample of the tagged library, ~`max` rows, proportional per
 // genre — so the Library Observatory shows the real shape of a huge library
 // instead of the first-N tracks by id (which over-represents whichever genres

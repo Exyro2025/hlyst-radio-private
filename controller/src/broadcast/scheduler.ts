@@ -966,6 +966,7 @@ export function syncSkillCrons() {
       const now = new Date();
       const eligible = skillEligible({
         seeded: cap.seeded,
+        defaultEnabled: cap.defaultEnabled,
         skill: cap.skill,
         enabled: settings.get().skills?.enabled || {},
         personaSkills: settings.getEffectivePersona(now)?.skills,

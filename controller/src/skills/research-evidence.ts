@@ -1,12 +1,13 @@
-// Source-neutral factual evidence exchanged between research adapters and the
-// Producer/Persona pipeline. Adapters keep provenance here; Persona receives a
-// deliberately smaller view containing only controller-approved statements.
+// Source-neutral evidence returned by specialist research adapters. The
+// speaking model gets explicit claims tied to explicit sources instead of raw
+// neighbouring search snippets from which it could invent a relationship.
 
 export const RESEARCH_EVIDENCE_FORMAT = 'subwave.research-evidence.v1' as const;
 
 export interface ResearchSubject {
-  artist: string;
+  artist?: string;
   title?: string;
+  topic?: string;
 }
 
 export interface ResearchSource {
@@ -14,6 +15,7 @@ export interface ResearchSource {
   provider: string;
   label: string;
   url?: string;
+  publishedAt?: string;
   retrievedAt?: string;
 }
 
@@ -40,6 +42,17 @@ export interface UnavailableResearchEvidence {
 
 export type ResearchEvidence = AvailableResearchEvidence | UnavailableResearchEvidence;
 
+function cleanSubject(subject: ResearchSubject): ResearchSubject {
+  const artist = String(subject?.artist || '').trim();
+  const title = String(subject?.title || '').trim();
+  const topic = String(subject?.topic || '').trim();
+  return {
+    ...(artist ? { artist } : {}),
+    ...(title ? { title } : {}),
+    ...(topic ? { topic } : {}),
+  };
+}
+
 export function unavailableResearchEvidence(
   subject: ResearchSubject,
   reason: string,
@@ -52,14 +65,6 @@ export function unavailableResearchEvidence(
   };
 }
 
-function cleanSubject(subject: ResearchSubject): ResearchSubject {
-  const artist = String(subject?.artist || '').trim();
-  const title = String(subject?.title || '').trim();
-  return title ? { artist, title } : { artist };
-}
-
-// Reject malformed provenance rather than letting an adapter accidentally
-// create a claim whose cited source is absent from the packet.
 export function createResearchEvidence({
   subject,
   claims,
@@ -74,6 +79,7 @@ export function createResearchEvidence({
     provider: String(source?.provider || '').trim(),
     label: String(source?.label || '').trim(),
     ...(source?.url ? { url: String(source.url).trim() } : {}),
+    ...(source?.publishedAt ? { publishedAt: String(source.publishedAt).trim() } : {}),
     ...(source?.retrievedAt ? { retrievedAt: String(source.retrievedAt).trim() } : {}),
   })).filter((source) => source.id && source.provider && source.label);
   const sourceIds = new Set(cleanedSources.map((source) => source.id));
@@ -102,8 +108,9 @@ export function isResearchEvidence(value: unknown): value is ResearchEvidence {
     && (value as { format?: unknown }).format === RESEARCH_EVIDENCE_FORMAT;
 }
 
-// URLs, snippets, provider names and retrieval mechanics are not creative
-// context. Persona gets the subject and approved facts only.
+// Provenance is retained backstage for gating and diagnostics. Persona receives
+// only controller-approved facts and their subject, never URLs, snippets,
+// provider names or retrieval mechanics.
 export function personaResearchEvidence(value: unknown): unknown {
   if (!isResearchEvidence(value) || !value.available) return value;
   return {

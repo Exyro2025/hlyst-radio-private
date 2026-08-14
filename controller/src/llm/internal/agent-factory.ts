@@ -31,7 +31,7 @@ export interface AgentDefinition<TArgs = Record<string, any>, TExtras = any> {
   // A function form is resolved at each run, so the schema can follow live
   // state (the picker swaps its transition-field coaching off when the on-air
   // persona isn't in DJ mode) instead of being frozen at module load.
-  schema?: any | (() => any);
+  schema?: any | ((args?: TArgs) => any);
   buildSystem: (args: TArgs) => string;
   buildTools?: (args: TArgs) => { tools: any; extras?: TExtras };
   maxSteps?: number;
@@ -40,7 +40,7 @@ export interface AgentDefinition<TArgs = Record<string, any>, TExtras = any> {
   // module load.
   timeoutMs?: number | (() => number);
   temperature?: number;
-  maxOutputTokens?: number;
+  maxOutputTokens?: number | ((args?: TArgs) => number);
   // Acceptance check on the native path's object, given this run's buildTools
   // extras (the picker checks its chosen id against the `seen` map). A miss
   // falls the run through to the done-tool harness — see djAgent's validate.
@@ -80,8 +80,15 @@ function resolveTimeout(t: number | (() => number) | undefined): number | undefi
 
 // Zod schemas are plain objects, so a function here can only be a dynamic
 // schema factory — same convention as timeoutMs.
-function resolveSchema(s: any | (() => any) | undefined): any {
-  return typeof s === 'function' ? s() : s;
+function resolveSchema<TArgs>(s: any | ((args?: TArgs) => any) | undefined, args?: TArgs): any {
+  return typeof s === 'function' ? s(args) : s;
+}
+
+function resolveMaxOutputTokens<TArgs>(
+  value: number | ((args?: TArgs) => number) | undefined,
+  args?: TArgs,
+): number | undefined {
+  return typeof value === 'function' ? value(args) : value;
 }
 
 export function defineAgent<TArgs = Record<string, any>, TExtras = any>(
@@ -100,7 +107,9 @@ export function defineAgent<TArgs = Record<string, any>, TExtras = any>(
       return resolveTimeout(def.timeoutMs);
     },
     temperature: def.temperature,
-    maxOutputTokens: def.maxOutputTokens,
+    get maxOutputTokens() {
+      return resolveMaxOutputTokens(def.maxOutputTokens);
+    },
     providerDiscoveryBudget: def.providerDiscoveryBudget === true,
     role: def.role ?? 'persona',
     async run({ messages, ...rest }) {
@@ -118,11 +127,11 @@ export function defineAgent<TArgs = Record<string, any>, TExtras = any>(
         system,
         messages,
         tools: built.tools,
-        schema: resolveSchema(def.schema),
+        schema: resolveSchema(def.schema, toolArgs),
         maxSteps: def.maxSteps,
         timeoutMs: resolveTimeout(def.timeoutMs),
         temperature: def.temperature,
-        maxOutputTokens: def.maxOutputTokens,
+        maxOutputTokens: resolveMaxOutputTokens(def.maxOutputTokens, toolArgs),
         kind: def.kind,
         providerDiscoveryBudget: def.providerDiscoveryBudget === true,
         role: def.role ?? 'persona',

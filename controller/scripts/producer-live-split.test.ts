@@ -250,7 +250,7 @@ test('the segment Producer has no listener-facing text field', () => {
 
 test('the segment Producer receives operational history, not Persona prose', () => {
   queue.djLog = [
-    { id: 1, kind: 'weather', message: 'The rain is holding its breath over the valley.', t: new Date().toISOString() },
+    { id: 1, kind: 'weather', message: 'The rain is holding its breath over the valley.', meta: {}, t: new Date().toISOString() },
   ];
   const situation = buildProducerSituation({}, [{ kind: 'weather', contextFields: [] }], null);
   assert.match(situation, /weather \(0m ago\)/);
@@ -286,6 +286,9 @@ test('segment context is selected for the chosen skill', () => {
   assert.ok(!weather.facts.join('\n').includes('Wednesday'));
   assert.equal(weather.includeTrack, false);
   assert.equal(personaSegmentContext({ kind: 'now-playing-dig', seeded: true }, ctx).includeTrack, true);
+  assert.equal(personaSegmentContext({ kind: 'now-playing-dig-v2', seeded: true }, ctx).includeTrack, true);
+  assert.match(personaSegmentContext({ kind: 'curiosity-v2', seeded: true }, ctx).facts.join('\n'), /Date:/);
+  assert.match(personaSegmentContext({ kind: 'weather-v2', seeded: true }, ctx).facts.join('\n'), /Approximate time:/);
 });
 
 test('failed and empty tool payloads cannot reach the Persona as evidence', () => {
@@ -310,15 +313,22 @@ test('off-air rehearsal isolates in-memory and durable tool state', () => {
 
   let remembered = 0;
   let logged = 0;
+  let curiosityRemember: boolean | undefined;
   const services = rehearsalStationServices({
+    researchCuriosity: async (_date, options) => {
+      curiosityRemember = options?.remember;
+      return { available: false } as any;
+    },
     recall: { seen: () => true, remember: () => { remembered += 1; } },
     log: () => { logged += 1; },
   } as any);
   assert.equal(services.recall.seen('known fact'), true);
   services.recall.remember('new fact');
   services.log('test');
+  void services.researchCuriosity();
   assert.equal(remembered, 0);
   assert.equal(logged, 0);
+  assert.equal(curiosityRemember, false);
 });
 
 test('now-playing evidence requires an explicit answer and exact-track source', () => {

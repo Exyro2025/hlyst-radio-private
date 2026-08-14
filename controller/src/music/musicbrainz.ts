@@ -66,10 +66,21 @@ function norm(s: unknown): string {
 // The slice of an MB recording the resolver reads. Search results carry all of
 // it; the shape is loose because it's third-party JSON.
 export interface MbRecording {
+  id?: string;
   score?: number;
   title?: string;
   'first-release-date'?: string;
   'artist-credit'?: Array<{ name?: string; artist?: { name?: string } }>;
+}
+
+export interface MbRecordingResearch {
+  id: string;
+  title: string;
+  artists: string[];
+  firstReleaseDate: string | null;
+  producers: string[];
+  mixers: string[];
+  remixers: string[];
 }
 
 function creditNames(r: MbRecording): string[] {
@@ -150,6 +161,79 @@ async function searchRecordings(query: string): Promise<MbRecording[]> {
   if (!res.ok) return [];
   const body = (await res.json()) as { recordings?: MbRecording[] };
   return Array.isArray(body.recordings) ? body.recordings : [];
+}
+
+async function fetchRecordingById(id: string): Promise<any | null> {
+  const url = `${MB_API}/recording/${encodeURIComponent(id)}?inc=artist-rels&fmt=json`;
+  const res = await fetchWithTimeout(url, {
+    timeoutMs: TIMEOUT_MS,
+    headers: { 'User-Agent': USER_AGENT, Accept: 'application/json' },
+  });
+  return res.ok ? res.json() : null;
+}
+
+export function exactResearchRecording(recordings: MbRecording[], artist: string, title: string): MbRecording | null {
+  const wantedTitle = norm(title);
+  const wantedArtists = [artist, primaryArtist(artist), artist.split('•')[0]]
+    .map(norm)
+    .filter(Boolean);
+  const matches = (recordings || []).filter((recording) => {
+    if (!recording.id || (recording.score ?? 0) < MIN_SCORE || norm(recording.title) !== wantedTitle) return false;
+    const credits = creditNames(recording).map(norm);
+    return wantedArtists.some((wanted) => credits.some((credit) => credit === wanted));
+  });
+  matches.sort((a, b) => String(a['first-release-date'] || '9999').localeCompare(String(b['first-release-date'] || '9999')));
+  return matches[0] || null;
+}
+
+export function recordingResearchFromResponses(
+  recordings: MbRecording[],
+  lookup: any,
+  artist: string,
+  title: string,
+): MbRecordingResearch | null {
+  const recording = exactResearchRecording(recordings, artist, title);
+  if (!recording?.id) return null;
+  const creditedArtists = (relationshipType: string): string[] => [...new Set<string>(
+    (lookup?.relations || [])
+      .filter((relation: any) => norm(relation?.type) === relationshipType)
+      .map((relation: any) => String(relation?.artist?.name || '').trim())
+      .filter(Boolean),
+  )];
+  return {
+    id: recording.id,
+    title: String(recording.title || title),
+    artists: creditNames(recording),
+    firstReleaseDate: String(recording['first-release-date'] || '').trim() || null,
+    producers: creditedArtists('producer'),
+    mixers: creditedArtists('mix'),
+    remixers: creditedArtists('remixer'),
+  };
+}
+
+// Exact-track research for factual skills. It shares this module's single
+// MusicBrainz throttle with the library enrichment pass; adding a second client
+// would let the two features jointly exceed MusicBrainz's one-request/second
+// policy. Returns null on any miss or network failure.
+export async function lookupRecordingResearch(track: {
+  artist?: string | null;
+  title?: string | null;
+}): Promise<MbRecordingResearch | null> {
+  const artist = String(track.artist || '').trim();
+  const title = String(track.title || '').trim();
+  if (!artist || !title) return null;
+  try {
+    const queryArtist = primaryArtist(artist.split('•')[0].trim() || artist);
+    const recordings = await throttled(() =>
+      searchRecordings(`recording:${phrase(title)} AND artist:${phrase(queryArtist)}`),
+    );
+    const recording = exactResearchRecording(recordings, artist, title);
+    if (!recording?.id) return null;
+    const lookup = await throttled(() => fetchRecordingById(recording.id!));
+    return recordingResearchFromResponses(recordings, lookup, artist, title);
+  } catch {
+    return null;
+  }
 }
 
 // Escape a value for use inside a quoted Lucene phrase.

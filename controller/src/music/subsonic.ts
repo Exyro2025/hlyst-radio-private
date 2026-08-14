@@ -608,6 +608,16 @@ export async function getAlbum(id) {
   return rejectArchive(r.album?.song || []);
 }
 
+// Full OpenSubsonic AlbumID3WithSongs record. Kept separate from getAlbum(),
+// whose long-standing public contract is the song array alone. Metadata-aware
+// policies (album-anniversary-v2) need originalReleaseDate, releaseTypes and
+// isCompilation from the album object itself.
+export async function getAlbumDetails(id) {
+  const r = await call('getAlbum', { id });
+  if (!r.album) return null;
+  return { ...r.album, song: rejectArchive(r.album.song || []) };
+}
+
 // Single song lookup — the Child carries albumId, which is how manual album
 // tagging resolves a whole album from one track id (the UI never sees albumIds).
 export async function getSong(id) {

@@ -16,6 +16,7 @@ import { openingKeyFrom, endingKeyFrom } from './mix.js';
 import { DEEP_CUT_DAYS, EMPTY_AIRED_INDEX, type AiredIndex } from './airing.js';
 
 let loaded = false;
+let artistProfilesCache: { at: number; rows: db.ArtistGenreProfile[] } | null = null;
 
 export async function load() {
   if (loaded) return;
@@ -36,6 +37,7 @@ export async function load() {
 export async function reload() {
   if (db.isOpen()) db.close();
   loaded = false;
+  artistProfilesCache = null;
   invalidateAiredIndex();
   await load();
 }
@@ -46,6 +48,7 @@ export async function reload() {
 // reload(), this deletes the file first (db.reset()) for a true fresh start.
 export async function reset() {
   loaded = false;
+  artistProfilesCache = null;
   invalidateAiredIndex();
   await db.reset();
   await load();
@@ -642,4 +645,17 @@ export function filter(opts: FilterOpts = {}): { total: number; rows: FilteredRo
       instrumental: r.vocalRanges == null ? null : r.vocalRanges.length === 0,
     })),
   };
+}
+
+// Compact local artist/genre index used by News v2's editorial gate. Five
+// minutes is short enough to pick up an active tagging run while avoiding a
+// GROUP BY scan on every scheduler pass.
+export function artistGenreProfiles(): db.ArtistGenreProfile[] {
+  if (!loaded) return [];
+  if (artistProfilesCache && Date.now() - artistProfilesCache.at < 5 * 60_000) {
+    return artistProfilesCache.rows;
+  }
+  const rows = db.artistGenreProfiles();
+  artistProfilesCache = { at: Date.now(), rows };
+  return rows;
 }

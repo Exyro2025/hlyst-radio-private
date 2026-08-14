@@ -17,24 +17,55 @@
 
 import { queue } from '../../../broadcast/queue.js';
 import { searchWeb, searchReady } from '../../../skills/web-search.js';
-import { fetchOnThisDay, curiositySeen, recordCuriosity } from '../../../skills/curiosity.js';
+import {
+  fetchOnThisDay,
+  curiositySeen,
+  recordCuriosity,
+  researchOnThisDay,
+} from '../../../skills/curiosity.js';
 import { fetchHeadlines, hashHeadline } from '../../../skills/news.js';
 import { getArtist, getAlbum, searchArtists } from '../../../music/subsonic.js';
-import { researchTrackOnMusicBrainz } from '../../../skills/musicbrainz.js';
+import { artistGenreProfiles, get as getLibraryTrack } from '../../../music/library.js';
+import { relevantMusicNews, safeGeneralHeadline } from '../../../skills/news-selection.js';
+import { researchExactTrack } from '../../../skills/track-research.js';
+import { fetchMusicNews, researchArtistMusicNews } from '../../../skills/music-news.js';
+import { researchAlbumAnniversary } from '../../../skills/album-anniversary.js';
+import { researchWeatherOutlook } from '../../../skills/weather-outlook.js';
+
+interface NewsRelevanceContext {
+  activeShow?: { genres?: string[] | null } | null;
+}
 
 export interface StationServices {
   // Web search via the operator's configured provider (DuckDuckGo / Tavily /
   // SearXNG). `searchReady()` is false when no provider is usable.
   searchWeb: typeof searchWeb;
   searchReady: typeof searchReady;
-  // Exact-track, provenance-bearing research from specialist music sources.
-  researchTrack: typeof researchTrackOnMusicBrainz;
+  // Provenance-bearing exact-track facts from specialist music data sources.
+  researchTrack: typeof researchExactTrack;
+  // Cached keyless music headlines and exact-artist evidence for v2 skills.
+  fetchMusicNews: typeof fetchMusicNews;
+  researchArtistNews: typeof researchArtistMusicNews;
+  researchAlbumAnniversary: typeof researchAlbumAnniversary;
+  researchWeatherOutlook: typeof researchWeatherOutlook;
+  researchCuriosity: typeof researchOnThisDay;
   // The track currently on air (artist/title/album/year/id), or null.
   nowPlaying: () => any | null;
   // Play-log lookup over the last `hours` — { ids, keys } sets for dedup.
   recentPlays: (hours: number) => { ids: Set<string>; keys: Set<string> };
   // Subsonic/Navidrome library reads.
-  library: { getArtist: typeof getArtist; getAlbum: typeof getAlbum; searchArtists: typeof searchArtists };
+  library: {
+    getArtist: typeof getArtist;
+    getAlbum: typeof getAlbum;
+    searchArtists: typeof searchArtists;
+    artistGenreProfiles: typeof artistGenreProfiles;
+  };
+  // Apply News v2's local-library/show-genre editorial gate.
+  relevantMusicNews: (
+    items: Awaited<ReturnType<typeof fetchMusicNews>>,
+    ctx: NewsRelevanceContext,
+  ) => ReturnType<typeof relevantMusicNews>;
+  safeGeneralHeadline: typeof safeGeneralHeadline;
   // Wikipedia "on this day" events for today's date.
   onThisDay: () => Promise<any[]>;
   // Fetch + parse an RSS feed (defaults to the configured news feed).
@@ -48,10 +79,15 @@ export interface StationServices {
 }
 
 // Rehearsals share live read paths but cannot consume durable evidence or add
-// tool-authored booth lines. Kept pure so the no-write boundary is testable.
+// tool-authored booth lines. Curiosity v2 has its own source adapter, so its
+// burn-on-read behaviour is explicitly disabled here as well.
 export function rehearsalStationServices(services: StationServices): StationServices {
   return {
     ...services,
+    researchCuriosity: (date, options) => services.researchCuriosity(
+      date,
+      { ...options, remember: false },
+    ),
     recall: { ...services.recall, remember: () => {} },
     log: () => {},
   };
@@ -67,10 +103,29 @@ export function buildStationServices(): StationServices {
   cached = {
     searchWeb,
     searchReady,
-    researchTrack: researchTrackOnMusicBrainz,
+    researchTrack: researchExactTrack,
+    fetchMusicNews,
+    researchArtistNews: researchArtistMusicNews,
+    researchAlbumAnniversary,
+    researchWeatherOutlook,
+    researchCuriosity: researchOnThisDay,
     nowPlaying: () => queue.current?.track ?? null,
     recentPlays: (hours: number) => queue.recentlyPlayed(hours),
-    library: { getArtist, getAlbum, searchArtists },
+    library: { getArtist, getAlbum, searchArtists, artistGenreProfiles },
+    relevantMusicNews: (items, ctx) => {
+      const showGenres = Array.isArray(ctx?.activeShow?.genres) ? ctx.activeShow.genres.filter(Boolean) : [];
+      const current = queue.current?.track;
+      const currentGenres = current?.id ? (getLibraryTrack(current.id)?.genres || []) : [];
+      return relevantMusicNews({
+        items,
+        artists: artistGenreProfiles(),
+        targetGenres: showGenres.length ? showGenres : currentGenres,
+        // Autonomous/no-show listening is the broad station mode. A defined
+        // show without genres uses the current track's genres as a soft gate.
+        broad: !ctx?.activeShow || (!showGenres.length && !currentGenres.length),
+      });
+    },
+    safeGeneralHeadline,
     onThisDay: () => fetchOnThisDay(),
     fetchHeadlines,
     hashHeadline,

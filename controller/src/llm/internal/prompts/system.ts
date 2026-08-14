@@ -32,6 +32,24 @@ const ELEVENLABS_V3_TAG_HINT =
 const FISH_S21_TAG_HINT =
   '\n\nYou may sparingly add a short natural-language performance cue in square brackets, such as [laughing nervously], [whispers], or [soft and warm]. Use at most one per segment, only when it genuinely improves the delivery, and never as filler.';
 
+// Skill agents do not use the full djSystem prompt, but their spoken field
+// still reaches the same TTS engine. Export the already-gated cue policy so
+// they can inherit it without duplicating provider/model detection or leaking
+// bracket instructions to an engine that would read them aloud.
+export function personaExpressionCueHint(
+  persona: any = settings.getEffectivePersona(),
+  cloudModel: string = resolveCloudModelForPersona(persona),
+): string {
+  if (persona?.tts?.engine === 'chatterbox') return CHATTERBOX_TAG_HINT;
+  const cueFamily = cloudExpressionCueFamily(
+    resolveCloudProviderForPersona(persona),
+    cloudModel,
+  );
+  if (cueFamily === 'fish-s21') return FISH_S21_TAG_HINT;
+  if (cueFamily === 'elevenlabs-v3') return ELEVENLABS_V3_TAG_HINT;
+  return '';
+}
+
 // `persona` overrides the on-air persona — used by the persona-handoff
 // generators (generatePersonaSignoff / generatePersonaHandoffGreeting) to render the sign-off
 // under the OUTGOING persona and the greeting under the incoming one, since the
@@ -57,18 +75,7 @@ export function djSystem(
     // string the DJ speaks as "broadcasting from {location}".
     location: settings.resolveOnAirLocation(s),
   }) + settings.onAirRosterClause(persona);
-  if (persona?.tts?.engine === 'chatterbox') return base + CHATTERBOX_TAG_HINT;
-  // Provider/model resolution is non-empty only when the persona actually
-  // resolves to a configured cloud engine — including via the station default
-  // when the persona sets no engine. That fail-closed check keeps cues away
-  // from Piper/Kokoro fallback, where brackets would be spoken literally.
-  const cueFamily = cloudExpressionCueFamily(
-    resolveCloudProviderForPersona(persona),
-    cloudModel,
-  );
-  if (cueFamily === 'fish-s21') return base + FISH_S21_TAG_HINT;
-  if (cueFamily === 'elevenlabs-v3') return base + ELEVENLABS_V3_TAG_HINT;
-  return base;
+  return base + personaExpressionCueHint(persona, cloudModel);
 }
 
 // Persona-driven verbosity, one entry per SCRIPT_LENGTHS rung. 'concise'

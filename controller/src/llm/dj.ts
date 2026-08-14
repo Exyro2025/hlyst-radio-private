@@ -2,7 +2,7 @@
 // internal/prompts/** by concern (system, context, intro-budget, request,
 // scripts, picker). Barrel so call sites keep importing from `llm/dj.js` unchanged.
 
-export { djSystem, lengthMode, lengthPhrase } from './internal/prompts/system.js';
+export { djSystem, lengthMode, lengthPhrase, personaExpressionCueHint } from './internal/prompts/system.js';
 export {
   ANGLES,
   pickAngle,

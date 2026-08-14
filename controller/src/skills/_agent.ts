@@ -33,15 +33,34 @@ import { queue } from '../broadcast/queue.js';
 import * as settings from '../settings.js';
 import { defineAgent } from '../llm/agent.js';
 import { djObject, modelTolerant } from '../llm/sdk.js';
-import { buildContextLines, CONTEXT_FIELDS, fuzzyAirTime, generatePersonaSegment, lengthMode, lengthPhrase } from '../llm/dj.js';
+import {
+  buildContextLines,
+  CONTEXT_FIELDS,
+  fuzzyAirTime,
+  generatePersonaSegment,
+  lengthMode,
+  lengthPhrase,
+  personaExpressionCueHint,
+} from '../llm/dj.js';
 import { ProducerSegmentSchema, producerSegmentSystem } from '../llm/producer.js';
 import { buildSegmentTools, fetchSegmentData } from '../llm/segment-tools.js';
 import { recordCuriosity, recentAiredCuriosity } from './curiosity.js';
 import { loadedCapabilities } from './loader.js';
 import { skillEligible } from './eligibility.js';
-import { researchAttemptDelayMs, researchAttemptsFromToolCalls, type SkillResearchAttempt } from './attempt-policy.js';
+import { enforceSkillSpeech, skillSpeechLimits } from './speech-policy.js';
+import {
+  directResearchAttempt,
+  hasRequiredEvidence,
+  researchAttemptDelayMs,
+  researchAttemptsFromToolCalls,
+  type SkillResearchAttempt,
+} from './attempt-policy.js';
 import { createResearchEvidence, isResearchEvidence, personaResearchEvidence, unavailableResearchEvidence } from './research-evidence.js';
 import * as sfx from '../broadcast/sfx.js';
+
+function isCuriosityKind(kind: string): boolean {
+  return kind === 'curiosity' || kind.startsWith('curiosity-');
+}
 
 // The capability registry now lives entirely in skills/loader.js, which loads
 // every skill — shipped and operator-added — from a directory (SKILL.md +
@@ -102,7 +121,7 @@ function unionContextFields(caps): string[] {
 // nullable nested object alone, emitting bare top-level `null` or prose instead
 // (isBareNullSilent / isSilentFailure below); `air: false` gives them an
 // unambiguous silence token.
-function segmentSchema() {
+function segmentSchema(persona = settings.getEffectivePersona()) {
   return modelTolerant(z.object({
     reason: z.string().describe('one short internal sentence on why this segment (or why silent) — never shown to the listener; write this BEFORE deciding the segment'),
     air: z.boolean().describe('true to air one segment now, false to stay silent — silence is a perfectly good answer, often the best one, when the data is dull, stale, unchanged, or there is nothing fresh worth a listener\'s attention'),
@@ -117,7 +136,7 @@ function segmentSchema() {
       // the system prompt, and agenticTick drops any kind it wasn't offered.
       kind: z.string()
         .describe('the segment kind — MUST be one of the kinds offered in the system prompt for this tick'),
-      text: z.string().describe(`the spoken line in the DJ voice — ${lengthPhrase('segment')}`),
+      text: z.string().describe(`the spoken line in the DJ voice — ${lengthPhrase('segment', persona)}`),
       sfx: z.string().nullable().describe('the exact name of one sound effect from the catalogue in the system prompt to play under this line, or null for no effect (null is usually right — most segments need none)'),
     }).describe('the segment to air when air is true; ignored when air is false (empty strings for kind/text, null sfx when silent)'),
   }), {
@@ -146,9 +165,9 @@ function segmentSchema() {
 
 // Operator-override schema: the segment is mandatory, the kind is already
 // known, so the agent only returns the spoken line.
-export function forcedSchema() {
+export function forcedSchema(persona = settings.getEffectivePersona()) {
   return modelTolerant(z.object({
-    text: z.string().describe(`the spoken line in the DJ voice — ${lengthPhrase('segment')}`),
+    text: z.string().describe(`the spoken line in the DJ voice — ${lengthPhrase('segment', persona)}`),
     sfx: z.string().nullable().describe('the exact name of one sound effect from the catalogue in the system prompt to play under this line, or null for no effect'),
   }));
 }
@@ -217,6 +236,7 @@ function availableCapabilities(ctx, now: Date) {
     // and reaches runCapability() without passing through here.
     if (!skillEligible({
       seeded: cap.seeded,
+      defaultEnabled: cap.defaultEnabled,
       skill: cap.skill,
       enabled,
       personaSkills: persona?.skills,
@@ -248,12 +268,37 @@ function directorSystem(persona, caps, freq: string, sfxCatalog) {
   const capList = caps.map((c) => `- ${c.kind}: ${c.desc}`).join('\n');
   const tone = stationTone(freq);
 
-  return `${settings.agentPersonaPreamble(persona)}
+  return `${skillPersonaPreamble(persona)}
 
 Your job: decide whether to air ONE between-track segment, or stay silent. You are NOT choosing music. ${tone}
 
 Capabilities available this tick (pick one of these kinds, or stay silent):
 ${capList}${sfxBlock(sfxCatalog)}${settings.agentLanguageReminder(persona, 'the "text" line')}`;
+}
+
+// Listener-facing skill calls inherit the selected speaker's existing Persona
+// controls without leaking those creative settings into Producer decisions.
+export function skillPersonaPreamble(persona) {
+  return settings.agentPersonaPreamble(persona)
+    + settings.personaToneDirectives(persona)
+    + personaExpressionCueHint(persona)
+    + `\n\nLength ceiling for this skill: ${lengthPhrase('segment', persona)}. Treat this as a maximum, not a target; follow a shorter requirement in the skill brief.`;
+}
+
+function skillAgentOutputTokens(persona): number {
+  return Math.max(512, skillSpeechLimits(persona).maxOutputTokens + 256);
+}
+
+function boundedSkillSpeech(text: unknown, persona, kind: string): string {
+  const result = enforceSkillSpeech(text, persona);
+  if (result.clipped) {
+    const limits = skillSpeechLimits(persona);
+    queue.log(
+      'scheduler',
+      `Skill speech bounded for ${kind} (${result.originalWords} words/${result.originalChars} chars → max ${limits.maxWords}/${limits.maxChars})`,
+    );
+  }
+  return result.text;
 }
 
 // 'silent' never reaches the auto tick (the frequency floor blocks it), but a
@@ -280,7 +325,7 @@ function segmentDeadline(): number {
 // caller (agenticTick) only feeds the dynamic per-tick state.
 export const directorAgent = defineAgent({
   kind: 'djAgentSegment',
-  schema: () => segmentSchema(),
+  schema: (args: any = {}) => segmentSchema(args.persona),
   // Discovery (step 0) + exactly one committed done-tool attempt (step 1),
   // same reasoning as pickerAgent.maxSteps in dj-agent.ts: a taller budget
   // just grows an increasingly "I already declined" trail on providers that
@@ -297,6 +342,7 @@ export const directorAgent = defineAgent({
   // into a multi-step stall (86s observed in issue #555) and hang the tick;
   // the deadline turns that into a clean throw → handled as silence below.
   timeoutMs: segmentDeadline,
+  maxOutputTokens: (args: any = {}) => skillAgentOutputTokens(args.persona),
   buildSystem: ({ persona, caps, freq, sfxCatalog }) =>
     directorSystem(persona, caps, freq, sfxCatalog),
   buildTools: ({ ctx, segmentState, caps }) => ({
@@ -423,7 +469,8 @@ export function usableSegmentEvidence(value: any): boolean {
 }
 
 const TRACK_CONTEXT_SEGMENTS = new Set([
-  'album-anniversary', 'library-deep-cut', 'now-playing-dig',
+  'album-anniversary', 'album-anniversary-v2', 'library-deep-cut',
+  'now-playing-dig', 'now-playing-dig-v2',
 ]);
 
 // Context crossing into Persona is selected by code, not copied from the
@@ -436,8 +483,8 @@ export function personaSegmentContext(cap, ctx): { facts: string[]; includeTrack
   if (show?.topic) facts.push(`Show brief: ${show.topic}`);
 
   let fields: string[] = [];
-  if (cap?.kind === 'curiosity') fields = ['date'];
-  else if (cap?.kind === 'weather') fields = ['clock'];
+  if (isCuriosityKind(cap?.kind || '')) fields = ['date'];
+  else if (cap?.kind === 'weather' || cap?.kind === 'weather-v2') fields = ['clock'];
   else if (!cap?.seeded && cap?.contextFields != null) fields = effectiveContextFields(cap);
 
   if (fields.includes('date') && ctx?.date) {
@@ -475,6 +522,9 @@ async function runSplitDirector(ctx, { caps, speaker, freq, sfxCatalog, state = 
   if (!cap) return { status: 'producer-invalid', seg: null, reason: `Producer returned unoffered kind "${object?.kind || ''}"`, attempts };
 
   const evidence = groundedSearchEvidence(cap.kind, evidenceForCapability(cap, toolCalls));
+  if (cap.requiresEvidence && (!isResearchEvidence(evidence) || !evidence.available)) {
+    return { status: 'evidence-rejected', seg: null, reason: `${cap.kind} returned no usable evidence`, attempts };
+  }
   if (typeof cap.toolFn === 'function' && !usableSegmentEvidence(evidence)) {
     return { status: 'evidence-rejected', seg: null, reason: `${cap.kind} returned no usable evidence`, attempts };
   }
@@ -590,17 +640,17 @@ export function dataBlock(data: unknown) {
 // Same decision surface as segmentSchema minus `kind` (code already chose it)
 // and minus the nested object (nothing here needs the agent path's GLM
 // armour — djObject's own repair layers cover a flat shape fine).
-export function simpleSegmentSchema() {
+export function simpleSegmentSchema(persona = settings.getEffectivePersona()) {
   return modelTolerant(z.object({
     reason: z.string().describe('one short internal sentence on why this segment (or why silent) — never shown to the listener; write this BEFORE deciding'),
     air: z.boolean().describe('true to air this segment now, false to stay silent — silence is a perfectly good answer when the data is dull, stale, unchanged, or not worth a listener\'s attention'),
-    text: z.string().describe(`the spoken line in the DJ voice — ${lengthPhrase('segment')}; empty string when air is false`),
+    text: z.string().describe(`the spoken line in the DJ voice — ${lengthPhrase('segment', persona)}; empty string when air is false`),
     sfx: z.string().nullable().describe('the exact name of one sound effect from the catalogue in the system prompt to play under this line, or null for no effect (null is usually right)'),
   }));
 }
 
 export function simpleSystem(persona, cap, freq: string, sfxCatalog) {
-  return `${settings.agentPersonaPreamble(persona)}
+  return `${skillPersonaPreamble(persona)}
 
 Your job: decide whether to air ONE between-track "${cap.kind}" segment, or stay silent. You are NOT choosing music. ${stationTone(freq)}
 
@@ -636,15 +686,17 @@ async function runSimpleDirector(ctx, { caps, speaker, freq, sfxCatalog }) {
   const cap = chooseCapability(caps, ctx);
   if (!cap) return { seg: null, reason: 'nothing fresh to say', attempts: [] };
   const data = await fetchSegmentData(cap, ctx, segmentState);
-  const attempts: SkillResearchAttempt[] = typeof cap.toolFn === 'function'
-    ? [{ kind: cap.kind, outcome: data?.error ? 'infrastructure-failure' : 'completed' }]
-    : [];
+  const attempts = directResearchAttempt(cap, data);
   if (data?.error) return { seg: null, reason: `${cap.kind} data fetch failed (${data.error})`, attempts };
-  const recentCuriosity = cap.kind === 'curiosity' ? recentAiredCuriosity() : undefined;
+  if (cap.requiresEvidence && data?.available !== true) {
+    return { seg: null, reason: `${cap.kind} returned no usable evidence`, attempts };
+  }
+  const recentCuriosity = isCuriosityKind(cap.kind) ? recentAiredCuriosity() : undefined;
   const out = await deadlinedSegmentObject({
     system: simpleSystem(speaker, cap, freq, sfxCatalog),
     prompt: buildSituation(ctx, { contextFields: effectiveContextFields(cap), recentCuriosity }) + dataBlock(data),
-    schema: simpleSegmentSchema(),
+    schema: simpleSegmentSchema(speaker),
+    maxOutputTokens: skillSpeechLimits(speaker).maxOutputTokens,
     temperature: 0.9,
     kind: 'generateSegment',
   });
@@ -726,7 +778,7 @@ export async function agenticTick(ctx) {
     } else {
       // When curiosity is on offer, brief the agent with what it already aired so
       // a pool-exhausted fallback doesn't repeat itself (issue #577).
-      const recentCuriosity = caps.some(c => c.kind === 'curiosity') ? recentAiredCuriosity() : undefined;
+      const recentCuriosity = caps.some(c => isCuriosityKind(c.kind)) ? recentAiredCuriosity() : undefined;
       const { object, toolCalls } = await directorAgent.run({
         messages: [{ role: 'user', content: buildSituation(ctx, { contextFields: unionContextFields(caps), recentCuriosity }) }],
         persona: speaker, caps, freq, sfxCatalog,
@@ -737,6 +789,11 @@ export async function agenticTick(ctx) {
       seg = object?.air ? object?.segment : null;
       silentReason = object?.reason;
       attempts = researchAttemptsFromToolCalls(caps, toolCalls);
+      const selected = seg ? caps.find((cap) => cap.kind === seg?.kind) : null;
+      if (selected && !hasRequiredEvidence(selected, toolCalls)) {
+        seg = null;
+        silentReason = `${selected.kind} returned no usable evidence`;
+      }
     }
 
     // A completed research call consumes the normal skill cooldown even when
@@ -766,13 +823,15 @@ export async function agenticTick(ctx) {
     // queue.announce appends the segment turn into the live session. The
     // speaker's id rides in meta so session.windowMessages names a guest's
     // turn as theirs rather than the host's own words.
-    await queue.announce(seg.text.trim(), seg.kind, {
+    const spoken = boundedSkillSpeech(seg.text, speaker, seg.kind);
+    if (!spoken) return;
+    await queue.announce(spoken, seg.kind, {
       persona: speaker, meta: { personaId: speaker?.id, personaName: speaker?.name },
     });
 
     // Record what actually aired so the durable ledger can keep both the tool
     // and the fallback path from repeating it after a restart (issue #577).
-    if (seg.kind === 'curiosity') recordCuriosity(seg.text.trim(), { aired: true });
+    if (isCuriosityKind(seg.kind)) recordCuriosity(spoken, { aired: true });
 
     // Optional sound effect mixed under the voice. Only honour a name the
     // agent was actually offered — anything else is dropped, like an
@@ -844,7 +903,7 @@ function isBareNullSilent(err) {
 // Same ultra-minimal treatment as directorSystem — the forcedSchema text
 // description and the segment-tools.js tool descriptions carry the rest.
 export function forcedSystem(persona, cap, sfxCatalog) {
-  return `${settings.agentPersonaPreamble(persona)}
+  return `${skillPersonaPreamble(persona)}
 
 The operator asked you to air ONE ${cap.kind} segment now — you must produce a line, silence is not an option. You are NOT choosing music.
 
@@ -855,9 +914,10 @@ ${cap.desc}${sfxBlock(sfxCatalog)}${settings.agentLanguageReminder(persona, 'the
 // the segment is mandatory, silence is not an option.
 export const forcedDirectorAgent = defineAgent({
   kind: 'djAgentSegment',
-  schema: () => forcedSchema(),
+  schema: (args: any = {}) => forcedSchema(args.persona),
   // Same wall-clock ceiling as the autonomous director (issue #555).
   timeoutMs: segmentDeadline,
+  maxOutputTokens: (args: any = {}) => skillAgentOutputTokens(args.persona),
   buildSystem: ({ persona, cap, sfxCatalog }) => forcedSystem(persona, cap, sfxCatalog),
   buildTools: ({ ctx, segmentState, cap }) => ({
     tools: buildSegmentTools(ctx, segmentState, [cap]),
@@ -922,7 +982,8 @@ export async function runCapability(which, ctx, { brief = null, persona = null }
     // only such capability today, and only when a keyed provider is active.
     let hint = '';
     const searchProvider = settings.get().search?.provider;
-    if (cap.kind === 'web-search' && (searchProvider === 'tavily' || searchProvider === 'brave')) {
+    if ((cap.kind === 'web-search' || cap.kind === 'web-search-v2')
+        && (searchProvider === 'tavily' || searchProvider === 'brave')) {
       const name = searchProvider === 'brave' ? 'Brave Search' : 'Tavily';
       hint = ` — set SEARCH_API_KEY or paste a ${name} key into the admin UI`;
     } else if (cap.requiresKey) {
@@ -934,7 +995,7 @@ export async function runCapability(which, ctx, { brief = null, persona = null }
   const speaker = persona || settings.getEffectivePersona(new Date());
   // Empty catalogue when SFX are disabled — the agent is never offered effects.
   const sfxCatalog = settings.get().sfx?.enabled === false ? [] : await sfx.catalog();
-  const recentCuriosity = cap.kind === 'curiosity' ? recentAiredCuriosity() : undefined;
+  const recentCuriosity = isCuriosityKind(cap.kind) ? recentAiredCuriosity() : undefined;
   const situation = buildSituation(ctx, { forced: true, contextFields: effectiveContextFields(cap), recentCuriosity })
     + (brief ? `\n\n${brief}` : '');
 
@@ -946,22 +1007,30 @@ export async function runCapability(which, ctx, { brief = null, persona = null }
     // capability brief and the moment alone, the same "straight talk"
     // degradation the programme feature uses for a stale kind.
     const data = await fetchSegmentData(cap, ctx, segmentState);
+    if (cap.requiresEvidence && data?.available !== true) {
+      throw new Error(`skill "${cap.skill}" returned no usable evidence`);
+    }
     object = await deadlinedSegmentObject({
       system: forcedSystem(speaker, cap, sfxCatalog),
       prompt: situation + (data && !data.error ? dataBlock(data) : ''),
-      schema: forcedSchema(),
+      schema: forcedSchema(speaker),
+      maxOutputTokens: skillSpeechLimits(speaker).maxOutputTokens,
       temperature: 0.9,
       kind: 'generateSegment',
     });
   } else {
-    ({ object } = await forcedDirectorAgent.run({
+    const run = await forcedDirectorAgent.run({
       messages: [{ role: 'user', content: situation }],
       persona: speaker, cap, sfxCatalog,
       ctx, segmentState,
-    }));
+    });
+    if (!hasRequiredEvidence(cap, run.toolCalls)) {
+      throw new Error(`skill "${cap.skill}" returned no usable evidence`);
+    }
+    object = run.object;
   }
 
-  const text = object?.text?.trim();
+  const text = boundedSkillSpeech(object?.text, speaker, cap.kind);
   if (!text) throw new Error(`skill "${cap.skill}" produced no text`);
 
   // Update cooldown/dedup memory so a follow-up autonomous tick doesn't
@@ -980,7 +1049,7 @@ export async function runCapability(which, ctx, { brief = null, persona = null }
 
   // Record an operator-fired curiosity line in the durable ledger too, so a
   // later autonomous tick doesn't repeat it (issue #577).
-  if (cap.kind === 'curiosity') recordCuriosity(text, { aired: true });
+  if (isCuriosityKind(cap.kind)) recordCuriosity(text, { aired: true });
 
   // Optional sound effect under the voice — only a name the agent was offered.
   const pick = object?.sfx;
@@ -1007,7 +1076,7 @@ export function skillCatalog() {
     let requiresKey = c.requiresKey || null;
     let keyUrl = c.keyUrl || null;
     let hint: string | null = null;
-    if (c.kind === 'web-search') {
+    if (c.kind === 'web-search' || c.kind === 'web-search-v2') {
       if (searchProvider === 'tavily') {
         requiresKey = 'SEARCH_API_KEY';
         keyUrl = 'https://app.tavily.com/home';

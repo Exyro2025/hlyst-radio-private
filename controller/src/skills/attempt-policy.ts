@@ -1,9 +1,9 @@
-// Research attempts and aired segments are deliberately separate concepts.
-// A factual skill can run successfully yet produce nothing safe enough to air;
-// repeating that same research every scheduler tick wastes tokens and does not
-// make the evidence stronger. Completed tool calls therefore consume the
-// skill's ordinary cooldown. Infrastructure failures get a shorter retry so a
-// temporary provider outage does not silence the skill for its full cadence.
+// A completed research attempt and an aired segment are different events.
+// Some data-backed skills should not repeat the same lookup every scheduler
+// tick merely because the evidence was empty or the DJ chose silence.
+//
+// This policy is opt-in through SKILL.md `cooldownOnAttempt: true`. Completed
+// calls consume the configured cooldown; infrastructure failures retry sooner.
 
 export const INFRASTRUCTURE_RETRY_CEILING_MS = 15 * 60 * 1000;
 
@@ -17,11 +17,24 @@ export interface SkillResearchAttempt {
 interface AttemptCapability {
   kind: string;
   toolName?: string | null;
+  cooldownOnAttempt?: boolean;
 }
 
 interface RecordedToolCall {
   name?: string;
   result?: unknown;
+}
+
+export function hasRequiredEvidence(
+  cap: AttemptCapability & { requiresEvidence?: boolean },
+  toolCalls: RecordedToolCall[] | null | undefined,
+): boolean {
+  if (!cap.requiresEvidence) return true;
+  if (!cap.toolName) return false;
+  return (toolCalls || []).some((call) => {
+    if (call?.name !== cap.toolName || !call.result || typeof call.result !== 'object') return false;
+    return (call.result as { available?: unknown }).available === true;
+  });
 }
 
 function isInfrastructureFailure(result: unknown): boolean {
@@ -30,8 +43,6 @@ function isInfrastructureFailure(result: unknown): boolean {
     && (result as { error: string }).error.trim().length > 0;
 }
 
-// Collapse retries of the same skill into one scheduler outcome. If any call
-// completed, research completed; only an all-error sequence is an infra retry.
 export function researchAttemptsFromToolCalls(
   caps: AttemptCapability[],
   toolCalls: RecordedToolCall[] | null | undefined,
@@ -39,7 +50,7 @@ export function researchAttemptsFromToolCalls(
   const calls = toolCalls || [];
   const attempts: SkillResearchAttempt[] = [];
   for (const cap of caps) {
-    if (!cap.toolName) continue;
+    if (!cap.cooldownOnAttempt || !cap.toolName) continue;
     const matches = calls.filter((call) => call?.name === cap.toolName);
     if (!matches.length) continue;
     attempts.push({
@@ -50,6 +61,17 @@ export function researchAttemptsFromToolCalls(
     });
   }
   return attempts;
+}
+
+export function directResearchAttempt(
+  cap: AttemptCapability,
+  result: unknown,
+): SkillResearchAttempt[] {
+  if (!cap.cooldownOnAttempt || !cap.toolName) return [];
+  return [{
+    kind: cap.kind,
+    outcome: isInfrastructureFailure(result) ? 'infrastructure-failure' : 'completed',
+  }];
 }
 
 export function researchAttemptDelayMs(

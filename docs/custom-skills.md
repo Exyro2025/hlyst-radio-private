@@ -54,6 +54,9 @@ a folder into `state/skills/` and hit **Rescan** in the admin Skills page:
 name: moon-phase          # the slug / "kind" (defaults to the folder name)
 label: Moon phase         # human label in /admin/skills (defaults to title-cased name)
 cooldown: 6h              # hard min gap between autonomous firings — "90m" | "6h" | "2d" | "45" (bare = minutes)
+defaultEnabled: false     # OPTIONAL: shipped alternatives can be opt-in; custom skills already default off
+cooldownOnAttempt: true   # OPTIONAL: a completed tool lookup consumes cooldown even when nothing airs
+requiresEvidence: true    # OPTIONAL: code refuses to air unless this skill's tool returns available: true
 cron: 0 * * * *           # OPTIONAL: fire on a fixed schedule instead of/alongside the cooldown gate (see below)
 cronOnly: true            # OPTIONAL: with a cron: set, withhold this skill from random autonomous picks entirely
 window: any               # "any" (default) | "commute" — only offered during commute hours
@@ -295,7 +298,15 @@ identical footing. It's read-mostly (no settings writes, no secrets):
 | `services.recentPlays(hours)` | play-log dedup sets `{ ids, keys }` over the last *hours* |
 | `services.library.getArtist(id)` / `.getAlbum(id)` / `.searchArtists(name, opts?)` | Navidrome/Subsonic reads |
 | `services.onThisDay()` | Wikipedia "on this day" events for today |
-| `services.fetchHeadlines({ feedUrl?, maxItems? })` | fetch + parse an RSS feed |
+| `services.fetchHeadlines({ feedUrl?, maxItems?, timeoutMs? })` | fetch + parse an RSS/Atom feed, preserving article URL and publication time |
+| `services.fetchMusicNews()` | cached headlines from Subwave's keyless music-feed set |
+| `services.researchTrack(track)` | source-bound exact-track claims from specialist music metadata |
+| `services.researchArtistNews(artist)` | source-bound claims for feed headlines that explicitly name an artist |
+| `services.researchAlbumAnniversary(track, ctx)` | validate an original non-compilation album anniversary from OpenSubsonic metadata |
+| `services.researchWeatherOutlook(weather, lastCondition, clock)` | reduce the cached 12-hour Open-Meteo outlook to one meaningful change |
+| `services.researchCuriosity()` | return one fresh, source-bound Wikimedia on-this-day event |
+| `services.relevantMusicNews(items, ctx)` | retain headlines naming a local-library artist whose genres fit the active show |
+| `services.safeGeneralHeadline(title)` | reject obviously grave stories before they reach a speaking model |
 | `services.recall.seen(key)` / `.remember(key)` | durable, cross-restart dedup ledger |
 | `services.log(msg)` | append a line to the station event log |
 
@@ -314,8 +325,10 @@ alone.
 
 ## Editing the built-in skills
 
-The 7 built-ins — `weather`, `news`, `now-playing-dig`, `curiosity`, `album-anniversary`,
-`library-deep-cut`, `web-search` — ship as read-only templates under
+The established built-ins — `weather`, `news`, `now-playing-dig`, `curiosity`,
+`album-anniversary`, `library-deep-cut`, `web-search` — plus the opt-in
+`now-playing-dig-v2`, `web-search-v2`, `news-v2`, `album-anniversary-v2`,
+`weather-v2` and `curiosity-v2` alternatives ship as read-only templates under
 `controller/src/skills/builtins/<kind>/` and are **seeded** into
 `state/skills/<kind>/` — both `SKILL.md` and `tool.mjs` — the first time the
 controller boots. After that they're ordinary editable skills: edit the brief /
@@ -326,8 +339,10 @@ weather ticked on, the rest with the default (no-weather) profile.
 
 How a built-in still differs from a skill you add:
 
-- **Enabled by default.** A built-in airs out of the box; a *new* skill starts in
-  the discovered-but-disabled state until you enable it.
+- **Activation default.** Established built-ins air out of the box; the shipped
+  v2 research alternatives and every operator-created skill start disabled until
+  you enable them. `defaultEnabled` changes activation only — it does not turn a
+  local folder into a protected/resettable built-in.
 - **Can't be deleted, only disabled.** Toggle it off to silence it. If you delete
   its folder on disk, the seeder restores it (both files) on the next boot.
 - **Reset to default.** `/admin/skills → <built-in> → ↺ Reset to default`
@@ -339,6 +354,69 @@ How a built-in still differs from a skill you add:
 > The seeder never clobbers a file that already exists, so your edits survive a
 > restart and an upgrade. Only **Reset to default** (or deleting the file on disk)
 > brings the shipped version back.
+
+### Opt-in research safety
+
+Shipped v2 research skills must be useful immediately after the operator enables
+them. Their default source path therefore must not require the operator to open
+another account, request an API token or add another secret to `.env`. A source
+that requires credentials may be considered later as an optional extension, but
+it must not be required for the built-in skill to work. This keeps installation
+simple and avoids making factual airtime dependent on third-party account setup.
+
+`cooldownOnAttempt: true` separates research cadence from airtime. Once the
+skill's tool completes, its ordinary cooldown begins even if the data is empty
+or the DJ chooses silence; an infrastructure error retries after at most 15
+minutes. Without the field, the historical behaviour remains: cooldown begins
+only after a segment airs.
+
+`requiresEvidence: true` is the matching hard gate. An autonomous run may air
+the skill only when that skill's own tool was called and returned
+`{ available: true, ... }`. A missing call, error or `available: false` is silence
+regardless of what the model attempted to write. Use both fields for factual
+research skills; neither is appropriate for prompt-only creative skills.
+
+The shipped v2 skills demonstrate the contract without replacing the
+legacy defaults:
+
+- `now-playing-dig-v2` asks the existing, globally throttled MusicBrainz client
+  for an exact artist/title recording. Only explicit first-release, producer,
+  mixer and remixer relationships become claims; a fuzzy match or a recording
+  with none of those facts stays silent. It never passes general web snippets to the model. The Persona
+  may frame that one claim with a short subjective reaction, but the claim
+  remains the complete boundary for factual content.
+- `web-search-v2` first checks a shared, keyless cache of Stereogum, Pitchfork
+  News and The Guardian Music feeds. Publishers are fetched concurrently and
+  fail independently; successful items retain their article URL, publisher and
+  publication time. When no feed headline explicitly names the artist, an
+  already-configured search provider may fall back to NME, Stereogum, Pitchfork,
+  Music Week, Songkick, Bandsintown and Setlist.fm. Only a qualifying headline
+  crosses as a claim; descriptions and neighbouring search snippets are
+  discarded. The skill therefore remains usable without SearXNG or a paid API.
+- `news-v2` alternates between a suitable general headline and music news when
+  both pools have something fresh. Music items must explicitly name an artist
+  in the station's tagged library and that artist's accumulated library genres
+  must fit the active show's genres. This gate applies independently of the
+  show's strict-filter toggle. One-word artists use a cautious start-of-headline
+  match to avoid common-word and venue collisions. Obvious death, violence and
+  disaster headlines are rejected before Persona generation.
+- `album-anniversary-v2` resolves the current track's exact album and requires
+  OpenSubsonic `originalReleaseDate`, an album release type and a non-compilation
+  record. Singles, EPs, compilations, remixes and mixtapes stay silent. The
+  track's plain year is never used, so a reissue cannot create a false birthday.
+- `weather-v2` extends the existing cached Open-Meteo request with a compact
+  12-hour outlook. Controller code selects at most one meaningful current or
+  forecast change and assigns broad station-local timing before the result
+  reaches Persona. The hourly forecast itself never enters an LLM prompt;
+  unchanged or insignificant conditions return unavailable evidence.
+- `curiosity-v2` selects one fresh event from the existing filtered Wikimedia
+  On This Day feed and binds it to the date-specific source endpoint. Empty or
+  exhausted pools stay silent; there is no model-generated factoid fallback.
+
+All v2 alternatives are seeded disabled. To trial one, disable its legacy predecessor, enable
+the v2 skill and include it in any persona that uses an explicit skill allowlist.
+The broader direction and reasoning for successors to all seven established
+built-ins is recorded in [Built-in skills v2: design notes](skills-v2.md).
 
 ### News: swapping the feed
 

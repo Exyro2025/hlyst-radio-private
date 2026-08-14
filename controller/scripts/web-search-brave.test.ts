@@ -38,6 +38,7 @@ async function main() {
       assert.equal(typeof r.content, 'string');
       assert.ok(r.title.length > 0, 'title should not be empty');
       assert.ok(r.content.length > 0, 'content should not be empty');
+      assert.ok(r.url, 'source URL should survive for trusted-source filtering');
     }
   });
 
