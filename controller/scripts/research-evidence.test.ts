@@ -37,3 +37,13 @@ test('claims without a matching source become unavailable', () => {
   });
   assert.equal(evidence.available, false);
 });
+
+test('source-neutral evidence may identify a topic without inventing an artist', () => {
+  const evidence = createResearchEvidence({
+    subject: { topic: 'general-news' },
+    claims: [{ text: 'A museum has opened a new exhibition.', sourceIds: ['news-1'] }],
+    sources: [{ id: 'news-1', provider: 'bbc.co.uk', label: 'BBC News' }],
+  });
+  assert.equal(evidence.available, true);
+  assert.deepEqual(evidence.subject, { topic: 'general-news' });
+});

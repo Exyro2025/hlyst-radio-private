@@ -5,8 +5,9 @@
 export const RESEARCH_EVIDENCE_FORMAT = 'subwave.research-evidence.v1' as const;
 
 export interface ResearchSubject {
-  artist: string;
+  artist?: string;
   title?: string;
+  topic?: string;
 }
 
 export interface ResearchSource {
@@ -44,7 +45,12 @@ export type ResearchEvidence = AvailableResearchEvidence | UnavailableResearchEv
 function cleanSubject(subject: ResearchSubject): ResearchSubject {
   const artist = String(subject?.artist || '').trim();
   const title = String(subject?.title || '').trim();
-  return title ? { artist, title } : { artist };
+  const topic = String(subject?.topic || '').trim();
+  return {
+    ...(artist ? { artist } : {}),
+    ...(title ? { title } : {}),
+    ...(topic ? { topic } : {}),
+  };
 }
 
 export function unavailableResearchEvidence(

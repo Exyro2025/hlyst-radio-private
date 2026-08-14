@@ -20,8 +20,14 @@ import { searchWeb, searchReady } from '../../../skills/web-search.js';
 import { fetchOnThisDay, curiositySeen, recordCuriosity } from '../../../skills/curiosity.js';
 import { fetchHeadlines, hashHeadline } from '../../../skills/news.js';
 import { getArtist, getAlbum, searchArtists } from '../../../music/subsonic.js';
+import { artistGenreProfiles, get as getLibraryTrack } from '../../../music/library.js';
+import { relevantMusicNews, safeGeneralHeadline } from '../../../skills/news-selection.js';
 import { researchExactTrack } from '../../../skills/track-research.js';
 import { fetchMusicNews, researchArtistMusicNews } from '../../../skills/music-news.js';
+
+interface NewsRelevanceContext {
+  activeShow?: { genres?: string[] | null } | null;
+}
 
 export interface StationServices {
   // Web search via the operator's configured provider (DuckDuckGo / Tavily /
@@ -38,7 +44,18 @@ export interface StationServices {
   // Play-log lookup over the last `hours` — { ids, keys } sets for dedup.
   recentPlays: (hours: number) => { ids: Set<string>; keys: Set<string> };
   // Subsonic/Navidrome library reads.
-  library: { getArtist: typeof getArtist; getAlbum: typeof getAlbum; searchArtists: typeof searchArtists };
+  library: {
+    getArtist: typeof getArtist;
+    getAlbum: typeof getAlbum;
+    searchArtists: typeof searchArtists;
+    artistGenreProfiles: typeof artistGenreProfiles;
+  };
+  // Apply News v2's local-library/show-genre editorial gate.
+  relevantMusicNews: (
+    items: Awaited<ReturnType<typeof fetchMusicNews>>,
+    ctx: NewsRelevanceContext,
+  ) => ReturnType<typeof relevantMusicNews>;
+  safeGeneralHeadline: typeof safeGeneralHeadline;
   // Wikipedia "on this day" events for today's date.
   onThisDay: () => Promise<any[]>;
   // Fetch + parse an RSS feed (defaults to the configured news feed).
@@ -66,7 +83,21 @@ export function buildStationServices(): StationServices {
     researchArtistNews: researchArtistMusicNews,
     nowPlaying: () => queue.current?.track ?? null,
     recentPlays: (hours: number) => queue.recentlyPlayed(hours),
-    library: { getArtist, getAlbum, searchArtists },
+    library: { getArtist, getAlbum, searchArtists, artistGenreProfiles },
+    relevantMusicNews: (items, ctx) => {
+      const showGenres = Array.isArray(ctx?.activeShow?.genres) ? ctx.activeShow.genres.filter(Boolean) : [];
+      const current = queue.current?.track;
+      const currentGenres = current?.id ? (getLibraryTrack(current.id)?.genres || []) : [];
+      return relevantMusicNews({
+        items,
+        artists: artistGenreProfiles(),
+        targetGenres: showGenres.length ? showGenres : currentGenres,
+        // Autonomous/no-show listening is the broad station mode. A defined
+        // show without genres uses the current track's genres as a soft gate.
+        broad: !ctx?.activeShow || (!showGenres.length && !currentGenres.length),
+      });
+    },
+    safeGeneralHeadline,
     onThisDay: () => fetchOnThisDay(),
     fetchHeadlines,
     hashHeadline,

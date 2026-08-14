@@ -301,6 +301,8 @@ identical footing. It's read-mostly (no settings writes, no secrets):
 | `services.fetchHeadlines({ feedUrl?, maxItems?, timeoutMs? })` | fetch + parse an RSS/Atom feed, preserving article URL and publication time |
 | `services.fetchMusicNews()` | cached headlines from Subwave's keyless music-feed set |
 | `services.researchArtistNews(artist)` | source-bound claims for feed headlines that explicitly name an artist |
+| `services.relevantMusicNews(items, ctx)` | retain headlines naming a local-library artist whose genres fit the active show |
+| `services.safeGeneralHeadline(title)` | reject obviously grave stories before they reach a speaking model |
 | `services.recall.seen(key)` / `.remember(key)` | durable, cross-restart dedup ledger |
 | `services.log(msg)` | append a line to the station event log |
 
@@ -321,7 +323,7 @@ alone.
 
 The established built-ins — `weather`, `news`, `now-playing-dig`, `curiosity`,
 `album-anniversary`, `library-deep-cut`, `web-search` — plus the opt-in
-`now-playing-dig-v2` and `web-search-v2` alternatives ship as read-only templates under
+`now-playing-dig-v2`, `web-search-v2` and `news-v2` alternatives ship as read-only templates under
 `controller/src/skills/builtins/<kind>/` and are **seeded** into
 `state/skills/<kind>/` — both `SKILL.md` and `tool.mjs` — the first time the
 controller boots. After that they're ordinary editable skills: edit the brief /
@@ -369,7 +371,7 @@ the skill only when that skill's own tool was called and returned
 regardless of what the model attempted to write. Use both fields for factual
 research skills; neither is appropriate for prompt-only creative skills.
 
-The two shipped v2 skills demonstrate the contract without replacing the
+The shipped v2 skills demonstrate the contract without replacing the
 legacy defaults:
 
 - `now-playing-dig-v2` asks the existing, globally throttled MusicBrainz client
@@ -386,6 +388,13 @@ legacy defaults:
   Music Week, Songkick, Bandsintown and Setlist.fm. Only a qualifying headline
   crosses as a claim; descriptions and neighbouring search snippets are
   discarded. The skill therefore remains usable without SearXNG or a paid API.
+- `news-v2` alternates between a suitable general headline and music news when
+  both pools have something fresh. Music items must explicitly name an artist
+  in the station's tagged library and that artist's accumulated library genres
+  must fit the active show's genres. This gate applies independently of the
+  show's strict-filter toggle. One-word artists use a cautious start-of-headline
+  match to avoid common-word and venue collisions. Obvious death, violence and
+  disaster headlines are rejected before Persona generation.
 
 Both are seeded disabled. To trial one, disable its legacy predecessor, enable
 the v2 skill and include it in any persona that uses an explicit skill allowlist.

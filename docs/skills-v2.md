@@ -83,12 +83,12 @@ useful than an autonomous tease.
 It cannot provide a default music-news beat or provenance-bearing headlines
 shared with artist research.
 
-**Data boundary:** use a cached, keyless RSS service. Keep BBC as the general
+**Implemented data boundary:** use a cached, keyless RSS service. Keep BBC as the general
 news source and add a small fixed set of public music feeds. Preserve headline,
 publication, article URL and publication time; descriptions are discovery aids,
 not factual material for the speaking model.
 
-**Acceptance:** alternate between a suitable general headline and a music
+**Implemented acceptance:** alternate between a suitable general headline and a music
 headline when both pools have fresh items. If the preferred pool has nothing
 safe, use the other rather than forcing an item. Deduplicate across feeds and
 across previous airtime. Continue when an individual feed is unavailable.
@@ -106,6 +106,16 @@ suitable general headline or stay silent.
 
 **Speech:** conversational rather than a bulletin. Retain the established
 avoidance of death, disaster and other stories unsuited to a breezy aside.
+
+News v2 now ships disabled beside the established News skill. The relevance
+gate builds a compact artist/genre index from the station's tagged library and
+does not consult `filtersStrict`: editorial suitability is separate from track
+selection. A show with configured genres uses those genres; a defined show
+without them falls back to the current track's library genres; autonomous mode
+may use any unambiguous local artist. Headline descriptions never become claims.
+The selected item is recorded in the durable recall ledger at research time,
+matching the v2 rule that a completed attempt consumes its opportunity even if
+the Persona ultimately stays silent.
 
 ### Now-playing dig v2
 
