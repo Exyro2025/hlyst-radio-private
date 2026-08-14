@@ -301,6 +301,7 @@ identical footing. It's read-mostly (no settings writes, no secrets):
 | `services.fetchHeadlines({ feedUrl?, maxItems?, timeoutMs? })` | fetch + parse an RSS/Atom feed, preserving article URL and publication time |
 | `services.fetchMusicNews()` | cached headlines from Subwave's keyless music-feed set |
 | `services.researchArtistNews(artist)` | source-bound claims for feed headlines that explicitly name an artist |
+| `services.researchAlbumAnniversary(track, ctx)` | validate an original non-compilation album anniversary from OpenSubsonic metadata |
 | `services.relevantMusicNews(items, ctx)` | retain headlines naming a local-library artist whose genres fit the active show |
 | `services.safeGeneralHeadline(title)` | reject obviously grave stories before they reach a speaking model |
 | `services.recall.seen(key)` / `.remember(key)` | durable, cross-restart dedup ledger |
@@ -323,7 +324,7 @@ alone.
 
 The established built-ins — `weather`, `news`, `now-playing-dig`, `curiosity`,
 `album-anniversary`, `library-deep-cut`, `web-search` — plus the opt-in
-`now-playing-dig-v2`, `web-search-v2` and `news-v2` alternatives ship as read-only templates under
+`now-playing-dig-v2`, `web-search-v2`, `news-v2` and `album-anniversary-v2` alternatives ship as read-only templates under
 `controller/src/skills/builtins/<kind>/` and are **seeded** into
 `state/skills/<kind>/` — both `SKILL.md` and `tool.mjs` — the first time the
 controller boots. After that they're ordinary editable skills: edit the brief /
@@ -395,6 +396,10 @@ legacy defaults:
   show's strict-filter toggle. One-word artists use a cautious start-of-headline
   match to avoid common-word and venue collisions. Obvious death, violence and
   disaster headlines are rejected before Persona generation.
+- `album-anniversary-v2` resolves the current track's exact album and requires
+  OpenSubsonic `originalReleaseDate`, an album release type and a non-compilation
+  record. Singles, EPs, compilations, remixes and mixtapes stay silent. The
+  track's plain year is never used, so a reissue cannot create a false birthday.
 
 Both are seeded disabled. To trial one, disable its legacy predecessor, enable
 the v2 skill and include it in any persona that uses an explicit skill allowlist.

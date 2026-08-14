@@ -29,11 +29,11 @@ all seven must ship together.
 may be a reissue year, and the tool does not exclude compilations, singles, EPs
 or other non-album releases.
 
-**Data boundary:** resolve the on-air track's `albumId` through OpenSubsonic and
+**Implemented data boundary:** resolve the on-air track's `albumId` through OpenSubsonic and
 read `originalReleaseDate`, `releaseTypes` and `isCompilation` from the album.
 These are already keyless fields on the station's configured music server.
 
-**Acceptance:** require an original release year, `isCompilation !== true`, and
+**Implemented acceptance:** require an original release year, `isCompilation !== true`, and
 a release type that identifies an album while rejecting compilation, single,
 EP, remix, mixtape and DJ-mix types. If the server does not provide enough
 metadata to establish those facts, stay silent. Calculate the anniversary from
@@ -41,6 +41,12 @@ the station-local calendar year and retain the existing five-year interval.
 
 **Speech:** one sourced anniversary observation. Do not infer chart performance,
 importance or contemporary reception.
+
+Album anniversary v2 now ships disabled beside the established skill. It uses
+the station-local year from the segment context, requires a five-year interval
+of at least five years, and emits one provenance-bound claim. Missing release
+types or original-release metadata stay silent rather than falling back to the
+track's year.
 
 ### Curiosity v2
 

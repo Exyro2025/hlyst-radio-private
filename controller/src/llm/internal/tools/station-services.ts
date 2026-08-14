@@ -24,6 +24,7 @@ import { artistGenreProfiles, get as getLibraryTrack } from '../../../music/libr
 import { relevantMusicNews, safeGeneralHeadline } from '../../../skills/news-selection.js';
 import { researchExactTrack } from '../../../skills/track-research.js';
 import { fetchMusicNews, researchArtistMusicNews } from '../../../skills/music-news.js';
+import { researchAlbumAnniversary } from '../../../skills/album-anniversary.js';
 
 interface NewsRelevanceContext {
   activeShow?: { genres?: string[] | null } | null;
@@ -39,6 +40,7 @@ export interface StationServices {
   // Cached keyless music headlines and exact-artist evidence for v2 skills.
   fetchMusicNews: typeof fetchMusicNews;
   researchArtistNews: typeof researchArtistMusicNews;
+  researchAlbumAnniversary: typeof researchAlbumAnniversary;
   // The track currently on air (artist/title/album/year/id), or null.
   nowPlaying: () => any | null;
   // Play-log lookup over the last `hours` — { ids, keys } sets for dedup.
@@ -81,6 +83,7 @@ export function buildStationServices(): StationServices {
     researchTrack: researchExactTrack,
     fetchMusicNews,
     researchArtistNews: researchArtistMusicNews,
+    researchAlbumAnniversary,
     nowPlaying: () => queue.current?.track ?? null,
     recentPlays: (hours: number) => queue.recentlyPlayed(hours),
     library: { getArtist, getAlbum, searchArtists, artistGenreProfiles },
