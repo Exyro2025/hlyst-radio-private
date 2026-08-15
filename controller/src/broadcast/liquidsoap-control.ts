@@ -6,6 +6,10 @@
 import net from 'node:net';
 import { cachedAsync } from '../util/ttl-cache.js';
 import { parseDjQueueStatus, type DjQueueStatus } from './skip-policy.js';
+import {
+  parseResolveProbeOutcome,
+  type ResolveProbeOutcome,
+} from './resolve-probe.js';
 
 // Liquidsoap shares a container with icecast2 under the `broadcast` service
 // (see docker-compose.yml). The legacy `liquidsoap` hostname is still honoured
@@ -128,6 +132,19 @@ export async function skipTrack() {
 export async function djQueueStatus(): Promise<DjQueueStatus> {
   try {
     return parseDjQueueStatus(await sendCommand('dj_queue_status', 2000));
+  } catch {
+    return 'unknown';
+  }
+}
+
+// Explicit completion state recorded by proto_subhttp for one controller
+// handoff. This does not inspect dj_queue.queue(): that list includes idle /
+// resolving requests and temporarily omits healthy boundary-prefetch work.
+export async function subhttpProbeOutcome(probeId: string): Promise<ResolveProbeOutcome> {
+  try {
+    return parseResolveProbeOutcome(
+      await sendCommand(`subhttp_probe_status ${probeId}`, 2000),
+    );
   } catch {
     return 'unknown';
   }
@@ -331,17 +348,6 @@ export async function getDjQueueIds(): Promise<Set<string>> {
   return _djQueueInflight;
 }
 
-// Uncached read of the ids pending in dj_queue. The 4s cache above is right for
-// the reconcile sweep (a stale-by-seconds view of a queue that changes at track
-// boundaries), but wrong for the push-resolution probe, which reads twice
-// PUSH_PROBE_INTERVAL_MS apart and must see the SECOND state — a cached first
-// read would answer both probes and turn the confirmation into a coin flip.
-export async function getDjQueueIdsFresh(): Promise<Set<string>> {
-  const snap = await fetchDjQueue();
-  _djQueueCache = { timestamp: Date.now(), ...snap };
-  return snap.ids;
-}
-
 // Resolve the Liquidsoap request id for a queued track, plus the bed queued
 // immediately ahead of it, if any. Always a fresh read — cancel decisions
 // can't ride a 4s-stale cache (the track may have gone on air since); `rid` is
@@ -381,4 +387,3 @@ export async function removeFromDjQueue(rid: string): Promise<boolean> {
   _djQueueCache = null; // the queue just changed under the cache
   return res.trim() === 'OK';
 }
-

@@ -202,6 +202,44 @@ log("settings loaded: jingle_ratio=#{jingle_ratio()} crossfade_duration=#{crossf
 # backstop for an origin that returns an error with no usable content type.
 subhttp_min_bytes = 4096
 
+# Per-handoff completion outcomes consumed by the controller over telnet. The
+# probe token rides in a URL fragment (never sent to the origin), so a stale
+# result for the same song id cannot satisfy a later push. Entries are removed
+# when read; controller pushes are deduped and bounded, so this stays tiny.
+subhttp_probe_outcomes = ref([])
+
+def subhttp_probe_id(uri) =
+  matches = string.extract(pattern="#subwave_probe=([^&#]+)", uri)
+  list.assoc(default="", 1, matches)
+end
+
+def remember_subhttp_outcome(uri, outcome) =
+  probe_id = subhttp_probe_id(uri)
+  if probe_id != "" then
+    kept = list.filter(fun(p) -> fst(p) != probe_id, subhttp_probe_outcomes())
+    subhttp_probe_outcomes.set([(probe_id, outcome), ...kept])
+  end
+end
+
+def take_subhttp_outcome(probe_id) =
+  matches = list.filter(fun(p) -> fst(p) == probe_id, subhttp_probe_outcomes())
+  if list.length(matches) == 0 then
+    "pending"
+  else
+    subhttp_probe_outcomes.set(
+      list.filter(fun(p) -> fst(p) != probe_id, subhttp_probe_outcomes())
+    )
+    snd(list.hd(matches))
+  end
+end
+
+# Stream URLs carry Subsonic u/t/s query credentials. Keep operator-facing
+# context without persisting replayable auth material or the internal probe id.
+def redact_subhttp_uri(uri) =
+  no_query = string.replace(pattern="\\?[^#]*", fun(_) -> "?[redacted]", uri)
+  string.replace(pattern="#.*$", fun(_) -> "", no_query)
+end
+
 def proto_subhttp(~rlog, ~maxtime, arg) =
   ignore(rlog)
   uri = arg
@@ -228,19 +266,25 @@ def proto_subhttp(~rlog, ~maxtime, arg) =
     string.contains(substring="json", ctype)
     or string.contains(substring="xml", ctype)
     or string.contains(substring="text/", ctype)
+  safe_uri = redact_subhttp_uri(uri)
+  safe_stderr = redact_subhttp_uri(ret.stderr)
   if not (ret.status == "exit" and ret.status.code == 0) then
-    log(label="protocol.subhttp", level=3, "curl failed for #{uri}: status=#{ret.status} code=#{ret.status.code} http=#{http_code} stderr=#{ret.stderr}")
+    remember_subhttp_outcome(uri, "failed")
+    log(label="protocol.subhttp", level=3, "curl failed for #{safe_uri}: status=#{ret.status} code=#{ret.status.code} http=#{http_code} stderr=#{safe_stderr}")
     file.remove(outfile)
     null
   elsif error_body then
-    log(label="protocol.subhttp", level=2, "music source returned an ERROR BODY, not audio, for #{uri} (http=#{http_code}, content-type=#{info}, #{size} bytes) — the track is missing or unreadable at the origin; check the music server's own log")
+    remember_subhttp_outcome(uri, "failed")
+    log(label="protocol.subhttp", level=2, "music source returned an ERROR BODY, not audio, for #{safe_uri} (http=#{http_code}, content-type=#{info}, #{size} bytes) — the track is missing or unreadable at the origin; check the music server's own log")
     file.remove(outfile)
     null
   elsif size < subhttp_min_bytes then
-    log(label="protocol.subhttp", level=2, "music source returned only #{size} bytes for #{uri} (http=#{http_code}, content-type=#{info}) — too small to be audio, treating as an error response")
+    remember_subhttp_outcome(uri, "failed")
+    log(label="protocol.subhttp", level=2, "music source returned only #{size} bytes for #{safe_uri} (http=#{http_code}, content-type=#{info}) — too small to be audio, treating as an error response")
     file.remove(outfile)
     null
   else
+    remember_subhttp_outcome(uri, "ready")
     outfile
   end
 end
@@ -259,7 +303,7 @@ def poll_queue() =
     contents = string.trim(file.contents("#{state_dir}/next.txt"))
     file.remove("#{state_dir}/next.txt")
     if contents != "" then
-      log("Queueing: #{contents}")
+      log("Queueing: #{redact_subhttp_uri(contents)}")
       ignore(dj_queue.push(request.create(contents)))
     end
   end
@@ -1835,6 +1879,13 @@ server.register(
     radio.skip()
     "OK"
   end
+)
+
+server.register(
+  "subhttp_probe_status",
+  description="Consume a proto_subhttp completion outcome: ready / failed / pending",
+  usage="subhttp_probe_status <probe-id>",
+  fun(arg) -> take_subhttp_outcome(string.trim(arg))
 )
 
 # What a skip would air next from dj_queue: "ready" (a resolved request is

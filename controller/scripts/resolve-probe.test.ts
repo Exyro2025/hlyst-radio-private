@@ -9,34 +9,31 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import {
+  parseResolveProbeOutcome,
   probeVerdict,
   repickAfterFailure,
-  PUSH_PROBE_ABSENT_READS,
-  PUSH_PROBE_INTERVAL_MS,
-  PUSH_PROBE_MAX_READS,
   MAX_CONSECUTIVE_RESOLVE_FAILURES,
 } from '../src/broadcast/resolve-probe.js';
 
-// A push that is live in dj_queue, seen on the first read.
-const PRESENT = { probeOk: true, inQueue: true, stillQueuedLocally: true, absentReads: 0 };
-// The same push, absent from dj_queue.
-const ABSENT = { probeOk: true, inQueue: false, stillQueuedLocally: true, absentReads: 1 };
-
-test('a request listed in dj_queue is resolved, whatever came before it', () => {
-  assert.equal(probeVerdict(PRESENT), 'resolved');
-  // Presence after an absent read still ends the check — the absence was the
-  // 1s poll not having landed yet, which is the whole reason absence needs two
-  // reads to count.
-  assert.equal(probeVerdict({ ...PRESENT, absentReads: 0, inQueue: true }), 'resolved');
+test('an explicit ready outcome resolves the pushed request', () => {
+  assert.equal(probeVerdict({ outcome: 'ready', stillQueuedLocally: true }), 'resolved');
 });
 
-test('one absent read is not enough — that is the air-seam race', () => {
-  assert.equal(probeVerdict(ABSENT), 'pending');
+test('only an explicit failed outcome fails the pushed request', () => {
+  assert.equal(probeVerdict({ outcome: 'failed', stillQueuedLocally: true }), 'failed');
 });
 
-test('absent across the confirm window, still ours and unaired → failed', () => {
-  assert.equal(probeVerdict({ ...ABSENT, absentReads: PUSH_PROBE_ABSENT_READS }), 'failed');
-  assert.equal(probeVerdict({ ...ABSENT, absentReads: PUSH_PROBE_ABSENT_READS + 1 }), 'failed');
+test('protocol outcomes parse strictly and upgrade skew stays unknown', () => {
+  assert.equal(parseResolveProbeOutcome(' ready\r\n'), 'ready');
+  assert.equal(parseResolveProbeOutcome('failed'), 'failed');
+  assert.equal(parseResolveProbeOutcome('pending'), 'pending');
+  assert.equal(parseResolveProbeOutcome('ERROR: unknown command'), 'unknown');
+});
+
+test('a pending protocol outcome remains non-actionable', () => {
+  // Queue membership is deliberately absent from this policy: it contains
+  // unresolved requests and omits healthy boundary-prefetch downloads.
+  assert.equal(probeVerdict({ outcome: 'pending', stillQueuedLocally: true }), 'pending');
 });
 
 test('an item that left `upcoming` is abandoned, never called failed', () => {
@@ -44,25 +41,18 @@ test('an item that left `upcoming` is abandoned, never called failed', () => {
   // reason an id leaves dj_queue. Calling that a failure would drop a track
   // that is on air RIGHT NOW and re-pick over it.
   assert.equal(
-    probeVerdict({ ...ABSENT, absentReads: PUSH_PROBE_ABSENT_READS, stillQueuedLocally: false }),
+    probeVerdict({ outcome: 'failed', stillQueuedLocally: false }),
     'abandon',
   );
-  // Even a present read abandons — there is nothing left to confirm.
-  assert.equal(probeVerdict({ ...PRESENT, stillQueuedLocally: false }), 'abandon');
+  assert.equal(probeVerdict({ outcome: 'ready', stillQueuedLocally: false }), 'abandon');
 });
 
-test('a failed telnet read fails OPEN — never actionable', () => {
+test('an unavailable or unknown outcome channel fails open', () => {
   // Mid-restart / unreachable / garbled. A wrong 'failed' here would drop a
   // perfectly good pick every time the mixer restarts; the pre-#1405
   // reconcile sweep still cleans up genuinely stale items.
   assert.equal(
-    probeVerdict({ probeOk: false, inQueue: false, stillQueuedLocally: true, absentReads: 99 }),
-    'abandon',
-  );
-  // The local check is evaluated first, but neither ordering may produce a
-  // failure verdict from an unreadable queue.
-  assert.equal(
-    probeVerdict({ probeOk: false, inQueue: false, stillQueuedLocally: false, absentReads: 99 }),
+    probeVerdict({ outcome: 'unknown', stillQueuedLocally: true }),
     'abandon',
   );
 });
@@ -73,14 +63,4 @@ test('re-picks are budgeted, so a dead origin cannot start a pick storm', () => 
   }
   assert.equal(repickAfterFailure(MAX_CONSECUTIVE_RESOLVE_FAILURES + 1), false);
   assert.equal(repickAfterFailure(50), false);
-});
-
-test('the read budget can actually reach a verdict', () => {
-  // MAX_READS must exceed ABSENT_READS or the loop times out before the
-  // failing path can ever conclude — the bug this whole module exists to fix
-  // would then simply move.
-  assert.ok(PUSH_PROBE_MAX_READS > PUSH_PROBE_ABSENT_READS);
-  // And the confirm window must span a watcher tick (1.5s), so an item that
-  // just went on air is spliced from `upcoming` before the second read.
-  assert.ok(PUSH_PROBE_INTERVAL_MS >= 1_500);
 });

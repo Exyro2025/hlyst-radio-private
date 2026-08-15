@@ -13,6 +13,7 @@
 
 import { readFile } from 'node:fs/promises';
 import { existsSync, readFileSync } from 'node:fs';
+import { randomBytes } from 'node:crypto';
 import { basename } from 'node:path';
 import { config } from '../config.js';
 import { writeFileAtomic } from '../util/atomic-file.js';
@@ -1168,10 +1169,18 @@ class Queue {
         if (cappedExit) item.cueOutSec = Math.min(item.cueOutSec ?? Infinity, maxDurationSec!);
         // Stem-seam cue points: the blend's cut on the way out, the clip's
         // hand-off on the way in (stamped when the INCOMING item drains).
+        // Per-attempt identity for proto_subhttp's explicit completion signal.
+        // A URL fragment carries it to Liquidsoap but is never sent to the
+        // Navidrome origin by curl. Local-file handoffs never enter that
+        // protocol, so do not poll a completion channel they cannot produce.
+        item.resolveProbeId = subsonic.getLocalPath(item.track)
+          ? undefined
+          : randomBytes(8).toString('hex');
         const uri = subsonic.getAnnotatedUri(item.track, {
           maxDurationSec,
           cueOutSec: item.stemBlend?.blendStartSec ?? null,
           cueInSec: item.stemSeam ? item.stemCueInSec ?? null : null,
+          resolveProbeId: item.resolveProbeId,
         });
         // Queue-file writes wait longer than the default 1.5s: with a clip
         // following, two back-to-back writes are the norm and one missed
@@ -2023,35 +2032,23 @@ class Queue {
   // file is gone, the fetch timed out — makes Liquidsoap drop the request
   // silently. Before this probe the controller found out only via
   // reconcileWithDjQueue, which needs three UNTRACKED track starts, i.e. ~3 auto
-  // tracks of unfiltered radio for one bad URL. A pending request stays listed
-  // in dj_queue while it downloads and while it waits its turn, so an absent id
-  // means aired-or-failed, and the local checks in probeVerdict separate those.
+  // tracks of unfiltered radio for one bad URL. proto_subhttp now reports the
+  // checked fetch outcome for this exact handoff; dj_queue membership is not
+  // used because resolving requests can be visible OR popped for prefetch.
   // Never throws: this is a safety net over the drain, not part of it.
   async verifyPushResolved(item: QueueItem) {
-    // No id to match on in dj_queue (pre-annotation item) — the probe has
-    // nothing to say, so it says nothing rather than guessing failure.
-    const id = item.track?.id;
-    if (!id) return;
+    const probeId = item.resolveProbeId;
+    if (!probeId) return;
 
-    let absentReads = 0;
     for (let read = 0; read < PUSH_PROBE_MAX_READS; read++) {
       await sleep(PUSH_PROBE_INTERVAL_MS);
-      let probeOk = true;
-      let inQueue = false;
-      try {
-        inQueue = (await liquidsoapControl.getDjQueueIdsFresh()).has(id);
-      } catch {
-        probeOk = false;
-      }
-      absentReads = inQueue ? 0 : absentReads + 1;
+      const outcome = await liquidsoapControl.subhttpProbeOutcome(probeId);
 
       const verdict = probeVerdict({
-        probeOk,
-        inQueue,
         // Aired (onTrackStarted spliced it), cancelled, or already reconciled
         // away — all mean this item is no longer ours to verify.
         stillQueuedLocally: !!item.sent && this.upcoming.includes(item),
-        absentReads,
+        outcome,
       });
       if (verdict === 'pending') continue;
       if (verdict === 'abandon') return;

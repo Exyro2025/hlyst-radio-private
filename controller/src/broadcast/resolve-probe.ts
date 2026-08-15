@@ -11,28 +11,17 @@
 // UNTRACKED track starts, needing EMPTY_DJ_QUEUE_CLEAR_THRESHOLD of them. Three
 // auto tracks is 10-25 minutes of unfiltered radio for one bad URL.
 //
-// So after a push, probe dj_queue for the item's own id. A request stays listed
-// while it downloads and while it waits its turn; it leaves the list only when
-// it airs or when resolution FAILED. Pure and I/O-free so
-// scripts/resolve-probe.test.ts can pin the state machine.
+// Queue membership cannot answer that question: dj_queue contains idle and
+// resolving requests, and a healthy request disappears from queue() while
+// boundary prefetch is still downloading it. proto_subhttp therefore records
+// an explicit per-handoff outcome and the controller consumes that over telnet.
+// Pure and I/O-free so scripts/resolve-probe.test.ts can pin the state machine.
 
-// How long after the push (and between probes) to read dj_queue. Liquidsoap
-// polls next.txt every 1.0s and writeHandoff already waited for that poll to
-// consume the file, so one second is the floor; two leaves room for a slow tick
-// without making the whole check feel like a timeout.
-export const PUSH_PROBE_INTERVAL_MS = 2_000;
-
-// Consecutive absent reads before the push is called failed. Absence has one
-// benign cause — the request was pulled for air in the moment between reads —
-// and `stillQueuedLocally` catches that as soon as onTrackStarted splices the
-// item (within one 1.5s watcher tick). Requiring two reads spans that tick, so
-// the seam race resolves itself rather than costing a wrongly re-picked track.
-export const PUSH_PROBE_ABSENT_READS = 2;
-
-// Hard ceiling on probes for one item. Presence ends the check immediately, so
-// this only bounds the failing path: PUSH_PROBE_ABSENT_READS to decide, plus
-// slack for a read that comes back present-then-absent.
-export const PUSH_PROBE_MAX_READS = 4;
+// Poll long enough to cover a slow whole-file fetch. If no explicit outcome
+// arrives (old broadcast image, local-file URI, mixer restart), the loop simply
+// expires fail-open and the existing reconcile sweep remains the backstop.
+export const PUSH_PROBE_INTERVAL_MS = 1_000;
+export const PUSH_PROBE_MAX_READS = 60;
 
 // Consecutive resolution failures that may each trigger an immediate re-pick.
 // Past it the station coasts on auto.m3u until the next natural pick: when a
@@ -41,34 +30,32 @@ export const PUSH_PROBE_MAX_READS = 4;
 // either way — that is what the auto playlist is for.
 export const MAX_CONSECUTIVE_RESOLVE_FAILURES = 3;
 
-// 'resolved' — the request is live in dj_queue; stop probing, it is real.
-// 'pending'  — absent, but not for long enough to be sure; probe again.
-// 'failed'   — absent across PUSH_PROBE_ABSENT_READS reads while the item is
-//              still ours and unaired: Liquidsoap dropped it.
-// 'abandon'  — nothing left to verify, or nothing trustworthy to verify it
-//              WITH. Never actionable.
+// 'resolved' — proto_subhttp returned a checked audio file.
+// 'pending'  — the protocol has not completed yet; probe again.
+// 'failed'   — proto_subhttp explicitly rejected or failed the fetch.
+// 'abandon'  — nothing left to verify, or the outcome channel is unavailable.
 export type ProbeVerdict = 'resolved' | 'pending' | 'failed' | 'abandon';
+export type ResolveProbeOutcome = 'ready' | 'failed' | 'pending' | 'unknown';
+
+export function parseResolveProbeOutcome(raw: string | null | undefined): ResolveProbeOutcome {
+  const word = (raw ?? '').trim();
+  if (word === 'ready' || word === 'failed' || word === 'pending') return word;
+  return 'unknown';
+}
 
 export function probeVerdict(p: {
-  // The telnet read succeeded. A failed read means the controller cannot see
-  // dj_queue at all — mid-restart, unreachable, garbled — and this gate fails
-  // OPEN like the other Liquidsoap probes: the cost of a wrong 'failed' is a
-  // dropped good pick plus a re-pick, the cost of a wrong 'abandon' is the
-  // pre-#1405 behaviour, which reconcileWithDjQueue still cleans up.
-  probeOk: boolean;
-  // The item's subsonic id is pending in dj_queue.
-  inQueue: boolean;
   // The item is still in `upcoming` and still flagged sent — i.e. it has not
   // aired (onTrackStarted splices it), was not cancelled, and was not already
   // cleared by a reconcile.
   stillQueuedLocally: boolean;
-  // Consecutive absent reads including this one.
-  absentReads: number;
+  // Explicit outcome reported by proto_subhttp for this handoff attempt.
+  outcome: ResolveProbeOutcome;
 }): ProbeVerdict {
   if (!p.stillQueuedLocally) return 'abandon';
-  if (!p.probeOk) return 'abandon';
-  if (p.inQueue) return 'resolved';
-  return p.absentReads >= PUSH_PROBE_ABSENT_READS ? 'failed' : 'pending';
+  if (p.outcome === 'ready') return 'resolved';
+  if (p.outcome === 'failed') return 'failed';
+  if (p.outcome === 'unknown') return 'abandon';
+  return 'pending';
 }
 
 // Whether a confirmed resolution failure may trigger an immediate re-pick.

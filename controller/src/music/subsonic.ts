@@ -836,8 +836,12 @@ export function getCoverArtUrl(id, size = 512) {
 // Library is AAC 256 kbps m4a from gamdl; without `raw`, Navidrome would
 // transcode to ~192 kbps MP3 on the way out, adding a lossy generation before
 // Liquidsoap's own MP3 re-encode. Liquidsoap decodes m4a/AAC via ffmpeg.
-export function getStreamUrl(songId) {
-  return `subhttp:${buildUrl('stream', { id: songId, format: 'raw' })}`;
+export function getStreamUrl(songId, resolveProbeId: string | null = null) {
+  const url = buildUrl('stream', { id: songId, format: 'raw' });
+  // The fragment reaches proto_subhttp but curl never sends it to Navidrome.
+  // It identifies this exact handoff, avoiding stale song-id outcomes.
+  const probe = resolveProbeId ? `#subwave_probe=${encodeURIComponent(resolveProbeId)}` : '';
+  return `subhttp:${url}${probe}`;
 }
 
 // Plain HTTP stream URL (no `subhttp:` prefix) with auth baked into the query
@@ -867,8 +871,8 @@ export function getLocalPath(song) {
 }
 
 // Best URI for Liquidsoap — local file if available, otherwise stream URL
-export function getPlayableUri(song) {
-  return getLocalPath(song) || getStreamUrl(song.id);
+export function getPlayableUri(song, resolveProbeId: string | null = null) {
+  return getLocalPath(song) || getStreamUrl(song.id, resolveProbeId);
 }
 
 // Liquidsoap `annotate:` URI — embeds metadata up front so on_track_change
@@ -879,7 +883,7 @@ export function getPlayableUri(song) {
 export function escAnnotate(s) {
   return String(s ?? '').replace(/\\/g, '\\\\').replace(/"/g, '\\"');
 }
-export function getAnnotatedUri(song, opts: { maxDurationSec?: number | null; cueOutSec?: number | null; cueInSec?: number | null } = {}) {
+export function getAnnotatedUri(song, opts: { maxDurationSec?: number | null; cueOutSec?: number | null; cueInSec?: number | null; resolveProbeId?: string | null } = {}) {
   const fields = [
     `title="${escAnnotate(song.title)}"`,
     `artist="${escAnnotate(song.artist)}"`,
@@ -964,7 +968,7 @@ export function getAnnotatedUri(song, opts: { maxDurationSec?: number | null; cu
   if (opts.cueInSec != null && opts.cueInSec > 0) {
     fields.push(`liq_cue_in="${escAnnotate(opts.cueInSec)}"`);
   }
-  return `annotate:${fields.join(',')}:${getPlayableUri(song)}`;
+  return `annotate:${fields.join(',')}:${getPlayableUri(song, opts.resolveProbeId ?? null)}`;
 }
 
 // Annotate URI for a pre-rendered transition CLIP (stem-blend transitions).
