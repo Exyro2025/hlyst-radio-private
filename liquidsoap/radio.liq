@@ -856,6 +856,43 @@ music_meta = music
 # and the rotate defers to the next real boundary.
 bed_on_air = ref(false)
 
+# Voice-on-air deadline for the jingle gate below. #997 solved one direction —
+# a voice handoff waits out a jingle that is already feeding (jingle-playing.json
+# + waitForJingleClear in the controller). The other direction was unguarded: the
+# rotate could hand a stinger to the music chain WHILE a DJ clip is on air, and
+# the jingle simply plays over the voice.
+#
+# A deadline, not a boolean. `source.is_ready(voice_queue)` looks like the
+# obvious predicate and is a trap: on a request.queue it latches true forever
+# after the first push (measured: still true 24s after a 6.4s clip finished,
+# queue empty), which would starve the jingle rotate permanently. An instant in
+# the future cannot latch — at worst it is already in the past.
+voice_until = ref(0.)
+
+# Hard ceiling on how far ahead voice_marker may push that deadline. The gate
+# fails toward SERVING jingles, deliberately: a measured duration that comes back
+# wrong (corrupt header, a filename that resolved to some other media) would
+# otherwise silence the rotate for as long as that number says, and unlike the
+# collision the gate fixes, that failure is inaudible — nothing in the log says
+# why the stingers stopped.
+VOICE_GATE_MAX_SEC = 120.
+
+# Two things this gate deliberately does NOT do:
+#
+#   - It arms at the clip's on_metadata, i.e. after the 0.5s say.txt poll and the
+#     silent lead-in. waitForJingleClear (voice-io.ts) covers a jingle already
+#     handed out when the controller writes say.txt; a jingle handed to the rotate
+#     inside that ~1s seam is covered by neither side. Arming optimistically at
+#     handoff would close it, but the controller has no channel to Liquidsoap
+#     other than the handoff files themselves — it would need a new one, for a
+#     window narrower than the poll that creates it.
+#   - intro_queue arms it too, not just voice_queue. A talk-over link is written
+#     for the INCOMING song, so if the rotate served a stinger at that seam the
+#     link would talk over the stinger instead — same collision, quieter. The
+#     cost is that links land on the rotate's decision point by construction, so
+#     a chatty persona (speech every 1-5 tracks) will skip some jingles and run
+#     slightly under the configured ratio. Skipping a jingle is the cheaper miss.
+
 # JINGLES & STATION ID — rotate a jingle in every N tracks.
 #
 # CRITICAL: this rotate MUST sit here, on the raw pre-cross / pre-duck music
@@ -892,10 +929,11 @@ music =
       )
     )
     # A bed on air makes jingles unavailable (bed_on_air above) so the rotate
-    # can't split a bed from the song it ramps into; a starved music chain does
-    # the same so the rotate can't serve stingers forever over dead air (see the
-    # MUSIC STARVE GUARD below).
-    jingles = source.available(jingles, {not bed_on_air() and not music_starved()})
+    # can't split a bed from the song it ramps into; a voice clip on air does
+    # the same so a stinger can't be handed over the DJ (voice_until above); and
+    # a starved music chain does the same so the rotate can't serve stingers
+    # forever over dead air (see the MUSIC STARVE GUARD below).
+    jingles = source.available(jingles, {not bed_on_air() and time() > voice_until() and not music_starved()})
     rotate(weights=[1, jingle_ratio()], [jingles, music])
   else
     music
@@ -951,17 +989,48 @@ def voice_marker(channel, tmp_dir) =
     begin
       voice_id = m["subwave_voice"]
       if voice_id != "" then
+        # ONE clock read for both jobs, taken before either. `startedAt` is the
+        # live-edge stamp the controller treats as the moment the words begin
+        # (#1382) — re-reading time() after the work below would skew it by
+        # however long that work took.
+        now = time()
+        fname = m["filename"]
+
+        # The marker goes out FIRST. Arming the jingle gate needs request.duration,
+        # which decodes a header and can raise on an unreadable/empty filename; if
+        # that ran first, a raise would cost the marker entirely, and because the
+        # file is never deleted awaitVoiceAir would not degrade instantly — it
+        # would burn its full 20s timeout against the PREVIOUS clip's voiceId.
         file.write(
           data=json.stringify(compact=true, {
             voiceId = voice_id,
             channel = channel,
-            filename = m["filename"],
-            startedAt = time()
+            filename = fname,
+            startedAt = now
           }),
           atomic=true,
           temp_dir=tmp_dir,
           "#{state_dir}/voice-playing.json"
         )
+
+        # Arm the jingle gate (see voice_until above). request.duration is
+        # documented as expensive, but this hook is synchronous=false and so runs
+        # off the streaming thread. Two bounds, because an over-long deadline
+        # silently starves the rotate with nothing in the log to explain it: the
+        # 30s fallback covers a clip that cannot be measured at all, and the cap
+        # covers one that measures WRONG (corrupt header, or a filename that
+        # resolved to some other media). No script is a legitimate two minutes.
+        dur =
+          try
+            null.get(default=30., request.duration(fname))
+          catch err do
+            log(
+              label="subwave",
+              "voice duration unavailable for #{fname} (#{err}); jingle gate falls back to 30s"
+            )
+            30.
+          end
+        voice_until := now + min(dur, VOICE_GATE_MAX_SEC) + 2.
       end
     end
 end
