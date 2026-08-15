@@ -75,6 +75,12 @@ import {
   sleep,
 } from './queue/pure.js';
 import {
+  PUSH_PROBE_INTERVAL_MS,
+  PUSH_PROBE_MAX_READS,
+  probeVerdict,
+  repickAfterFailure,
+} from './resolve-probe.js';
+import {
   DEDUPE_KINDS,
   KIND_LABEL,
   PENDING_VOICE_MAX_AGE_MS,
@@ -139,6 +145,7 @@ class Queue {
   _recentPlaysTimer: NodeJS.Timeout | null = null; // debounce for the recent-plays.json sidecar
   _recentPlays: RecentPlay[] = [];
   _emptyDjQueueStreak = 0;      // consecutive reconcile checks seeing an empty dj_queue while sent items remain — see reconcileWithDjQueue
+  _resolveFailStreak = 0;       // consecutive pushes Liquidsoap never resolved — re-pick budget, see onPushResolveFailed
   _deadlinePickAt = 0;          // last deadline-pick ATTEMPT (ms epoch) — failure-retry cooldown, see maybeDeadlinePick
   _pendingVoice: { text: string; kind: string; wavPath: string; persona: Persona | null; meta: TurnMeta; t: number } | null = null; // one boundary-deferred segment awaiting the next track start — see announceAtNextTrack
 
@@ -1194,6 +1201,13 @@ class Queue {
         item.sent = true;
         this.persist();  // record the sent flag — these are now live in dj_queue
 
+        // `sent` means "handed over", NOT "playable": Liquidsoap drops a
+        // request it cannot resolve, and nothing else tells the controller
+        // (#1405). Probe dj_queue for this id and re-pick at once if the push
+        // evaporated. Fire-and-forget — it sleeps between reads and must not
+        // hold the sender mutex.
+        void this.verifyPushResolved(item);
+
         // writeHandoff already waited for Liquidsoap's poll to consume the
         // file before returning, so no extra sleep needed here.
       }
@@ -2001,6 +2015,89 @@ class Queue {
     // track-start path's source check.
     this._deadlinePickAt = Date.now();
     this.runPickCycle({ isAutonomous: !head.requestedBy, predecessorItem: head });
+  }
+
+  // Did the pick we just pushed actually become a playable request? (#1405)
+  //
+  // A resolution failure — the origin answered with a Subsonic error body, the
+  // file is gone, the fetch timed out — makes Liquidsoap drop the request
+  // silently. Before this probe the controller found out only via
+  // reconcileWithDjQueue, which needs three UNTRACKED track starts, i.e. ~3 auto
+  // tracks of unfiltered radio for one bad URL. A pending request stays listed
+  // in dj_queue while it downloads and while it waits its turn, so an absent id
+  // means aired-or-failed, and the local checks in probeVerdict separate those.
+  // Never throws: this is a safety net over the drain, not part of it.
+  async verifyPushResolved(item: QueueItem) {
+    // No id to match on in dj_queue (pre-annotation item) — the probe has
+    // nothing to say, so it says nothing rather than guessing failure.
+    const id = item.track?.id;
+    if (!id) return;
+
+    let absentReads = 0;
+    for (let read = 0; read < PUSH_PROBE_MAX_READS; read++) {
+      await sleep(PUSH_PROBE_INTERVAL_MS);
+      let probeOk = true;
+      let inQueue = false;
+      try {
+        inQueue = (await liquidsoapControl.getDjQueueIdsFresh()).has(id);
+      } catch {
+        probeOk = false;
+      }
+      absentReads = inQueue ? 0 : absentReads + 1;
+
+      const verdict = probeVerdict({
+        probeOk,
+        inQueue,
+        // Aired (onTrackStarted spliced it), cancelled, or already reconciled
+        // away — all mean this item is no longer ours to verify.
+        stillQueuedLocally: !!item.sent && this.upcoming.includes(item),
+        absentReads,
+      });
+      if (verdict === 'pending') continue;
+      if (verdict === 'abandon') return;
+      if (verdict === 'resolved') {
+        // Seen live in dj_queue: the push landed. Reuse the reconcile sweep's
+        // own flag — it means exactly this — and let that sweep own the item
+        // from here.
+        item.confirmedInLiquidsoap = true;
+        this._resolveFailStreak = 0;
+        return;
+      }
+      this.onPushResolveFailed(item);
+      return;
+    }
+  }
+
+  // A push Liquidsoap never resolved: drop the dead item and re-pick now, so a
+  // bad URL costs seconds of auto playlist instead of the ~3 tracks the
+  // reconcile sweep needs to notice.
+  onPushResolveFailed(item: QueueItem) {
+    const idx = this.upcoming.indexOf(item);
+    if (idx < 0) return;  // raced with a cancel/air between verdict and action
+    this.upcoming.splice(idx, 1);
+    this._resolveFailStreak++;
+    this.persist();
+
+    const who = item.requestedBy ? ` (requested by ${item.requestedBy})` : '';
+    this.log('error',
+      `Liquidsoap never resolved "${item.track?.title || 'unknown'} — ${item.track?.artist || 'unknown'}"${who}: it left dj_queue without airing. The music source returned an error instead of audio, or the file is missing/unreadable — check the broadcast log for a "protocol.subhttp" line and the music server's own log. Dropped from the queue.`);
+
+    // A whole origin being down fails every re-pick the same way, and each one
+    // costs an LLM call to queue a track that cannot air. Past the budget the
+    // auto playlist keeps the station on air until the next natural pick.
+    if (!repickAfterFailure(this._resolveFailStreak)) {
+      this.log('scheduler',
+        `${this._resolveFailStreak} unresolvable picks in a row — holding off on re-picks; the auto playlist covers the slot until the next track boundary`);
+      return;
+    }
+
+    // Same gate as onTrackStarted's auto-DJ block: only re-pick when the slot is
+    // genuinely empty, no pick is already running, and DJ calls are allowed.
+    if (this.autoPick && this.upcoming.length === 0 && !this.pickerBusy && djCallsAllowed()) {
+      this._deadlinePickAt = Date.now();  // this IS a pick attempt — stamp the backstop's cooldown
+      const isAutonomous = this.current?.source === 'auto' || this.current?.source === 'ai';
+      this.runPickCycle({ isAutonomous });
+    }
   }
 
   // Reconcile Node's upcoming queue with Liquidsoap's actual dj_queue.

@@ -2,6 +2,7 @@
 // Uses the proper salt+token auth (not plaintext password).
 
 import crypto from 'node:crypto';
+import fs from 'node:fs';
 import { config } from '../config.js';
 import * as settings from '../settings.js';
 import * as subLog from './subsonic-log.js';
@@ -849,10 +850,20 @@ export function getRawStreamUrl(songId: string): string {
 // Returns the local file path if Navidrome and the controller share the music
 // volume — much more efficient than streaming over HTTP for the radio.
 // Set MUSIC_LIBRARY_PATH to mount your library inside the controller container.
+//
+// The path is only ever a GUESS. Navidrome's Subsonic `path` is synthetic —
+// built from tags, not read off disk — so it routinely disagrees with the real
+// layout (the API says `Frank Zappa/Chunga's Revenge/…` while the folder is
+// `Frank Zappa/Chunga's Revenge (1970)/…`). A guess handed to Liquidsoap
+// resolves to nothing and takes the queued pick down with it (#1405), so the
+// guess is CHECKED here and a miss falls back to the stream URL: local-file
+// mode then speeds up the tracks whose paths do line up instead of breaking
+// every track whose paths don't.
 export function getLocalPath(song) {
   const libRoot = process.env.MUSIC_LIBRARY_PATH;
   if (!libRoot || !song.path) return null;
-  return `${libRoot}/${song.path}`;
+  const local = `${libRoot}/${song.path}`;
+  return fs.existsSync(local) ? local : null;
 }
 
 // Best URI for Liquidsoap — local file if available, otherwise stream URL

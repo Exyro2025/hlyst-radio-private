@@ -183,7 +183,25 @@ log("settings loaded: jingle_ratio=#{jingle_ratio()} crossfade_duration=#{crossf
 # subhttp:<full-url> — whole-file download via curl. The built-in
 # http.get.stream returns spurious 522s on the Cloudflare-fronted Navidrome
 # origin.
+#
+# INVARIANT: a download that curl reports as successful is NOT proof of audio.
+# The Subsonic API carries its error code INSIDE the body — Navidrome answers a
+# missing file with HTTP 200 and a JSON (or XML) `subsonic-response` blob — so
+# the old "curl exited 0 and the file is non-empty" test handed an error page to
+# the decoders, which logged the useless `Available decoders cannot decode
+# "/tmp/liq-curl-….mp3"`. Request resolution then failed, Liquidsoap dropped the
+# request, and the station fell through to the unfiltered auto playlist while the
+# controller's queued pick sat `sent:true` for another three tracks (#1405).
+# `--fail` alone does NOT cover this (the status is 200); what identifies it is
+# the CONTENT TYPE, so ask curl what it actually fetched and refuse anything that
+# is not audio — with a log line naming the real cause.
 # ---------------------------------------------------------------------------
+
+# Below this a "track" cannot be audio worth airing — a Subsonic error body is a
+# few hundred bytes, while 4 KiB of MP3 is about a quarter of a second. Only a
+# backstop for an origin that returns an error with no usable content type.
+subhttp_min_bytes = 4096
+
 def proto_subhttp(~rlog, ~maxtime, arg) =
   ignore(rlog)
   uri = arg
@@ -195,14 +213,35 @@ def proto_subhttp(~rlog, ~maxtime, arg) =
     elsif string.contains(substring=".flac", arg) then ".flac"
     else ".mp3" end
   outfile = file.temp("liq-curl-", ext)
-  cmd = "curl -sS -L --max-time #{timeout} -o #{process.quote(outfile)} #{process.quote(uri)}"
+  # `-w` reports the FINAL response (after -L), status first so the content type
+  # — which may itself contain a space, e.g. `application/json; charset=utf-8` —
+  # can keep the rest of the line.
+  cmd = "curl -sS -L --fail --max-time #{timeout} -w '%{http_code} %{content_type}' -o #{process.quote(outfile)} #{process.quote(uri)}"
   ret = process.run(timeout=float_of_int(timeout), cmd)
-  if ret.status == "exit" and ret.status.code == 0 and file.size(outfile) > 0 then
-    outfile
-  else
-    log(label="protocol.subhttp", level=3, "curl failed for #{uri}: status=#{ret.status} code=#{ret.status.code} stderr=#{ret.stderr}")
+  info = string.trim(ret.stdout)
+  http_code = list.hd(default="", string.split(separator=" ", info))
+  ctype = string.case(lower=true, info)
+  size = file.size(outfile)
+  # An API error body, whatever the status: JSON and XML are the two Subsonic
+  # error dialects, and text/* covers a proxy's HTML error page.
+  error_body =
+    string.contains(substring="json", ctype)
+    or string.contains(substring="xml", ctype)
+    or string.contains(substring="text/", ctype)
+  if not (ret.status == "exit" and ret.status.code == 0) then
+    log(label="protocol.subhttp", level=3, "curl failed for #{uri}: status=#{ret.status} code=#{ret.status.code} http=#{http_code} stderr=#{ret.stderr}")
     file.remove(outfile)
     null
+  elsif error_body then
+    log(label="protocol.subhttp", level=2, "music source returned an ERROR BODY, not audio, for #{uri} (http=#{http_code}, content-type=#{info}, #{size} bytes) — the track is missing or unreadable at the origin; check the music server's own log")
+    file.remove(outfile)
+    null
+  elsif size < subhttp_min_bytes then
+    log(label="protocol.subhttp", level=2, "music source returned only #{size} bytes for #{uri} (http=#{http_code}, content-type=#{info}) — too small to be audio, treating as an error response")
+    file.remove(outfile)
+    null
+  else
+    outfile
   end
 end
 

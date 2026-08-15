@@ -331,6 +331,17 @@ export async function getDjQueueIds(): Promise<Set<string>> {
   return _djQueueInflight;
 }
 
+// Uncached read of the ids pending in dj_queue. The 4s cache above is right for
+// the reconcile sweep (a stale-by-seconds view of a queue that changes at track
+// boundaries), but wrong for the push-resolution probe, which reads twice
+// PUSH_PROBE_INTERVAL_MS apart and must see the SECOND state — a cached first
+// read would answer both probes and turn the confirmation into a coin flip.
+export async function getDjQueueIdsFresh(): Promise<Set<string>> {
+  const snap = await fetchDjQueue();
+  _djQueueCache = { timestamp: Date.now(), ...snap };
+  return snap.ids;
+}
+
 // Resolve the Liquidsoap request id for a queued track, plus the bed queued
 // immediately ahead of it, if any. Always a fresh read — cancel decisions
 // can't ride a 4s-stale cache (the track may have gone on air since); `rid` is
