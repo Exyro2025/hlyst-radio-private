@@ -856,6 +856,19 @@ music_meta = music
 # and the rotate defers to the next real boundary.
 bed_on_air = ref(false)
 
+# Voice-on-air deadline for the jingle gate below. #997 solved one direction —
+# a voice handoff waits out a jingle that is already feeding (jingle-playing.json
+# + waitForJingleClear in the controller). The other direction was unguarded: the
+# rotate could hand a stinger to the music chain WHILE a DJ clip is on air, and
+# the jingle simply plays over the voice.
+#
+# A deadline, not a boolean. `source.is_ready(voice_queue)` looks like the
+# obvious predicate and is a trap: on a request.queue it latches true forever
+# after the first push (measured: still true 24s after a 6.4s clip finished,
+# queue empty), which would starve the jingle rotate permanently. An instant in
+# the future cannot latch — at worst it is already in the past.
+voice_until = ref(0.)
+
 # JINGLES & STATION ID — rotate a jingle in every N tracks.
 #
 # CRITICAL: this rotate MUST sit here, on the raw pre-cross / pre-duck music
@@ -892,10 +905,11 @@ music =
       )
     )
     # A bed on air makes jingles unavailable (bed_on_air above) so the rotate
-    # can't split a bed from the song it ramps into; a starved music chain does
-    # the same so the rotate can't serve stingers forever over dead air (see the
-    # MUSIC STARVE GUARD below).
-    jingles = source.available(jingles, {not bed_on_air() and not music_starved()})
+    # can't split a bed from the song it ramps into; a voice clip on air does
+    # the same so a stinger can't be handed over the DJ (voice_until above); and
+    # a starved music chain does the same so the rotate can't serve stingers
+    # forever over dead air (see the MUSIC STARVE GUARD below).
+    jingles = source.available(jingles, {not bed_on_air() and time() > voice_until() and not music_starved()})
     rotate(weights=[1, jingle_ratio()], [jingles, music])
   else
     music
@@ -951,6 +965,13 @@ def voice_marker(channel, tmp_dir) =
     begin
       voice_id = m["subwave_voice"]
       if voice_id != "" then
+        # Arm the jingle gate (see voice_until above). request.duration is
+        # documented as expensive, but this hook is synchronous=false and so
+        # runs off the streaming thread. The 30s fallback keeps the guard useful
+        # when the clip cannot be measured, and stays bounded by construction.
+        dur = request.duration(m["filename"])
+        voice_until := time() + (null.get(default=30., dur)) + 2.
+
         file.write(
           data=json.stringify(compact=true, {
             voiceId = voice_id,
