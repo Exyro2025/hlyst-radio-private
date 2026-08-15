@@ -40,6 +40,7 @@ import * as scrobble from './scrobble.js';
 import * as liquidsoapControl from './liquidsoap-control.js';
 import {
   drainAction,
+  introRenderBudgetSec,
   remainingSec,
   shouldDeadlinePick,
   DEADLINE_PICK_COOLDOWN_SEC,
@@ -90,6 +91,7 @@ import {
   type QueuedVoice,
   type VoiceHandoff,
 } from './queue/voice-io.js';
+import { awaitIntroRender, IntroRenderTracker } from './queue/intro-render.js';
 import { notifyQueued, notifySpoken } from './voice-events.js';
 
 // Everything the outside world is told about ONE spoken segment, held in a
@@ -141,6 +143,7 @@ class Queue {
   _emptyDjQueueStreak = 0;      // consecutive reconcile checks seeing an empty dj_queue while sent items remain — see reconcileWithDjQueue
   _deadlinePickAt = 0;          // last deadline-pick ATTEMPT (ms epoch) — failure-retry cooldown, see maybeDeadlinePick
   _pendingVoice: { text: string; kind: string; wavPath: string; persona: Persona | null; meta: TurnMeta; t: number } | null = null; // one boundary-deferred segment awaiting the next track start — see announceAtNextTrack
+  _introRenders = new IntroRenderTracker<QueueItem>(); // timed-out pre-renders stay reusable by airIntro
 
   // Snapshot upcoming/current/history to disk. The queue is otherwise purely
   // in-memory, so a controller restart (every `--build controller` rebuild)
@@ -1062,17 +1065,53 @@ class Queue {
         // WAV (the script predates the flip), so the render is pure waste — and
         // if the switch comes back on before the track airs, airIntro renders
         // from the script itself.
+        //
+        // The render is BUDGETED against the same clock the drain verdict used
+        // (#1409). The verdict only decides "send"; the music isn't committed
+        // until the writeHandoff far below, and a slow local TTS engine can
+        // burn the whole remaining runway right here — the seam then falls to
+        // auto.m3u and this pick airs one track late. Music commitment is not
+        // allowed to sit behind optional speech: past the budget the drain
+        // moves on and airIntro renders from the script at air time.
+        //
+        // A deferred render also costs this link its bed — maybePushBed needs
+        // a WAV to measure the line against, so it no-ops and a long link airs
+        // over the song's intro under the light duck (pre-bed behaviour). That
+        // is the accepted price of the trade: a naked link is a garnish lost,
+        // a missed seam is the wrong track on air.
         if (item.introScript && !item.introWav && autoVoiceAllowed()) {
-          try {
-            item.introWav = await speak(item.introScript, {
+          const budgetSec = introRenderBudgetSec(this.remainingUntilItemAirs(item));
+          if (budgetSec === 0) {
+            this.log('mix', `Intro render deferred to air time — "${item.track.title}" airs too soon to render ahead`);
+          } else {
+            // Settle handlers are attached to the render promise ITSELF, not to
+            // the race: a render that lands after the budget still reaches the
+            // item (airIntro then finds a WAV instead of re-rendering), and a
+            // late rejection can never surface as an unhandled rejection.
+            const render = this._introRenders.start(item, () => speak(item.introScript!, {
               kind: item.introKind || 'dj-speak',
               // Voice it as whoever wrote it. Without this, speak() falls back
               // to getEffectivePersona() at DRAIN time — minutes after the line
               // was written, possibly the other side of a show boundary.
               persona: item.introPersona || null,
+            }));
+            // The tracker turns rejection into a result so a late failure can
+            // never surface unhandled. This observer owns the item mutation and
+            // error log even after the drain stops waiting.
+            void render.then(result => {
+              if (result.status === 'rendered') {
+                if (!item.introAired) item.introWav = result.wav;
+              } else {
+                this.log('error', `TTS failed: ${(result.error as Error).message}`);
+              }
             });
-          } catch (err) {
-            this.log('error', `TTS failed: ${(err as Error).message}`);
+            const result = await awaitIntroRender(
+              render,
+              budgetSec == null ? null : budgetSec * 1000,
+            );
+            if (result.status === 'timed-out') {
+              this.log('mix', `Intro render overran its ${Math.round(budgetSec!)}s window — committing "${item.track.title}" now, voice follows at air time`);
+            }
           }
         }
 
@@ -1561,6 +1600,18 @@ class Queue {
     // set above, so this can't double-air.
     if (!item.introWav || !existsSync(item.introWav)) {
       if (!item.introScript) return;
+      // The drain may have stopped WAITING for this pre-render to protect the
+      // music seam. Reuse that one TTS job at air time: local workers process
+      // requests serially, so starting it again would queue a duplicate behind
+      // the original; cloud engines would bill the same line twice.
+      const pending = this._introRenders.get(item);
+      if (pending) {
+        const result = await pending;
+        if (result.status === 'rendered') item.introWav = result.wav;
+      }
+    }
+    if (!item.introWav || !existsSync(item.introWav)) {
+      if (!item.introScript) return;
       try {
         item.introWav = await speak(item.introScript, {
           kind: item.introKind || 'dj-speak',
@@ -1712,6 +1763,10 @@ class Queue {
       const item = consumed[consumed.length - 1];
       const source = item.aiPicked ? 'ai' : 'request';
       this.current = { ...item, startedAt: new Date().toISOString(), source };
+      // A timed-out intro pre-render is keyed by the queued item. The current
+      // item is a spread clone, so carry the lifecycle across that identity
+      // hand-off before airIntro tries to reuse it.
+      this._introRenders.transfer(item, this.current);
       this.log('playing', `${np.title} — ${np.artist}`, { requestedBy: item.requestedBy, source });
       // A tracked item matched → controller and Liquidsoap are in sync; clear any
       // dj_queue-empty desync streak accumulated from prior untracked plays.
