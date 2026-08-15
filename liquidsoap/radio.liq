@@ -740,9 +740,9 @@ def dj_transition(a, b) =
       end
       # Complementary ride — the loop is built from the raw capture so every
       # repeated bar has a stable internal level, then this outer envelope gives
-      # back exactly the headroom consumed by the incoming fade. Previously the
-      # log-faded outgoing stayed hot through the capture pass while the incoming
-      # rose underneath it, producing the audible level jump unique to Loop.
+      # back headroom as the incoming track rises. Previously the log-faded
+      # outgoing stayed hot through the capture pass while the incoming rose
+      # underneath it, producing the audible level jump unique to Loop.
       def loop_gain() =
         e = source.elapsed(loop_src)
         e = if e < 0. then 0. else e end
@@ -753,7 +753,10 @@ def dj_transition(a, b) =
       looped = comb(delay=2.0 * bar, feedback=0.0, looped)
       looped = if 4.0 * bar < d then comb(delay=4.0 * bar, feedback=0.0, looped) else looped end
       looped = if 8.0 * bar < d then comb(delay=8.0 * bar, feedback=0.0, looped) else looped end
-      looped = amplify(2.0, looped)             # the cascade's fixed −6 dB
+      # feedback=0.0 emits each delayed copy at 0 dB. Because the dry gate keeps
+      # exactly one bar and the delays double, those copies occupy non-overlapping
+      # bar slots at unity. Global makeup would double the direct capture pass
+      # before any delayed copy exists, recreating the transition-entry jump.
       looped = filter.rc(frequency=loop_cut, mode="low", wetness=loop_wet,
                  filter.rc(frequency=loop_cut, mode="low", wetness=loop_wet, looped))
       amplify(loop_gain, looped)
