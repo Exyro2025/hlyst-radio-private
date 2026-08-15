@@ -301,14 +301,18 @@ def dj_transition(a, b) =
   # The log fades do the opposite, holding the outgoing hot so that the EFFECT,
   # not the fader, is heard doing the removal: with the default fade the sweep's
   # cutoff arrived over an already-quiet track and felt powerless (on-air), a
-  # chopped track must stab at full level like a real crossfader cut, and the
-  # loop's one-bar capture pass has to be seeded hot or every repeat inherits
-  # the couple of dB it lost.
+  # chopped track must stab at full level like a real crossfader cut. Loop is
+  # the exception: it captures the raw outgoing bar, then applies its own
+  # complementary ride after the delay cascade. Putting it on this hot fade
+  # held the outgoing near unity while the incoming rose and made the start of
+  # every loop transition jump in level.
   a_source =
     if washing then
       fade.out(duration=d, type="exp", initial_metadata=a.metadata, a.source)
-    elsif sweeping or chopping or looping then
+    elsif sweeping or chopping then
       fade.out(duration=d, type="log", initial_metadata=a.metadata, a.source)
+    elsif looping then
+      a.source
     else
       fade.out(duration=d, initial_metadata=a.metadata, a.source)
     end
@@ -734,17 +738,15 @@ def dj_transition(a, b) =
         x = if e >= t_on then 1.0 elsif e <= bar then 0.0 else (e - bar) / (0.15 * d) end
         3.0 * x * x - 2.0 * x * x * x
       end
-      # Master release — the ONLY level release available, since a feed-forward
-      # cascade has no feedback to ramp down. The loop rides flat, then fades
-      # out under the incoming and is silent before the branch truncates at d.
-      def loop_master() =
+      # Complementary ride — the loop is built from the raw capture so every
+      # repeated bar has a stable internal level, then this outer envelope gives
+      # back exactly the headroom consumed by the incoming fade. Previously the
+      # log-faded outgoing stayed hot through the capture pass while the incoming
+      # rose underneath it, producing the audible level jump unique to Loop.
+      def loop_gain() =
         e = source.elapsed(loop_src)
         e = if e < 0. then 0. else e end
-        if e < 0.80 * d then 1.0
-        elsif e < 0.92 * d then
-          x = (e - 0.80 * d) / (0.12 * d)
-          1.0 - (3.0 * x * x - 2.0 * x * x * x)
-        else 0.0 end
+        if e >= d then 0.0 else 1.0 - e / d end
       end
       gated  = amplify(loop_dry, a_source)
       looped = comb(delay=bar, feedback=0.0, gated)
@@ -754,7 +756,7 @@ def dj_transition(a, b) =
       looped = amplify(2.0, looped)             # the cascade's fixed −6 dB
       looped = filter.rc(frequency=loop_cut, mode="low", wetness=loop_wet,
                  filter.rc(frequency=loop_cut, mode="low", wetness=loop_wet, looped))
-      amplify(loop_master, looped)
+      amplify(loop_gain, looped)
     else
       a_source
     end

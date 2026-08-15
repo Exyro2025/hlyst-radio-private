@@ -158,8 +158,10 @@ def t(a, b) =
   a_src =
     if washout_on then
       fade.out(duration=d, type="exp", a.source)
-    elsif sweep_on or chop_on or loop_on then
+    elsif sweep_on or chop_on then
       fade.out(duration=d, type="log", a.source)
+    elsif loop_on then
+      a.source
     else
       fade.out(duration=d, a.source)
     end
@@ -415,8 +417,9 @@ def t(a, b) =
   # LOOP — keep in lockstep with radio.liq's loop block: comb here is a
   # ONE-SHOT feed-forward echo (measured), so the loop is a cascade of
   # doubling delays (taps at every bar multiple, flat at −6 dB → ×2 makeup),
-  # hard dry gate after the capture pass, ride-out darkening lowpass, master
-  # release. Fixed bar=2.0 here (no BPM stamp).
+  # hard dry gate after the capture pass, ride-out darkening lowpass, and a
+  # complementary output ride that leaves headroom for the incoming fade.
+  # Fixed bar=2.0 here (no BPM stamp).
   a_src =
     if loop_on then
       bar = 2.0
@@ -447,14 +450,10 @@ def t(a, b) =
         x = if e >= t_on then 1.0 elsif e <= bar then 0.0 else (e - bar) / (0.15 * d) end
         3.0 * x * x - 2.0 * x * x * x
       end
-      def loop_master() =
+      def loop_gain() =
         e = source.elapsed(loop_src)
         e = if e < 0. then 0. else e end
-        if e < 0.80 * d then 1.0
-        elsif e < 0.92 * d then
-          x = (e - 0.80 * d) / (0.12 * d)
-          1.0 - (3.0 * x * x - 2.0 * x * x * x)
-        else 0.0 end
+        if e >= d then 0.0 else 1.0 - e / d end
       end
       gated  = amplify(loop_dry, a_src)
       looped = comb(delay=bar, feedback=0.0, gated)
@@ -464,7 +463,7 @@ def t(a, b) =
       looped = amplify(2.0, looped)
       looped = filter.rc(frequency=loop_cut, mode="low", wetness=loop_wet,
                  filter.rc(frequency=loop_cut, mode="low", wetness=loop_wet, looped))
-      amplify(loop_master, looped)
+      amplify(loop_gain, looped)
     else a_src end
   b_src = fade.in(duration=d, b.source)
   b_src =
