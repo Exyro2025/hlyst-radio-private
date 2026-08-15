@@ -40,6 +40,7 @@ import * as scrobble from './scrobble.js';
 import * as liquidsoapControl from './liquidsoap-control.js';
 import {
   drainAction,
+  introRenderBudgetSec,
   remainingSec,
   shouldDeadlinePick,
   DEADLINE_PICK_COOLDOWN_SEC,
@@ -1062,17 +1063,53 @@ class Queue {
         // WAV (the script predates the flip), so the render is pure waste — and
         // if the switch comes back on before the track airs, airIntro renders
         // from the script itself.
+        //
+        // The render is BUDGETED against the same clock the drain verdict used
+        // (#1409). The verdict only decides "send"; the music isn't committed
+        // until the writeHandoff far below, and a slow local TTS engine can
+        // burn the whole remaining runway right here — the seam then falls to
+        // auto.m3u and this pick airs one track late. Music commitment is not
+        // allowed to sit behind optional speech: past the budget the drain
+        // moves on and airIntro renders from the script at air time.
+        //
+        // A deferred render also costs this link its bed — maybePushBed needs
+        // a WAV to measure the line against, so it no-ops and a long link airs
+        // over the song's intro under the light duck (pre-bed behaviour). That
+        // is the accepted price of the trade: a naked link is a garnish lost,
+        // a missed seam is the wrong track on air.
         if (item.introScript && !item.introWav && autoVoiceAllowed()) {
-          try {
-            item.introWav = await speak(item.introScript, {
+          const budgetSec = introRenderBudgetSec(this.remainingUntilItemAirs(item));
+          if (budgetSec === 0) {
+            this.log('mix', `Intro render deferred to air time — "${item.track.title}" airs too soon to render ahead`);
+          } else {
+            // Settle handlers are attached to the render promise ITSELF, not to
+            // the race: a render that lands after the budget still reaches the
+            // item (airIntro then finds a WAV instead of re-rendering), and a
+            // late rejection can never surface as an unhandled rejection.
+            const render = speak(item.introScript, {
               kind: item.introKind || 'dj-speak',
               // Voice it as whoever wrote it. Without this, speak() falls back
               // to getEffectivePersona() at DRAIN time — minutes after the line
               // was written, possibly the other side of a show boundary.
               persona: item.introPersona || null,
             });
-          } catch (err) {
-            this.log('error', `TTS failed: ${(err as Error).message}`);
+            const settled = render.then(
+              wav => { if (!item.introAired) item.introWav = wav; },
+              err => { this.log('error', `TTS failed: ${(err as Error).message}`); },
+            );
+            if (budgetSec == null) {
+              await settled;
+            } else {
+              let timer: NodeJS.Timeout | undefined;
+              await Promise.race([
+                settled,
+                new Promise<void>(resolve => { timer = setTimeout(resolve, budgetSec * 1000); }),
+              ]);
+              clearTimeout(timer);
+              if (!item.introWav) {
+                this.log('mix', `Intro render overran its ${Math.round(budgetSec)}s window — committing "${item.track.title}" now, voice follows at air time`);
+              }
+            }
           }
         }
 
