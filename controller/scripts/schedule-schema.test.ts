@@ -19,11 +19,14 @@ import test from 'node:test';
 process.env.STATE_DIR = mkdtempSync(join(tmpdir(), 'subwave-schedule-schema-'));
 
 const {
+  GENRE_LOCK_GENRES_MAX,
+  GENRE_LOCK_SHOW_ID,
   OVERRIDE_MAX_MINUTES,
   OVERRIDE_MIN_MINUTES,
   SCHEDULE_DAYS,
   SCHEDULE_HOURS,
   emptyWeek,
+  genreLockRequestSchema,
   repairScheduleForLoad,
   resolveScheduleSlots,
   scheduleOverrideRequestSchema,
@@ -333,4 +336,49 @@ test('override request: the minutes message names the real bounds', () => {
     r.error!.issues[0]!.message,
     new RegExp(`between ${OVERRIDE_MIN_MINUTES} and ${OVERRIDE_MAX_MINUTES}`),
   );
+});
+
+// --- POST /schedule/genre-lock ----------------------------------------------
+
+test('genre lock: the reserved show id is a valid show id', () => {
+  // SHOW_ID_RE (schemas/show.ts) is 3-32 chars of lowercase letters, digits or
+  // underscores — asserted structurally here rather than by importing show.ts,
+  // which schedule.ts may not do (see the header).
+  assert.match(GENRE_LOCK_SHOW_ID, /^[a-z0-9_]{3,32}$/);
+});
+
+test('genre lock request: accepts one or more genres and coerces minutes', () => {
+  const r = genreLockRequestSchema.parse({ genres: ['Jazz'], minutes: '90' });
+  assert.deepEqual(r.genres, ['Jazz']);
+  assert.equal(r.minutes, 90);
+});
+
+test('genre lock request: genres de-duplicate case-insensitively, in first-seen order', () => {
+  const r = genreLockRequestSchema.parse({ genres: ['Jazz', 'jazz', 'Soul', 'JAZZ'], minutes: 60 });
+  assert.deepEqual(r.genres, ['Jazz', 'Soul']);
+});
+
+test('genre lock request: refuses an empty genre list', () => {
+  assert.equal(genreLockRequestSchema.safeParse({ genres: [], minutes: 60 }).success, false);
+});
+
+test('genre lock request: caps the genre list at GENRE_LOCK_GENRES_MAX', () => {
+  const genres = Array.from({ length: GENRE_LOCK_GENRES_MAX + 1 }, (_, i) => `genre-${i}`);
+  assert.equal(genreLockRequestSchema.safeParse({ genres, minutes: 60 }).success, false);
+  assert.equal(
+    genreLockRequestSchema.safeParse({ genres: genres.slice(0, GENRE_LOCK_GENRES_MAX), minutes: 60 }).success,
+    true,
+  );
+});
+
+test('genre lock request: same minute bounds as the takeover request', () => {
+  for (const minutes of [OVERRIDE_MIN_MINUTES - 1, OVERRIDE_MAX_MINUTES + 1, 30.5, 'soon']) {
+    assert.equal(
+      genreLockRequestSchema.safeParse({ genres: ['Jazz'], minutes }).success,
+      false,
+      `minutes=${String(minutes)} should be refused`,
+    );
+  }
+  assert.equal(genreLockRequestSchema.safeParse({ genres: ['Jazz'], minutes: OVERRIDE_MIN_MINUTES }).success, true);
+  assert.equal(genreLockRequestSchema.safeParse({ genres: ['Jazz'], minutes: OVERRIDE_MAX_MINUTES }).success, true);
 });

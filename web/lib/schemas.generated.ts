@@ -1528,13 +1528,15 @@ export const listenerRequestSchema = z.object({
 
 // ─── from controller/src/schemas/schedule.ts ─────────────────────────────
 
-// Shared schedule schema — the weekly grid (#shows) and the timed takeover
-// (#930), executed on BOTH sides. The controller runs it in
-// settings.validate.validateScheduleStrict / validateScheduleOverrideStrict
-// (the update() chokepoint), in settings.normalize.normalizeSchedule /
-// normalizeScheduleOverride (the lenient load path) and in the PUT /schedule +
-// POST /schedule/override route middleware; the browser runs the mirrored copy
-// (web/lib/schemas.generated.ts) for the takeover dialog's minute bounds.
+// Shared schedule schema — the weekly grid (#shows), the timed takeover
+// (#930), and the genre lock quick-control, executed on BOTH sides. The
+// controller runs it in settings.validate.validateScheduleStrict /
+// validateScheduleOverrideStrict (the update() chokepoint),
+// settings.normalize.normalizeSchedule / normalizeScheduleOverride (the
+// lenient load path), and the PUT /schedule + POST /schedule/override +
+// POST /schedule/genre-lock route middleware; the browser runs the mirrored
+// copy (web/lib/schemas.generated.ts) for the takeover/genre-lock dialogs'
+// bounds.
 //
 // HARD RULE: this file may import ONLY from 'zod'. It is copied verbatim into
 // the web bundle, so a project import or a node builtin here breaks the mirror.
@@ -1837,6 +1839,64 @@ export function scheduleOverrideSchema(ctx: ScheduleOverrideContext) {
  */
 export const scheduleOverrideRequestSchema = z.object({
   showId: z.string({ error: 'pick a show to pin' }).min(1, 'pick a show to pin'),
+  minutes: z.coerce
+    .number({ error: `must be an integer between ${OVERRIDE_MIN_MINUTES} and ${OVERRIDE_MAX_MINUTES}` })
+    .int(`must be an integer between ${OVERRIDE_MIN_MINUTES} and ${OVERRIDE_MAX_MINUTES}`)
+    .min(OVERRIDE_MIN_MINUTES, `must be an integer between ${OVERRIDE_MIN_MINUTES} and ${OVERRIDE_MAX_MINUTES}`)
+    .max(OVERRIDE_MAX_MINUTES, `must be an integer between ${OVERRIDE_MIN_MINUTES} and ${OVERRIDE_MAX_MINUTES}`),
+});
+
+// ── Genre lock (quick "only this genre, for N minutes") ─────────────────────
+//
+// A one-control shortcut over the show + takeover machinery above: rather than
+// building a show and placing it in the grid, the operator picks genre(s) and
+// a duration and this reserved show id carries the filter. routes/shows.ts's
+// POST /schedule/genre-lock upserts a show at this id (genres + filtersStrict,
+// host = the active persona) and pins it exactly like POST /schedule/override.
+// It stays a normal, visible, editable show — not hidden state — so an
+// operator who wants to hand-tune it (a different host, an added mood) isn't
+// stuck. Reserved rather than random so re-locking updates the SAME show
+// instead of accumulating one new show per lock.
+export const GENRE_LOCK_SHOW_ID = 'genre_lock';
+
+// This module may only import 'zod' (see header), so these duplicate
+// schemas/show.ts's SHOW_GENRE_MAX and SHOW_FILTER_VALUES_MAX rather than
+// importing them. Both bound the same free-text genre list a show's own
+// `genres` field accepts; a change to either pair should change both.
+// Exported (not just used locally) so the admin form can cap the chip input
+// and grey out "Add" at the same limit the server enforces, the same way
+// components/admin/shows/types.ts's FILTER_VALUES_MAX mirrors show.ts's.
+export const GENRE_LOCK_GENRE_MAX = 64;
+export const GENRE_LOCK_GENRES_MAX = 15;
+
+/**
+ * POST /schedule/genre-lock's body. Genres are free text, resolved fuzzily
+ * against the library at pick time — same contract as a show's own `genres`
+ * field, never checked against Subsonic here. Deduplicated case-insensitively,
+ * in first-seen order, like showStringList's genre list above.
+ */
+export const genreLockRequestSchema = z.object({
+  genres: z
+    .array(
+      z
+        .string({ error: 'must be a string' })
+        .trim()
+        .min(1, `must be ${GENRE_LOCK_GENRE_MAX} characters or fewer`)
+        .max(GENRE_LOCK_GENRE_MAX, `must be ${GENRE_LOCK_GENRE_MAX} characters or fewer`),
+    )
+    .min(1, 'pick at least one genre')
+    .max(GENRE_LOCK_GENRES_MAX, `must have at most ${GENRE_LOCK_GENRES_MAX} entries`)
+    .transform((xs) => {
+      const seen = new Set<string>();
+      const out: string[] = [];
+      for (const v of xs) {
+        const k = v.toLowerCase();
+        if (seen.has(k)) continue;
+        seen.add(k);
+        out.push(v);
+      }
+      return out;
+    }),
   minutes: z.coerce
     .number({ error: `must be an integer between ${OVERRIDE_MIN_MINUTES} and ${OVERRIDE_MAX_MINUTES}` })
     .int(`must be an integer between ${OVERRIDE_MIN_MINUTES} and ${OVERRIDE_MAX_MINUTES}`)
