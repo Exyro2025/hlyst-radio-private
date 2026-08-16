@@ -8,6 +8,7 @@ import {
   parseToolCalls,
   runModelScenario,
 } from './functiongemma/model-runner.js';
+import { generateTrainingExamples, validateTrainingSets } from './functiongemma/training-data.js';
 
 const scenario = (id: string) => {
   const found = FUNCTIONGEMMA_VALIDATION_SCENARIOS.find(item => item.id === id);
@@ -137,4 +138,32 @@ test('model runner carries an empty result into a different recovery call', asyn
   assert.deepEqual(bodies[0].stop, ['<end_function_call>']);
   assert.match(bodies[1].messages.at(-1).content, /absent from the semantic index/);
   assert.equal(scorePrediction(fixture, prediction).passed, true);
+});
+
+test('generates deterministic, disjoint routing and recovery datasets', () => {
+  const train = generateTrainingExamples('train', 240);
+  const development = generateTrainingExamples('development', 60);
+  const repeated = generateTrainingExamples('train', 240);
+  assert.deepEqual(train, repeated);
+  assert.equal(train.length, 240);
+  assert.equal(development.length, 60);
+  const validation = validateTrainingSets(train, development);
+  assert.notEqual(validation.fingerprints.train, validation.fingerprints.development);
+  assert.ok(Object.keys(validation.families).some(name => name.startsWith('route.')));
+  assert.ok(Object.keys(validation.families).some(name => name.startsWith('recover.')));
+});
+
+test('training recovery examples contain an empty result and a changed tool', () => {
+  const examples = generateTrainingExamples('development', 80)
+    .filter(example => example.family.startsWith('recover.'));
+  assert.ok(examples.length > 0);
+  for (const example of examples) {
+    const calls = example.messages
+      .filter(message => message.role === 'assistant')
+      .flatMap(message => message.tool_calls ?? []);
+    assert.equal(calls.length, 2, example.id);
+    assert.notEqual(calls[0].function.name, calls[1].function.name, example.id);
+    const result = example.messages.find(message => message.role === 'tool');
+    assert.deepEqual((result?.content as any)?.response?.tracks, [], example.id);
+  }
 });

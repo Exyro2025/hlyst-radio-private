@@ -48,6 +48,9 @@ scripts/.fx-render/
 # llm-bench reports (local benchmark artifacts)
 controller/scripts/llm-bench/reports/
 controller/scripts/functiongemma/reports/
+controller/scripts/functiongemma/training/data/
+controller/scripts/functiongemma/training/output/
+controller/.functiongemma-venv/
 
 # design-sync (machine state — the durable set in .design-sync/ IS committed)
 .ds-sync/

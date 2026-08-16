@@ -1,0 +1,9 @@
+torch
+transformers
+datasets
+accelerate
+trl
+tensorboard
+protobuf
+sentencepiece
+huggingface-hub

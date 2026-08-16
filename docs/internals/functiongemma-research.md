@@ -264,3 +264,91 @@ function-calling fine-tunes, not a drop-in general Producer. The next useful
 experiment is a small, policy-derived routing dataset followed by evaluation
 against these unchanged validation fixtures. Candidate commitment should stay
 outside the first fine-tune until routing and recovery meet their gates.
+
+## First routing fine-tune
+
+The first training package lives under
+`controller/scripts/functiongemma/training/`. It performs full supervised
+fine-tuning from Google's original BF16 weights. The Q8 GGUF is an inference
+artifact and cannot be used as the training source.
+
+The generated `subwave.functiongemma-routing.v1` dataset contains 2,400
+training conversations and 400 development conversations by default. It is
+72% single-turn routing and 28% multi-turn empty-result recovery. The generator
+covers 19 families across the following discovery tools:
+
+- pinned show playlist and sonic journey;
+- structured genre, mood and energy;
+- deep cuts, starred music and recent additions;
+- semantic and music-server similarity;
+- named library search and unconstrained fallback;
+- recovery from empty semantic, server and playlist results through a
+  genuinely different axis.
+
+Every example contains realistic but synthetic track metadata. Training and
+development use separate musical entities and seed identifiers. Generation
+fails if the two sets share a conversation or if any distinctive identifier,
+entity or full prompt from the frozen validation fixtures leaks into them.
+
+Candidate commitment and the `done` function are deliberately absent. This
+run asks only whether a 270M model can become a reliable discovery router.
+
+### Ubuntu training run
+
+Use a separate checkout so training work cannot disturb the live deployment:
+
+```bash
+cd /home/jaz666
+git clone --branch codex/functiongemma-research \
+  https://github.com/Jaz666/subwave.git subwave-functiongemma
+cd /home/jaz666/subwave-functiongemma/controller
+npm ci
+npm run functiongemma:data
+```
+
+Before downloading the original weights, accept the Gemma licence on the
+[official FunctionGemma model page](https://huggingface.co/google/functiongemma-270m-it).
+Create a Hugging Face read token, then prepare an isolated Python environment:
+
+```bash
+sudo apt-get install -y python3-venv
+python3 -m venv .functiongemma-venv
+source .functiongemma-venv/bin/activate
+python -m pip install --upgrade pip
+python -m pip install -r scripts/functiongemma/training/requirements.txt
+huggingface-cli login
+```
+
+Stop other GPU model and TTS containers before the training run. The script
+refuses to train on CPU, validates both datasets again, checks every rendered
+conversation against the token limit, saves a checkpoint after each epoch and
+keeps the best development-loss checkpoint:
+
+```bash
+python scripts/functiongemma/training/train.py \
+  --train scripts/functiongemma/training/data/train.jsonl \
+  --development scripts/functiongemma/training/data/development.jsonl \
+  --output scripts/functiongemma/training/output/router-v1 \
+  --epochs 8 \
+  --batch-size 4 \
+  --gradient-accumulation 2 \
+  --max-length 1024 \
+  --learning-rate 5e-5
+```
+
+These parameters follow Google's published FunctionGemma SFT recipe, with a
+larger safe sequence ceiling for multi-turn tool responses and an effective
+batch size of eight. Early stopping defaults to two unimproved evaluations.
+The final selected weights are written to `output/router-v1/best`; checkpoints,
+TensorBoard logs and a reproducibility manifest remain alongside them.
+
+Monitor the run from a second terminal with `nvidia-smi`. To continue an
+interrupted run, repeat the command with `--resume latest`. Do not evaluate or
+convert merely the last epoch: the `best` directory contains the checkpoint
+selected by development loss.
+
+After training, first evaluate the unquantised `best` checkpoint through a
+Transformers-native path. Only a passing checkpoint should be converted to
+GGUF and Q8, served through llama.cpp and run against the same frozen harness.
+This separates training quality from conversion, quantisation and serving
+compatibility failures.

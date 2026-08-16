@@ -16,6 +16,7 @@
     "llm-bench": "tsx scripts/llm-bench/cli.ts",
     "llm-bench:publish": "tsx scripts/llm-bench/publish-manual.ts",
     "functiongemma:eval": "tsx scripts/functiongemma/cli.ts",
+    "functiongemma:data": "tsx scripts/functiongemma/data-cli.ts",
     "lint": "eslint . && tsc --noEmit",
     "lint:fix": "eslint . --fix",
     "typecheck": "tsc --noEmit",
