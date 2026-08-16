@@ -147,15 +147,28 @@ def main() -> int:
     )
     model.config.use_cache = False
 
-    lengths: list[int] = []
-    for row in train_rows + development_rows:
-        tokenised = tokenizer.apply_chat_template(
-            row["messages"],
-            tools=row["tools"],
-            add_generation_prompt=False,
-            tokenize=True,
-        )
-        lengths.append(len(tokenised))
+    def render_rows(rows: list[dict[str, Any]]) -> tuple[list[str], list[int]]:
+        texts: list[str] = []
+        token_lengths: list[int] = []
+        for row in rows:
+            text = tokenizer.apply_chat_template(
+                row["messages"],
+                tools=row["tools"],
+                add_generation_prompt=False,
+                tokenize=False,
+            )
+            if not isinstance(text, str):
+                raise TypeError("FunctionGemma chat template did not return text")
+            # TRL's standard-text collator also tokenizes with
+            # add_special_tokens=False, avoiding a duplicate <bos>.
+            tokenised = tokenizer(text, add_special_tokens=False)["input_ids"]
+            texts.append(text)
+            token_lengths.append(len(tokenised))
+        return texts, token_lengths
+
+    rendered_train, train_lengths = render_rows(train_rows)
+    rendered_development, development_lengths = render_rows(development_rows)
+    lengths = train_lengths + development_lengths
     longest = max(lengths)
     over_limit = sum(length > args.max_length for length in lengths)
     print(f"token lengths: max={longest}; over --max-length={over_limit}")
@@ -164,6 +177,9 @@ def main() -> int:
             f"{over_limit} examples exceed max length {args.max_length}; "
             "increase --max-length rather than silently truncating tool calls"
         )
+    with (args.output / "rendered-sample.txt").open("w", encoding="utf-8") as handle:
+        handle.write(rendered_train[0])
+        handle.write("\n")
 
     batches_per_epoch = math.ceil(len(train_rows) / args.batch_size)
     update_steps_per_epoch = math.ceil(batches_per_epoch / args.gradient_accumulation)
@@ -177,6 +193,7 @@ def main() -> int:
     training_args = SFTConfig(
         output_dir=str(args.output),
         max_length=args.max_length,
+        dataset_text_field="text",
         packing=False,
         num_train_epochs=args.epochs,
         per_device_train_batch_size=args.batch_size,
@@ -207,8 +224,11 @@ def main() -> int:
     trainer = SFTTrainer(
         model=model,
         args=training_args,
-        train_dataset=Dataset.from_list(train_rows),
-        eval_dataset=Dataset.from_list(development_rows),
+        # PyArrow cannot store message.content as both strings and structured
+        # tool responses in one nested column. Render with FunctionGemma's
+        # official template first, then give TRL one homogeneous text column.
+        train_dataset=Dataset.from_dict({"text": rendered_train}),
+        eval_dataset=Dataset.from_dict({"text": rendered_development}),
         processing_class=tokenizer,
         callbacks=callbacks,
     )

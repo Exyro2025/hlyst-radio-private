@@ -344,6 +344,13 @@ two unimproved evaluations.
 The final selected weights are written to `output/router-v1/best`; checkpoints,
 TensorBoard logs and a reproducibility manifest remain alongside them.
 
+The trainer renders each structured conversation through FunctionGemma's own
+chat template before constructing the Arrow dataset. This preserves native
+function calls and structured tool responses while avoiding Arrow's inability
+to store string messages and object-valued tool results in one nested
+`content` column. `rendered-sample.txt` records the first exact training
+sequence for inspection.
+
 Monitor the run from a second terminal with `nvidia-smi`. To continue an
 interrupted run, repeat the command with `--resume latest`. Do not evaluate or
 convert merely the last epoch: the `best` directory contains the checkpoint
