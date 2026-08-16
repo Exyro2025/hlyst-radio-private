@@ -34,10 +34,10 @@ export function openAiTool(contract: ToolContract) {
   ]);
   for (const key of keys) {
     const values = contract.enums?.[key];
-    if (values?.includes('null')) {
+    if (values?.includes(null)) {
       properties[key] = {
         type: ['string', 'null'],
-        enum: [...values.filter(value => value !== 'null'), null],
+        enum: [...values.filter(value => value !== null), null],
       };
     } else if (values) {
       properties[key] = { type: 'string', enum: [...values] };
@@ -98,6 +98,53 @@ export function parseToolCalls(rawCalls: readonly OpenAiToolCall[] | undefined):
   });
 }
 
+// llama.cpp currently classifies the official FunctionGemma GGUF template as
+// `Content-only`, so its native call can arrive in message.content rather than
+// OpenAI `tool_calls`. Keep this adapter deliberately narrow: it recognises
+// exactly FunctionGemma's documented call envelope and simple flat arguments.
+export function parseFunctionGemmaContent(content: unknown): PredictedToolCall[] {
+  if (typeof content !== 'string') return [];
+  const match = content.match(/<start_function_call>call:([^\s{]+)\{([\s\S]*?)\}(?:<end_function_call>|$)/);
+  if (!match) return [];
+  const args: Record<string, unknown> = {};
+  for (const part of splitArguments(match[2])) {
+    const separator = part.indexOf(':');
+    if (separator < 1) continue;
+    const key = part.slice(0, separator).trim();
+    const raw = part.slice(separator + 1).trim();
+    args[key] = functionGemmaScalar(raw);
+  }
+  return [{ name: match[1], arguments: args }];
+}
+
+function splitArguments(raw: string): string[] {
+  const parts: string[] = [];
+  let start = 0;
+  let escaped = false;
+  for (let index = 0; index < raw.length; index++) {
+    if (raw.startsWith('<escape>', index)) {
+      escaped = !escaped;
+      index += '<escape>'.length - 1;
+    } else if (raw[index] === ',' && !escaped) {
+      parts.push(raw.slice(start, index));
+      start = index + 1;
+    }
+  }
+  if (raw.slice(start).trim()) parts.push(raw.slice(start));
+  return parts;
+}
+
+function functionGemmaScalar(raw: string): unknown {
+  if (raw.startsWith('<escape>') && raw.endsWith('<escape>')) {
+    return raw.slice('<escape>'.length, -'<escape>'.length);
+  }
+  if (raw === 'null') return null;
+  if (raw === 'true') return true;
+  if (raw === 'false') return false;
+  if (/^-?\d+(?:\.\d+)?$/.test(raw)) return Number(raw);
+  return raw;
+}
+
 function endpoint(baseUrl: string): string {
   const clean = baseUrl.trim().replace(/\/+$/, '');
   return clean.endsWith('/v1') ? `${clean}/chat/completions` : `${clean}/v1/chat/completions`;
@@ -121,6 +168,8 @@ export async function runModelScenario(
     { role: 'user', content: scenario.prompt },
   ];
   const calls: PredictedToolCall[] = [];
+  const responseText: string[] = [];
+  const finishReasons: string[] = [];
   const started = Date.now();
   const maxRounds = scenario.stage === 'recover' ? 3 : 1;
 
@@ -142,6 +191,14 @@ export async function runModelScenario(
           tool_choice: 'required',
           parallel_tool_calls: false,
           temperature: 0,
+          // A tool call is tiny. Without an explicit ceiling the untuned 270M
+          // model can continue generating after the call until the HTTP
+          // deadline, while larger instruction models tend to stop naturally.
+          max_tokens: 256,
+          // Stock llama.cpp may not know FunctionGemma's output parser even
+          // when it correctly renders the GGUF's input template. Stop after
+          // one native call so it cannot continue into invented responses.
+          stop: ['<end_function_call>'],
         }),
         signal: controller.signal,
       });
@@ -154,25 +211,47 @@ export async function runModelScenario(
       throw new Error(`model endpoint returned ${response.status}: ${JSON.stringify(body).slice(0, 300)}`);
     }
     const message = body?.choices?.[0]?.message;
+    if (typeof message?.content === 'string' && message.content.trim()) {
+      responseText.push(message.content.trim());
+    }
+    if (body?.choices?.[0]?.finish_reason != null) {
+      finishReasons.push(String(body.choices[0].finish_reason));
+    }
     const rawCalls: OpenAiToolCall[] = message?.tool_calls ?? [];
-    const parsed = parseToolCalls(rawCalls);
+    const parsed = rawCalls.length
+      ? parseToolCalls(rawCalls)
+      : parseFunctionGemmaContent(message?.content);
+    const replayCalls: OpenAiToolCall[] = rawCalls.length ? rawCalls : parsed.map((call, index) => ({
+      id: `functiongemma-${round}-${index}`,
+      type: 'function',
+      function: { name: call.name, arguments: JSON.stringify(call.arguments) },
+    }));
     calls.push(...parsed);
     if (!parsed.length) break;
 
     messages.push({
       role: 'assistant',
-      content: message?.content ?? null,
-      tool_calls: rawCalls,
+      // When we converted a native content envelope to tool_calls, do not
+      // replay that same envelope as prose as well.
+      content: rawCalls.length ? (message?.content ?? null) : null,
+      tool_calls: replayCalls,
     });
     for (const [index, call] of parsed.entries()) {
       messages.push({
         role: 'tool',
-        tool_call_id: rawCalls[index]?.id ?? `call-${round}-${index}`,
+        tool_call_id: replayCalls[index]?.id ?? `call-${round}-${index}`,
+        name: call.name,
         content: JSON.stringify(resultFor(scenario, call)),
       });
     }
     if (parsed.some(call => call.name === 'done')) break;
   }
 
-  return { scenario: scenario.id, calls, latencyMs: Date.now() - started };
+  return {
+    scenario: scenario.id,
+    calls,
+    latencyMs: Date.now() - started,
+    ...(responseText.length ? { responseText: responseText.join('\n\n') } : {}),
+    ...(finishReasons.length ? { finishReasons } : {}),
+  };
 }

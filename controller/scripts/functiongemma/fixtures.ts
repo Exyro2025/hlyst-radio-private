@@ -9,7 +9,7 @@ const done: ToolContract = {
   name: 'done',
   required: ['id', 'reason', 'transition'],
   enums: {
-    transition: ['normal', 'blend', 'sweep', 'washout', 'dissolve', 'chop', 'loop', 'null'],
+    transition: ['normal', 'blend', 'sweep', 'washout', 'dissolve', 'chop', 'loop', null],
   },
 };
 
@@ -22,7 +22,7 @@ const tracksByMood: ToolContract = {
       'focus', 'workout', 'driving', 'cooking', 'rainy', 'sunny', 'night',
       'morning', 'evening', 'festival', 'cultural',
     ],
-    energy: ['low', 'medium', 'high', 'null'],
+    energy: ['low', 'medium', 'high', null],
   },
 };
 

@@ -3,7 +3,7 @@ export type EvaluationStage = 'route' | 'recover' | 'commit';
 export interface ToolContract {
   name: string;
   required?: readonly string[];
-  enums?: Readonly<Record<string, readonly string[]>>;
+  enums?: Readonly<Record<string, readonly (string | null)[]>>;
 }
 
 export interface ExpectedRoute {
@@ -46,6 +46,8 @@ export interface FunctionGemmaPrediction {
   calls: PredictedToolCall[];
   latencyMs?: number;
   iteration?: number;
+  responseText?: string;
+  finishReasons?: string[];
 }
 
 export type ScoreDimension =

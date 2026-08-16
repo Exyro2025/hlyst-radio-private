@@ -208,3 +208,59 @@ correctly chose the fresh artist but treated the whole phrase as the ID. That
 was a fixture defect, because real SUB/WAVE tool results carry separate JSON
 fields. All commitment fixtures were corrected to structured candidate
 objects before this canonical baseline was recorded.
+
+### FunctionGemma 270M IT Q8_0 — 2026-08-16
+
+Five iterations of the same nine frozen scenarios were run against
+`google_functiongemma-270m-it-Q8_0.gguf` on a separate llama.cpp endpoint:
+
+| Result | Score |
+| --- | ---: |
+| Complete scenarios | 5/45 |
+| Protocol | 25/45 |
+| Routing | 5/30 |
+| Empty-result recovery | 0/5 |
+| Grounded commitment | 15/20 |
+| Editorial commitment | 5/20 |
+
+The failures were deterministic across all five passes. The model routed only
+the active sonic-journey case correctly. It asked for clarification instead of
+calling the pinned-playlist tool, chose generic or semantically adjacent tools
+for genre, energy and deep-cut requests, and did not progress through the
+empty-result recovery sequence. Its final choices selected the same-artist trap
+and the obvious single despite contrary editorial context. Every `done` call
+also emitted the string `"NULL"` instead of JSON `null`, which is invalid under
+the production transition contract.
+
+Latency was excellent but does not offset those failures: 435ms average, 385ms
+p50 and 1.64s p95 overall. The three-stage recovery case accounted for the
+long tail:
+
+| Stage | Runs | Average | p50 | p95 |
+| --- | ---: | ---: | ---: | ---: |
+| Route | 25 | 203ms | 154ms | 430ms |
+| Recover | 5 | 1.63s | 1.64s | 1.66s |
+| Commit | 15 | 422ms | 409ms | 616ms |
+
+#### llama.cpp compatibility boundary
+
+The GGUF carried Google's official FunctionGemma chat template, but this
+llama.cpp server reported its chat format as `Content-only`. Calls therefore
+arrived in `message.content` as FunctionGemma's native
+`<start_function_call>...<end_function_call>` envelope rather than as OpenAI
+`tool_calls`. Stock SUB/WAVE cannot consume that response shape through its
+existing AI SDK path.
+
+For research only, the harness stops generation after the first native call
+and applies a deliberately narrow parser for FunctionGemma's flat call
+envelope. This adapter removes transport-format failure from the model-quality
+score; it is not a production integration. Shipping FunctionGemma would require
+either native FunctionGemma parsing in the serving layer or a maintained
+SUB/WAVE provider adapter.
+
+This baseline does not reject the fine-tuning hypothesis. It confirms the
+model card's warning that FunctionGemma is a foundation for task-specific
+function-calling fine-tunes, not a drop-in general Producer. The next useful
+experiment is a small, policy-derived routing dataset followed by evaluation
+against these unchanged validation fixtures. Candidate commitment should stay
+outside the first fine-tune until routing and recovery meet their gates.

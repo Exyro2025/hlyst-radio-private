@@ -2,7 +2,12 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { FUNCTIONGEMMA_VALIDATION_SCENARIOS } from './functiongemma/fixtures.js';
 import { dimensionSummary, scorePrediction, scorePredictions } from './functiongemma/score.js';
-import { openAiTool, parseToolCalls, runModelScenario } from './functiongemma/model-runner.js';
+import {
+  openAiTool,
+  parseFunctionGemmaContent,
+  parseToolCalls,
+  runModelScenario,
+} from './functiongemma/model-runner.js';
 
 const scenario = (id: string) => {
   const found = FUNCTIONGEMMA_VALIDATION_SCENARIOS.find(item => item.id === id);
@@ -74,10 +79,37 @@ test('missing predictions fail without hiding the dimensions', () => {
 test('renders nullable done transition and parses string arguments', () => {
   const done = openAiTool(scenario('commit.quiet-flow').tools[0]);
   assert.deepEqual(done.function.parameters.properties.transition.type, ['string', 'null']);
+  assert.deepEqual(done.function.parameters.properties.transition.enum, [
+    'normal', 'blend', 'sweep', 'washout', 'dissolve', 'chop', 'loop', null,
+  ]);
   assert.deepEqual(parseToolCalls([{
     id: 'call-1',
     function: { name: 'done', arguments: '{"id":"quiet-01","reason":"flow","transition":null}' },
   }]), [{ name: 'done', arguments: { id: 'quiet-01', reason: 'flow', transition: null } }]);
+});
+
+test('rejects the string NULL where the contract requires JSON null', () => {
+  const fixture = scenario('commit.quiet-flow');
+  const result = scorePrediction(fixture, {
+    scenario: fixture.id,
+    calls: [{
+      name: 'done',
+      arguments: { id: 'quiet-01', reason: 'flow', transition: 'NULL' },
+    }],
+  });
+  assert.equal(result.dimensions.protocol?.passed, false);
+  assert.deepEqual(result.dimensions.protocol?.violations, ['call-1:invalid-enum:transition']);
+});
+
+test('parses FunctionGemma native content returned by a content-only server', () => {
+  assert.deepEqual(
+    parseFunctionGemmaContent('<start_function_call>call:tracksByMood{mood:<escape>reflective<escape>,energy:<escape>low<escape>}<end_function_call>'),
+    [{ name: 'tracksByMood', arguments: { mood: 'reflective', energy: 'low' } }],
+  );
+  assert.deepEqual(
+    parseFunctionGemmaContent('<start_function_call>call:showPlaylistTracks{}'),
+    [{ name: 'showPlaylistTracks', arguments: {} }],
+  );
 });
 
 test('model runner carries an empty result into a different recovery call', async () => {
@@ -101,6 +133,8 @@ test('model runner carries an empty result into a different recovery call', asyn
   }, fakeFetch);
   assert.deepEqual(prediction.calls.map(call => call.name), ['tracksLikeThis', 'tracksByMood', 'done']);
   assert.equal(bodies[0].messages[0].role, 'developer');
+  assert.equal(bodies[0].max_tokens, 256);
+  assert.deepEqual(bodies[0].stop, ['<end_function_call>']);
   assert.match(bodies[1].messages.at(-1).content, /absent from the semantic index/);
   assert.equal(scorePrediction(fixture, prediction).passed, true);
 });

@@ -49,8 +49,10 @@ function validateArguments(contract: ToolContract, call: PredictedToolCall, inde
   for (const [key, allowed] of Object.entries(contract.enums ?? {})) {
     if (!(key in call.arguments)) continue;
     const raw = call.arguments[key];
-    const comparable = raw === null ? 'null' : String(raw).toLowerCase();
-    if (!allowed.some(value => value.toLowerCase() === comparable)) {
+    const matches = allowed.some(value => value === null
+      ? raw === null
+      : typeof raw === 'string' && value.toLowerCase() === raw.toLowerCase());
+    if (!matches) {
       violations.push(`call-${index + 1}:invalid-enum:${key}`);
     }
   }
