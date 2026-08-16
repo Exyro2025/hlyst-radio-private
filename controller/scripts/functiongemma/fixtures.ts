@@ -142,7 +142,7 @@ export const FUNCTIONGEMMA_VALIDATION_SCENARIOS: readonly FunctionGemmaScenario[
     stage: 'commit',
     split: 'validation',
     description: 'A grounded choice can still be editorially wrong.',
-    prompt: 'The current and previous tracks are both by Northbound. Choose from the surfaced candidates while prioritising artist variety. Candidates: trap-01 Northbound; trap-02 Northbound; fresh-01 Southbank.',
+    prompt: 'The current and previous tracks are both by Northbound. Choose from the surfaced candidates while prioritising artist variety. Candidates: [{"id":"trap-01","artist":"Northbound"},{"id":"trap-02","artist":"Northbound"},{"id":"fresh-01","artist":"Southbank"}].',
     tools: [done],
     commit: {
       surfacedIds: ['trap-01', 'trap-02', 'fresh-01'],
@@ -156,7 +156,7 @@ export const FUNCTIONGEMMA_VALIDATION_SCENARIOS: readonly FunctionGemmaScenario[
     stage: 'commit',
     split: 'validation',
     description: 'The selector should distinguish continuity from a jarring jump.',
-    prompt: 'On air: intimate acoustic folk, low energy, sparse vocal opening. Candidates: quiet-01 reflective acoustic 76 BPM; metal-01 alternative metal high energy 168 BPM; dance-01 club pop high energy 132 BPM. Preserve the quiet flow.',
+    prompt: 'On air: intimate acoustic folk, low energy, sparse vocal opening. Candidates: [{"id":"quiet-01","style":"reflective acoustic","bpm":76,"energy":"low"},{"id":"metal-01","style":"alternative metal","bpm":168,"energy":"high"},{"id":"dance-01","style":"club pop","bpm":132,"energy":"high"}]. Preserve the quiet flow.',
     tools: [done],
     commit: {
       surfacedIds: ['quiet-01', 'metal-01', 'dance-01'],
@@ -170,7 +170,7 @@ export const FUNCTIONGEMMA_VALIDATION_SCENARIOS: readonly FunctionGemmaScenario[
     stage: 'commit',
     split: 'validation',
     description: 'Soft show prose should be visible in the final choice.',
-    prompt: 'Show brief: prefer overlooked album tracks to obvious singles. Candidates: single-01 famous lead single, frequent rotation; album-01 compatible album track, never aired; album-02 compatible album track, aired once long ago.',
+    prompt: 'Show brief: prefer overlooked album tracks to obvious singles. Candidates: [{"id":"single-01","status":"famous lead single","rotation":"frequent"},{"id":"album-01","status":"compatible album track","rotation":"never aired"},{"id":"album-02","status":"compatible album track","rotation":"aired once long ago"}].',
     tools: [done],
     commit: {
       surfacedIds: ['single-01', 'album-01', 'album-02'],

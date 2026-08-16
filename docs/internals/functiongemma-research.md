@@ -95,11 +95,14 @@ cd controller
 npm run functiongemma:eval -- \
   --base-url http://HOST:PORT/v1 \
   --model FUNCTIONGEMMA_MODEL_NAME \
-  --iterations 5
+  --iterations 5 \
+  --out reports/functiongemma.json
 ```
 
 Use `--api-key` when required, or set `FUNCTIONGEMMA_API_KEY`. The default
 per-call deadline is 30 seconds; override it with `--timeout-ms`.
+Use `--scenarios route.pinned-playlist,commit.quiet-flow` to rerun a focused
+subset while diagnosing a failure.
 
 An existing capture can be scored without contacting a model:
 
@@ -174,3 +177,34 @@ not yet justify making the model a bundled default.
 The next research increment is to establish baselines for Qwen3-4B,
 Qwen3-1.7B and untuned FunctionGemma on these frozen fixtures, then design
 training families around the failures rather than guessing what to teach.
+
+## Recorded baselines
+
+### Qwen3-4B Q4_K_M — 2026-08-16
+
+Five iterations of all nine validation scenarios against the separate
+llama.cpp OpenAI-compatible endpoint:
+
+| Result | Score |
+| --- | ---: |
+| Complete scenarios | 45/45 |
+| Protocol | 45/45 |
+| Routing | 30/30 |
+| Empty-result recovery | 5/5 |
+| Grounded commitment | 20/20 |
+| Editorial commitment | 20/20 |
+
+Latency across all 45 calls was 3.53s average, 2.29s p50 and 10.19s p95.
+The p95 is intentionally dominated by the three-call recovery fixture:
+
+| Stage | Runs | Average | p50 | p95 |
+| --- | ---: | ---: | ---: | ---: |
+| Route | 25 | 2.02s | 1.89s | 2.31s |
+| Recover | 5 | 10.28s | 10.19s | 10.66s |
+| Commit | 15 | 3.81s | 3.81s | 4.09s |
+
+An earlier shorthand form wrote candidates as `fresh-01 Southbank`; Qwen
+correctly chose the fresh artist but treated the whole phrase as the ID. That
+was a fixture defect, because real SUB/WAVE tool results carry separate JSON
+fields. All commitment fixtures were corrected to structured candidate
+objects before this canonical baseline was recorded.
