@@ -491,3 +491,6 @@ sufficient: replacing its Producer also replaces its final music editor.
   prompt.
 - `controller/scripts/picker-test.mjs` and `controller/scripts/llm-bench/` —
   existing reliability harnesses to extend with editorial fixtures.
+- `docs/internals/functiongemma-research.md` and
+  `controller/scripts/functiongemma/` — held-out router/recovery/commit
+  evaluation for a possible bundled small Producer model.
