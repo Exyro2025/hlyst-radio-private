@@ -361,3 +361,23 @@ Transformers-native path. Only a passing checkpoint should be converted to
 GGUF and Q8, served through llama.cpp and run against the same frozen harness.
 This separates training quality from conversion, quantisation and serving
 compatibility failures.
+
+Regenerate the data bundle after pulling the evaluator so `validation.json`
+contains the frozen scenarios and their FunctionGemma tool schemas, then run
+five deterministic passes through the selected unquantised checkpoint:
+
+```bash
+npm run functiongemma:data
+python scripts/functiongemma/training/evaluate.py \
+  --model scripts/functiongemma/training/output/router-v1/best \
+  --scenarios scripts/functiongemma/training/data/validation.json \
+  --output scripts/functiongemma/training/output/router-v1/native-predictions.jsonl \
+  --iterations 5
+npm run functiongemma:eval -- \
+  --predictions scripts/functiongemma/training/output/router-v1/native-predictions.jsonl \
+  --out scripts/functiongemma/training/output/router-v1/native-report.json
+```
+
+The commit scenarios remain in the report as a deliberate control. This first
+tuning dataset teaches discovery routing and recovery only, so the decision to
+delegate or separately train final candidate commitment remains evidence-led.

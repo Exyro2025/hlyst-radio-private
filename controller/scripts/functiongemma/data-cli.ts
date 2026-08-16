@@ -1,5 +1,7 @@
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
+import { FUNCTIONGEMMA_VALIDATION_SCENARIOS } from './fixtures.js';
+import { openAiTool } from './model-runner.js';
 import { generateTrainingExamples, validateTrainingSets } from './training-data.js';
 
 function argsOf(argv: string[]): Record<string, string> {
@@ -32,6 +34,14 @@ const writeJsonl = (name: string, rows: readonly unknown[]) => writeFileSync(
 );
 writeJsonl('train.jsonl', train);
 writeJsonl('development.jsonl', development);
+writeFileSync(resolve(output, 'validation.json'), `${JSON.stringify(
+  FUNCTIONGEMMA_VALIDATION_SCENARIOS.map(scenario => ({
+    ...scenario,
+    openAiTools: scenario.tools.map(openAiTool),
+  })),
+  null,
+  2,
+)}\n`);
 writeFileSync(resolve(output, 'manifest.json'), `${JSON.stringify({
   format: 'subwave.functiongemma-routing.v1',
   generatedAt: new Date().toISOString(),

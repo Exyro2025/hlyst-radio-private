@@ -41,8 +41,9 @@ function readPredictions(path: string): FunctionGemmaPrediction[] {
     if (typeof value?.scenario !== 'string' || !Array.isArray(value?.calls)) {
       throw new Error(`${path}:${index + 1}: expected { scenario, calls[] }`);
     }
-    if (seen.has(value.scenario)) throw new Error(`${path}:${index + 1}: duplicate scenario ${value.scenario}`);
-    seen.add(value.scenario);
+    const key = `${value.scenario}:${value.iteration ?? 1}`;
+    if (seen.has(key)) throw new Error(`${path}:${index + 1}: duplicate scenario/iteration ${key}`);
+    seen.add(key);
     output.push(value);
   }
   return output;
