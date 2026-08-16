@@ -410,3 +410,91 @@ sudo docker run --rm \
   --outfile /output/Subwave-FunctionGemma-270M-Router-v1-Q8_0.gguf \
   --outtype q8_0
 ```
+
+### Router-v1 result — 2026-08-16
+
+The eight-epoch command stopped early after the development loss failed to
+improve for two evaluations. Checkpoint 300 (the first epoch) was selected:
+
+| Measurement | Result |
+| --- | ---: |
+| Best development loss | 0.245663 |
+| Final reported training loss | 0.088132 |
+| Runtime | 1,123s |
+| Selected weights | 544 MiB |
+
+Five deterministic passes through the frozen native evaluator produced the
+same result on every pass:
+
+| Dimension | Result |
+| --- | ---: |
+| Protocol | 30/45 |
+| Routing | 30/30 |
+| Empty-result recovery | 5/5 |
+| Grounded commitment | 0/20 |
+| Editorial commitment | 0/20 |
+
+The apparent commitment failure is expected: router-v1 was deliberately never
+trained to call `done`. It proves the bounded role it was trained for and does
+not support delegating the final music decision to this checkpoint.
+
+The text-only Q8_0 GGUF preserved those scores under CPU-only llama.cpp. Across
+the 30 trained-scope route/recovery runs it averaged 315ms, with 209ms p50,
+1.009s p95 and 1.019s maximum latency. The untuned Q8 baseline scored only
+5/30 routing and 0/5 recovery on the same scope. This is strong evidence that
+the improvement came from task-specific tuning rather than the harness.
+
+## Hybrid live experiment
+
+Branch `codex/functiongemma-hybrid` integrates router-v1 behind an optional
+Producer Router boundary:
+
+1. FunctionGemma receives compact operational context and the currently
+   available discovery tools.
+2. It calls exactly one real SUB/WAVE discovery tool.
+3. If that tool adds no grounded candidates, its call and exact result are
+   replayed once so it can choose a different tool.
+4. The configured Producer model receives the resulting candidate list and
+   makes the final grounded track and transition decision without tools.
+5. Persona remains a later, independent speech call and sees neither model's
+   private reasoning.
+
+This division is intentional. It tests the 270M model only where the frozen
+evaluation supports it, while retaining Qwen-class editorial judgement for
+flow, show fit, variety and soft prompt influence.
+
+The experiment is disabled unless both variables are present in the
+controller environment:
+
+```dotenv
+PRODUCER_ROUTER_BASE_URL=http://host.docker.internal:8091/v1
+PRODUCER_ROUTER_MODEL=/models/Subwave-FunctionGemma-270M-Router-v1-text-Q8_0.gguf
+PRODUCER_ROUTER_TIMEOUT_MS=15000
+```
+
+`PRODUCER_ROUTER_API_KEY` is optional for protected compatible endpoints. The
+deadline is shared across initial discovery and recovery rather than resetting
+for each call.
+
+The live safety order is:
+
+1. FunctionGemma discovery + configured Producer final selection;
+2. the complete established Producer tool-loop picker;
+3. the established all-in-one Persona picker;
+4. SUB/WAVE's existing stateless pool fallback.
+
+Consequently the experiment cannot turn a router miss into dead air. It can
+add latency only until its bounded deadline before the established paths take
+over.
+
+The stats/debug surfaces record `djProducerRoute` for FunctionGemma and
+`djProducerSelect` for the configured Producer's final decision. Router records
+include the real tool name, validated arguments, result and aggregate token
+usage. A rejected route is recorded as a failure even when fallback later
+fills the queue; that distinction is necessary to measure router reliability
+honestly.
+
+This is not yet a bundled installation feature or a replacement for the
+advanced Producer settings. It is a controlled live experiment intended to
+collect latency, recovery, route distribution and downstream selection data
+before any commitment fine-tune is considered.

@@ -24,6 +24,10 @@ export function producerPickSystem(rounds: number): string {
   })}`;
 }
 
+export function producerSelectSystem(): string {
+  return `${instruction('producer', 'frame')}\n\n${instruction('producer', 'select')}`;
+}
+
 export function producerSegmentSystem(): string {
   return `${instruction('producer', 'frame')}\n\n${instruction('producer', 'segment')}`;
 }

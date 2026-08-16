@@ -7,6 +7,7 @@ export {
   ProducerPickSchema,
   ProducerSegmentSchema,
   producerPickSystem,
+  producerSelectSystem,
   producerSegmentSystem,
   checkProducerPick,
   checkProducerSegment,

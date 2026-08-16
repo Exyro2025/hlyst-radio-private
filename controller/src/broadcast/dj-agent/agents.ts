@@ -13,7 +13,7 @@ import {
   producerPromptDiscoverySteps,
   showMusicLean,
 } from '../../llm/dj.js';
-import { ProducerPickSchema, producerPickSystem } from '../../llm/producer.js';
+import { ProducerPickSchema, producerPickSystem, producerSelectSystem } from '../../llm/producer.js';
 import { pickSchema, pickSystem, requestSchema, requestSystem } from './schemas.js';
 import { agentDeadline } from './breaker.js';
 
@@ -106,6 +106,67 @@ export function producerPickerSystem(showAt: Date | null = null, playlistResolve
   return `${producerPickSystem(producerPromptDiscoverySteps())}${showLine}${showMusicLean(activeShow, { includeTalk: false })}${playlistLine}
 
 ${PICKER_CRITERIA}${effectsGuidance()}`;
+}
+
+// Tool-less second half of the experimental split Producer picker. Discovery
+// has already produced a grounded candidate set, so this prompt deliberately
+// omits every instruction to call a library tool. The configured Producer LLM
+// retains the editorial work: show fit, musical flow and transition choice.
+export function producerSelectorSystem(showAt: Date | null = null, playlistResolved = true): string {
+  const activeShow = settings.resolveActiveShow(showAt ?? undefined);
+  const showLine = activeShow?.topic
+    ? `\n\nCurrent show brief: ${activeShow.topic}`
+    : '';
+  const playlistLine = activeShow?.playlistIds?.length && playlistResolved
+    ? `\n\nThe candidates were discovered under the current show's ${activeShow.playlistStrict ? 'strict' : 'preferred'} pinned-playlist policy.`
+    : '';
+  return `${producerSelectSystem()}${showLine}${showMusicLean(activeShow, { includeTalk: false })}${playlistLine}
+
+${PICKER_CRITERIA}${effectsGuidance()}`;
+}
+
+// Compact operational request for the tiny Producer Router. It gets only the
+// facts needed to choose a discovery mechanism; it does not see Persona prose,
+// transition coaching, listener-facing history or the later candidate list.
+export function producerRouterMessage({
+  current = null,
+  activeShow = null,
+  playlistAvailable = false,
+  journeyActive = false,
+  explore = false,
+}: {
+  current?: any;
+  activeShow?: any;
+  playlistAvailable?: boolean;
+  journeyActive?: boolean;
+  explore?: boolean;
+} = {}): string {
+  const direction = playlistAvailable
+    ? 'This programme has an operator-pinned playlist. Begin discovery inside that curated source.'
+    : journeyActive
+      ? 'The active sonic journey has a current waypoint. Discover music toward that waypoint.'
+      : explore
+        ? 'Explore neglected catalogue tracks that have never aired or have been absent for a long time.'
+        : current?.id
+          ? `Use the library semantic index to find music like the current track [id: ${current.id}]. If that source is unavailable, choose the closest offered similarity source.`
+          : 'No usable current-track seed is available. Return a broad library sample.';
+  return `${direction}\n\n${JSON.stringify({
+    currentTrack: current ? {
+      id: current.id ?? null,
+      title: current.title ?? null,
+      artist: current.artist ?? null,
+    } : null,
+    show: activeShow ? {
+      name: activeShow.name ?? null,
+      topic: activeShow.topic ?? null,
+      genres: activeShow.genres ?? [],
+      moods: activeShow.moods ?? [],
+      energies: activeShow.energies ?? [],
+      eras: activeShow.eras ?? [],
+      filtersStrict: activeShow.filtersStrict === true,
+      playlistStrict: activeShow.playlistStrict === true,
+    } : null,
+  }, null, 2)}`;
 }
 
 export const pickerAgent = defineAgent<PickerRunArgs, PickerExtras>({

@@ -13,6 +13,8 @@ const {
   producerPickMessage,
   producerPickerAgent,
   producerPickerSystem,
+  producerRouterMessage,
+  producerSelectorSystem,
 } = await import('../src/broadcast/dj-agent/agents.js');
 const {
   fuzzyAirTime,
@@ -138,6 +140,25 @@ test('the Producer picker system excludes the on-air Persona preamble', () => {
     { includeTalk: false },
   );
   assert.ok(!strictLean.includes('Keep your talk'));
+});
+
+test('hybrid routing and selection preserve the Producer/Persona boundary', () => {
+  const route = producerRouterMessage({
+    current: { id: 'seed-1', title: 'Current', artist: 'Artist' },
+    activeShow: { name: 'Deep Cuts', topic: 'Prefer overlooked album tracks.' },
+  });
+  assert.match(route, /semantic index/);
+  assert.match(route, /seed-1/);
+  assert.match(route, /Prefer overlooked album tracks/);
+  assert.ok(!route.includes('listener'));
+  assert.ok(!route.includes('say'));
+  assert.ok(!route.includes('transition'));
+
+  const selector = producerSelectorSystem(null, true);
+  assert.match(selector, /supplied candidate list/i);
+  assert.ok(!selector.includes('using the library discovery tools'));
+  assert.ok(!selector.includes('on-air presenter'));
+  assert.ok(!selector.includes('listener-facing speech'));
 });
 
 test('the Producer receives structured operational history without Persona prose', () => {
