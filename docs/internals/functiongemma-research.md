@@ -381,3 +381,32 @@ npm run functiongemma:eval -- \
 The commit scenarios remain in the report as a deliberate control. This first
 tuning dataset teaches discovery routing and recovery only, so the decision to
 delegate or separately train final candidate commitment remains evidence-led.
+
+### Text-only GGUF conversion
+
+FunctionGemma's Transformers tokenizer exposes the multimodal-only
+`<image_soft_token>` and `<end_of_image>` at IDs 262144 and 262145, while the
+270M text model has exactly 262144 embedding rows. Transformers text inference
+does not touch them, but llama.cpp refuses to convert a tokenizer whose highest
+ID is outside the model vocabulary. Prepare a separate conversion source that
+removes only those unusable visual markers and verifies that the function-call
+tokens remain at IDs 46–52:
+
+```bash
+python scripts/functiongemma/training/prepare_gguf.py \
+  --source scripts/functiongemma/training/output/router-v1/best \
+  --output scripts/functiongemma/training/output/router-v1/gguf-source
+```
+
+Never edit `best` in place. Convert the checked staging directory directly to
+Q8_0 with llama.cpp's full image:
+
+```bash
+sudo docker run --rm \
+  -v "$PWD/scripts/functiongemma/training/output/router-v1/gguf-source:/input:ro" \
+  -v /home/jaz666/Docker/llama_cpp/models:/output \
+  ghcr.io/ggml-org/llama.cpp:full \
+  --convert /input \
+  --outfile /output/Subwave-FunctionGemma-270M-Router-v1-Q8_0.gguf \
+  --outtype q8_0
+```
