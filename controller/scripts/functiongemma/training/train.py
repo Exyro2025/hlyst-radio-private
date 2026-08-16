@@ -11,6 +11,7 @@ import argparse
 import hashlib
 import importlib.metadata
 import json
+import math
 import platform
 import sys
 from pathlib import Path
@@ -164,6 +165,15 @@ def main() -> int:
             "increase --max-length rather than silently truncating tool calls"
         )
 
+    batches_per_epoch = math.ceil(len(train_rows) / args.batch_size)
+    update_steps_per_epoch = math.ceil(batches_per_epoch / args.gradient_accumulation)
+    planned_update_steps = math.ceil(update_steps_per_epoch * args.epochs)
+    warmup_steps = max(1, math.ceil(planned_update_steps * 0.05))
+    print(
+        f"planned optimiser steps: {planned_update_steps}; "
+        f"warmup: {warmup_steps} steps (5%)"
+    )
+
     training_args = SFTConfig(
         output_dir=str(args.output),
         max_length=args.max_length,
@@ -182,7 +192,7 @@ def main() -> int:
         metric_for_best_model="eval_loss",
         greater_is_better=False,
         learning_rate=args.learning_rate,
-        warmup_ratio=0.05,
+        warmup_steps=warmup_steps,
         fp16=not use_bf16,
         bf16=use_bf16,
         lr_scheduler_type="constant",

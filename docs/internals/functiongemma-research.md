@@ -338,7 +338,9 @@ python scripts/functiongemma/training/train.py \
 
 These parameters follow Google's published FunctionGemma SFT recipe, with a
 larger safe sequence ceiling for multi-turn tool responses and an effective
-batch size of eight. Early stopping defaults to two unimproved evaluations.
+batch size of eight. TRL 1.10 expresses the recipe's 5% warmup as an equivalent
+automatically calculated number of optimiser steps. Early stopping defaults to
+two unimproved evaluations.
 The final selected weights are written to `output/router-v1/best`; checkpoints,
 TensorBoard logs and a reproducibility manifest remain alongside them.
 

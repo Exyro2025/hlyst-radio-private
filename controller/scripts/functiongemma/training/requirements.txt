@@ -1,8 +1,8 @@
 torch
-transformers
+transformers==5.15.0
 datasets
 accelerate
-trl
+trl==1.10.0
 tensorboard
 protobuf
 sentencepiece
