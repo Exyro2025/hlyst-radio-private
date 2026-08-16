@@ -153,4 +153,3 @@ export function dimensionSummary(scores: readonly ScenarioScore[]) {
   }
   return Object.fromEntries(totals);
 }
-
