@@ -46,10 +46,11 @@ import {
   pickerAgent,
   producerPickMessage,
   producerPickerAgent,
-  producerPickerSystem,
+  producerRouterMessage,
+  producerSelectorSystem,
   requestAgent,
 } from './dj-agent/agents.js';
-import { ProducerPickSchema } from '../llm/producer.js';
+import { ProducerPickSchema, producerRouterConfig, routeProducerDiscovery } from '../llm/producer.js';
 import { pickerScope } from '../llm/tools.js';
 import {
   HANDOFF_MAX_AGE_MS,
@@ -71,7 +72,10 @@ export { runActive } from './dj-agent/runs.js';
 export {
   PICK_SCHEMA, PICK_SCHEMA_NO_FX, pickSchema, pickSystem, requestSchema, requestSystem,
 } from './dj-agent/schemas.js';
-export { pickerAgent, producerPickMessage, producerPickerAgent, producerPickerSystem, requestAgent } from './dj-agent/agents.js';
+export {
+  pickerAgent, producerPickMessage, producerPickerAgent, producerPickerSystem,
+  producerRouterMessage, producerSelectorSystem, requestAgent,
+} from './dj-agent/agents.js';
 
 // ---------------------------------------------------------------------------
 // Track event — a track started; pick the next one and maybe air a link.
@@ -150,7 +154,7 @@ async function repickProducerFromSeen({
     ?? `The id ${badId ? `"${badId}"` : 'you returned'} is not one of the candidates surfaced in this run. Choose the best exact candidate id.`;
   try {
     return await djObject({
-      system: producerPickerSystem(showAt, playlistResolved),
+      system: producerSelectorSystem(showAt, playlistResolved),
       prompt: JSON.stringify({ candidates: [...seen.values()] }, null, 2)
         + `\n\n${why}`,
       schema,
@@ -161,6 +165,37 @@ async function repickProducerFromSeen({
   } catch {
     return null;
   }
+}
+
+// The hybrid picker's editorial half. FunctionGemma has already selected and
+// executed discovery; this call gives the configured Producer model the full
+// operational pick request plus only grounded candidates, with no tools and no
+// Persona speech history. Unlike corrective re-pick this throws, so the caller
+// can retry the complete established Producer agent on any failure.
+async function selectProducerFromSeen({
+  seen,
+  producerMessage,
+  showAt = null,
+  playlistResolved = true,
+}: {
+  seen: Map<string, any>;
+  producerMessage: string;
+  showAt?: Date | null;
+  playlistResolved?: boolean;
+}) {
+  const ids = [...seen.keys()];
+  if (!ids.length) throw new Error('Producer Router supplied no candidates for final selection');
+  const schema = modelTolerant(ProducerPickSchema.extend({
+    id: z.enum(ids as [string, ...string[]]).describe('the exact id of one supplied candidate'),
+  }));
+  return djObject({
+    system: producerSelectorSystem(showAt, playlistResolved),
+    prompt: `${producerMessage}\n\nGrounded candidates discovered for this pick:\n${JSON.stringify([...seen.values()], null, 2)}`,
+    schema,
+    temperature: 0.4,
+    kind: 'djProducerSelect',
+    role: 'producer',
+  });
 }
 
 // Request-flavoured corrective re-pick (D1): mirrors repickFromSeen above, for
@@ -207,7 +242,7 @@ async function repickRequestFromSeen({ seen, badId, requester, text }:
 // (#1187) — the agent's own run needs neither. They're the same values
 // runTrackEvent hands the ordinary pool fallback, so a rescued pick is built
 // from exactly the pool a failed agent run would have produced.
-async function pickViaAgent(queue, ctx, { wantLink, audioWaypoint = null, current = null, showAt = null, rankTarget = null, linkAirAt = null, producerMessage = null }: { wantLink: boolean; audioWaypoint?: number[] | null; current?: any; showAt?: Date | null; rankTarget?: { bpm: number | null; key: string | null } | null; linkAirAt?: Date | null; producerMessage?: string | null }): Promise<boolean> {
+async function pickViaAgent(queue, ctx, { wantLink, audioWaypoint = null, current = null, showAt = null, rankTarget = null, linkAirAt = null, producerMessage = null, producerExplore = false }: { wantLink: boolean; audioWaypoint?: number[] | null; current?: any; showAt?: Date | null; rankTarget?: { bpm: number | null; key: string | null } | null; linkAirAt?: Date | null; producerMessage?: string | null; producerExplore?: boolean }): Promise<boolean> {
   await library.load();
   const stats = library.stats();
   // Sized off the MIRROR, not `stats.total` (TAGGED tracks only) — see the same
@@ -330,7 +365,43 @@ async function pickViaAgent(queue, ctx, { wantLink, audioWaypoint = null, curren
       // request assembled by runTrackEvent. It must never inherit the shared
       // session window, which contains listener-facing Persona prose.
       const producerMessages = [{ role: 'user' as const, content: producerMessage || 'Pick the next track using the offered discovery tools.' }];
-      run = await producerPickerAgent.run({ messages: producerMessages, scope, showAt });
+      const routerConfig = producerRouterConfig();
+      if (routerConfig) {
+        try {
+          const routed = await routeProducerDiscovery({
+            scope,
+            config: routerConfig,
+            prompt: producerRouterMessage({
+              current,
+              activeShow,
+              playlistAvailable: !!playlistTracks?.length,
+              journeyActive: !!audioWaypoint,
+              explore: producerExplore,
+            }),
+          });
+          const object = await selectProducerFromSeen({
+            seen: routed.seen,
+            producerMessage: producerMessages[0].content,
+            showAt,
+            playlistResolved: !!playlistTracks?.length,
+          });
+          run = {
+            object,
+            steps: routed.steps + 1,
+            toolCalls: routed.toolCalls,
+            extras: { seen: routed.seen },
+          };
+        } catch (routerError: any) {
+          // The experimental router is never allowed to turn a missed call
+          // into a missed pick. Retry the complete current Producer agent; its
+          // own failure still falls through to the all-in-one Persona below.
+          queue.log('producer', `Producer Router failed: ${routerError.message} — retrying with the complete Producer picker`);
+          logEvent('producer.fallback', { stage: 'route', reason: routerError.message });
+          run = await producerPickerAgent.run({ messages: producerMessages, scope, showAt });
+        }
+      } else {
+        run = await producerPickerAgent.run({ messages: producerMessages, scope, showAt });
+      }
       splitProducer = true;
     } catch (err) {
       // A failed backstage decision drops back to the complete established
@@ -906,6 +977,7 @@ export async function runTrackEvent(queue, ctx, { wantLink, showAt = null, prede
           wantLink, audioWaypoint, current, showAt, rankTarget,
           linkAirAt: linkClockStampFor(airAt, !!airClock),
           producerMessage,
+          producerExplore: !!exploreClause,
         });
         breakerSuccess();
         if (queued) return;

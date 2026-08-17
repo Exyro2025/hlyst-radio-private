@@ -1,0 +1,9 @@
+torch
+transformers==5.15.0
+datasets
+accelerate
+trl==1.10.0
+tensorboard
+protobuf
+sentencepiece
+huggingface-hub

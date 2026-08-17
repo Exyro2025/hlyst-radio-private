@@ -1,0 +1,600 @@
+# FunctionGemma Producer research
+
+This document defines the experimental boundary for testing a small,
+CPU-resident FunctionGemma model as part of SUB/WAVE's optional
+Producer/Persona architecture. It is research scaffolding, not a commitment to
+ship FunctionGemma or to replace the current Producer model.
+
+Read [`track-selection.md`](track-selection.md) first. The important finding is
+that the current picker model does two different jobs:
+
+1. it routes discovery by choosing tools and arguments;
+2. it makes the final editorial choice from the surfaced candidates.
+
+A function-calling score can establish competence at the first job. It says
+nothing by itself about the second.
+
+## Target deployment
+
+The long-term product hypothesis is deliberately simple for operators:
+
+- the ordinary installation continues to use one configured LLM for all work;
+- an advanced split mode may load one bundled, standard Producer model on CPU;
+- the operator chooses only the Persona model and its local/cloud provider;
+- the Producer supplies grounded operational decisions, never on-air prose;
+- the Persona supplies expression, never tool calls or invented database facts.
+
+The bundled-model idea is only viable if the CPU Producer is reliable enough
+that it cannot create more on-air mistakes or timing failures than the existing
+single-model path.
+
+## Research stages
+
+### Stage 1: discovery router
+
+The smallest defensible role for FunctionGemma is selecting a library tool and
+its arguments from grounded operational context. Test:
+
+- correct function name;
+- valid required arguments and enums;
+- respect for a pinned show playlist and active sonic journey;
+- use of structured mood/energy/genre tools rather than vague search;
+- a real state transition after an empty result.
+
+This stage does not choose the final song.
+
+### Stage 2: candidate committer
+
+The current architecture also asks the Producer to call `done` with one exact
+surfaced ID. Test this separately so protocol success cannot conceal weak radio
+programming. Fixtures should include:
+
+- a same-artist trap;
+- a quiet-song to high-energy-song discontinuity;
+- a deliberate energy lift where the louder candidate is correct;
+- soft Show Brief influence such as preferring overlooked album tracks;
+- several defensible choices rather than one brittle golden ID.
+
+If FunctionGemma routes well but commits poorly, keep it as a router and hand
+the fixed candidate set to deterministic scoring or a more capable editorial
+model. Do not average the two scores into one reassuring percentage.
+
+### Stage 3: live-shaped replay
+
+Only after the first two stages pass should the model see captured, anonymised
+live-shaped scenarios. Replay the same station state to each candidate model
+and compare multi-track arcs, fallback rates, latency and human listening
+judgements. This belongs naturally in the future Rehearsal Room.
+
+## Held-out validation fixtures
+
+The initial fixtures live under `controller/scripts/functiongemma/`. They are
+small, synthetic and intentionally readable. Every fixture is marked
+`split: validation` and must never be exported into a fine-tuning dataset.
+
+The scorer reports five independent dimensions:
+
+| Dimension | Question |
+| --- | --- |
+| Protocol | Did the model call an offered function with structurally valid arguments? |
+| Routing | Did it choose the appropriate discovery axis and values? |
+| Recovery | After an empty result, did it change strategy rather than repeat the failed call? |
+| Grounding | Is the committed ID one that a tool actually surfaced? |
+| Editorial | Is that grounded choice musically defensible for the supplied situation? |
+
+For example, choosing a same-artist candidate from a returned list passes
+Protocol and Grounding but fails Editorial. That distinction is load-bearing.
+
+### Running against a model endpoint
+
+The runner talks directly to a separate OpenAI-compatible endpoint and never
+loads or mutates the live station's settings:
+
+```bash
+cd controller
+npm run functiongemma:eval -- \
+  --base-url http://HOST:PORT/v1 \
+  --model FUNCTIONGEMMA_MODEL_NAME \
+  --iterations 5 \
+  --out reports/functiongemma.json
+```
+
+Use `--api-key` when required, or set `FUNCTIONGEMMA_API_KEY`. The default
+per-call deadline is 30 seconds; override it with `--timeout-ms`.
+Use `--scenarios route.pinned-playlist,commit.quiet-flow` to rerun a focused
+subset while diagnosing a failure.
+
+An existing capture can be scored without contacting a model:
+
+```bash
+npm run functiongemma:eval -- --predictions results.jsonl
+```
+
+Each JSONL row has this shape:
+
+```json
+{"scenario":"route.pinned-playlist","calls":[{"name":"showPlaylistTracks","arguments":{}}],"latencyMs":120}
+```
+
+## Fine-tuning data contract
+
+Training examples should remain provider-neutral structured conversations:
+
+- offered function definitions;
+- operational user context;
+- the assistant's expected function call;
+- mocked function results for multi-turn recovery examples;
+- a later `done` call only when the example trains candidate commitment.
+
+Apply Google's official FunctionGemma tokenizer/chat template during dataset
+preparation. Do not hand-write FunctionGemma control tokens into the canonical
+JSONL; doing so couples the data to one tokenizer revision and makes the source
+hard to inspect.
+
+The model's function-calling activation instruction belongs in the
+`developer` role, not an ordinary `system` message. Keep that role intact in
+both training examples and endpoint evaluation. See the
+[official FunctionGemma model card](https://huggingface.co/google/functiongemma-270m-it#basic-usage).
+
+Keep three non-overlapping groups:
+
+- **train** — generated variations reviewed against deterministic policies;
+- **development** — used while choosing epochs and tuning parameters;
+- **validation** — frozen scenarios used only for final comparison.
+
+Split by scenario family and musical entities, not random rows. Renaming the
+same track in a validation copy is not a genuinely unseen example.
+
+Training targets must come from an explicit policy or human judgement. Never
+use the current model's output as an unquestioned label: that would teach its
+existing mistakes to the smaller model and then score imitation as success.
+
+## Provisional promotion gates
+
+These are starting safety thresholds, to be revised from measured baselines:
+
+- Protocol: at least 99.5%, with no unoffered functions;
+- Grounding: 100%; an invented ID is a hard failure;
+- Routing: at least 95% on held-out scenarios;
+- Recovery: at least 90%, with no repeated-call spiral;
+- Editorial: non-inferior to the current Qwen3-4B Producer in blinded human
+  comparisons and no increase in hard discontinuities;
+- CPU latency: comfortably inside the queue runway at p95 while the station is
+  concurrently generating Persona/TTS work;
+- stability: no material drop across a long replay rather than one short run.
+
+Passing these gates would justify a guarded integration experiment. It would
+not yet justify making the model a bundled default.
+
+## What this first harness does not claim
+
+- The fixtures are not yet large enough to rank models conclusively.
+- Tool descriptions are a focused subset of the live picker surface.
+- The runner measures model behaviour, not CPU/RAM telemetry.
+- No training examples or fine-tuning script have been generated yet.
+- No live Producer routing has been changed.
+
+The next research increment is to establish baselines for Qwen3-4B,
+Qwen3-1.7B and untuned FunctionGemma on these frozen fixtures, then design
+training families around the failures rather than guessing what to teach.
+
+## Recorded baselines
+
+### Qwen3-4B Q4_K_M — 2026-08-16
+
+Five iterations of all nine validation scenarios against the separate
+llama.cpp OpenAI-compatible endpoint:
+
+| Result | Score |
+| --- | ---: |
+| Complete scenarios | 45/45 |
+| Protocol | 45/45 |
+| Routing | 30/30 |
+| Empty-result recovery | 5/5 |
+| Grounded commitment | 20/20 |
+| Editorial commitment | 20/20 |
+
+Latency across all 45 calls was 3.53s average, 2.29s p50 and 10.19s p95.
+The p95 is intentionally dominated by the three-call recovery fixture:
+
+| Stage | Runs | Average | p50 | p95 |
+| --- | ---: | ---: | ---: | ---: |
+| Route | 25 | 2.02s | 1.89s | 2.31s |
+| Recover | 5 | 10.28s | 10.19s | 10.66s |
+| Commit | 15 | 3.81s | 3.81s | 4.09s |
+
+An earlier shorthand form wrote candidates as `fresh-01 Southbank`; Qwen
+correctly chose the fresh artist but treated the whole phrase as the ID. That
+was a fixture defect, because real SUB/WAVE tool results carry separate JSON
+fields. All commitment fixtures were corrected to structured candidate
+objects before this canonical baseline was recorded.
+
+### FunctionGemma 270M IT Q8_0 — 2026-08-16
+
+Five iterations of the same nine frozen scenarios were run against
+`google_functiongemma-270m-it-Q8_0.gguf` on a separate llama.cpp endpoint:
+
+| Result | Score |
+| --- | ---: |
+| Complete scenarios | 5/45 |
+| Protocol | 25/45 |
+| Routing | 5/30 |
+| Empty-result recovery | 0/5 |
+| Grounded commitment | 15/20 |
+| Editorial commitment | 5/20 |
+
+The failures were deterministic across all five passes. The model routed only
+the active sonic-journey case correctly. It asked for clarification instead of
+calling the pinned-playlist tool, chose generic or semantically adjacent tools
+for genre, energy and deep-cut requests, and did not progress through the
+empty-result recovery sequence. Its final choices selected the same-artist trap
+and the obvious single despite contrary editorial context. Every `done` call
+also emitted the string `"NULL"` instead of JSON `null`, which is invalid under
+the production transition contract.
+
+Latency was excellent but does not offset those failures: 435ms average, 385ms
+p50 and 1.64s p95 overall. The three-stage recovery case accounted for the
+long tail:
+
+| Stage | Runs | Average | p50 | p95 |
+| --- | ---: | ---: | ---: | ---: |
+| Route | 25 | 203ms | 154ms | 430ms |
+| Recover | 5 | 1.63s | 1.64s | 1.66s |
+| Commit | 15 | 422ms | 409ms | 616ms |
+
+#### llama.cpp compatibility boundary
+
+The GGUF carried Google's official FunctionGemma chat template, but this
+llama.cpp server reported its chat format as `Content-only`. Calls therefore
+arrived in `message.content` as FunctionGemma's native
+`<start_function_call>...<end_function_call>` envelope rather than as OpenAI
+`tool_calls`. Stock SUB/WAVE cannot consume that response shape through its
+existing AI SDK path.
+
+For research only, the harness stops generation after the first native call
+and applies a deliberately narrow parser for FunctionGemma's flat call
+envelope. This adapter removes transport-format failure from the model-quality
+score; it is not a production integration. Shipping FunctionGemma would require
+either native FunctionGemma parsing in the serving layer or a maintained
+SUB/WAVE provider adapter.
+
+This baseline does not reject the fine-tuning hypothesis. It confirms the
+model card's warning that FunctionGemma is a foundation for task-specific
+function-calling fine-tunes, not a drop-in general Producer. The next useful
+experiment is a small, policy-derived routing dataset followed by evaluation
+against these unchanged validation fixtures. Candidate commitment should stay
+outside the first fine-tune until routing and recovery meet their gates.
+
+## First routing fine-tune
+
+The first training package lives under
+`controller/scripts/functiongemma/training/`. It performs full supervised
+fine-tuning from Google's original BF16 weights. The Q8 GGUF is an inference
+artifact and cannot be used as the training source.
+
+The generated `subwave.functiongemma-routing.v1` dataset contains 2,400
+training conversations and 400 development conversations by default. It is
+72% single-turn routing and 28% multi-turn empty-result recovery. The generator
+covers 19 families across the following discovery tools:
+
+- pinned show playlist and sonic journey;
+- structured genre, mood and energy;
+- deep cuts, starred music and recent additions;
+- semantic and music-server similarity;
+- named library search and unconstrained fallback;
+- recovery from empty semantic, server and playlist results through a
+  genuinely different axis.
+
+Every example contains realistic but synthetic track metadata. Training and
+development use separate musical entities and seed identifiers. Generation
+fails if the two sets share a conversation or if any distinctive identifier,
+entity or full prompt from the frozen validation fixtures leaks into them.
+
+Candidate commitment and the `done` function are deliberately absent. This
+run asks only whether a 270M model can become a reliable discovery router.
+
+### Ubuntu training run
+
+Use a separate checkout so training work cannot disturb the live deployment:
+
+```bash
+cd /home/jaz666
+git clone --branch codex/functiongemma-research \
+  https://github.com/Jaz666/subwave.git subwave-functiongemma
+cd /home/jaz666/subwave-functiongemma/controller
+npm ci
+npm run functiongemma:data
+```
+
+Before downloading the original weights, accept the Gemma licence on the
+[official FunctionGemma model page](https://huggingface.co/google/functiongemma-270m-it).
+Create a Hugging Face read token, then prepare an isolated Python environment:
+
+```bash
+sudo apt-get install -y python3-venv
+python3 -m venv .functiongemma-venv
+source .functiongemma-venv/bin/activate
+python -m pip install --upgrade pip
+python -m pip install -r scripts/functiongemma/training/requirements.txt
+huggingface-cli login
+```
+
+Stop other GPU model and TTS containers before the training run. The script
+refuses to train on CPU, validates both datasets again, checks every rendered
+conversation against the token limit, saves a checkpoint after each epoch and
+keeps the best development-loss checkpoint:
+
+```bash
+python scripts/functiongemma/training/train.py \
+  --train scripts/functiongemma/training/data/train.jsonl \
+  --development scripts/functiongemma/training/data/development.jsonl \
+  --output scripts/functiongemma/training/output/router-v1 \
+  --epochs 8 \
+  --batch-size 4 \
+  --gradient-accumulation 2 \
+  --max-length 1024 \
+  --learning-rate 5e-5
+```
+
+These parameters follow Google's published FunctionGemma SFT recipe, with a
+larger safe sequence ceiling for multi-turn tool responses and an effective
+batch size of eight. TRL 1.10 expresses the recipe's 5% warmup as an equivalent
+automatically calculated number of optimiser steps. Early stopping defaults to
+two unimproved evaluations.
+The final selected weights are written to `output/router-v1/best`; checkpoints,
+TensorBoard logs and a reproducibility manifest remain alongside them.
+
+The trainer renders each structured conversation through FunctionGemma's own
+chat template before constructing the Arrow dataset. This preserves native
+function calls and structured tool responses while avoiding Arrow's inability
+to store string messages and object-valued tool results in one nested
+`content` column. `rendered-sample.txt` records the first exact training
+sequence for inspection.
+
+Monitor the run from a second terminal with `nvidia-smi`. To continue an
+interrupted run, repeat the command with `--resume latest`. Do not evaluate or
+convert merely the last epoch: the `best` directory contains the checkpoint
+selected by development loss.
+
+After training, first evaluate the unquantised `best` checkpoint through a
+Transformers-native path. Only a passing checkpoint should be converted to
+GGUF and Q8, served through llama.cpp and run against the same frozen harness.
+This separates training quality from conversion, quantisation and serving
+compatibility failures.
+
+Regenerate the data bundle after pulling the evaluator so `validation.json`
+contains the frozen scenarios and their FunctionGemma tool schemas, then run
+five deterministic passes through the selected unquantised checkpoint:
+
+```bash
+npm run functiongemma:data
+python scripts/functiongemma/training/evaluate.py \
+  --model scripts/functiongemma/training/output/router-v1/best \
+  --scenarios scripts/functiongemma/training/data/validation.json \
+  --output scripts/functiongemma/training/output/router-v1/native-predictions.jsonl \
+  --iterations 5
+npm run functiongemma:eval -- \
+  --predictions scripts/functiongemma/training/output/router-v1/native-predictions.jsonl \
+  --out scripts/functiongemma/training/output/router-v1/native-report.json
+```
+
+The commit scenarios remain in the report as a deliberate control. This first
+tuning dataset teaches discovery routing and recovery only, so the decision to
+delegate or separately train final candidate commitment remains evidence-led.
+
+### Text-only GGUF conversion
+
+FunctionGemma's Transformers tokenizer exposes the multimodal-only
+`<image_soft_token>` and `<end_of_image>` at IDs 262144 and 262145, while the
+270M text model has exactly 262144 embedding rows. Transformers text inference
+does not touch them, but llama.cpp refuses to convert a tokenizer whose highest
+ID is outside the model vocabulary. Prepare a separate conversion source that
+removes only those unusable visual markers and verifies that the function-call
+tokens remain at IDs 46–52:
+
+```bash
+python scripts/functiongemma/training/prepare_gguf.py \
+  --source scripts/functiongemma/training/output/router-v1/best \
+  --output scripts/functiongemma/training/output/router-v1/gguf-source
+```
+
+Never edit `best` in place. Convert the checked staging directory directly to
+Q8_0 with llama.cpp's full image:
+
+```bash
+sudo docker run --rm \
+  -v "$PWD/scripts/functiongemma/training/output/router-v1/gguf-source:/input:ro" \
+  -v /home/jaz666/Docker/llama_cpp/models:/output \
+  ghcr.io/ggml-org/llama.cpp:full \
+  --convert /input \
+  --outfile /output/Subwave-FunctionGemma-270M-Router-v1-Q8_0.gguf \
+  --outtype q8_0
+```
+
+### Router-v1 result — 2026-08-16
+
+The eight-epoch command stopped early after the development loss failed to
+improve for two evaluations. Checkpoint 300 (the first epoch) was selected:
+
+| Measurement | Result |
+| --- | ---: |
+| Best development loss | 0.245663 |
+| Final reported training loss | 0.088132 |
+| Runtime | 1,123s |
+| Selected weights | 544 MiB |
+
+Five deterministic passes through the frozen native evaluator produced the
+same result on every pass:
+
+| Dimension | Result |
+| --- | ---: |
+| Protocol | 30/45 |
+| Routing | 30/30 |
+| Empty-result recovery | 5/5 |
+| Grounded commitment | 0/20 |
+| Editorial commitment | 0/20 |
+
+The apparent commitment failure is expected: router-v1 was deliberately never
+trained to call `done`. It proves the bounded role it was trained for and does
+not support delegating the final music decision to this checkpoint.
+
+The text-only Q8_0 GGUF preserved those scores under CPU-only llama.cpp. Across
+the 30 trained-scope route/recovery runs it averaged 315ms, with 209ms p50,
+1.009s p95 and 1.019s maximum latency. The untuned Q8 baseline scored only
+5/30 routing and 0/5 recovery on the same scope. This is strong evidence that
+the improvement came from task-specific tuning rather than the harness.
+
+### Router-v2 target: picker recovery and segment research
+
+The first live hybrid run exposed a recovery case missing from router-v1's
+training set. During a restrictive energetic/electronic show, an empty
+`tracksTowardJourney` result was sometimes followed by the same journey tool
+again. The complete Producer fallback often made the same retry and then fell
+through to the stateless pool picker. The controller now removes any empty
+discovery tool from the recovery request, so state progression is guaranteed
+by code rather than entrusted to model memory. Journey-to-mood and
+journey-to-genre examples remain in router-v2's dataset so the model also
+learns the preferred recovery.
+
+The next bounded workload is choosing one research tool for an autonomous
+between-track segment. FunctionGemma will not decide whether the result is
+worth airing and will never write listener-facing text. Those decisions remain
+with the configured Producer and Persona models respectively. Manual Run Now
+and Off Air Test calls already identify one specific skill; they do not need a
+router merely to rediscover that choice.
+
+The initial held-out segment fixtures covered changed weather, exact-track
+research, recent artist news and album anniversaries. Router-v1's Q8 CPU
+checkpoint scored 0/4 on these unseen tool names (two invalid `searchLibrary`
+calls and two missing calls), while still passing the new empty-journey
+recovery case. Warm latency was 323-723ms. This was the expected pre-training
+result and proved that the picker checkpoint must not be silently enabled for
+segment work. Changed weather later moved out of model scope because the
+controller already owns that authoritative state transition.
+
+Generate router-v2's mixed picker/segment dataset and train it into a separate
+output directory, preserving router-v1 as the live benchmark:
+
+```bash
+npm run functiongemma:data
+python scripts/functiongemma/training/train.py \
+  --train scripts/functiongemma/training/data/train.jsonl \
+  --development scripts/functiongemma/training/data/development.jsonl \
+  --output scripts/functiongemma/training/output/router-v2 \
+  --epochs 8 \
+  --batch-size 4 \
+  --gradient-accumulation 2 \
+  --max-length 1024 \
+  --learning-rate 5e-5
+```
+
+Router-v2 must retain the picker routing and empty-result recovery scores while
+passing the new segment-routing fixtures before any live segment opt-in is
+added. Final track selection, segment approval, production SFX choice and all
+spoken copy remain deliberately outside the 270M model's scope.
+
+#### Router-v2 checkpoint selection — 2026-08-17
+
+Development loss again selected checkpoint 300, but the held-out operational
+routes improved at every saved checkpoint:
+
+| Checkpoint | Routing | Recovery | Regressions / misses |
+| --- | ---: | ---: | --- |
+| 300 | 8/11 | 2/2 | lower energy, overlooked shelves, changed weather |
+| 600 | 9/11 | 2/2 | changed weather, album anniversary |
+| 900 | 10/11 | 2/2 | changed weather |
+
+Checkpoint 900 is therefore the router-v2 candidate even though checkpoint 300
+has the lowest aggregate development loss. This is a multi-objective routing
+task: aggregate token loss is useful for early warning, but it is not a proxy
+for whether every operational boundary remains intact. Frozen route/recovery
+scores decide which checkpoint advances.
+
+The remaining weather miss is better handled as controller policy. SUB/WAVE
+already knows when current conditions differ from the last weather segment; a
+changed condition is a deterministic freshness signal, not an editorial tool
+choice. The controller should directly research weather when that signal is
+present and omit stale weather from the router's alternatives. FunctionGemma
+then handles only genuine choices among the remaining research tools.
+
+FunctionGemma emitted Python-style `None` for the nullable artist-news query.
+The native, evaluator and live-controller parsers now normalise `None`/`True`/
+`False` alongside JSON `null`/`true`/`false` before validating tool arguments.
+
+The text-only Q8_0 conversion of checkpoint 900 preserved every in-scope result
+across five deterministic passes: protocol 50/50, routing 50/50 and recovery
+10/10. Across those 50 calls it averaged 336ms (207ms p50, 981ms p95, 1.098s
+maximum); the slower tail consists of the intentional two-call recovery cases.
+
+Segment routing is a separate opt-in on top of the picker router:
+
+```dotenv
+PRODUCER_ROUTER_SEGMENTS=1
+```
+
+When enabled, changed weather is researched directly by controller policy. A
+single remaining research skill is also fetched directly. With two or more
+data-backed skills, FunctionGemma chooses and executes one, then the configured
+Producer model receives only that selected evidence and decides airtime and
+SFX through `djProducerSegmentSelect`. Persona receives the approved evidence
+afterwards and remains the sole writer. Off-air rehearsals retain the
+established full Producer path. If a prompt-only custom skill is offered, or
+the router fails, the complete Producer segment agent handles that tick so the
+optimisation cannot make operator skills disappear.
+
+## Hybrid live experiment
+
+The FunctionGemma live-test branches integrate the router behind an optional
+Producer Router boundary. Router-v2 retains the same split and adds the tested
+empty-journey recovery plus optional segment-research routing:
+
+1. FunctionGemma receives compact operational context and the currently
+   available discovery tools.
+2. It calls exactly one real SUB/WAVE discovery tool.
+3. If that tool adds no grounded candidates, its call and exact result are
+   replayed once so it can choose a different tool.
+4. The configured Producer model receives the resulting candidate list and
+   makes the final grounded track and transition decision without tools.
+5. Persona remains a later, independent speech call and sees neither model's
+   private reasoning.
+
+This division is intentional. It tests the 270M model only where the frozen
+evaluation supports it, while retaining Qwen-class editorial judgement for
+flow, show fit, variety and soft prompt influence.
+
+The experiment is disabled unless both variables are present in the
+controller environment:
+
+```dotenv
+PRODUCER_ROUTER_BASE_URL=http://host.docker.internal:8092/v1
+PRODUCER_ROUTER_MODEL=/models/Subwave-FunctionGemma-270M-Router-v2-text-Q8_0.gguf
+PRODUCER_ROUTER_TIMEOUT_MS=15000
+PRODUCER_ROUTER_SEGMENTS=1
+```
+
+`PRODUCER_ROUTER_API_KEY` is optional for protected compatible endpoints. The
+deadline is shared across initial discovery and recovery rather than resetting
+for each call.
+
+The live safety order is:
+
+1. FunctionGemma discovery + configured Producer final selection;
+2. the complete established Producer tool-loop picker;
+3. the established all-in-one Persona picker;
+4. SUB/WAVE's existing stateless pool fallback.
+
+Consequently the experiment cannot turn a router miss into dead air. It can
+add latency only until its bounded deadline before the established paths take
+over.
+
+The stats/debug surfaces record `djProducerRoute` for FunctionGemma and
+`djProducerSelect` for the configured Producer's final decision. Router records
+include the real tool name, validated arguments, result and aggregate token
+usage. A rejected route is recorded as a failure even when fallback later
+fills the queue; that distinction is necessary to measure router reliability
+honestly.
+
+This is not yet a bundled installation feature or a replacement for the
+advanced Producer settings. It is a controlled live experiment intended to
+collect latency, recovery, route distribution and downstream selection data
+before any commitment fine-tune is considered.

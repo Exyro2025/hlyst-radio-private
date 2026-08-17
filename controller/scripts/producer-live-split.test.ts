@@ -13,6 +13,8 @@ const {
   producerPickMessage,
   producerPickerAgent,
   producerPickerSystem,
+  producerRouterMessage,
+  producerSelectorSystem,
 } = await import('../src/broadcast/dj-agent/agents.js');
 const {
   fuzzyAirTime,
@@ -27,7 +29,7 @@ const {
   generatePersonaSegment,
   personaSegmentPrompt,
 } = await import('../src/llm/internal/prompts/scripts.js');
-const { buildProducerSituation, groundedSearchEvidence, isolatedSegmentState, personaSegmentContext, producerDirectorAgent, usableSegmentEvidence } = await import('../src/skills/_agent.js');
+const { buildProducerSituation, changedWeatherCapability, groundedSearchEvidence, isolatedSegmentState, personaSegmentContext, producerDirectorAgent, usableSegmentEvidence } = await import('../src/skills/_agent.js');
 const { rehearsalStationServices } = await import('../src/llm/internal/tools/station-services.js');
 const { showMusicLean } = await import('../src/llm/internal/prompts/picker.js');
 const { queue } = await import('../src/broadcast/queue.js');
@@ -138,6 +140,25 @@ test('the Producer picker system excludes the on-air Persona preamble', () => {
     { includeTalk: false },
   );
   assert.ok(!strictLean.includes('Keep your talk'));
+});
+
+test('hybrid routing and selection preserve the Producer/Persona boundary', () => {
+  const route = producerRouterMessage({
+    current: { id: 'seed-1', title: 'Current', artist: 'Artist' },
+    activeShow: { name: 'Deep Cuts', topic: 'Prefer overlooked album tracks.' },
+  });
+  assert.match(route, /semantic index/);
+  assert.match(route, /seed-1/);
+  assert.match(route, /Prefer overlooked album tracks/);
+  assert.ok(!route.includes('listener'));
+  assert.ok(!route.includes('say'));
+  assert.ok(!route.includes('transition'));
+
+  const selector = producerSelectorSystem(null, true);
+  assert.match(selector, /supplied candidate list/i);
+  assert.ok(!selector.includes('using the library discovery tools'));
+  assert.ok(!selector.includes('on-air presenter'));
+  assert.ok(!selector.includes('listener-facing speech'));
 });
 
 test('the Producer receives structured operational history without Persona prose', () => {
@@ -289,6 +310,19 @@ test('segment context is selected for the chosen skill', () => {
   assert.equal(personaSegmentContext({ kind: 'now-playing-dig-v2', seeded: true }, ctx).includeTrack, true);
   assert.match(personaSegmentContext({ kind: 'curiosity-v2', seeded: true }, ctx).facts.join('\n'), /Date:/);
   assert.match(personaSegmentContext({ kind: 'weather-v2', seeded: true }, ctx).facts.join('\n'), /Approximate time:/);
+  assert.match(personaSegmentContext({ kind: 'weather-v2', seeded: true }, ctx).facts.join('\n'), /approaching 11am/);
+});
+
+test('changed weather is a controller route for both original and v2 skills', () => {
+  const state = {
+    seenHeadlines: new Set<string>(),
+    lastWeatherCondition: 'clear',
+    lastSearchedArtist: null,
+    lastAnySegment: 0,
+  };
+  const caps = [{ kind: 'curiosity-v2' }, { kind: 'weather-v2', toolName: 'skill_weather_v2' }];
+  assert.equal(changedWeatherCapability(caps, { weather: { condition: 'rain' } }, state)?.kind, 'weather-v2');
+  assert.equal(changedWeatherCapability(caps, { weather: { condition: 'clear' } }, state), null);
 });
 
 test('failed and empty tool payloads cannot reach the Persona as evidence', () => {
@@ -348,6 +382,15 @@ test('now-playing evidence requires an explicit answer and exact-track source', 
   assert.deepEqual(evidence.sources.map((source) => source.label), [
     'Anna Meredith: Varmints review: “Dowager” starts as a spinster lament.',
   ]);
+});
+
+test('v2 track research receives the same grounding policy', () => {
+  assert.equal(groundedSearchEvidence('now-playing-dig-v2', {
+    artist: 'Happy Mondays',
+    title: 'Angel',
+    answer: '',
+    sources: ['Happy Mondays - Angel - CD single listing.'],
+  }).available, false);
 });
 
 test('exact-track snippets alone cannot authorise a Persona claim', () => {
