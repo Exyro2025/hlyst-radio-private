@@ -70,6 +70,19 @@ const contracts: Record<string, ToolContract> = {
   randomSongs: noArgs('randomSongs'),
   tracksLikeThis: withString('tracksLikeThis', 'songId'),
   similarSongs: withString('similarSongs', 'songId'),
+  skill_album_anniversary: noArgs('skill_album_anniversary'),
+  skill_curiosity: noArgs('skill_curiosity'),
+  skill_library_deep_cut: noArgs('skill_library_deep_cut'),
+  skill_news: noArgs('skill_news'),
+  skill_now_playing_dig: noArgs('skill_now_playing_dig'),
+  skill_weather: noArgs('skill_weather'),
+  skill_web_search: { name: 'skill_web_search', required: ['query'], enums: { query: [null] } },
+  skill_album_anniversary_v2: noArgs('skill_album_anniversary_v2'),
+  skill_curiosity_v2: noArgs('skill_curiosity_v2'),
+  skill_news_v2: noArgs('skill_news_v2'),
+  skill_now_playing_dig_v2: noArgs('skill_now_playing_dig_v2'),
+  skill_weather_v2: noArgs('skill_weather_v2'),
+  skill_web_search_v2: { name: 'skill_web_search_v2', required: ['query'], enums: { query: [null] } },
 };
 
 const routeFamilies = [
@@ -85,6 +98,13 @@ const routeFamilies = [
   'server-similarity',
   'library-search',
   'random-fallback',
+  'segment-weather',
+  'segment-track-research',
+  'segment-artist-news',
+  'segment-headlines',
+  'segment-anniversary',
+  'segment-curiosity',
+  'segment-library-deep-cut',
 ] as const;
 
 const recoveryFamilies = [
@@ -95,6 +115,8 @@ const recoveryFamilies = [
   'recover-semantic-to-starred',
   'recover-server-to-mood',
   'recover-playlist-to-mood',
+  'recover-journey-to-mood',
+  'recover-journey-to-genre',
 ] as const;
 
 const splitPools = {
@@ -247,6 +269,54 @@ function routeExample(family: typeof routeFamilies[number], context: ExampleCont
       target = 'randomSongs';
       tools = ['randomSongs', 'tracksByMood', 'searchLibrary', 'deepCuts'];
       break;
+    case 'segment-weather': {
+      const suffix = context.index % 2 ? '_v2' : '';
+      prompt = 'Choose one research function for a between-track segment. The weather has changed noticeably since the last bulletin; research the current conditions.';
+      target = `skill_weather${suffix}`;
+      tools = [target, `skill_news${suffix}`, `skill_curiosity${suffix}`, `skill_now_playing_dig${suffix}`];
+      break;
+    }
+    case 'segment-track-research': {
+      const suffix = context.index % 2 ? '_v2' : '';
+      prompt = 'Choose one research function for a between-track segment. Find one verifiable production or release detail about the exact track now playing.';
+      target = `skill_now_playing_dig${suffix}`;
+      tools = [target, `skill_web_search${suffix}`, `skill_news${suffix}`, `skill_weather${suffix}`];
+      break;
+    }
+    case 'segment-artist-news': {
+      const suffix = context.index % 2 ? '_v2' : '';
+      prompt = 'Choose one research function for a between-track segment. Look for genuinely recent news about the artist currently on air.';
+      target = `skill_web_search${suffix}`;
+      args = { query: null };
+      tools = [target, `skill_now_playing_dig${suffix}`, `skill_news${suffix}`, `skill_weather${suffix}`];
+      break;
+    }
+    case 'segment-headlines': {
+      const suffix = context.index % 2 ? '_v2' : '';
+      prompt = 'Choose one research function for a between-track segment. Check the configured current-news feed for a fresh general headline.';
+      target = `skill_news${suffix}`;
+      tools = [target, `skill_web_search${suffix}`, `skill_curiosity${suffix}`, `skill_weather${suffix}`];
+      break;
+    }
+    case 'segment-anniversary': {
+      const suffix = context.index % 2 ? '_v2' : '';
+      prompt = 'Choose one research function for a between-track segment. Check whether the album currently on air has a meaningful release anniversary this year.';
+      target = `skill_album_anniversary${suffix}`;
+      tools = [target, `skill_now_playing_dig${suffix}`, `skill_curiosity${suffix}`, `skill_news${suffix}`];
+      break;
+    }
+    case 'segment-curiosity': {
+      const suffix = context.index % 2 ? '_v2' : '';
+      prompt = 'Choose one research function for a between-track segment. Fetch a fresh historical event tied to today\'s date.';
+      target = `skill_curiosity${suffix}`;
+      tools = [target, `skill_news${suffix}`, `skill_weather${suffix}`, `skill_album_anniversary${suffix}`];
+      break;
+    }
+    case 'segment-library-deep-cut':
+      prompt = 'Choose one research function for a between-track segment. Find a long-unplayed library track by the artist currently on air.';
+      target = 'skill_library_deep_cut';
+      tools = [target, 'skill_now_playing_dig', 'skill_web_search', 'skill_news'];
+      break;
   }
 
   prompt = `${prompt} Current track metadata: "${title}" by ${artist} [id: ${seed}].`;
@@ -322,11 +392,25 @@ function recoveryExample(family: typeof recoveryFamilies[number], context: Examp
       nextArgs = { mood };
       names = ['showPlaylistTracks', 'tracksByMood', 'deepCuts', 'randomSongs'];
       break;
+    case 'recover-journey-to-mood':
+      prompt = `Continue the active sonic journey while preserving the show's ${mood}, ${energy}-energy character. If the current waypoint returns no eligible tracks, change to the structured show mood.`;
+      first = 'tracksTowardJourney';
+      next = 'tracksByMood';
+      nextArgs = { mood, energy };
+      names = ['tracksTowardJourney', 'tracksByMood', 'songsByGenre', 'randomSongs'];
+      break;
+    case 'recover-journey-to-genre':
+      prompt = `Continue the active sonic journey inside a ${genre} show. If the current waypoint returns no eligible tracks, recover through the show's structured genre rather than repeating the journey search.`;
+      first = 'tracksTowardJourney';
+      next = 'songsByGenre';
+      nextArgs = { genre };
+      names = ['tracksTowardJourney', 'songsByGenre', 'tracksByMood', 'randomSongs'];
+      break;
   }
 
   prompt = `${prompt} Current track metadata: "${title}" by ${artist} [id: ${seed}].`;
 
-  const firstArgs = first === 'showPlaylistTracks' ? {} : { songId: seed };
+  const firstArgs = first === 'showPlaylistTracks' || first === 'tracksTowardJourney' ? {} : { songId: seed };
   return {
     id: `${context.split}.recover.${family}.${context.index}`,
     split: context.split,
@@ -339,7 +423,9 @@ function recoveryExample(family: typeof recoveryFamilies[number], context: Examp
         tracks: [],
         note: first === 'showPlaylistTracks'
           ? 'All pinned tracks were filtered out. Choose a genuinely different discovery tool.'
-          : 'No candidates were found. Change discovery strategy rather than repeating this tool.',
+          : first === 'tracksTowardJourney'
+            ? 'The active journey waypoint returned no eligible tracks. Use the show mood or genre instead; do not repeat this tool.'
+            : 'No candidates were found. Change discovery strategy rather than repeating this tool.',
       }),
       call(next, nextArgs),
     ],

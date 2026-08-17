@@ -154,8 +154,7 @@ export async function routeProducerDiscovery({
 }): Promise<RoutedDiscovery> {
   if (!config) throw new Error('Producer Router is not configured');
   const { tools, seen } = buildTools(scope);
-  const offered = openAiTools(tools);
-  if (!offered.length) throw new Error('Producer Router has no available discovery tools');
+  if (!Object.keys(tools).length) throw new Error('Producer Router has no available discovery tools');
 
   const started = Date.now();
   const deadline = started + config.timeoutMs;
@@ -164,11 +163,23 @@ export async function routeProducerDiscovery({
     { role: 'user', content: prompt },
   ];
   const toolCalls: RoutedDiscovery['toolCalls'] = [];
+  const exhaustedTools = new Set<string>();
   const responses: string[] = [];
   let usage = { input: 0, output: 0, total: 0 };
 
   try {
     for (let round = 0; round < 2; round++) {
+      // Recovery must change the state of the search. Once a discovery tool
+      // returns no candidates, remove it from the next request rather than
+      // asking a small router to remember a prose-only "do not retry" rule.
+      // This is especially important for an empty tracksTowardJourney result:
+      // live testing showed both the tiny router and the larger fallback model
+      // repeatedly reconstructing the same plan when the failed route remained
+      // available.
+      const roundToolEntries = Object.entries(tools).filter(([name]) => !exhaustedTools.has(name));
+      const roundTools = Object.fromEntries(roundToolEntries) as ToolSet;
+      const offered = openAiTools(roundTools);
+      if (!offered.length) throw new Error('Producer Router has no untried recovery tools');
       const remaining = deadline - Date.now();
       if (remaining <= 0) throw new Error('Producer Router exhausted its shared deadline');
       const controller = new AbortController();
@@ -206,7 +217,7 @@ export async function routeProducerDiscovery({
       const parsed = rawCalls.length ? parseOpenAiCalls(rawCalls) : parseFunctionGemmaCall(message?.content);
       if (parsed.length !== 1) throw new Error(`Producer Router returned ${parsed.length} tool calls; expected exactly one`);
       const call = parsed[0];
-      const selected: any = (tools as any)[call.name];
+      const selected: any = (roundTools as any)[call.name];
       if (!selected) throw new Error(`Producer Router selected unavailable tool "${call.name}"`);
       const validated = selected.inputSchema?.safeParse?.(call.arguments);
       if (!validated?.success) throw new Error(`Producer Router supplied invalid arguments for "${call.name}"`);
@@ -221,6 +232,7 @@ export async function routeProducerDiscovery({
       });
       toolCalls.push({ name: call.name, args: validated.data, result });
       if (seen.size > before) break;
+      exhaustedTools.add(call.name);
 
       messages.push({
         role: 'assistant',

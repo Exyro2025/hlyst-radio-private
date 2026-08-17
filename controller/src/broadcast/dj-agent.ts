@@ -50,9 +50,8 @@ import {
   producerSelectorSystem,
   requestAgent,
 } from './dj-agent/agents.js';
-import { ProducerPickSchema } from '../llm/producer.js';
+import { ProducerPickSchema, producerRouterConfig, routeProducerDiscovery } from '../llm/producer.js';
 import { pickerScope } from '../llm/tools.js';
-import { producerRouterConfig, routeProducerDiscovery } from '../llm/internal/producer/router.js';
 import {
   HANDOFF_MAX_AGE_MS,
   breakerFailure,

@@ -12,3 +12,11 @@ export {
   checkProducerPick,
   checkProducerSegment,
 } from './internal/producer/contracts.js';
+
+export {
+  parseFunctionGemmaCall,
+  parseOpenAiCalls,
+  producerRouterConfig,
+  routeProducerDiscovery,
+  type RoutedDiscovery,
+} from './internal/producer/router.js';

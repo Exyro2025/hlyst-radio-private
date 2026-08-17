@@ -122,8 +122,46 @@ test('replays an empty tool result and permits exactly one recovery route', asyn
 
   assert.equal(result.steps, 2);
   assert.deepEqual(result.toolCalls.map(call => call.name), ['tracksLikeThis', 'tracksByMood']);
+  assert.deepEqual(
+    requests[0].tools.map((entry: any) => entry.function.name).sort(),
+    ['tracksByMood', 'tracksLikeThis'],
+  );
+  assert.deepEqual(
+    requests[1].tools.map((entry: any) => entry.function.name),
+    ['tracksByMood'],
+  );
   assert.equal(requests[1].messages.at(-2).role, 'assistant');
   assert.equal(requests[1].messages.at(-1).role, 'tool');
+});
+
+test('rejects a repeated empty route because exhausted tools are no longer offered', async () => {
+  const requests: any[] = [];
+  await assert.rejects(routeProducerDiscovery({
+    scope: {} as any,
+    prompt: 'Continue a restrictive sonic journey.',
+    config: { baseUrl: 'http://router/v1', model: 'router.gguf', timeoutMs: 5000 },
+    fetchImpl: (async (_url: any, init: any) => {
+      requests.push(JSON.parse(init.body));
+      return jsonResponse({
+        role: 'assistant',
+        content: '<start_function_call>call:tracksTowardJourney{}<end_function_call>',
+      });
+    }) as any,
+    buildTools: (() => ({
+      seen: new Map(),
+      tools: {
+        tracksTowardJourney: tool({
+          description: 'continue the journey', inputSchema: z.object({}), execute: async () => [],
+        }),
+        tracksByMood: tool({
+          description: 'show mood', inputSchema: z.object({}), execute: async () => [],
+        }),
+      },
+    })) as any,
+    recordImpl: (() => {}) as any,
+  }), /unavailable tool/);
+
+  assert.deepEqual(requests[1].tools.map((entry: any) => entry.function.name), ['tracksByMood']);
 });
 
 test('rejects unoffered calls before execution and records failure', async () => {

@@ -151,6 +151,10 @@ test('generates deterministic, disjoint routing and recovery datasets', () => {
   assert.notEqual(validation.fingerprints.train, validation.fingerprints.development);
   assert.ok(Object.keys(validation.families).some(name => name.startsWith('route.')));
   assert.ok(Object.keys(validation.families).some(name => name.startsWith('recover.')));
+  assert.ok(validation.families['route.segment-weather'] > 0);
+  assert.ok(validation.families['route.segment-track-research'] > 0);
+  assert.ok(validation.families['recover.recover-journey-to-mood'] > 0);
+  assert.ok(validation.families['recover.recover-journey-to-genre'] > 0);
 });
 
 test('training recovery examples contain an empty result and a changed tool', () => {

@@ -444,6 +444,53 @@ the 30 trained-scope route/recovery runs it averaged 315ms, with 209ms p50,
 5/30 routing and 0/5 recovery on the same scope. This is strong evidence that
 the improvement came from task-specific tuning rather than the harness.
 
+### Router-v2 target: picker recovery and segment research
+
+The first live hybrid run exposed a recovery case missing from router-v1's
+training set. During a restrictive energetic/electronic show, an empty
+`tracksTowardJourney` result was sometimes followed by the same journey tool
+again. The complete Producer fallback often made the same retry and then fell
+through to the stateless pool picker. The controller now removes any empty
+discovery tool from the recovery request, so state progression is guaranteed
+by code rather than entrusted to model memory. Journey-to-mood and
+journey-to-genre examples remain in router-v2's dataset so the model also
+learns the preferred recovery.
+
+The next bounded workload is choosing one research tool for an autonomous
+between-track segment. FunctionGemma will not decide whether the result is
+worth airing and will never write listener-facing text. Those decisions remain
+with the configured Producer and Persona models respectively. Manual Run Now
+and Off Air Test calls already identify one specific skill; they do not need a
+router merely to rediscover that choice.
+
+Held-out segment fixtures cover changed weather, exact-track research, recent
+artist news and album anniversaries. Router-v1's Q8 CPU checkpoint scored 0/4
+on these unseen tool names (two invalid `searchLibrary` calls and two missing
+calls), while still passing the new empty-journey recovery case. Warm latency
+was 323-723ms. This is the expected pre-training result and proves that the
+picker checkpoint must not be silently enabled for segment work.
+
+Generate router-v2's mixed picker/segment dataset and train it into a separate
+output directory, preserving router-v1 as the live benchmark:
+
+```bash
+npm run functiongemma:data
+python scripts/functiongemma/training/train.py \
+  --train scripts/functiongemma/training/data/train.jsonl \
+  --development scripts/functiongemma/training/data/development.jsonl \
+  --output scripts/functiongemma/training/output/router-v2 \
+  --epochs 8 \
+  --batch-size 4 \
+  --gradient-accumulation 2 \
+  --max-length 1024 \
+  --learning-rate 5e-5
+```
+
+Router-v2 must retain the picker routing and empty-result recovery scores while
+passing the new segment-routing fixtures before any live segment opt-in is
+added. Final track selection, segment approval, production SFX choice and all
+spoken copy remain deliberately outside the 270M model's scope.
+
 ## Hybrid live experiment
 
 Branch `codex/functiongemma-hybrid` integrates router-v1 behind an optional

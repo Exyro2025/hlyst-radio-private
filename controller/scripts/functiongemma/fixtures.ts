@@ -45,6 +45,8 @@ const discoveryFallbacks: readonly ToolContract[] = [
   done,
 ];
 
+const segmentTool = (name: string): ToolContract => ({ name });
+
 /**
  * Held-out fixtures. These are deliberately small and legible so a failed
  * score can be diagnosed by a human. They must never be exported as training
@@ -97,6 +99,46 @@ export const FUNCTIONGEMMA_VALIDATION_SCENARIOS: readonly FunctionGemmaScenario[
     route: { firstCallOneOf: ['deepCuts'] },
   },
   {
+    id: 'segment.route.changed-weather',
+    stage: 'route',
+    split: 'validation',
+    description: 'Changed conditions should route to weather research, not generic news.',
+    prompt: 'Choose one research function for a between-track segment. Rain has just replaced clear skies and no weather update has aired recently.',
+    tools: [segmentTool('skill_weather_v2'), segmentTool('skill_news_v2'), segmentTool('skill_curiosity_v2')],
+    route: { firstCallOneOf: ['skill_weather_v2'] },
+  },
+  {
+    id: 'segment.route.exact-track-fact',
+    stage: 'route',
+    split: 'validation',
+    description: 'A request for exact-track evidence should use the track researcher.',
+    prompt: 'Choose one research function for a between-track segment. Find one sourced production or release detail about the exact track now playing.',
+    tools: [segmentTool('skill_now_playing_dig_v2'), segmentTool('skill_web_search_v2'), segmentTool('skill_news_v2')],
+    route: { firstCallOneOf: ['skill_now_playing_dig_v2'] },
+  },
+  {
+    id: 'segment.route.artist-news',
+    stage: 'route',
+    split: 'validation',
+    description: 'Recent artist activity should use artist research rather than general headlines.',
+    prompt: 'Choose one research function for a between-track segment. Look for genuinely recent news about the artist currently on air.',
+    tools: [
+      { name: 'skill_web_search_v2', required: ['query'], enums: { query: [null] } },
+      segmentTool('skill_now_playing_dig_v2'),
+      segmentTool('skill_news_v2'),
+    ],
+    route: { firstCallOneOf: ['skill_web_search_v2'], arguments: { query: null } },
+  },
+  {
+    id: 'segment.route.album-anniversary',
+    stage: 'route',
+    split: 'validation',
+    description: 'Album anniversary research has its own specialist function.',
+    prompt: 'Choose one research function for a between-track segment. Check whether the original studio album currently on air reaches a meaningful anniversary this year.',
+    tools: [segmentTool('skill_album_anniversary_v2'), segmentTool('skill_curiosity_v2'), segmentTool('skill_now_playing_dig_v2')],
+    route: { firstCallOneOf: ['skill_album_anniversary_v2'] },
+  },
+  {
     id: 'recover.empty-semantic-index',
     stage: 'recover',
     split: 'validation',
@@ -135,6 +177,27 @@ export const FUNCTIONGEMMA_VALIDATION_SCENARIOS: readonly FunctionGemmaScenario[
       surfacedIds: ['reflective-01', 'reflective-02', 'safe-favourite-01'],
       acceptableIds: ['reflective-01', 'reflective-02', 'safe-favourite-01'],
       preferredIds: ['reflective-01', 'reflective-02'],
+    },
+  },
+  {
+    id: 'recover.empty-journey-waypoint',
+    stage: 'recover',
+    split: 'validation',
+    description: 'An empty journey waypoint must fall back to structured show criteria.',
+    prompt: 'A sonic journey is active inside a reflective, low-energy art-rock show. Try its current waypoint first; if no eligible tracks remain, change to a structured show axis.',
+    tools: [noArgs('tracksTowardJourney'), tracksByMood, songsByGenre, noArgs('randomSongs')],
+    mockResults: {
+      tracksTowardJourney: {
+        tracks: [],
+        note: 'The active waypoint has no eligible tracks. Do not repeat this tool.',
+      },
+      tracksByMood: { tracks: [{ id: 'journey-mood-01', title: 'Low Signal', artist: 'Quiet Maps' }] },
+      songsByGenre: { tracks: [{ id: 'journey-genre-01', title: 'Slow Geometry', artist: 'Amber District' }] },
+    },
+    route: { firstCallOneOf: ['tracksTowardJourney'] },
+    recovery: {
+      emptyTool: 'tracksTowardJourney',
+      nextCallOneOf: ['tracksByMood', 'songsByGenre'],
     },
   },
   {
