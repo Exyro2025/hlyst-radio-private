@@ -17,6 +17,13 @@ const ROUTER_SYSTEM = [
   'Never invent a track id. The current track is a discovery seed, not a valid pick.',
 ].join(' ');
 
+const RESEARCH_ROUTER_SYSTEM = [
+  'You are a model that can do function calling with the following functions.',
+  'You are the backstage Producer Research Router for a live personal radio station.',
+  'Choose and call exactly one offered research function.',
+  'Do not decide whether anything airs, choose sound effects, or write listener-facing speech.',
+].join(' ');
+
 interface RouterConfig {
   baseUrl: string;
   model: string;
@@ -28,6 +35,12 @@ export interface RoutedDiscovery {
   seen: Map<string, any>;
   steps: number;
   toolCalls: Array<{ name: string; args: Record<string, unknown>; result: unknown }>;
+}
+
+export interface RoutedResearch {
+  name: string;
+  args: Record<string, unknown>;
+  result: unknown;
 }
 
 interface ParsedCall {
@@ -49,6 +62,10 @@ export function producerRouterConfig(env: NodeJS.ProcessEnv = process.env): Rout
   const timeoutMs = Number.isFinite(requested) ? Math.max(1_000, Math.min(60_000, requested)) : 15_000;
   const apiKey = String(env.PRODUCER_ROUTER_API_KEY ?? '').trim();
   return { baseUrl, model, timeoutMs, ...(apiKey ? { apiKey } : {}) };
+}
+
+export function producerSegmentRouterEnabled(env: NodeJS.ProcessEnv = process.env): boolean {
+  return /^(1|true|yes|on)$/i.test(String(env.PRODUCER_ROUTER_SEGMENTS ?? '').trim());
 }
 
 function endpoint(baseUrl: string): string {
@@ -268,6 +285,102 @@ export async function routeProducerDiscovery({
       model: config.model, via: 'openai-compatible:functiongemma', usage,
       t: new Date().toISOString(), system: ROUTER_SYSTEM, user: prompt,
       response: responses.join('\n\n'), steps: toolCalls.length, toolCalls,
+      error: error?.message ?? String(error),
+    });
+    throw error;
+  }
+}
+
+// One bounded research choice for the split segment path. Unlike picker
+// discovery there is no recovery round: an empty result is itself useful
+// evidence for the larger Producer to decline, and trying a different subject
+// would quietly change what the scheduled segment was about.
+export async function routeProducerResearch({
+  prompt,
+  tools,
+  config = producerRouterConfig(),
+  fetchImpl = fetch,
+  recordImpl = record,
+}: {
+  prompt: string;
+  tools: ToolSet;
+  config?: RouterConfig | null;
+  fetchImpl?: typeof fetch;
+  recordImpl?: typeof record;
+}): Promise<RoutedResearch> {
+  if (!config) throw new Error('Producer Router is not configured');
+  const offered = openAiTools(tools);
+  if (!offered.length) throw new Error('Producer Research Router has no available tools');
+
+  const started = Date.now();
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), config.timeoutMs);
+  let usage = { input: 0, output: 0, total: 0 };
+  let responseText = '';
+  let toolCalls: RoutedDiscovery['toolCalls'] = [];
+  try {
+    let response: Response;
+    try {
+      response = await fetchImpl(endpoint(config.baseUrl), {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+          ...(config.apiKey ? { authorization: `Bearer ${config.apiKey}` } : {}),
+        },
+        body: JSON.stringify({
+          model: config.model,
+          messages: [
+            { role: 'developer', content: RESEARCH_ROUTER_SYSTEM },
+            { role: 'user', content: prompt },
+          ],
+          tools: offered,
+          tool_choice: 'required',
+          parallel_tool_calls: false,
+          temperature: 0,
+          max_tokens: 256,
+          stop: ['<end_function_call>'],
+        }),
+        signal: controller.signal,
+      });
+    } finally {
+      clearTimeout(timer);
+    }
+
+    const body: any = await response.json().catch(() => null);
+    usage = usageOf(body);
+    if (!response.ok) throw new Error(`Producer Research Router endpoint returned ${response.status}: ${JSON.stringify(body).slice(0, 240)}`);
+    const message = body?.choices?.[0]?.message;
+    responseText = typeof message?.content === 'string' ? message.content.trim() : '';
+    const rawCalls: OpenAiToolCall[] = Array.isArray(message?.tool_calls) ? message.tool_calls : [];
+    const parsed = rawCalls.length ? parseOpenAiCalls(rawCalls) : parseFunctionGemmaCall(message?.content);
+    if (parsed.length !== 1) throw new Error(`Producer Research Router returned ${parsed.length} tool calls; expected exactly one`);
+    const call = parsed[0];
+    const selected: any = (tools as any)[call.name];
+    if (!selected) throw new Error(`Producer Research Router selected unavailable tool "${call.name}"`);
+    const validated = selected.inputSchema?.safeParse?.(call.arguments);
+    if (!validated?.success) throw new Error(`Producer Research Router supplied invalid arguments for "${call.name}"`);
+    if (typeof selected.execute !== 'function') throw new Error(`Producer Research Router selected non-executable tool "${call.name}"`);
+    const result = await selected.execute(validated.data, {
+      toolCallId: rawCalls[0]?.id || 'producer-research-router-0',
+      messages: [],
+      abortSignal: undefined,
+    });
+    const routed = { name: call.name, args: validated.data, result };
+    toolCalls = [routed];
+    recordImpl({
+      kind: 'djProducerSegmentRoute', ok: true, ms: Date.now() - started,
+      model: config.model, via: 'openai-compatible:functiongemma', usage,
+      t: new Date().toISOString(), system: RESEARCH_ROUTER_SYSTEM, user: prompt,
+      response: responseText, steps: 1, toolCalls,
+    });
+    return routed;
+  } catch (error: any) {
+    clearTimeout(timer);
+    recordImpl({
+      kind: 'djProducerSegmentRoute', ok: false, ms: Date.now() - started,
+      model: config.model, via: 'openai-compatible:functiongemma', usage,
+      t: new Date().toISOString(), system: RESEARCH_ROUTER_SYSTEM, user: prompt,
+      response: responseText, steps: toolCalls.length, toolCalls,
       error: error?.message ?? String(error),
     });
     throw error;

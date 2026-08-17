@@ -6,7 +6,9 @@ import {
   parseFunctionGemmaCall,
   parseOpenAiCalls,
   producerRouterConfig,
+  producerSegmentRouterEnabled,
   routeProducerDiscovery,
+  routeProducerResearch,
 } from '../src/llm/internal/producer/router.js';
 
 test('Producer Router stays disabled until both endpoint and model are configured', () => {
@@ -19,6 +21,8 @@ test('Producer Router stays disabled until both endpoint and model are configure
   } as NodeJS.ProcessEnv), {
     baseUrl: 'http://router/v1', model: 'router.gguf', timeoutMs: 1000,
   });
+  assert.equal(producerSegmentRouterEnabled({} as NodeJS.ProcessEnv), false);
+  assert.equal(producerSegmentRouterEnabled({ PRODUCER_ROUTER_SEGMENTS: 'true' } as NodeJS.ProcessEnv), true);
 });
 
 test('parses native OpenAI and llama.cpp FunctionGemma tool calls', () => {
@@ -184,4 +188,37 @@ test('rejects unoffered calls before execution and records failure', async () =>
     recordImpl: ((value: any) => records.push(value)) as any,
   }), /unavailable tool/);
   assert.equal(records[0].ok, false);
+});
+
+test('routes and executes exactly one segment research tool', async () => {
+  const requests: any[] = [];
+  const records: any[] = [];
+  const result = await routeProducerResearch({
+    prompt: 'Research the exact track now playing.',
+    tools: {
+      skill_now_playing_dig_v2: tool({
+        description: 'exact-track specialist research',
+        inputSchema: z.object({}),
+        execute: async () => ({ available: true, claim: 'Produced by Example Producer.' }),
+      }),
+      skill_news_v2: tool({
+        description: 'general headlines', inputSchema: z.object({}), execute: async () => [],
+      }),
+    },
+    config: { baseUrl: 'http://router/v1', model: 'router-v2.gguf', timeoutMs: 5000 },
+    fetchImpl: (async (_url: any, init: any) => {
+      requests.push(JSON.parse(init.body));
+      return jsonResponse({
+        role: 'assistant',
+        content: '<start_function_call>call:skill_now_playing_dig_v2{}<end_function_call>',
+      });
+    }) as any,
+    recordImpl: ((value: any) => records.push(value)) as any,
+  });
+
+  assert.equal(requests.length, 1);
+  assert.equal(result.name, 'skill_now_playing_dig_v2');
+  assert.deepEqual(result.result, { available: true, claim: 'Produced by Example Producer.' });
+  assert.equal(records[0].kind, 'djProducerSegmentRoute');
+  assert.equal(records[0].ok, true);
 });

@@ -34,7 +34,14 @@ import * as settings from '../settings.js';
 import { defineAgent } from '../llm/agent.js';
 import { djObject, modelTolerant } from '../llm/sdk.js';
 import { buildContextLines, CONTEXT_FIELDS, fuzzyAirTime, generatePersonaSegment, lengthMode, lengthPhrase } from '../llm/dj.js';
-import { ProducerSegmentSchema, producerSegmentSystem } from '../llm/producer.js';
+import {
+  ProducerSegmentSchema,
+  producerRouterConfig,
+  producerSegmentRouterEnabled,
+  producerSegmentSelectSystem,
+  producerSegmentSystem,
+  routeProducerResearch,
+} from '../llm/producer.js';
 import { buildSegmentTools, fetchSegmentData } from '../llm/segment-tools.js';
 import { recordCuriosity, recentAiredCuriosity } from './curiosity.js';
 import { loadedCapabilities } from './loader.js';
@@ -346,7 +353,12 @@ export const producerDirectorAgent = defineAgent({
   }),
 });
 
-export function buildProducerSituation(ctx, caps, currentTrack) {
+export function buildProducerSituation(
+  ctx,
+  caps,
+  currentTrack,
+  instruction = 'Research one offered kind, then decide whether it is worth airing. Return production fields only; never write the line.',
+) {
   const lines = ['Operational moment:'];
   lines.push(...buildContextLines(ctx, { contextFields: unionContextFields(caps) }));
   if (currentTrack) lines.push(`Track on air: "${currentTrack.title}" by ${currentTrack.artist || 'unknown'}`);
@@ -360,7 +372,7 @@ export function buildProducerSituation(ctx, caps, currentTrack) {
     .slice(0, 8)
     .map((entry) => `${entry.kind} (${Math.max(0, Math.round((now - new Date(entry.t).getTime()) / 60_000))}m ago)`);
   if (recentKinds.length) lines.push(`\nRecent segment kinds already aired:\n${recentKinds.map((item) => `- ${item}`).join('\n')}`);
-  lines.push('\nResearch one offered kind, then decide whether it is worth airing. Return production fields only; never write the line.');
+  lines.push(`\n${instruction}`);
   return lines.join('\n');
 }
 
@@ -387,13 +399,14 @@ function mentions(value: unknown, subject: unknown): boolean {
 // biography fact to whichever song happened to be on air.
 export function groundedSearchEvidence(kind: string, value: any): any {
   if (!value || typeof value !== 'object') return value;
-  if (kind !== 'now-playing-dig' && kind !== 'web-search') return value;
+  const family = skillFamily(kind);
+  if (family !== 'now-playing-dig' && family !== 'web-search') return value;
   // Specialist adapters already return the controller's provenance-bearing
   // contract; the legacy search normalizer below exists only during migration.
   if (isResearchEvidence(value)) return value;
   const artist = String(value.artist || '').trim();
   const title = String(value.title || '').trim();
-  const supports = (text: unknown) => kind === 'now-playing-dig'
+  const supports = (text: unknown) => family === 'now-playing-dig'
     ? mentions(text, artist) && mentions(text, title)
     : mentions(text, artist);
   const answer = supports(value.answer) ? String(value.answer).trim() : '';
@@ -443,6 +456,10 @@ const TRACK_CONTEXT_SEGMENTS = new Set([
   'album-anniversary', 'library-deep-cut', 'now-playing-dig',
 ]);
 
+function skillFamily(kind: unknown): string {
+  return String(kind || '').replace(/-v\d+$/i, '');
+}
+
 // Context crossing into Persona is selected by code, not copied from the
 // Producer prompt. Built-ins get the smallest known requirement; custom skills
 // may opt into date/clock/time/festival through their explicit `context:` field.
@@ -453,8 +470,9 @@ export function personaSegmentContext(cap, ctx): { facts: string[]; includeTrack
   if (show?.topic) facts.push(`Show brief: ${show.topic}`);
 
   let fields: string[] = [];
-  if (cap?.kind === 'curiosity') fields = ['date'];
-  else if (cap?.kind === 'weather') fields = ['clock'];
+  const family = skillFamily(cap?.kind);
+  if (family === 'curiosity') fields = ['date'];
+  else if (family === 'weather') fields = ['clock'];
   else if (!cap?.seeded && cap?.contextFields != null) fields = effectiveContextFields(cap);
 
   if (fields.includes('date') && ctx?.date) {
@@ -468,7 +486,7 @@ export function personaSegmentContext(cap, ctx): { facts: string[]; includeTrack
   if (fields.includes('festival') && ctx?.festival?.name) {
     facts.push(`Festival: ${ctx.festival.name}${ctx.festival.description ? ` — ${ctx.festival.description}` : ''}.`);
   }
-  return { facts, includeTrack: TRACK_CONTEXT_SEGMENTS.has(cap?.kind) };
+  return { facts, includeTrack: TRACK_CONTEXT_SEGMENTS.has(family) };
 }
 
 export type SplitSegmentStatus = 'draft' | 'producer-declined' | 'producer-invalid' | 'evidence-rejected' | 'stale' | 'persona-empty';
@@ -480,12 +498,122 @@ interface SplitSegmentResult {
   attempts: SkillResearchAttempt[];
 }
 
+function isWeatherCapability(cap): boolean {
+  return skillFamily(cap?.kind) === 'weather';
+}
+
+export function changedWeatherCapability(caps, ctx, state: SegmentState) {
+  const condition = ctx?.weather?.condition;
+  if (!condition || condition === 'unknown' || condition === state.lastWeatherCondition) return null;
+  return caps.find(isWeatherCapability) || null;
+}
+
+function segmentSelectorSystem(cap, freq: string, sfxCatalog) {
+  return `${producerSegmentSelectSystem()}\n\nStation cadence: ${stationTone(freq)}\n\nOnly offered segment kind:\n- ${cap.kind}: ${cap.desc}${producerSfxBlock(sfxCatalog)}`;
+}
+
+async function selectProducerSegment({ cap, evidence, situation, freq, sfxCatalog }) {
+  const schema = ProducerSegmentSchema.extend({
+    kind: z.union([z.literal(cap.kind), z.null()]),
+  });
+  return deadlinedSegmentObject({
+    system: segmentSelectorSystem(cap, freq, sfxCatalog),
+    prompt: `${situation}\n\nResearch result for "${cap.kind}":\n${JSON.stringify(evidence, null, 2)}\n\nDecide whether this exact researched segment is worth airing. Return production fields only.`,
+    schema,
+    temperature: 0.4,
+    kind: 'djProducerSegmentSelect',
+    role: 'producer',
+  });
+}
+
+async function runHybridSegmentResearch(ctx, {
+  caps, freq, sfxCatalog, state, currentTrack, routerConfig,
+}) {
+  let cap = changedWeatherCapability(caps, ctx, state);
+  let routed;
+
+  if (cap) {
+    // Changed weather is already an authoritative controller fact. Asking a
+    // tiny model to rediscover it adds ambiguity without editorial judgement.
+    const result = await fetchSegmentData(cap, ctx, state);
+    routed = { name: cap.toolName, args: {}, result };
+  } else {
+    // Unchanged weather is not a useful alternative. The established simple
+    // path applies the same freshness rule.
+    const routeCaps = caps.filter(candidate => !isWeatherCapability(candidate));
+    if (!routeCaps.length) {
+      return {
+        object: { air: false, kind: null, reason: 'Weather has not changed since the last update', sfx: null },
+        toolCalls: [],
+      };
+    }
+    if (!routeCaps.every(candidate => typeof candidate.toolFn === 'function' && candidate.toolName)) {
+      throw new Error('Producer Research Router cannot safely represent a prompt-only offered skill');
+    }
+
+    if (routeCaps.length === 1) {
+      cap = routeCaps[0];
+      const result = await fetchSegmentData(cap, ctx, state);
+      routed = { name: cap.toolName, args: {}, result };
+    } else {
+      const tools = buildSegmentTools(ctx, state, routeCaps, currentTrack);
+      routed = await routeProducerResearch({
+        prompt: buildProducerSituation(
+          ctx,
+          routeCaps,
+          currentTrack,
+          'Choose exactly one offered research function. Do not decide airtime or write the line.',
+        ),
+        tools,
+        config: routerConfig,
+      });
+      cap = routeCaps.find(candidate => candidate.toolName === routed.name) || null;
+      if (!cap) throw new Error(`Producer Research Router returned unmapped tool "${routed.name}"`);
+    }
+  }
+
+  const toolCalls = [routed];
+  const evidence = groundedSearchEvidence(cap.kind, routed.result);
+  if (typeof cap.toolFn === 'function' && !usableSegmentEvidence(evidence)) {
+    return {
+      object: { air: false, kind: null, reason: `${cap.kind} returned no usable evidence`, sfx: null },
+      toolCalls,
+    };
+  }
+  const situation = buildProducerSituation(
+    ctx,
+    [cap],
+    currentTrack,
+    'The controller has completed the research. Decide whether it is worth airing; never write the line.',
+  );
+  const object = await selectProducerSegment({ cap, evidence, situation, freq, sfxCatalog });
+  return { object, toolCalls };
+}
+
 async function runSplitDirector(ctx, { caps, speaker, freq, sfxCatalog, state = segmentState, rehearsal = false }): Promise<SplitSegmentResult> {
   const currentTrack = queue.current?.track ?? null;
-  const { object, toolCalls } = await producerDirectorAgent.run({
-    messages: [{ role: 'user', content: buildProducerSituation(ctx, caps, currentTrack) }],
-    caps, freq, sfxCatalog, ctx, segmentState: state, currentTrack, rehearsal,
-  });
+  let object;
+  let toolCalls;
+  const routerConfig = producerRouterConfig();
+  const useResearchRouter = !rehearsal && producerSegmentRouterEnabled() && !!routerConfig;
+  if (useResearchRouter) {
+    try {
+      ({ object, toolCalls } = await runHybridSegmentResearch(ctx, {
+        caps, freq, sfxCatalog, state, currentTrack, routerConfig,
+      }));
+    } catch (error: any) {
+      // Segment routing is optional. Unfamiliar prompt-only custom skills,
+      // endpoint failures and malformed tiny-model calls all return to the
+      // complete established Producer agent for this tick.
+      queue.log('scheduler', `Producer Research Router unavailable (${error?.message || error}) — using full Producer segment agent`);
+    }
+  }
+  if (!object || !toolCalls) {
+    ({ object, toolCalls } = await producerDirectorAgent.run({
+      messages: [{ role: 'user', content: buildProducerSituation(ctx, caps, currentTrack) }],
+      caps, freq, sfxCatalog, ctx, segmentState: state, currentTrack, rehearsal,
+    }));
+  }
   const attempts = researchAttemptsFromToolCalls(caps, toolCalls);
   if (!object?.air) return { status: 'producer-declined', seg: null, reason: object?.reason || 'Producer chose silence', attempts };
   const cap = caps.find((candidate) => candidate.kind === object?.kind);

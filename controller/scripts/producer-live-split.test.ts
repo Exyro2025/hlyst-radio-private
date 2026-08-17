@@ -29,7 +29,7 @@ const {
   generatePersonaSegment,
   personaSegmentPrompt,
 } = await import('../src/llm/internal/prompts/scripts.js');
-const { buildProducerSituation, groundedSearchEvidence, isolatedSegmentState, personaSegmentContext, producerDirectorAgent, usableSegmentEvidence } = await import('../src/skills/_agent.js');
+const { buildProducerSituation, changedWeatherCapability, groundedSearchEvidence, isolatedSegmentState, personaSegmentContext, producerDirectorAgent, usableSegmentEvidence } = await import('../src/skills/_agent.js');
 const { rehearsalStationServices } = await import('../src/llm/internal/tools/station-services.js');
 const { showMusicLean } = await import('../src/llm/internal/prompts/picker.js');
 const { queue } = await import('../src/broadcast/queue.js');
@@ -307,6 +307,20 @@ test('segment context is selected for the chosen skill', () => {
   assert.ok(!weather.facts.join('\n').includes('Wednesday'));
   assert.equal(weather.includeTrack, false);
   assert.equal(personaSegmentContext({ kind: 'now-playing-dig', seeded: true }, ctx).includeTrack, true);
+  assert.equal(personaSegmentContext({ kind: 'now-playing-dig-v2', seeded: true }, ctx).includeTrack, true);
+  assert.match(personaSegmentContext({ kind: 'weather-v2', seeded: true }, ctx).facts.join('\n'), /approaching 11am/);
+});
+
+test('changed weather is a controller route for both original and v2 skills', () => {
+  const state = {
+    seenHeadlines: new Set<string>(),
+    lastWeatherCondition: 'clear',
+    lastSearchedArtist: null,
+    lastAnySegment: 0,
+  };
+  const caps = [{ kind: 'curiosity-v2' }, { kind: 'weather-v2', toolName: 'skill_weather_v2' }];
+  assert.equal(changedWeatherCapability(caps, { weather: { condition: 'rain' } }, state)?.kind, 'weather-v2');
+  assert.equal(changedWeatherCapability(caps, { weather: { condition: 'clear' } }, state), null);
 });
 
 test('failed and empty tool payloads cannot reach the Persona as evidence', () => {
@@ -359,6 +373,15 @@ test('now-playing evidence requires an explicit answer and exact-track source', 
   assert.deepEqual(evidence.sources.map((source) => source.label), [
     'Anna Meredith: Varmints review: “Dowager” starts as a spinster lament.',
   ]);
+});
+
+test('v2 track research receives the same grounding policy', () => {
+  assert.equal(groundedSearchEvidence('now-playing-dig-v2', {
+    artist: 'Happy Mondays',
+    title: 'Angel',
+    answer: '',
+    sources: ['Happy Mondays - Angel - CD single listing.'],
+  }).available, false);
 });
 
 test('exact-track snippets alone cannot authorise a Persona claim', () => {

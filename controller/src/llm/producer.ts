@@ -9,6 +9,7 @@ export {
   producerPickSystem,
   producerSelectSystem,
   producerSegmentSystem,
+  producerSegmentSelectSystem,
   checkProducerPick,
   checkProducerSegment,
 } from './internal/producer/contracts.js';
@@ -17,6 +18,9 @@ export {
   parseFunctionGemmaCall,
   parseOpenAiCalls,
   producerRouterConfig,
+  producerSegmentRouterEnabled,
   routeProducerDiscovery,
+  routeProducerResearch,
   type RoutedDiscovery,
+  type RoutedResearch,
 } from './internal/producer/router.js';

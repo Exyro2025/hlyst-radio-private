@@ -463,12 +463,14 @@ with the configured Producer and Persona models respectively. Manual Run Now
 and Off Air Test calls already identify one specific skill; they do not need a
 router merely to rediscover that choice.
 
-Held-out segment fixtures cover changed weather, exact-track research, recent
-artist news and album anniversaries. Router-v1's Q8 CPU checkpoint scored 0/4
-on these unseen tool names (two invalid `searchLibrary` calls and two missing
-calls), while still passing the new empty-journey recovery case. Warm latency
-was 323-723ms. This is the expected pre-training result and proves that the
-picker checkpoint must not be silently enabled for segment work.
+The initial held-out segment fixtures covered changed weather, exact-track
+research, recent artist news and album anniversaries. Router-v1's Q8 CPU
+checkpoint scored 0/4 on these unseen tool names (two invalid `searchLibrary`
+calls and two missing calls), while still passing the new empty-journey
+recovery case. Warm latency was 323-723ms. This was the expected pre-training
+result and proved that the picker checkpoint must not be silently enabled for
+segment work. Changed weather later moved out of model scope because the
+controller already owns that authoritative state transition.
 
 Generate router-v2's mixed picker/segment dataset and train it into a separate
 output directory, preserving router-v1 as the live benchmark:
@@ -518,6 +520,27 @@ then handles only genuine choices among the remaining research tools.
 FunctionGemma emitted Python-style `None` for the nullable artist-news query.
 The native, evaluator and live-controller parsers now normalise `None`/`True`/
 `False` alongside JSON `null`/`true`/`false` before validating tool arguments.
+
+The text-only Q8_0 conversion of checkpoint 900 preserved every in-scope result
+across five deterministic passes: protocol 50/50, routing 50/50 and recovery
+10/10. Across those 50 calls it averaged 336ms (207ms p50, 981ms p95, 1.098s
+maximum); the slower tail consists of the intentional two-call recovery cases.
+
+Segment routing is a separate opt-in on top of the picker router:
+
+```dotenv
+PRODUCER_ROUTER_SEGMENTS=1
+```
+
+When enabled, changed weather is researched directly by controller policy. A
+single remaining research skill is also fetched directly. With two or more
+data-backed skills, FunctionGemma chooses and executes one, then the configured
+Producer model receives only that selected evidence and decides airtime and
+SFX through `djProducerSegmentSelect`. Persona receives the approved evidence
+afterwards and remains the sole writer. Off-air rehearsals retain the
+established full Producer path. If a prompt-only custom skill is offered, or
+the router fails, the complete Producer segment agent handles that tick so the
+optimisation cannot make operator skills disappear.
 
 ## Hybrid live experiment
 

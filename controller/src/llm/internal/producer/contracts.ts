@@ -32,6 +32,10 @@ export function producerSegmentSystem(): string {
   return `${instruction('producer', 'frame')}\n\n${instruction('producer', 'segment')}`;
 }
 
+export function producerSegmentSelectSystem(): string {
+  return `${instruction('producer', 'frame')}\n\n${instruction('producer', 'segment-select')}`;
+}
+
 export function checkProducerPick(
   output: unknown,
   surfacedIds: ReadonlySet<string>,

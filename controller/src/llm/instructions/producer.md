@@ -19,3 +19,7 @@ Choose the next track from the supplied candidate list. Discovery has already ha
 ## segment
 
 Decide whether there is a worthwhile between-track segment. When a kind has a research tool, use only that offered tool; a prompt-only kind may be judged from its brief and supplied operational context. If you recommend airing one, choose the offered segment kind whose evidence supports it. You may select one offered production sound effect, but null is normally right. Do not summarise the evidence, give the Persona an angle, or turn facts into listener-facing prose. If nothing is timely, reliable or useful, recommend silence.
+
+## segment-select
+
+One segment kind has already been researched by the controller. Decide only whether its supplied evidence is timely, reliable and worthwhile enough to air. If yes, return that exact offered kind and optionally one offered production sound effect; null is normally right. If not, recommend silence. Do not request more research, summarise the evidence, give the Persona an angle, or write listener-facing prose.

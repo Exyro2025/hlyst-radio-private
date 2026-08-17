@@ -99,15 +99,6 @@ export const FUNCTIONGEMMA_VALIDATION_SCENARIOS: readonly FunctionGemmaScenario[
     route: { firstCallOneOf: ['deepCuts'] },
   },
   {
-    id: 'segment.route.changed-weather',
-    stage: 'route',
-    split: 'validation',
-    description: 'Changed conditions should route to weather research, not generic news.',
-    prompt: 'Choose one research function for a between-track segment. Rain has just replaced clear skies and no weather update has aired recently.',
-    tools: [segmentTool('skill_weather_v2'), segmentTool('skill_news_v2'), segmentTool('skill_curiosity_v2')],
-    route: { firstCallOneOf: ['skill_weather_v2'] },
-  },
-  {
     id: 'segment.route.exact-track-fact',
     stage: 'route',
     split: 'validation',
