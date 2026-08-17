@@ -491,6 +491,34 @@ passing the new segment-routing fixtures before any live segment opt-in is
 added. Final track selection, segment approval, production SFX choice and all
 spoken copy remain deliberately outside the 270M model's scope.
 
+#### Router-v2 checkpoint selection — 2026-08-17
+
+Development loss again selected checkpoint 300, but the held-out operational
+routes improved at every saved checkpoint:
+
+| Checkpoint | Routing | Recovery | Regressions / misses |
+| --- | ---: | ---: | --- |
+| 300 | 8/11 | 2/2 | lower energy, overlooked shelves, changed weather |
+| 600 | 9/11 | 2/2 | changed weather, album anniversary |
+| 900 | 10/11 | 2/2 | changed weather |
+
+Checkpoint 900 is therefore the router-v2 candidate even though checkpoint 300
+has the lowest aggregate development loss. This is a multi-objective routing
+task: aggregate token loss is useful for early warning, but it is not a proxy
+for whether every operational boundary remains intact. Frozen route/recovery
+scores decide which checkpoint advances.
+
+The remaining weather miss is better handled as controller policy. SUB/WAVE
+already knows when current conditions differ from the last weather segment; a
+changed condition is a deterministic freshness signal, not an editorial tool
+choice. The controller should directly research weather when that signal is
+present and omit stale weather from the router's alternatives. FunctionGemma
+then handles only genuine choices among the remaining research tools.
+
+FunctionGemma emitted Python-style `None` for the nullable artist-news query.
+The native, evaluator and live-controller parsers now normalise `None`/`True`/
+`False` alongside JSON `null`/`true`/`false` before validating tool arguments.
+
 ## Hybrid live experiment
 
 Branch `codex/functiongemma-hybrid` integrates router-v1 behind an optional
