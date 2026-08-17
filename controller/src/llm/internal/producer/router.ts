@@ -93,15 +93,18 @@ export function parseOpenAiCalls(rawCalls: readonly OpenAiToolCall[] | undefined
 // OpenAI tool_calls. Recognise only its documented, flat call envelope.
 export function parseFunctionGemmaCall(content: unknown): ParsedCall[] {
   if (typeof content !== 'string') return [];
-  const match = content.match(/<start_function_call>call:([^\s{]+)\{([\s\S]*?)\}(?:<end_function_call>|$)/);
-  if (!match) return [];
-  const args: Record<string, unknown> = {};
-  for (const part of splitArguments(match[2])) {
-    const separator = part.indexOf(':');
-    if (separator < 1) continue;
-    args[part.slice(0, separator).trim()] = scalar(part.slice(separator + 1).trim());
-  }
-  return [{ name: match[1], arguments: args }];
+  // Parse every explicitly marked flat call, even when the model omitted an
+  // end marker. The caller requires exactly one, so leaked recovery calls are
+  // rejected rather than allowing the parser to hide the first or last one.
+  return [...content.matchAll(/<start_function_call>call:([^\s{]+)\{([^}]*)\}/g)].map(match => {
+    const args: Record<string, unknown> = {};
+    for (const part of splitArguments(match[2])) {
+      const separator = part.indexOf(':');
+      if (separator < 1) continue;
+      args[part.slice(0, separator).trim()] = scalar(part.slice(separator + 1).trim());
+    }
+    return { name: match[1], arguments: args };
+  });
 }
 
 function splitArguments(raw: string): string[] {

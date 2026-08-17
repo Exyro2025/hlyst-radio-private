@@ -24,9 +24,7 @@ PRODUCER_SYSTEM = " ".join([
     "When a done function is offered, use it only after discovery has surfaced a candidate.",
 ])
 
-CALL_PATTERN = re.compile(
-    r"<start_function_call>call:([^\s{]+)\{([\s\S]*?)\}(?:<end_function_call>|$)"
-)
+CALL_PATTERN = re.compile(r"<start_function_call>call:([^\s{]+)\{([^}]*)\}")
 
 
 def parse_args() -> argparse.Namespace:
@@ -73,16 +71,16 @@ def scalar(raw: str) -> Any:
     return value
 
 
-def parse_call(text: str) -> dict[str, Any] | None:
-    match = CALL_PATTERN.search(text)
-    if not match:
-        return None
-    arguments: dict[str, Any] = {}
-    for part in split_arguments(match.group(2)):
-        key, separator, value = part.partition(":")
-        if separator and key.strip():
-            arguments[key.strip()] = scalar(value)
-    return {"name": match.group(1), "arguments": arguments}
+def parse_calls(text: str) -> list[dict[str, Any]]:
+    calls: list[dict[str, Any]] = []
+    for match in CALL_PATTERN.finditer(text):
+        arguments: dict[str, Any] = {}
+        for part in split_arguments(match.group(2)):
+            key, separator, value = part.partition(":")
+            if separator and key.strip():
+                arguments[key.strip()] = scalar(value)
+        calls.append({"name": match.group(1), "arguments": arguments})
+    return calls
 
 
 def result_for(scenario: dict[str, Any], call: dict[str, Any]) -> Any:
@@ -104,6 +102,7 @@ def run_scenario(
     ]
     calls: list[dict[str, Any]] = []
     responses: list[str] = []
+    calls_per_round: list[int] = []
     max_rounds = 3 if scenario["stage"] == "recover" else 1
     started = time.perf_counter()
 
@@ -131,10 +130,12 @@ def run_scenario(
         ).strip()
         if text:
             responses.append(text)
-        call = parse_call(text)
-        if call is None:
+        parsed = parse_calls(text)
+        calls_per_round.append(len(parsed))
+        calls.extend(parsed)
+        if len(parsed) != 1:
             break
-        calls.append(call)
+        call = parsed[0]
         messages.append({
             "role": "assistant",
             "tool_calls": [{
@@ -159,6 +160,7 @@ def run_scenario(
         "scenario": scenario["id"],
         "calls": calls,
         "latencyMs": round((time.perf_counter() - started) * 1000),
+        "callsPerRound": calls_per_round,
         **({"responseText": "\n\n".join(responses)} if responses else {}),
     }
 

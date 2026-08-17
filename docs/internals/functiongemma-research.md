@@ -344,12 +344,15 @@ two unimproved evaluations.
 The final selected weights are written to `output/router-v1/best`; checkpoints,
 TensorBoard logs and a reproducibility manifest remain alongside them.
 
-The trainer renders each structured conversation through FunctionGemma's own
-chat template before constructing the Arrow dataset. This preserves native
-function calls and structured tool responses while avoiding Arrow's inability
-to store string messages and object-valued tool results in one nested
-`content` column. `rendered-sample.txt` records the first exact training
-sequence for inspection.
+The trainer renders each assistant decision through FunctionGemma's own chat
+template before constructing a homogeneous prompt/completion Arrow dataset.
+Each tool call is a separate completion-only target. In recovery examples the
+second target can see the first call and its empty result, but loss is never
+applied across both calls as one continuous answer. This preserves native
+function calls and structured tool responses, avoids Arrow's mixed-content
+limitation, and teaches the required stop between decision points.
+`rendered-sample.txt` records the first exact prompt plus completion for
+inspection.
 
 Monitor the run from a second terminal with `nvidia-smi`. To continue an
 interrupted run, repeat the command with `--resume latest`. Do not evaluate or
@@ -525,6 +528,57 @@ The text-only Q8_0 conversion of checkpoint 900 preserved every in-scope result
 across five deterministic passes: protocol 50/50, routing 50/50 and recovery
 10/10. Across those 50 calls it averaged 336ms (207ms p50, 981ms p95, 1.098s
 maximum); the slower tail consists of the intentional two-call recovery cases.
+
+#### Router-v2 live rejection and router-v3 correction — 2026-08-17
+
+Router-v2 passed the small frozen harness but failed its first live deployment.
+Several semantic routes copied synthetic training literals such as
+`seed-train-b-1379` instead of the current Navidrome track id. Some responses
+also emitted an initial similarity call and a recovery call in the same model
+turn, before any tool result existed. Finally, `tracksByMood` was trained with
+`energy` as optional, while the live controller schema requires the key to be
+present with either `low`, `medium`, `high`, or JSON `null`.
+
+These were dataset and evaluation defects, not acceptable model variance:
+
+- five repeated seed prefixes made memorisation easier than copying live ids;
+- full-conversation loss rewarded both calls in a recovery transcript without
+  isolating the turn boundary;
+- the training contract was looser than the production Zod schema;
+- the native parser could hide a leaked first call and score only a later one.
+
+Router-v3 therefore changes the experiment before any further live test:
+
+1. Every generated conversation uses a unique, production-shaped 22-character
+   current-track id, with disjoint deterministic train and development sets.
+2. Prompts carry a production-shaped JSON packet containing `currentTrack` and
+   representative show context rather than a short synthetic metadata suffix.
+3. Similarity targets are validated to copy the id from that packet exactly.
+4. `tracksByMood` always sends `energy`; it is explicitly `null` when no energy
+   restriction was requested.
+5. Training uses completion-only loss on one assistant decision at a time.
+6. Native and llama.cpp evaluation record calls per round and fail any response
+   that emits zero or multiple calls at one decision point.
+
+The v2 model remains disabled after this result. Router-v3 must pass the frozen
+harness, novel-id copying tests, schema checks, multi-call checks and an offline
+production-shaped soak before it is eligible for another live opt-in.
+
+Train it into a new directory so the rejected v2 artifacts remain available
+for comparison:
+
+```bash
+npm run functiongemma:data
+python scripts/functiongemma/training/train.py \
+  --train scripts/functiongemma/training/data/train.jsonl \
+  --development scripts/functiongemma/training/data/development.jsonl \
+  --output scripts/functiongemma/training/output/router-v3 \
+  --epochs 8 \
+  --batch-size 4 \
+  --gradient-accumulation 2 \
+  --max-length 1536 \
+  --learning-rate 5e-5
+```
 
 Segment routing is a separate opt-in on top of the picker router:
 

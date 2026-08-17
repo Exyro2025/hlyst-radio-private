@@ -117,17 +117,20 @@ export function parseToolCalls(rawCalls: readonly OpenAiToolCall[] | undefined):
 // exactly FunctionGemma's documented call envelope and simple flat arguments.
 export function parseFunctionGemmaContent(content: unknown): PredictedToolCall[] {
   if (typeof content !== 'string') return [];
-  const match = content.match(/<start_function_call>call:([^\s{]+)\{([\s\S]*?)\}(?:<end_function_call>|$)/);
-  if (!match) return [];
-  const args: Record<string, unknown> = {};
-  for (const part of splitArguments(match[2])) {
-    const separator = part.indexOf(':');
-    if (separator < 1) continue;
-    const key = part.slice(0, separator).trim();
-    const raw = part.slice(separator + 1).trim();
-    args[key] = functionGemmaScalar(raw);
-  }
-  return [{ name: match[1], arguments: args }];
+  // Parse every marked call, including a call whose closing marker is absent.
+  // This makes a leaked second call visible to the scorer instead of silently
+  // accepting only the final well-formed envelope.
+  return [...content.matchAll(/<start_function_call>call:([^\s{]+)\{([^}]*)\}/g)].map(match => {
+    const args: Record<string, unknown> = {};
+    for (const part of splitArguments(match[2])) {
+      const separator = part.indexOf(':');
+      if (separator < 1) continue;
+      const key = part.slice(0, separator).trim();
+      const raw = part.slice(separator + 1).trim();
+      args[key] = functionGemmaScalar(raw);
+    }
+    return { name: match[1], arguments: args };
+  });
 }
 
 function splitArguments(raw: string): string[] {
@@ -183,6 +186,7 @@ export async function runModelScenario(
   const calls: PredictedToolCall[] = [];
   const responseText: string[] = [];
   const finishReasons: string[] = [];
+  const callsPerRound: number[] = [];
   const started = Date.now();
   const maxRounds = scenario.stage === 'recover' ? 3 : 1;
 
@@ -234,13 +238,16 @@ export async function runModelScenario(
     const parsed = rawCalls.length
       ? parseToolCalls(rawCalls)
       : parseFunctionGemmaContent(message?.content);
+    callsPerRound.push(parsed.length);
     const replayCalls: OpenAiToolCall[] = rawCalls.length ? rawCalls : parsed.map((call, index) => ({
       id: `functiongemma-${round}-${index}`,
       type: 'function',
       function: { name: call.name, arguments: JSON.stringify(call.arguments) },
     }));
     calls.push(...parsed);
-    if (!parsed.length) break;
+    // One decision point permits exactly one call. Do not fabricate tool
+    // results for an invalid multi-call response during evaluation.
+    if (parsed.length !== 1) break;
 
     messages.push({
       role: 'assistant',
@@ -266,5 +273,6 @@ export async function runModelScenario(
     latencyMs: Date.now() - started,
     ...(responseText.length ? { responseText: responseText.join('\n\n') } : {}),
     ...(finishReasons.length ? { finishReasons } : {}),
+    callsPerRound,
   };
 }

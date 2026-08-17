@@ -22,10 +22,14 @@ function sameScalar(expected: unknown, actual: unknown): boolean {
 function protocolViolations(
   scenario: FunctionGemmaScenario,
   calls: readonly PredictedToolCall[],
+  callsPerRound?: readonly number[],
 ): string[] {
   if (!calls.length) return ['no-tool-call'];
   const offered = new Map(scenario.tools.map(tool => [tool.name, tool]));
   const violations: string[] = [];
+  for (const [round, count] of (callsPerRound ?? []).entries()) {
+    if (count !== 1) violations.push(`round-${round + 1}:expected-one-call:received-${count}`);
+  }
   for (const [index, call] of calls.entries()) {
     const contract = offered.get(call.name);
     if (!contract) {
@@ -118,7 +122,9 @@ export function scorePrediction(
 ): ScenarioScore {
   const calls = prediction?.calls ?? [];
   const dimensions: Partial<Record<ScoreDimension, DimensionScore>> = {
-    protocol: dimension(prediction ? protocolViolations(scenario, calls) : ['missing-prediction']),
+    protocol: dimension(prediction
+      ? protocolViolations(scenario, calls, prediction.callsPerRound)
+      : ['missing-prediction']),
   };
   if (scenario.route) dimensions.routing = dimension(routeViolations(scenario, calls));
   if (scenario.recovery) dimensions.recovery = dimension(recoveryViolations(scenario, calls));
