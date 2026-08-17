@@ -580,6 +580,32 @@ python scripts/functiongemma/training/train.py \
   --learning-rate 5e-5
 ```
 
+#### Router-v3 result — 2026-08-17
+
+Completion-only training selected checkpoint 768 after 985.6 seconds. The
+selected weights are 544 MiB; best development loss was 0.018023 and reported
+training loss 0.014635. These losses are not directly comparable with v1/v2,
+because v3 excludes prompt and previous-turn tokens from the loss.
+
+Five deterministic native runs passed every intended route and recovery gate:
+routing 60/60 and recovery 10/10. The new production-shaped id-copy and
+explicit-null scenarios passed on all five runs, with no multi-call-per-round
+violations. Final-commit controls still fail as expected because candidate
+selection remains outside this router's trained role.
+
+The text-only Q8_0 conversion preserved the scores exactly under CPU-only
+llama.cpp. Across all 75 frozen calls it averaged 359ms, with 231ms p50,
+1.406s p95 and 1.474s maximum latency.
+
+Because router-v2 had passed the small harness before failing live, router-v3
+also underwent a larger generated soak. Three hundred fresh production-shaped
+examples produced 384 independent route and recovery decisions. Every decision
+used a novel 22-character current-track id and was checked for exact tool,
+exact arguments, explicit nullable fields, and exactly one call per response.
+Q8 CPU passed 384/384 with 338ms average, 299ms p50, 552ms p95 and 602ms
+maximum latency. This clears router-v3 for a bounded live experiment; it does
+not expand FunctionGemma into final selection or listener-facing work.
+
 Segment routing is a separate opt-in on top of the picker router:
 
 ```dotenv
