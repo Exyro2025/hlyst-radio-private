@@ -29,6 +29,10 @@ test('parses native OpenAI and llama.cpp FunctionGemma tool calls', () => {
     parseFunctionGemmaCall('<start_function_call>call:tracksByMood{mood:<escape>night<escape>,energy:null}<end_function_call>'),
     [{ name: 'tracksByMood', arguments: { mood: 'night', energy: null } }],
   );
+  assert.deepEqual(
+    parseFunctionGemmaCall('<start_function_call>call:skill_web_search_v2{query:None}<end_function_call>'),
+    [{ name: 'skill_web_search_v2', arguments: { query: null } }],
+  );
 });
 
 function jsonResponse(message: any, usage = { prompt_tokens: 10, completion_tokens: 2, total_tokens: 12 }) {

@@ -62,11 +62,11 @@ def scalar(raw: str) -> Any:
     value = raw.strip()
     if value.startswith("<escape>") and value.endswith("<escape>"):
         return value[len("<escape>"):-len("<escape>")]
-    if value == "null":
+    if value in {"null", "None"}:
         return None
-    if value == "true":
+    if value in {"true", "True"}:
         return True
-    if value == "false":
+    if value in {"false", "False"}:
         return False
     if re.fullmatch(r"-?\d+(?:\.\d+)?", value):
         return float(value) if "." in value else int(value)

@@ -113,6 +113,13 @@ test('parses FunctionGemma native content returned by a content-only server', ()
   );
 });
 
+test('normalises FunctionGemma Python-style null arguments', () => {
+  assert.deepEqual(
+    parseFunctionGemmaContent('<start_function_call>call:skill_web_search_v2{query:None}<end_function_call>'),
+    [{ name: 'skill_web_search_v2', arguments: { query: null } }],
+  );
+});
+
 test('model runner carries an empty result into a different recovery call', async () => {
   const fixture = scenario('recover.empty-semantic-index');
   const replies = [

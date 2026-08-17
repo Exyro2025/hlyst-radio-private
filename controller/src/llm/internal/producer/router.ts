@@ -108,9 +108,12 @@ function scalar(raw: string): unknown {
   if (raw.startsWith('<escape>') && raw.endsWith('<escape>')) {
     return raw.slice('<escape>'.length, -'<escape>'.length);
   }
-  if (raw === 'null') return null;
-  if (raw === 'true') return true;
-  if (raw === 'false') return false;
+  // FunctionGemma's native envelope follows Python spellings in some
+  // Transformers/llama.cpp templates even though the OpenAI schema is JSON.
+  // Normalise both forms before Zod validates the real SUB/WAVE tool input.
+  if (raw === 'null' || raw === 'None') return null;
+  if (raw === 'true' || raw === 'True') return true;
+  if (raw === 'false' || raw === 'False') return false;
   if (/^-?\d+(?:\.\d+)?$/.test(raw)) return Number(raw);
   return raw;
 }
