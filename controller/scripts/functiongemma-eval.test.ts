@@ -9,6 +9,7 @@ import {
   runModelScenario,
 } from './functiongemma/model-runner.js';
 import { generateTrainingExamples, validateTrainingSets } from './functiongemma/training-data.js';
+import { buildNovelSoakCases, runSoakCase } from './functiongemma/soak.js';
 
 const scenario = (id: string) => {
   const found = FUNCTIONGEMMA_VALIDATION_SCENARIOS.find(item => item.id === id);
@@ -234,4 +235,33 @@ test('training recovery examples contain an empty result and a changed tool', ()
     const result = example.messages.find(message => message.role === 'tool');
     assert.deepEqual((result?.content as any)?.response?.tracks, [], example.id);
   }
+});
+
+test('builds a deterministic novel soak with separate recovery decisions', () => {
+  const cases = buildNovelSoakCases(100);
+  assert.deepEqual(cases, buildNovelSoakCases(100));
+  assert.ok(cases.length > 100);
+  assert.ok(cases.some(candidate => candidate.id.endsWith('decision-2')));
+  for (const candidate of cases) {
+    assert.equal(candidate.messages.at(-1)?.role === 'assistant', false, candidate.id);
+    assert.ok(candidate.tools.some(tool => tool.function.name === candidate.expected.name), candidate.id);
+  }
+});
+
+test('soak runner rejects two calls emitted at one decision point', async () => {
+  const candidate = buildNovelSoakCases(1)[0];
+  const fakeFetch: typeof fetch = async () => new Response(JSON.stringify({
+    choices: [{ message: { content: [
+      '<start_function_call>call:skill_now_playing_dig_v2{}',
+      '<start_function_call>call:skill_news_v2{}',
+    ].join('\n') } }],
+  }), { status: 200, headers: { 'content-type': 'application/json' } });
+  const result = await runSoakCase({
+    candidate,
+    baseUrl: 'http://model.test:8080/v1',
+    model: 'functiongemma',
+    fetchImpl: fakeFetch,
+  });
+  assert.equal(result.passed, false);
+  assert.equal(result.actual.length, 2);
 });
