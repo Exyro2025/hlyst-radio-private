@@ -48,6 +48,8 @@ export interface FunctionGemmaPrediction {
   iteration?: number;
   responseText?: string;
   finishReasons?: string[];
+  /** Number of native/OpenAI calls emitted in each model response. */
+  callsPerRound?: number[];
 }
 
 export type ScoreDimension =

@@ -9,6 +9,7 @@ import {
   runModelScenario,
 } from './functiongemma/model-runner.js';
 import { generateTrainingExamples, validateTrainingSets } from './functiongemma/training-data.js';
+import { buildNovelSoakCases, runSoakCase } from './functiongemma/soak.js';
 
 const scenario = (id: string) => {
   const found = FUNCTIONGEMMA_VALIDATION_SCENARIOS.find(item => item.id === id);
@@ -34,11 +35,12 @@ test('scores exact routing tool and arguments independently', () => {
 
 test('distinguishes recovery progress from repeating the failed tool', () => {
   const fixture = scenario('recover.empty-semantic-index');
+  const seedId = String(fixture.route?.arguments?.songId);
   const loop = scorePrediction(fixture, {
     scenario: fixture.id,
     calls: [
-      { name: 'tracksLikeThis', arguments: { songId: 'seed-current-track' } },
-      { name: 'tracksLikeThis', arguments: { songId: 'seed-current-track' } },
+      { name: 'tracksLikeThis', arguments: { songId: seedId } },
+      { name: 'tracksLikeThis', arguments: { songId: seedId } },
       { name: 'done', arguments: { id: 'reflective-01', reason: 'flow', transition: null } },
     ],
   });
@@ -47,7 +49,7 @@ test('distinguishes recovery progress from repeating the failed tool', () => {
   const progressed = scorePrediction(fixture, {
     scenario: fixture.id,
     calls: [
-      { name: 'tracksLikeThis', arguments: { songId: 'seed-current-track' } },
+      { name: 'tracksLikeThis', arguments: { songId: seedId } },
       { name: 'tracksByMood', arguments: { mood: 'reflective', energy: 'low' } },
       { name: 'done', arguments: { id: 'reflective-01', reason: 'flow', transition: null } },
     ],
@@ -113,6 +115,25 @@ test('parses FunctionGemma native content returned by a content-only server', ()
   );
 });
 
+test('surfaces multiple native calls instead of silently accepting the last one', () => {
+  const calls = parseFunctionGemmaContent([
+    '<start_function_call>call:tracksLikeThis{songId:<escape>V7mx9Qb2nL4sR8tK1cWdFz<escape>}',
+    '<start_function_call>call:tracksByMood{mood:<escape>reflective<escape>,energy:null}',
+  ].join('\n'));
+  assert.deepEqual(calls, [
+    { name: 'tracksLikeThis', arguments: { songId: 'V7mx9Qb2nL4sR8tK1cWdFz' } },
+    { name: 'tracksByMood', arguments: { mood: 'reflective', energy: null } },
+  ]);
+  const scored = scorePrediction(scenario('route.sonic-journey'), {
+    scenario: 'route.sonic-journey',
+    calls,
+    callsPerRound: [2],
+  });
+  assert.deepEqual(scored.dimensions.protocol?.violations, [
+    'round-1:expected-one-call:received-2',
+  ]);
+});
+
 test('normalises FunctionGemma Python-style null arguments', () => {
   assert.deepEqual(
     parseFunctionGemmaContent('<start_function_call>call:skill_web_search_v2{query:None}<end_function_call>'),
@@ -122,8 +143,9 @@ test('normalises FunctionGemma Python-style null arguments', () => {
 
 test('model runner carries an empty result into a different recovery call', async () => {
   const fixture = scenario('recover.empty-semantic-index');
+  const seedId = String(fixture.route?.arguments?.songId);
   const replies = [
-    { id: 'a', function: { name: 'tracksLikeThis', arguments: '{"songId":"seed-current-track"}' } },
+    { id: 'a', function: { name: 'tracksLikeThis', arguments: JSON.stringify({ songId: seedId }) } },
     { id: 'b', function: { name: 'tracksByMood', arguments: '{"mood":"reflective","energy":"low"}' } },
     { id: 'c', function: { name: 'done', arguments: '{"id":"reflective-01","reason":"flow","transition":null}' } },
   ];
@@ -140,6 +162,7 @@ test('model runner carries an empty result into a different recovery call', asyn
     baseUrl: 'http://model.test:8080', model: 'functiongemma',
   }, fakeFetch);
   assert.deepEqual(prediction.calls.map(call => call.name), ['tracksLikeThis', 'tracksByMood', 'done']);
+  assert.deepEqual(prediction.callsPerRound, [1, 1, 1]);
   assert.equal(bodies[0].messages[0].role, 'developer');
   assert.equal(bodies[0].max_tokens, 256);
   assert.deepEqual(bodies[0].stop, ['<end_function_call>']);
@@ -164,6 +187,41 @@ test('generates deterministic, disjoint routing and recovery datasets', () => {
   assert.ok(validation.families['recover.recover-journey-to-genre'] > 0);
 });
 
+test('training calls use exact live schemas and copy unique production-shaped ids', () => {
+  const examples = generateTrainingExamples('development', 240);
+  const seenIds = new Set<string>();
+  for (const example of examples) {
+    const prompt = String(example.messages.find(message => message.role === 'user')?.content ?? '');
+    const context = JSON.parse(prompt.slice(prompt.indexOf('\n\n{') + 2));
+    if (example.family === 'route.random-fallback') {
+      assert.equal(context.currentTrack, null, example.id);
+      continue;
+    }
+    const currentId = context.currentTrack.id;
+    assert.match(currentId, /^[A-Za-z0-9]{22}$/, example.id);
+    assert.equal(seenIds.has(currentId), false, example.id);
+    seenIds.add(currentId);
+    assert.ok('show' in context, example.id);
+
+    const calls = example.messages
+      .filter(message => message.role === 'assistant')
+      .flatMap(message => message.tool_calls ?? []);
+    for (const call of calls) {
+      if (call.function.name === 'tracksByMood') {
+        assert.equal('energy' in call.function.arguments, true, example.id);
+        assert.ok(
+          call.function.arguments.energy === null
+            || ['low', 'medium', 'high'].includes(String(call.function.arguments.energy)),
+          example.id,
+        );
+      }
+      if (call.function.name === 'tracksLikeThis' || call.function.name === 'similarSongs') {
+        assert.equal(call.function.arguments.songId, currentId, example.id);
+      }
+    }
+  }
+});
+
 test('training recovery examples contain an empty result and a changed tool', () => {
   const examples = generateTrainingExamples('development', 80)
     .filter(example => example.family.startsWith('recover.'));
@@ -177,4 +235,33 @@ test('training recovery examples contain an empty result and a changed tool', ()
     const result = example.messages.find(message => message.role === 'tool');
     assert.deepEqual((result?.content as any)?.response?.tracks, [], example.id);
   }
+});
+
+test('builds a deterministic novel soak with separate recovery decisions', () => {
+  const cases = buildNovelSoakCases(100);
+  assert.deepEqual(cases, buildNovelSoakCases(100));
+  assert.ok(cases.length > 100);
+  assert.ok(cases.some(candidate => candidate.id.endsWith('decision-2')));
+  for (const candidate of cases) {
+    assert.equal(candidate.messages.at(-1)?.role === 'assistant', false, candidate.id);
+    assert.ok(candidate.tools.some(tool => tool.function.name === candidate.expected.name), candidate.id);
+  }
+});
+
+test('soak runner rejects two calls emitted at one decision point', async () => {
+  const candidate = buildNovelSoakCases(1)[0];
+  const fakeFetch: typeof fetch = async () => new Response(JSON.stringify({
+    choices: [{ message: { content: [
+      '<start_function_call>call:skill_now_playing_dig_v2{}',
+      '<start_function_call>call:skill_news_v2{}',
+    ].join('\n') } }],
+  }), { status: 200, headers: { 'content-type': 'application/json' } });
+  const result = await runSoakCase({
+    candidate,
+    baseUrl: 'http://model.test:8080/v1',
+    model: 'functiongemma',
+    fetchImpl: fakeFetch,
+  });
+  assert.equal(result.passed, false);
+  assert.equal(result.actual.length, 2);
 });

@@ -1,6 +1,15 @@
 import type { FunctionGemmaScenario, ToolContract } from './contracts.js';
 
-const SEED_ID = 'seed-current-track';
+const SEED_ID = 'V7mx9Qb2nL4sR8tK1cWdFz';
+const MOOD_SEED_ID = 'p3Hx8Lm5Qa2Vn7Ds4KcR9W';
+
+function productionPrompt(
+  instruction: string,
+  currentTrack: { id: string; title: string; artist: string } | null,
+  show: Record<string, unknown> | null,
+): string {
+  return `${instruction}\n\n${JSON.stringify({ currentTrack, show }, null, 2)}`;
+}
 
 const noArgs = (name: string): ToolContract => ({ name });
 const withSongId = (name: string): ToolContract => ({ name, required: ['songId'] });
@@ -15,7 +24,7 @@ const done: ToolContract = {
 
 const tracksByMood: ToolContract = {
   name: 'tracksByMood',
-  required: ['mood'],
+  required: ['mood', 'energy'],
   enums: {
     mood: [
       'energetic', 'calm', 'reflective', 'celebratory', 'romantic', 'spiritual',
@@ -99,6 +108,40 @@ export const FUNCTIONGEMMA_VALIDATION_SCENARIOS: readonly FunctionGemmaScenario[
     route: { firstCallOneOf: ['deepCuts'] },
   },
   {
+    id: 'route.semantic-live-id',
+    stage: 'route',
+    split: 'validation',
+    description: 'Similarity routing must copy a novel production-shaped id, never a training literal.',
+    prompt: productionPrompt(
+      `Use the library semantic index to find music like the current track [id: ${SEED_ID}]. If that source is unavailable, choose the closest offered similarity source.`,
+      { id: SEED_ID, title: 'An Ending (Ascent)', artist: 'Brian Eno' },
+      {
+        name: 'The Evening Signal', topic: 'Calm discoveries and overlooked catalogue tracks.',
+        genres: ['Ambient', 'Electronic'], moods: ['reflective'], energies: ['low'],
+        eras: ['1970-1979', '1980-1989'], filtersStrict: false, playlistStrict: false,
+      },
+    ),
+    tools: [withSongId('tracksLikeThis'), withSongId('similarSongs'), tracksByMood, noArgs('randomSongs')],
+    route: { firstCallOneOf: ['tracksLikeThis'], arguments: { songId: SEED_ID } },
+  },
+  {
+    id: 'route.mood-null-energy',
+    stage: 'route',
+    split: 'validation',
+    description: 'Mood discovery must include the live schema’s explicit nullable energy key.',
+    prompt: productionPrompt(
+      'Find a reflective track using structured station tags. No energy restriction was requested.',
+      { id: MOOD_SEED_ID, title: 'Low Light', artist: 'Velvet Transit' },
+      {
+        name: 'The Scenic Route', topic: 'Thoughtful music without forcing the pace.',
+        genres: ['Art Rock'], moods: ['reflective'], energies: [], eras: [],
+        filtersStrict: false, playlistStrict: false,
+      },
+    ),
+    tools: [tracksByMood, tracksByEnergy, noArgs('randomSongs')],
+    route: { firstCallOneOf: ['tracksByMood'], arguments: { mood: 'reflective', energy: null } },
+  },
+  {
     id: 'segment.route.exact-track-fact',
     stage: 'route',
     split: 'validation',
@@ -134,7 +177,15 @@ export const FUNCTIONGEMMA_VALIDATION_SCENARIOS: readonly FunctionGemmaScenario[
     stage: 'recover',
     split: 'validation',
     description: 'An empty similarity result must cause a real strategy change.',
-    prompt: `Keep a reflective, low-energy flow from the current track [id: ${SEED_ID}]. Start with the library's semantic similarity, recover through a genuinely different discovery axis if it is empty, then commit only to an id actually surfaced by a tool.`,
+    prompt: productionPrompt(
+      `Keep a reflective, low-energy flow from the current track [id: ${SEED_ID}]. Start with the library's semantic similarity, recover through a genuinely different discovery axis if it is empty, then commit only to an id actually surfaced by a tool.`,
+      { id: SEED_ID, title: 'An Ending (Ascent)', artist: 'Brian Eno' },
+      {
+        name: 'The Evening Signal', topic: 'Calm discoveries and overlooked catalogue tracks.',
+        genres: ['Ambient'], moods: ['reflective'], energies: ['low'], eras: ['1980-1989'],
+        filtersStrict: false, playlistStrict: false,
+      },
+    ),
     tools: discoveryFallbacks,
     mockResults: {
       tracksLikeThis: {

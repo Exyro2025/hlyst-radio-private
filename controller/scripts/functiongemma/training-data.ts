@@ -40,14 +40,16 @@ const withString = (name: string, key: string): ToolContract => ({ name, require
 
 const moodTool: ToolContract = {
   name: 'tracksByMood',
-  required: ['mood'],
+  // Match the live Zod schema exactly. `energy` is required even when no
+  // energy filter is wanted; the caller must then send JSON null.
+  required: ['mood', 'energy'],
   enums: {
     mood: [
       'energetic', 'calm', 'reflective', 'celebratory', 'romantic', 'spiritual',
       'focus', 'workout', 'driving', 'cooking', 'rainy', 'sunny', 'night',
       'morning', 'evening', 'festival', 'cultural',
     ],
-    energy: ['low', 'medium', 'high'],
+    energy: ['low', 'medium', 'high', null],
   },
 };
 
@@ -124,18 +126,17 @@ const splitPools = {
     genres: ['post-punk', 'synth-pop', 'soul', 'folk rock', 'trip-hop', 'jazz', 'funk', 'shoegaze', 'ambient', 'disco', 'punk', 'dream pop'],
     artists: ['Glass Harbour', 'Signal Fires', 'Copper Lines', 'June Arcade', 'Low Satellite', 'Paper Cinema', 'Night Assembly', 'Static Gardens'],
     titles: ['Open Windows', 'Faint Signals', 'After the Rain', 'Parallel Lines', 'Northern Rooms', 'Long Division', 'Last Light', 'Slow Current'],
-    seeds: ['seed-train-a', 'seed-train-b', 'seed-train-c', 'seed-train-d', 'seed-train-e'],
   },
   development: {
     genres: ['krautrock', 'northern soul', 'art rock', 'dub', 'electro', 'garage rock'],
     artists: ['Velvet Transit', 'Amber District', 'Sunday Circuit', 'The Quiet Maps'],
     titles: ['Broken Compass', 'Signal Path', 'Soft Landing', 'Borrowed Weather'],
-    seeds: ['seed-dev-a', 'seed-dev-b', 'seed-dev-c'],
   },
 } as const;
 
 const moods = ['energetic', 'calm', 'reflective', 'celebratory', 'focus', 'driving', 'rainy', 'sunny', 'night', 'morning'] as const;
 const energies = ['low', 'medium', 'high'] as const;
+const idAlphabet = '0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz';
 
 function mulberry32(seed: number): () => number {
   return () => {
@@ -160,6 +161,41 @@ function shuffle<T>(values: readonly T[], random: () => number): T[] {
   return copy;
 }
 
+function liveTrackId(random: () => number): string {
+  let id = '';
+  for (let index = 0; index < 22; index++) id += pick(idAlphabet, random);
+  return id;
+}
+
+function productionPrompt(
+  instruction: string,
+  currentTrack: { id: string; title: string; artist: string } | null,
+  context: ExampleContext,
+): string {
+  const pools = splitPools[context.split];
+  // Preserve one canonical no-show/no-track fallback without flooding the
+  // dataset with identical conversations. Other no-seed examples still carry
+  // the active show packet that production commonly has available.
+  const show = context.split === 'train' && context.index === 21 ? null : {
+    name: pick([
+      'Another Day, Another Spin', 'The Scenic Route', 'Lunchtime Rocks',
+      'The Evening Signal', 'Good Tunes',
+    ], context.random),
+    topic: pick([
+      'Familiar favourites alongside overlooked album tracks.',
+      'A varied musical route with smooth changes of pace.',
+      'Prefer discoveries that still belong naturally in the current programme.',
+    ], context.random),
+    genres: [pick(pools.genres, context.random), pick(pools.genres, context.random)],
+    moods: [pick(moods, context.random)],
+    energies: [pick(energies, context.random)],
+    eras: [pick(['1970-1979', '1980-1989', '1990-1999', '2000-2009', '2010-2019', '2020-2029'], context.random)],
+    filtersStrict: context.index % 3 === 0,
+    playlistStrict: context.index % 5 === 0,
+  };
+  return `${instruction}\n\n${JSON.stringify({ currentTrack, show }, null, 2)}`;
+}
+
 function call(name: string, args: Record<string, unknown> = {}): TrainingMessage {
   return {
     role: 'assistant',
@@ -180,7 +216,7 @@ function routeExample(family: typeof routeFamilies[number], context: ExampleCont
   const genre = pick(pools.genres, context.random);
   const artist = pick(pools.artists, context.random);
   const title = pick(pools.titles, context.random);
-  const seed = `${pick(pools.seeds, context.random)}-${context.index}`;
+  const seed = liveTrackId(context.random);
   const mood = pick(moods, context.random);
   const energy = pick(energies, context.random);
   let prompt = '';
@@ -222,7 +258,7 @@ function routeExample(family: typeof routeFamilies[number], context: ExampleCont
     case 'mood':
       prompt = `Find a ${mood} track${context.random() > 0.45 ? ` at ${energy} energy` : ''} using structured station tags.`;
       target = 'tracksByMood';
-      args = { mood, ...(prompt.includes(' energy') ? { energy } : {}) };
+      args = { mood, energy: prompt.includes(' energy') ? energy : null };
       tools = ['tracksByMood', 'tracksByEnergy', 'searchLibrary', 'randomSongs'];
       break;
     case 'deep-cuts':
@@ -319,7 +355,11 @@ function routeExample(family: typeof routeFamilies[number], context: ExampleCont
       break;
   }
 
-  prompt = `${prompt} Current track metadata: "${title}" by ${artist} [id: ${seed}].`;
+  prompt = productionPrompt(
+    prompt,
+    family === 'random-fallback' ? null : { id: seed, title, artist },
+    context,
+  );
 
   return {
     id: `${context.split}.route.${family}.${context.index}`,
@@ -336,7 +376,7 @@ function routeExample(family: typeof routeFamilies[number], context: ExampleCont
 
 function recoveryExample(family: typeof recoveryFamilies[number], context: ExampleContext): FunctionGemmaTrainingExample {
   const pools = splitPools[context.split];
-  const seed = `${pick(pools.seeds, context.random)}-${context.index}`;
+  const seed = liveTrackId(context.random);
   const genre = pick(pools.genres, context.random);
   const artist = pick(pools.artists, context.random);
   const title = pick(pools.titles, context.random);
@@ -382,14 +422,14 @@ function recoveryExample(family: typeof recoveryFamilies[number], context: Examp
       prompt = `Ask the music server for songs related to [id: ${seed}], then switch to ${mood} tags if that service returns nothing.`;
       first = 'similarSongs';
       next = 'tracksByMood';
-      nextArgs = { mood };
+      nextArgs = { mood, energy: null };
       names = ['similarSongs', 'tracksLikeThis', 'tracksByMood', 'randomSongs'];
       break;
     case 'recover-playlist-to-mood':
       prompt = `Start with the active show playlist. If every pinned track is filtered out, recover through the ${mood} mood axis.`;
       first = 'showPlaylistTracks';
       next = 'tracksByMood';
-      nextArgs = { mood };
+      nextArgs = { mood, energy: null };
       names = ['showPlaylistTracks', 'tracksByMood', 'deepCuts', 'randomSongs'];
       break;
     case 'recover-journey-to-mood':
@@ -408,7 +448,7 @@ function recoveryExample(family: typeof recoveryFamilies[number], context: Examp
       break;
   }
 
-  prompt = `${prompt} Current track metadata: "${title}" by ${artist} [id: ${seed}].`;
+  prompt = productionPrompt(prompt, { id: seed, title, artist }, context);
 
   const firstArgs = first === 'showPlaylistTracks' || first === 'tracksTowardJourney' ? {} : { songId: seed };
   return {
@@ -462,10 +502,12 @@ export function validateTrainingSets(
   const violations: string[] = [];
   const all = [...train, ...development];
   const ids = new Set<string>();
+  const trackIds = new Set<string>();
   const messageFingerprints = new Map<string, string>();
   const validationPrompts = new Set(FUNCTIONGEMMA_VALIDATION_SCENARIOS.map(item => item.prompt));
   const bannedValidationLiterals = [
-    'seed-current-track', 'reflective-01', 'reflective-02', 'safe-favourite-01',
+    'seed-current-track', 'V7mx9Qb2nL4sR8tK1cWdFz', 'p3Hx8Lm5Qa2Vn7Ds4KcR9W',
+    'reflective-01', 'reflective-02', 'safe-favourite-01',
     'trap-01', 'trap-02', 'fresh-01', 'quiet-01', 'metal-01', 'dance-01',
     'single-01', 'album-01', 'album-02', 'Northbound', 'Southbank', 'Britpop',
   ];
@@ -478,6 +520,25 @@ export function validateTrainingSets(
     const user = example.messages.find(message => message.role === 'user')?.content;
     if (typeof user !== 'string') violations.push(`${example.id}: missing user prompt`);
     if (typeof user === 'string' && validationPrompts.has(user)) violations.push(`${example.id}: copied validation prompt`);
+    let currentTrackId: string | undefined;
+    if (typeof user === 'string') {
+      const jsonStart = user.indexOf('\n\n{');
+      try {
+        const context = JSON.parse(user.slice(jsonStart + 2));
+        currentTrackId = context?.currentTrack?.id;
+      } catch {
+        violations.push(`${example.id}: malformed production context`);
+      }
+    }
+    if (example.family === 'route.random-fallback' && currentTrackId == null) {
+      // This mirrors the live no-seed path.
+    } else if (typeof currentTrackId !== 'string' || !/^[A-Za-z0-9]{22}$/.test(currentTrackId)) {
+      violations.push(`${example.id}: current track id is not production-shaped`);
+    } else if (trackIds.has(currentTrackId)) {
+      violations.push(`${example.id}: repeated current track id ${currentTrackId}`);
+    } else {
+      trackIds.add(currentTrackId);
+    }
     const serialised = JSON.stringify(example);
     for (const literal of bannedValidationLiterals) {
       if (serialised.includes(literal)) violations.push(`${example.id}: leaked validation literal ${literal}`);
@@ -488,8 +549,22 @@ export function validateTrainingSets(
       .flatMap(message => message.tool_calls ?? []);
     if (!assistantCalls.length) violations.push(`${example.id}: missing assistant tool call`);
     for (const assistantCall of assistantCalls) {
-      if (!toolNames.has(assistantCall.function.name)) {
-        violations.push(`${example.id}: target tool not offered: ${assistantCall.function.name}`);
+      const name = assistantCall.function.name;
+      if (!toolNames.has(name)) {
+        violations.push(`${example.id}: target tool not offered: ${name}`);
+      }
+      const contract = contracts[name];
+      const args = assistantCall.function.arguments;
+      for (const key of contract?.required ?? []) {
+        if (!(key in args)) violations.push(`${example.id}: ${name} missing required argument ${key}`);
+      }
+      for (const [key, allowed] of Object.entries(contract?.enums ?? {})) {
+        if (key in args && !allowed.includes(args[key] as never)) {
+          violations.push(`${example.id}: ${name} has invalid ${key}`);
+        }
+      }
+      if ((name === 'tracksLikeThis' || name === 'similarSongs') && args.songId !== currentTrackId) {
+        violations.push(`${example.id}: ${name} did not copy the current track id`);
       }
     }
     const hash = fingerprint(example);

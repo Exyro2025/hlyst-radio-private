@@ -147,24 +147,40 @@ def main() -> int:
     )
     model.config.use_cache = False
 
-    def render_rows(rows: list[dict[str, Any]]) -> tuple[list[str], list[int]]:
-        texts: list[str] = []
+    def render_rows(rows: list[dict[str, Any]]) -> tuple[list[dict[str, str]], list[int]]:
+        rendered: list[dict[str, str]] = []
         token_lengths: list[int] = []
         for row in rows:
-            text = tokenizer.apply_chat_template(
-                row["messages"],
-                tools=row["tools"],
-                add_generation_prompt=False,
-                tokenize=False,
-            )
-            if not isinstance(text, str):
-                raise TypeError("FunctionGemma chat template did not return text")
-            # TRL's standard-text collator also tokenizes with
-            # add_special_tokens=False, avoiding a duplicate <bos>.
-            tokenised = tokenizer(text, add_special_tokens=False)["input_ids"]
-            texts.append(text)
-            token_lengths.append(len(tokenised))
-        return texts, token_lengths
+            messages = row["messages"]
+            for target_index, message in enumerate(messages):
+                if message.get("role") != "assistant":
+                    continue
+                prompt = tokenizer.apply_chat_template(
+                    messages[:target_index],
+                    tools=row["tools"],
+                    add_generation_prompt=True,
+                    tokenize=False,
+                )
+                full = tokenizer.apply_chat_template(
+                    messages[:target_index + 1],
+                    tools=row["tools"],
+                    add_generation_prompt=False,
+                    tokenize=False,
+                )
+                if not isinstance(prompt, str) or not isinstance(full, str):
+                    raise TypeError("FunctionGemma chat template did not return text")
+                if not full.startswith(prompt):
+                    raise ValueError(
+                        "FunctionGemma template cannot isolate an assistant completion"
+                    )
+                completion = full[len(prompt):]
+                if not completion.strip():
+                    raise ValueError("FunctionGemma rendered an empty assistant completion")
+                combined = prompt + completion
+                tokenised = tokenizer(combined, add_special_tokens=False)["input_ids"]
+                rendered.append({"prompt": prompt, "completion": completion})
+                token_lengths.append(len(tokenised))
+        return rendered, token_lengths
 
     rendered_train, train_lengths = render_rows(train_rows)
     rendered_development, development_lengths = render_rows(development_rows)
@@ -178,10 +194,11 @@ def main() -> int:
             "increase --max-length rather than silently truncating tool calls"
         )
     with (args.output / "rendered-sample.txt").open("w", encoding="utf-8") as handle:
-        handle.write(rendered_train[0])
+        handle.write(rendered_train[0]["prompt"])
+        handle.write(rendered_train[0]["completion"])
         handle.write("\n")
 
-    batches_per_epoch = math.ceil(len(train_rows) / args.batch_size)
+    batches_per_epoch = math.ceil(len(rendered_train) / args.batch_size)
     update_steps_per_epoch = math.ceil(batches_per_epoch / args.gradient_accumulation)
     planned_update_steps = math.ceil(update_steps_per_epoch * args.epochs)
     warmup_steps = max(1, math.ceil(planned_update_steps * 0.05))
@@ -193,7 +210,7 @@ def main() -> int:
     training_args = SFTConfig(
         output_dir=str(args.output),
         max_length=args.max_length,
-        dataset_text_field="text",
+        completion_only_loss=True,
         packing=False,
         num_train_epochs=args.epochs,
         per_device_train_batch_size=args.batch_size,
@@ -224,11 +241,12 @@ def main() -> int:
     trainer = SFTTrainer(
         model=model,
         args=training_args,
-        # PyArrow cannot store message.content as both strings and structured
-        # tool responses in one nested column. Render with FunctionGemma's
-        # official template first, then give TRL one homogeneous text column.
-        train_dataset=Dataset.from_dict({"text": rendered_train}),
-        eval_dataset=Dataset.from_dict({"text": rendered_development}),
+        # Each assistant decision becomes its own prompt/completion row. Loss
+        # is calculated only on that one call, so a recovery conversation
+        # cannot teach the model to emit its next call before seeing a tool
+        # result.
+        train_dataset=Dataset.from_list(rendered_train),
+        eval_dataset=Dataset.from_list(rendered_development),
         processing_class=tokenizer,
         callbacks=callbacks,
     )
@@ -254,6 +272,8 @@ def main() -> int:
         "dataset": {
             "train_rows": len(train_rows),
             "development_rows": len(development_rows),
+            "train_targets": len(rendered_train),
+            "development_targets": len(rendered_development),
             "train_sha256": file_sha256(args.train),
             "development_sha256": file_sha256(args.development),
             "max_tokens": longest,
