@@ -14,15 +14,21 @@
 // the guard). So the re-pick also steps around the artists of the last few
 // plays, and only falls back to the bare on-air exclusion when that leaves it
 // nothing — the same never-starve philosophy as #1187's pool rescue.
+//
+// #1406: that recency window only narrowed the re-pick POOL — the guard itself
+// still fired on the on-air artist alone, so a pick three slots after the same
+// artist was never examined and the window never consulted. The entry condition
+// is the window too now (artistGuardCause below), which is what turns "no
+// adjacent repeats" into actual spacing across a show.
 
 import { artistRootKey, type CandidateLike } from '../../music/recency.js';
 
-// How many recent plays the re-pick remembers. 5 covers the reported
-// oscillation (an artist re-entering every other slot is inside any window ≥ 2;
-// 5 also catches the slower every-third-slot shape) while staying far below the
-// point where a show-filtered run's candidate set is likely to be wholly recent
-// — and if it ever is, the fallback below hands the bare exclusion back rather
-// than starving.
+// Default for `settings.llm.artistVarietyWindow` — how many recent plays the
+// guard remembers. 5 covers the reported oscillation (an artist re-entering
+// every other slot is inside any window ≥ 2; 5 also catches the slower
+// every-third-slot shape) while staying far below the point where a
+// show-filtered run's candidate set is likely to be wholly recent — and if it
+// ever is, the fallbacks below hand the bare exclusion back rather than starving.
 //
 // NOTE the effective exclusion is wider than "5 plays": neighbourArtistRoots(n)
 // gathers up to n queued-and-unaired tracks AND the on-air track AND the last n
@@ -30,6 +36,30 @@ import { artistRootKey, type CandidateLike } from '../../music/recency.js';
 // (the queued side is what covers pair-aware drains, where the pick is not
 // adjacent to the track on air).
 export const ARTIST_VARIETY_WINDOW = 5;
+
+// Why the guard fired — 'onair' is the back-to-back repeat (#1124), 'recent' the
+// spacing miss (#1406: legal 3-slots-apart repeats that still read as the same
+// artist all morning). They are NOT the same event and the caller escalates them
+// differently, which is the whole reason this returns a cause rather than a
+// boolean: back-to-back is worth a pool rescue and a relaxation log; spacing is
+// a preference that yields to whatever the run already surfaced.
+export type ArtistGuardCause = 'onair' | 'recent' | null;
+
+// Does this pick need the guard?
+//
+// `recentRoots` is queue.neighbourArtistRoots(window) and already CONTAINS the
+// on-air artist, so the on-air test is checked first purely to name the cause —
+// an empty window (operator set 0) still leaves back-to-back protection intact.
+// An untagged pick is never guarded: no artist is not evidence of a repeat.
+export function artistGuardCause(
+  pickRoot: string,
+  onAirRoot: string,
+  recentRoots: Set<string> = new Set(),
+): ArtistGuardCause {
+  if (!pickRoot) return null;
+  if (onAirRoot && pickRoot === onAirRoot) return 'onair';
+  return recentRoots.has(pickRoot) ? 'recent' : null;
+}
 
 export interface AlternativePool<T> {
   // The candidates the re-pick may choose from, keyed by id as `seen` is.
@@ -47,9 +77,12 @@ export interface AlternativePool<T> {
 
 // The candidate set for a guard re-pick.
 //
-// `avoidRoot` is the predecessor's lead key (artistRootKey), `recentRoots` the
-// lead keys of the surrounding slots (queue.neighbourArtistRoots — queued and
-// unaired, on air, and the last few plays). Candidates with no artist at all are
+// `avoidRoot` is the lead key (artistRootKey) of the artist being steered away
+// from — the rejected pick's own artist, which on the 'onair' cause IS the
+// on-air artist. `recentRoots` is the lead keys of the surrounding slots
+// (queue.neighbourArtistRoots — queued and unaired, on air, and the last few
+// plays), so the on-air artist is excluded on either cause. Candidates with no
+// artist at all are
 // never dropped — an untagged track is not evidence of a repeat, and dropping it
 // would narrow thin runs for nothing.
 export function alternativeCandidates<T extends CandidateLike>(

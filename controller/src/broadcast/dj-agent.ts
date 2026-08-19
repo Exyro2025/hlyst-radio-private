@@ -36,7 +36,7 @@ import * as budget from './dj-budget.js';
 import { withTrace, logEvent } from '../observability/events.js';
 import { recencyWindowsForLibrary, effectiveNoRepeatWindow, artistRootKey } from '../music/recency.js';
 import { EXPLORE_SEED_PROBABILITY } from '../music/airing.js';
-import { ARTIST_VARIETY_WINDOW, alternativeCandidates } from './dj-agent/artist-guard.js';
+import { ARTIST_VARIETY_WINDOW, alternativeCandidates, artistGuardCause } from './dj-agent/artist-guard.js';
 import { hasEraBound, genreResolutionWarningOnce, type VocalMode } from '../music/show-filter.js';
 import { djCallsAllowed } from './listeners.js';
 import { autoVoiceAllowed } from './voice-policy.js';
@@ -368,60 +368,97 @@ async function pickViaAgent(queue, ctx, { wantLink, audioWaypoint = null, curren
   // plays, because a re-pick that knows only the on-air artist keeps returning to
   // whoever ranks next-highest — the every-other-slot repeat this guard exists
   // to prevent.
+  //
+  // #1406 widened the ENTRY condition to that same window. Until then it only
+  // narrowed the re-pick pool, so the guard never fired on a pick three slots
+  // after the same artist and the window was never consulted — every occurrence
+  // legal, and the same artist across a whole morning show. The two causes are
+  // escalated differently on purpose (see below): back-to-back is a fault worth
+  // a pool rescue, spacing is a preference that yields to the run.
+  const varietyWindow = settings.get().llm?.artistVarietyWindow ?? ARTIST_VARIETY_WINDOW;
+  const recentRoots = queue.neighbourArtistRoots(varietyWindow);
   const curArtist = artistRootKey(current || {});
-  if (curArtist && artistRootKey(song) === curArtist) {
-    const { alt, dropped, starved } = alternativeCandidates<any>(
-      extras.seen, curArtist, queue.neighbourArtistRoots(ARTIST_VARIETY_WINDOW),
-    );
-    let altSong: any = null;
-    if (alt.size) {
-      const repicked = await repickFromSeen({
-        seen: alt, badId: null, wantLink, showAt,
-        playlistResolved: !!playlistTracks?.length,
-        reason: `The track you chose is by ${song.artist}, the artist already on air — never play the same artist twice in a row. Choose a DIFFERENT artist from the candidates above.`,
+  const pickRoot = artistRootKey(song);
+  const guardCause = artistGuardCause(pickRoot, curArtist, recentRoots);
+  if (guardCause) {
+    const { alt, dropped, starved } = alternativeCandidates<any>(extras.seen, pickRoot, recentRoots);
+    const label = guardCause === 'onair' ? 'back-to-back artist' : 'recently-played artist';
+    // Spacing yields to the run. `starved` means every alternative the agent
+    // surfaced is ALSO inside the window, and an empty `alt` means the run was
+    // single-artist — in both cases there is no fresher artist to re-pick, and
+    // spending a re-pick call plus a pool rescue to end up back here would buy
+    // latency and nothing else. Back-to-back still escalates through both,
+    // because an artist following itself is not a preference.
+    if (guardCause === 'recent' && (starved || !alt.size)) {
+      logEvent('pick.artistGuard', {
+        relaxed: true, cause: guardCause, reason: alt.size ? 'all-recent' : 'no-other-artist',
+        artist: song.artist, candidates: alt.size, window: varietyWindow,
       });
-      // Resolved from `alt`, not `extras.seen`: the re-pick's id is constrained
-      // to the alternatives by construction (z.enum), and reading it back out of
-      // the narrower map is what keeps that true if the schema ever gains a
-      // tolerance for ids it didn't offer.
-      altSong = repicked?.id ? alt.get(repicked.id) : null;
-      if (altSong) {
-        logEvent('pick.artistGuard', { relaxed: false, from: song.artist, to: altSong.artist, candidates: alt.size, recencySkipped: dropped, recencyStarved: starved });
-        queue.log('picker', `back-to-back artist "${song.artist}" avoided — re-picked "${altSong.title}" by ${altSong.artist} from ${alt.size} other-artist candidate(s)${dropped ? `, ${dropped} more skipped as recently-played artists` : ''}${starved ? ' (every alternative was recently played — recency window waived)' : ''}`);
-        object = repicked;
-        song = altSong;
+      queue.log('picker', `recently-played artist "${song.artist}" allowed — no fresher artist among the run's candidates (spacing window ${varietyWindow} slots)`);
+    } else {
+      let altSong: any = null;
+      if (alt.size) {
+        const repicked = await repickFromSeen({
+          seen: alt, badId: null, wantLink, showAt,
+          playlistResolved: !!playlistTracks?.length,
+          reason: guardCause === 'onair'
+            ? `The track you chose is by ${song.artist}, the artist already on air — never play the same artist twice in a row. Choose a DIFFERENT artist from the candidates above.`
+            : `The track you chose is by ${song.artist}, who has already played in the last few slots — space artists out across the show. Choose a DIFFERENT artist from the candidates above.`,
+        });
+        // Resolved from `alt`, not `extras.seen`: the re-pick's id is constrained
+        // to the alternatives by construction (z.enum), and reading it back out of
+        // the narrower map is what keeps that true if the schema ever gains a
+        // tolerance for ids it didn't offer.
+        altSong = repicked?.id ? alt.get(repicked.id) : null;
+        if (altSong) {
+          logEvent('pick.artistGuard', { relaxed: false, cause: guardCause, from: song.artist, to: altSong.artist, candidates: alt.size, recencySkipped: dropped, recencyStarved: starved, window: varietyWindow });
+          queue.log('picker', `${label} "${song.artist}" avoided — re-picked "${altSong.title}" by ${altSong.artist} from ${alt.size} other-artist candidate(s)${dropped ? `, ${dropped} more skipped as recently-played artists` : ''}${starved ? ' (every alternative was recently played — recency window waived)' : ''}`);
+          object = repicked;
+          song = altSong;
+        }
       }
-    }
-    if (!altSong) {
-      // Pool rescue. This enqueues (and links, and records its own session turn)
-      // on success, so there is nothing left for this run to do — return true
-      // and let runTrackEvent treat the slot as filled. `enqueuePick`'s dedup
-      // still applies: a pool pick that collides with something already queued
-      // reports 'collision' and we fall through to the relaxation below rather
-      // than silently dropping the slot.
-      const rescued = await pickViaPool(
-        queue, ctx, { wantLink, current, showAt }, rankTarget, audioWaypoint,
-        { avoidArtist: song.artist },
-      );
-      // Why the rescue ran, phrased for the booth log: the run either surfaced
-      // no other artist at all, or surfaced some and the constrained re-pick
-      // call over them failed — two different stations of the same rescue.
-      const runWasThin = alt.size
-        ? `re-pick from ${alt.size} other-artist candidate(s) didn't land`
-        : 'every agent candidate was that artist';
-      if (rescued === 'queued') {
-        logEvent('pick.artistGuard', { relaxed: false, reason: 'pool-rescue', artist: song.artist, candidates: alt.size });
-        queue.log('picker', `back-to-back artist "${song.artist}" avoided — ${runWasThin}, so the pick came from the fallback pool instead`);
-        return true;
+      // A failed spacing re-pick keeps the pick. The pool rescue below exists to
+      // answer "does another artist exist AT ALL", which is only in doubt for
+      // back-to-back — here the run demonstrably surfaced one and the model
+      // declined to take it, so the honest outcome is the original pick, not a
+      // second model call chasing a preference.
+      if (!altSong && guardCause === 'recent') {
+        logEvent('pick.artistGuard', {
+          relaxed: true, cause: guardCause, reason: 'repick-failed',
+          artist: song.artist, candidates: alt.size, window: varietyWindow,
+        });
+        queue.log('picker', `recently-played artist "${song.artist}" allowed — re-pick from ${alt.size} other-artist candidate(s) didn't land (spacing window ${varietyWindow} slots)`);
+      } else if (!altSong) {
+        // Pool rescue. This enqueues (and links, and records its own session turn)
+        // on success, so there is nothing left for this run to do — return true
+        // and let runTrackEvent treat the slot as filled. `enqueuePick`'s dedup
+        // still applies: a pool pick that collides with something already queued
+        // reports 'collision' and we fall through to the relaxation below rather
+        // than silently dropping the slot.
+        const rescued = await pickViaPool(
+          queue, ctx, { wantLink, current, showAt }, rankTarget, audioWaypoint,
+          { avoidArtist: song.artist },
+        );
+        // Why the rescue ran, phrased for the booth log: the run either surfaced
+        // no other artist at all, or surfaced some and the constrained re-pick
+        // call over them failed — two different stations of the same rescue.
+        const runWasThin = alt.size
+          ? `re-pick from ${alt.size} other-artist candidate(s) didn't land`
+          : 'every agent candidate was that artist';
+        if (rescued === 'queued') {
+          logEvent('pick.artistGuard', { relaxed: false, reason: 'pool-rescue', artist: song.artist, candidates: alt.size });
+          queue.log('picker', `back-to-back artist "${song.artist}" avoided — ${runWasThin}, so the pick came from the fallback pool instead`);
+          return true;
+        }
+        // poolRescue distinguishes 'empty' (the pool truly holds no other artist)
+        // from 'collision' (it produced a pick that deduped against something
+        // already queued) — an operator reading #1187-style reports must be able
+        // to tell "the library really had nothing" from "a request slipped in
+        // mid-pick".
+        const reason = alt.size ? 'repick-failed' : 'no-other-artist';
+        logEvent('pick.artistGuard', { relaxed: true, reason, artist: song.artist, candidates: alt.size, poolRescue: rescued });
+        queue.log('picker', `back-to-back artist "${song.artist}" allowed — ${runWasThin} and the fallback pool ${rescued === 'collision' ? 'pick was already queued' : 'had none either'} (relaxed)`);
       }
-      // poolRescue distinguishes 'empty' (the pool truly holds no other artist)
-      // from 'collision' (it produced a pick that deduped against something
-      // already queued) — an operator reading #1187-style reports must be able
-      // to tell "the library really had nothing" from "a request slipped in
-      // mid-pick".
-      const reason = alt.size ? 'repick-failed' : 'no-other-artist';
-      logEvent('pick.artistGuard', { relaxed: true, reason, artist: song.artist, candidates: alt.size, poolRescue: rescued });
-      queue.log('picker', `back-to-back artist "${song.artist}" allowed — ${runWasThin} and the fallback pool ${rescued === 'collision' ? 'pick was already queued' : 'had none either'} (relaxed)`);
     }
   }
 

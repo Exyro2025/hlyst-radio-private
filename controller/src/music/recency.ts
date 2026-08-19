@@ -89,12 +89,43 @@ const FEATURE_SPLIT = /\s*[([]?\s*\b(?:feat|ft|featuring)\b\.?\s+/i;
 // with Sirens" and "Chase x Status"-style names would lose their tail.
 const JOIN_SPLIT = /\s+(?:&|\+|and)\s+/i;
 
+// Typographic noise that carries no identity: curly quotes against straight
+// ones ("Guns N’ Roses" vs "Guns N' Roses" — the same act, tagged either way
+// depending on which ripper wrote the file), and runs of whitespace. Folded
+// BEFORE the splits above so a curly apostrophe can't hide a join marker.
+const APOSTROPHES = /[‘’ʼ´`]/g;
+
+// A leading article is decoration, not identity — "The Clash" and "Clash" are
+// one act, and a station tagged from two sources routinely carries both. Only
+// stripped when something survives it, so "The The" keys as "the".
+const LEADING_ARTICLE = /^the\s+/;
+
+// Ensemble words an act's name picks up and drops between releases: "The Jimi
+// Hendrix Experience" is Jimi Hendrix, "Glenn Miller Orchestra" is Glenn
+// Miller, and a station carrying both aired the same artist twice with the
+// guard none the wiser (#1406). Only the LAST word is considered, and only
+// when a name remains — "The Band" keys as "band", not empty.
+//
+// Deliberately narrow: every word here is a role attached to a named lead, not
+// a name in its own right. Adding a word that can BE a name (e.g. "singers",
+// "boys") would fold unrelated acts together, and unlike the collaboration
+// collapse above that mistake is not always safe — see `blockedArtists` in
+// filterPickerCandidates, the one caller that treats a match as a hard drop.
+const ENSEMBLE_SUFFIX = /\s+(?:experience|band|orchestra|ensemble|trio|quartet|quintet|sextet)$/;
+
 // The LEAD artist of a credit — `artistKey` collapsed onto its primary act, so
 // a collaboration shares a key with the artist who leads it (#1251):
 //
 //   "Marvin Gaye & Tammi Terrell"  → "marvin gaye"
 //   "Kanye West (feat. Jay-Z)"     → "kanye west"
+//   "The Jimi Hendrix Experience"  → "jimi hendrix"
+//   "The Clash"                    → "clash"
 //   "Sly & the Family Stone"       → "sly & the family stone"   (unchanged)
+//
+// …and past the name variants one act picks up across a catalogue tagged from
+// more than one source (#1406): a leading article, an ensemble suffix, and
+// curly-vs-straight apostrophes. See the constants above for why that list is
+// short — the collapse is only safe while every word in it is a role, not a name.
 //
 // The `the …` exception on the join keeps band names whole: "X & the Y" is one
 // act, not two credits, and stripping it would key half the Motown and soul
@@ -113,7 +144,7 @@ const JOIN_SPLIT = /\s+(?:&|\+|and)\s+/i;
 // queue.recentlyPlayed builds from raw tag text. This is a MATCHING key.
 export function artistRootKey(song: CandidateLike | string): string {
   const raw = typeof song === 'string' ? song : (song?.artist || '');
-  const base = raw.toLowerCase().trim();
+  const base = raw.toLowerCase().replace(APOSTROPHES, "'").replace(/\s+/g, ' ').trim();
   if (!base) return '';
 
   let root = base;
@@ -125,6 +156,15 @@ export function artistRootKey(song: CandidateLike | string): string {
     const tail = root.slice(join.index + join[0].length).trim();
     if (tail && !/^the\b/.test(tail)) root = root.slice(0, join.index).trim();
   }
+
+  // Article and ensemble suffix come AFTER the splits, so the join's `the …`
+  // exception still sees the tail it was written to protect ("Sly & the Family
+  // Stone" is whole before either of these runs) and so the suffix is judged
+  // against the LEAD act's name rather than a collaborator's.
+  const unarticled = root.replace(LEADING_ARTICLE, '').trim();
+  if (unarticled) root = unarticled;
+  const unsuffixed = root.replace(ENSEMBLE_SUFFIX, '').trim();
+  if (unsuffixed) root = unsuffixed;
 
   return root || base;
 }

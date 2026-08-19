@@ -389,6 +389,21 @@ export function clampNoRepeatWindow(raw: unknown, def: number): number {
   return Math.min(1000, Math.max(0, Math.floor(raw)));
 }
 
+// Artist spacing window, in SLOTS (issue #1406). Floored to an integer in
+// [0, 25]: 0 turns spacing off and leaves only the back-to-back guard, which is
+// not operator-disableable — an artist following itself is a fault, not a taste.
+//
+// The ceiling is low on purpose and is not the same kind of number as
+// noRepeatWindow's 1000. This one is consulted at the POINT OF CHOICE against
+// the run's own candidates, and neighbourArtistRoots(n) excludes up to 2n+1
+// artists, so a large window on a show-filtered run mostly buys re-pick calls
+// that end in a waived window — cost without spacing. 25 is already ~2 hours of
+// air. Non-numeric/NaN falls back to `def`.
+export function clampArtistVarietyWindow(raw: unknown, def: number): number {
+  if (typeof raw !== 'number' || !Number.isFinite(raw)) return def;
+  return Math.min(25, Math.max(0, Math.floor(raw)));
+}
+
 // Validate + apply the connection fields shared by the primary LLM leg and its
 // optional fallback (provider/model/apiKey/ollamaUrl/baseUrl/reasoning/numCtx).
 // `target` is the live settings sub-object to mutate; `patch` is the incoming
