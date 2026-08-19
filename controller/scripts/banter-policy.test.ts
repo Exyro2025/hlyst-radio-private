@@ -40,6 +40,7 @@ const {
   BANTER_SLOTS, BANTER_WINDOW_MINUTES, BANTER_MIN_GAP_MS,
   banterSlot, banterSlotKey, banterWindowEnd, banterGap, banterCronExpression,
   banterStandDownLine, banterMissedLine,
+  banterTickPlan,
 } = await import('../src/broadcast/banter-policy.js');
 const { shouldFire } = await import('../src/broadcast/dj-gate.js');
 
@@ -176,6 +177,103 @@ test('the stand-down lines carry the reason and the numbers', () => {
   assert.match(missed, /300s/);
   // A fresh boot has no last break — the line must not print "Infinitys".
   assert.match(banterStandDownLine(20, banterGap({ nowMs: now, lastTalkBreakAt: 0 })), /never ago/);
+});
+
+// ---------------------------------------------------------------------------
+// THE TICK'S STATE MACHINE (banterTickPlan)
+// The half that had no coverage before: the slot claim, log-once, and which line
+// the window's last minute writes. Driven the way the scheduler drives it — one
+// call per minute, threading the two counters back in — so a mistake in the
+// caller's contract shows up here rather than on air.
+// ---------------------------------------------------------------------------
+
+// Replays a run of minutes exactly as banterTick does, and reports what aired
+// and what was logged. `talkAt` is the wall-clock minute (with seconds) some
+// other segment aired at.
+function replay(minutes: number[], opts: {
+  talkAtMin?: number; talkAtSec?: number; eligible?: boolean;
+} = {}) {
+  const lastTalkBreakAt = opts.talkAtMin == null
+    ? 0
+    : new Date(2026, 7, 19, 9, opts.talkAtMin, opts.talkAtSec ?? 0).getTime();
+  let firedSlot: string | null = null;
+  let loggedSlot: string | null = null;
+  const fired: number[] = [];
+  const logs: string[] = [];
+  for (const m of minutes) {
+    const plan = banterTickPlan({
+      now: at(m),
+      eligible: opts.eligible ?? true,
+      lastTalkBreakAt,
+      firedSlot,
+      loggedSlot,
+    });
+    if (plan.act === 'skip') continue;
+    if (plan.act === 'wait') {
+      if (plan.markLogged) loggedSlot = plan.markLogged;
+      if (plan.log) logs.push(plan.log);
+      continue;
+    }
+    firedSlot = plan.slotKey;
+    fired.push(m);
+  }
+  return { fired, logs };
+}
+
+const WINDOW_20 = [20, 21, 22, 23, 24, 25, 26, 27, 28, 29];
+
+test("the reporter's hour: a :19:35 ident postpones the exchange, it no longer cancels it", () => {
+  // 09:15 ident cron → boundary-deferred → actually airs 09:19:35. The old code
+  // saw 25s at the :20 tick and gave up until :50 (or, on moderate, until 10:20).
+  const { fired, logs } = replay(WINDOW_20, { talkAtMin: 19, talkAtSec: 35 });
+  // The gap clears at :24:35, so :24 is still short (24:00 − 19:35 = 265s) and
+  // :25 is the first minute that may air. This is the whole fix.
+  assert.deepEqual(fired, [25]);
+  // One stand-down line for the slot, not one per blocked minute.
+  assert.equal(logs.length, 1);
+  assert.match(logs[0], /stood down at :20 — last standalone talk 25s ago/);
+});
+
+test('a slot fires at most once, however many minutes are left in the window', () => {
+  // Nothing has aired at all: the gap is open from the first minute.
+  const { fired, logs } = replay(WINDOW_20);
+  assert.deepEqual(fired, [20], 'the slot opens, airs once, and stays quiet');
+  assert.deepEqual(logs, []);
+  // And the :50 window is its own chance, unaffected by the :20 one.
+  assert.deepEqual(replay([...WINDOW_20, 50, 51, 52]).fired, [20, 50]);
+});
+
+test('a window that never clears says so once, at the minute it is lost', () => {
+  // A talk break at :24 keeps the gap short for every remaining minute (:29 is
+  // only 300s later at :29:00 — exactly on the boundary, so it clears there).
+  const late = replay(WINDOW_20, { talkAtMin: 24, talkAtSec: 30 });
+  assert.deepEqual(late.fired, [], 'the gap never clears inside this window');
+  assert.equal(late.logs.length, 2, 'one stand-down at :20, one "missed" at :29');
+  assert.match(late.logs[0], /stood down at :20/);
+  assert.match(late.logs[1], /slot :20 missed/);
+  // The last minute being the FIRST blocked one still reports, with numbers —
+  // the case where an operator would otherwise get no line at all.
+  const only29 = replay([29], { talkAtMin: 28, talkAtSec: 30 });
+  assert.deepEqual(only29.fired, []);
+  assert.equal(only29.logs.length, 1);
+  assert.match(only29.logs[0], /slot :20 missed — last standalone talk 30s ago/);
+});
+
+test('an ineligible show is silent — it never logs about a gap it never reached', () => {
+  // Solo show / quiet persona / no listeners / budget spent all collapse to this.
+  const out = replay(WINDOW_20, { talkAtMin: 19, talkAtSec: 35, eligible: false });
+  assert.deepEqual(out.fired, []);
+  assert.deepEqual(out.logs, [], 'a per-minute tick must not narrate ineligible minutes');
+});
+
+test('minutes outside a window are skipped without a decision', () => {
+  for (const m of [0, 15, 19, 30, 45, 49]) {
+    assert.equal(
+      banterTickPlan({ now: at(m), eligible: true, lastTalkBreakAt: 0, firedSlot: null, loggedSlot: null }).act,
+      'skip',
+      `:${m} must not reach the gap check`,
+    );
+  }
 });
 
 test.after(() => rmSync(root, { recursive: true, force: true }));

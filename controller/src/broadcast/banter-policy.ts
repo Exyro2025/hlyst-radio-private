@@ -114,3 +114,57 @@ export function banterMissedLine(slot: number, gap: BanterGap): string {
   return `[banter] slot :${slot} missed — last standalone talk ${since} ago, `
     + `minimum gap ${Math.round(gap.needMs / 1000)}s never cleared before :${banterWindowEnd(slot)}`;
 }
+
+// ---------------------------------------------------------------------------
+// THE TICK'S STATE MACHINE
+// What one banter tick should do, as a pure decision over the clock, the two
+// slot counters and one collapsed eligibility flag. Split out for the same
+// reason skillCronAllowed() takes its four gates as an object: the rule is
+// worth pinning (scripts/banter-policy.test.ts walks the reporter's own hour
+// minute by minute) and it cannot be, if it reads real settings, listener and
+// budget state itself. The caller keeps resolving `eligible` — roster, the
+// frequency rung, listeners, budget — because those need the live modules.
+//
+// The ORDER matters and is the pre-#1419 order: a solo show or a quiet persona
+// short-circuits BEFORE the gap is consulted, so an ineligible show never logs
+// a stand-down about a gap that was never going to be asked about.
+// ---------------------------------------------------------------------------
+
+export type BanterPlan =
+  // Nothing to do: outside both windows, this slot already spoke, or the show
+  // isn't eligible this minute. Silent by design — a per-minute tick that
+  // narrated every ineligible minute would bury the booth log.
+  | { act: 'skip' }
+  // In the window, eligible, but the quiet gap hasn't elapsed. `log` is the one
+  // line to write (null when this slot has already reported), and `markLogged`
+  // is what the caller should remember so the next minute stays quiet.
+  | { act: 'wait'; slot: number; gap: BanterGap; log: string | null; markLogged: string | null }
+  // Air it. The caller claims `slotKey` BEFORE awaiting the exchange.
+  | { act: 'fire'; slot: number; slotKey: string; gap: BanterGap };
+
+export function banterTickPlan(p: {
+  now: Date;
+  eligible: boolean;
+  lastTalkBreakAt: number;
+  firedSlot: string | null;
+  loggedSlot: string | null;
+}): BanterPlan {
+  const slotKey = banterSlotKey(p.now);
+  if (!slotKey) return { act: 'skip' };            // outside both windows
+  if (slotKey === p.firedSlot) return { act: 'skip' };  // this slot already spoke
+  if (!p.eligible) return { act: 'skip' };
+  const slot = banterSlot(p.now.getMinutes())!;
+  const gap = banterGap({ nowMs: p.now.getTime(), lastTalkBreakAt: p.lastTalkBreakAt });
+  if (gap.clear) return { act: 'fire', slot, slotKey, gap };
+  // The window's last minute is the chance being LOST, so it says so rather
+  // than promising a retry that can't happen — and it carries the numbers,
+  // because it is the only line an operator gets when the last minute is also
+  // the first one to be blocked.
+  if (p.now.getMinutes() === banterWindowEnd(slot)) {
+    return { act: 'wait', slot, gap, log: banterMissedLine(slot, gap), markLogged: null };
+  }
+  // Once per slot, not once per tick: the stand-down was a bare `return`, which
+  // is why a starved hour left nothing in the log to explain itself (#1419).
+  if (p.loggedSlot === slotKey) return { act: 'wait', slot, gap, log: null, markLogged: null };
+  return { act: 'wait', slot, gap, log: banterStandDownLine(slot, gap), markLogged: slotKey };
+}
