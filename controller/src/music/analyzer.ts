@@ -50,6 +50,12 @@ export interface AnalysisResult {
   musicalKey: string | null;
   introMs: number | null;
   confidence: number | null;
+  // How unambiguous the TEMPO's octave was, 0..1 (#1417) — the onset evidence's
+  // distance from flipping between bpm and its half/double. null when the
+  // backend could not judge it (or predates the correction), which consumers
+  // must read as "unmeasured", never as a low score. `confidence` above is
+  // mostly about the key and cannot answer the same question.
+  bpmConfidence: number | null;
   // Structural sections over the analysed window (intro/leading sections are
   // the reliable part — the outro is beyond the decode window). null when the
   // backend computed none; consumers treat null as "no structure".
@@ -262,6 +268,7 @@ interface WorkerMessage {
   key?: string | null;
   intro_ms?: number | null;
   confidence?: number | null;
+  bpm_confidence?: number | null;
   loudness_lufs?: unknown;
   peak_db?: unknown;
   sections?: unknown;
@@ -432,6 +439,7 @@ function localRequest(req: ({ url: string } | { path: string }) & AnalyzeRequest
           musicalKey: msg.key ?? null,
           introMs: msg.intro_ms ?? null,
           confidence: msg.confidence ?? null,
+          bpmConfidence: msg.bpm_confidence ?? null,
           loudnessLufs: parseFinite(msg.loudness_lufs),
           peakDb: parseFinite(msg.peak_db),
           sections: parseSections(msg.sections),
@@ -596,6 +604,7 @@ async function sidecarRequest(body: ({ url: string } | { path: string }) & Analy
     musicalKey: resBody.key ?? null,
     introMs: resBody.intro_ms ?? null,
     confidence: resBody.confidence ?? null,
+    bpmConfidence: resBody.bpm_confidence ?? null,
     loudnessLufs: parseFinite(resBody.loudness_lufs),
     peakDb: parseFinite(resBody.peak_db),
     sections: parseSections(resBody.sections),

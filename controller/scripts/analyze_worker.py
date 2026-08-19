@@ -877,6 +877,245 @@ def embed_windows(embedder, path, librosa, duration_s):
     return [float(x) for x in mean]
 
 
+# --- Tempo octave correction (#1417) ---------------------------------------
+# librosa.beat.beat_track applies a log-normal tempo prior centred on 120 BPM
+# and returns whichever tempogram lag that prior favours. On slow material it
+# systematically picks the DOUBLE: a 76 BPM ballad comes back as 152.0, which
+# is a real tempogram peak (60*sr/hop/lag, lag 17) — just the wrong octave of
+# one. Nothing corrected it downstream, so the stored value drove bar-snapped
+# crossfades, playlist tempo bands, the picker's prompt and the embed text's
+# tempo word at twice the music's actual rate.
+#
+# Onset strength decides the octave here, not a prior. Both tests run on the
+# beat grid beat_track already returned, so they inherit its phase for free:
+#
+#   halve   Sample the envelope at every beat, then split the samples into the
+#           two alternating sets. A doubled grid lands half its beats on the
+#           real beat and half between them, so the sets separate
+#           (strong/weak/strong/weak); a grid at the true tempo keeps them level.
+#   double  Sample the MIDPOINTS between consecutive beats. Midpoints carrying
+#           beat-strength onsets mean the real pulse is twice the reported one
+#           and the reported grid is missing every other beat.
+#
+# Each test compares two EQUAL-SIZED sample sets drawn from the same envelope.
+# That symmetry is the whole point: comparing a raw autocorrelation at a lag
+# against its double has a lag-dependent noise floor, and drifts toward the
+# slow candidate on rhythmically weak material all by itself — which, for a fix
+# whose job is to slow tempos down, would be indistinguishable from working.
+#
+# Deliberately conservative. An override must clear EVERY one of its
+# conditions, so an ambiguous track keeps librosa's answer rather than being
+# churned, and the no-correction path is byte-for-byte the old behaviour.
+
+# Hop for every onset envelope in this file, and the frame unit the octave
+# tests share with beat_track's grid. Pinned in one place because the two must
+# agree: sampling a 512-hop envelope on beat frames measured at another hop
+# reads the onsets at the wrong times and the tests become noise.
+ONSET_HOP = 512
+
+# How unevenly the beats must alternate (weaker set mean / stronger set mean)
+# before a grid reads as doubled.
+OCTAVE_ALT_MAX = 0.60
+# ...and the weak set must ALSO sit at or below the envelope's own mean, i.e.
+# be background rather than a quieter beat. This is what separates a doubled
+# grid from a backbeat: reggae, soul and funk accent beats 2 and 4, so their
+# alternating sets separate at the TRUE tempo — but their unaccented beats
+# still carry a real kick, well above the envelope mean, while the interleaved
+# positions of a doubled grid carry nothing. Without this second condition the
+# one-drop half of a soul/reggae library would be halved into nonsense.
+OCTAVE_WEAK_MAX_MEAN = 1.0
+# What share of beat strength the midpoints must reach before a grid reads as
+# half-speed (every other beat missing).
+OCTAVE_OFF_MIN = 0.85
+# Range guards on the CORRECTED value, not the reported one. A perceived pulse
+# below ~55 BPM or above ~190 is vanishingly rare in recorded music, so a
+# correction landing outside the window is far likelier to be the tests
+# misreading an accent pattern than a real octave error — the last line of
+# defence for the backbeat case above. A refused correction reports zero tempo
+# confidence: we kept a reading the evidence argued against.
+OCTAVE_HALVE_FLOOR = 55.0
+OCTAVE_DOUBLE_CEIL = 190.0
+
+
+def onset_envelope(y, sr, librosa):
+    """Spectral-flux onset strength at ONSET_HOP, as a plain float list.
+
+    One computation shared by the tempo octave correction and the pace curve:
+    both read the same envelope, and the octave tests have to sample it on beat
+    frames in the same hop units. None on failure — every caller degrades."""
+    try:
+        env = librosa.onset.onset_strength(y=y, sr=sr, hop_length=ONSET_HOP)
+        return [float(v) for v in env] if len(env) else None
+    except Exception as e:  # noqa: BLE001 — an envelope is never a gate
+        log(f"onset envelope failed: {e}")
+        return None
+
+
+def _onset_at(env, frame):
+    """Onset strength at `frame`, taking the strongest of ±1 frame so a beat
+    landing a frame either side of a constant-tempo grid still reads as a beat.
+    Every sample set below is drawn this way, so it adds no asymmetry between
+    the two sets a test compares."""
+    lo = max(0, frame - 1)
+    hi = min(len(env), frame + 2)
+    return max(env[lo:hi]) if lo < hi else None
+
+
+def tempo_octave_fit(onset_env, beat_frames):
+    """Which octave of a reported tempo the onset envelope actually supports.
+
+    Pure — plain sequences of floats/ints, no numpy, no audio — so the
+    judgement is unit-testable against synthetic envelopes
+    (scripts/analyzer_tempo_test.py). Returns
+
+      {"action": "halve"|"double"|"keep", "alt": float|None, "off": float|None,
+       "strongOffset": 0|1, "confidence": float}
+
+    or None when there is too little grid to judge, which every caller treats
+    as "keep the reported tempo, tempo confidence unmeasured".
+
+    `confidence` is the deciding measurement's distance from the threshold it
+    crossed — or, for "keep", from the nearest threshold it did NOT cross —
+    normalised so 1.0 is the unambiguous extreme. It says how far the call was
+    from flipping, never how accurate the tempo is in absolute terms."""
+    env = [float(v) for v in (onset_env or [])]
+    n = len(env)
+    beats = sorted({int(b) for b in (beat_frames or []) if 0 <= int(b) < n})
+    # Four beats is the floor for two two-sample alternating sets. Fewer means
+    # the window caught an intro or a decode stub, not a groove.
+    if n < 8 or len(beats) < 4:
+        return None
+    mean_env = sum(env) / n
+    if mean_env <= 0:
+        return None
+
+    on = [v for v in (_onset_at(env, b) for b in beats) if v is not None]
+    if len(on) < 4:
+        return None
+    mean_beats = sum(on) / len(on)
+    if mean_beats <= 0:
+        return None
+
+    # --- halve: do the beats alternate strong/weak? -------------------------
+    # Truncated to equal length: an odd beat count would otherwise hand one set
+    # an extra sample and tilt its mean on that alone.
+    evens, odds = on[0::2], on[1::2]
+    span = min(len(evens), len(odds))
+    means = (sum(evens[:span]) / span, sum(odds[:span]) / span)
+    strong_offset = 0 if means[0] >= means[1] else 1
+    strong, weak = means[strong_offset], means[1 - strong_offset]
+    alt = (weak / strong) if strong > 0 else None
+
+    # --- double: do the midpoints carry beat-strength onsets? ---------------
+    mids = []
+    for i in range(len(beats) - 1):
+        mid = (beats[i] + beats[i + 1]) // 2
+        # A midpoint with no frame of its own (adjacent beat frames) says
+        # nothing about a faster pulse — skip it rather than resample a beat.
+        if beats[i] < mid < beats[i + 1]:
+            v = _onset_at(env, mid)
+            if v is not None:
+                mids.append(v)
+    off = (sum(mids) / len(mids) / mean_beats) if mids else None
+
+    # A low `alt` is only evidence of doubling when the weak set is background
+    # level — see OCTAVE_WEAK_MAX_MEAN. On a backbeat it is not evidence either
+    # way, so it must not count as ambiguity in the "keep" margin below.
+    alt_decisive = alt is not None and weak <= mean_env * OCTAVE_WEAK_MAX_MEAN
+
+    if alt_decisive and alt <= OCTAVE_ALT_MAX:
+        action = "halve"
+        conf = (OCTAVE_ALT_MAX - alt) / OCTAVE_ALT_MAX
+    elif off is not None and off >= OCTAVE_OFF_MIN:
+        action = "double"
+        conf = (off - OCTAVE_OFF_MIN) / (1.0 - OCTAVE_OFF_MIN)
+    else:
+        action = "keep"
+        margins = []
+        if alt_decisive:
+            margins.append((alt - OCTAVE_ALT_MAX) / (1.0 - OCTAVE_ALT_MAX))
+        if off is not None:
+            margins.append((OCTAVE_OFF_MIN - off) / OCTAVE_OFF_MIN)
+        conf = min(margins) if margins else 0.0
+
+    return {
+        "action": action,
+        "alt": alt,
+        "off": off,
+        "strongOffset": strong_offset,
+        "confidence": max(0.0, min(1.0, conf)),
+    }
+
+
+def apply_tempo_octave(bpm, beat_frames, fit):
+    """Apply a tempo_octave_fit to a reported tempo AND its beat grid.
+
+    Both, together, because they must never disagree: beats/bars feed
+    bar-snapped crossfades, so a 152 BPM grid stamped under a 76 BPM tempo
+    makes each "bar" two beats long instead of four — a different bug wearing
+    the same clothes.
+
+    Returns (bpm, beat_frames, applied). `applied` is False when there was
+    nothing to do OR when the range guard refused the correction; callers use
+    it to distinguish "the tests agreed with librosa" from "the tests
+    disagreed and we overrode them", which are not the same confidence."""
+    if not fit or fit.get("action") == "keep":
+        return bpm, beat_frames, False
+    # Filtered exactly as tempo_octave_fit filtered them, because strongOffset
+    # is a PARITY over that list: drop a leading frame here and "keep the strong
+    # half" silently keeps the silent half instead. The fit also drops frames at
+    # or past the envelope's end, but those are a trailing slice and cannot move
+    # the parity — a negative frame would.
+    beats = sorted({int(b) for b in (beat_frames or []) if int(b) >= 0})
+    if fit["action"] == "halve":
+        target = bpm / 2.0
+        if target < OCTAVE_HALVE_FLOOR:
+            return bpm, beat_frames, False
+        # Keep the STRONGER alternating set — those are the real beats; the
+        # other half is what the doubled grid invented between them.
+        return target, beats[fit.get("strongOffset", 0) :: 2], True
+    target = bpm * 2.0
+    if target > OCTAVE_DOUBLE_CEIL:
+        return bpm, beat_frames, False
+    # Interleave the midpoints the reported grid skipped.
+    filled = []
+    for i, b in enumerate(beats):
+        filled.append(b)
+        if i + 1 < len(beats):
+            mid = (b + beats[i + 1]) // 2
+            if b < mid < beats[i + 1]:
+                filled.append(mid)
+    return target, filled, True
+
+
+def corrected_tempo(y, sr, librosa, bpm, beat_frames, onset_env=None, label=""):
+    """beat_track's tempo and grid, octave-corrected against onset strength.
+
+    Returns (bpm, beat_frames, tempo_confidence) where tempo_confidence is None
+    when the fit could not be measured — which is the pre-#1417 path, and the
+    reason every caller treats None as "no penalty" rather than "bad tempo"."""
+    tag = f" ({label})" if label else ""
+    try:
+        env = onset_env if onset_env is not None else onset_envelope(y, sr, librosa)
+        fit = tempo_octave_fit(env, beat_frames) if env else None
+    except Exception as e:  # noqa: BLE001 — a failed fit leaves the reading be
+        log(f"tempo octave fit failed{tag}: {e}")
+        return bpm, beat_frames, None
+    if not fit:
+        return bpm, beat_frames, None
+    new_bpm, new_beats, applied = apply_tempo_octave(bpm, beat_frames, fit)
+    if applied:
+        log(
+            f"tempo octave {fit['action']}{tag}: {bpm:.1f} -> {new_bpm:.1f} BPM"
+            f" (alt={fit['alt']}, off={fit['off']})"
+        )
+        return new_bpm, new_beats, fit["confidence"]
+    if fit["action"] != "keep":
+        # The tests wanted an octave move and the range guard refused it. We are
+        # keeping a reading the evidence argued against — say so.
+        log(f"tempo octave {fit['action']} refused{tag}: {bpm:.1f} BPM out of range once corrected")
+        return bpm, beat_frames, 0.0
+    return bpm, beat_frames, fit["confidence"]
 def analyze_outro(path, librosa, duration_s):
     """Tail features for the crossfade seam — the outgoing track's ending is
     what actually decides whether a transition lands. Decodes the last
@@ -901,7 +1140,7 @@ def analyze_outro(path, librosa, duration_s):
     if y is None or len(y) < ANALYZE_SR * OUTRO_SECONDS * 0.6:
         return None
 
-    hop = 512
+    hop = ONSET_HOP
     rms = librosa.feature.rms(y=y, frame_length=2048, hop_length=hop)[0]
     if rms.size == 0:
         return None
@@ -939,10 +1178,14 @@ def analyze_outro(path, librosa, duration_s):
     beats_ms = []
     bars_ms = []
     try:
-        tempo, beat_frames = librosa.beat.beat_track(y=y, sr=sr)
+        tempo, beat_frames = librosa.beat.beat_track(y=y, sr=sr, hop_length=hop)
         t = float(np.atleast_1d(tempo)[0])
+        # Same octave correction as the body (#1417). The tail tempo is what
+        # bar-aligns the EXIT, so a doubled reading here mis-snaps the very seam
+        # this function exists to place. Measured off the tail's own envelope.
+        t, beat_frames, _tconf = corrected_tempo(y, sr, librosa, t, beat_frames, label="outro")
         bpm_t = round(t, 1) if 30 <= t <= 300 else None
-        bt = librosa.frames_to_time(beat_frames, sr=sr)
+        bt = librosa.frames_to_time(beat_frames, sr=sr, hop_length=hop)
         beats_ms = [int(round((offset + float(x)) * 1000.0)) for x in bt]
         bars_ms = beats_ms[::4]
     except Exception as e:  # noqa: BLE001 — the grid is garnish, never a gate
@@ -1119,7 +1362,7 @@ class VocalActivityDetector:
         return vocal_ranges_from_rms(rms, mix_rms, sr, hop)
 
 
-def estimate_pace(y, sr, librosa, window_s=5.0):
+def estimate_pace(y, sr, librosa, window_s=5.0, onset_env=None):
     """Perceptual energy/momentum curve over the decoded window, decoupled from
     BPM (a high-tempo track can read low pace during a sparse breakdown). Mean
     onset-strength (spectral-flux) energy per ~window_s window, normalised 0..1
@@ -1128,22 +1371,25 @@ def estimate_pace(y, sr, librosa, window_s=5.0):
     import numpy as np
 
     try:
-        hop = 512
-        onset_env = librosa.onset.onset_strength(y=y, sr=sr, hop_length=hop)
-        if onset_env.size == 0:
+        hop = ONSET_HOP
+        # The caller may already have this envelope (the octave correction needs
+        # the same one) — computing spectral flux twice per track is pure waste.
+        if onset_env is None:
+            onset_env = onset_envelope(y, sr, librosa)
+        if not onset_env:
             return None
         frames_per_win = max(1, int(round(window_s * sr / hop)))
         peak = float(np.max(onset_env))
         if peak <= 0:
             return None
         curve = []
-        for start in range(0, onset_env.size, frames_per_win):
+        for start in range(0, len(onset_env), frames_per_win):
             chunk = onset_env[start : start + frames_per_win]
             if chunk.size == 0:
                 continue
             value = round(float(np.mean(chunk)) / peak, 3)
             start_ms = int(round(start * hop / sr * 1000.0))
-            end_ms = int(round(min(start + frames_per_win, onset_env.size) * hop / sr * 1000.0))
+            end_ms = int(round(min(start + frames_per_win, len(onset_env)) * hop / sr * 1000.0))
             if end_ms > start_ms:
                 curve.append({"startMs": start_ms, "endMs": end_ms, "value": value})
         return curve or None
@@ -1697,8 +1943,25 @@ def analyze(librosa, url=None, path=None, embed=None, vocal=None, complete=None,
     if y is None or len(y) == 0:
         raise RuntimeError("decoded empty audio")
 
-    tempo, beat_frames = librosa.beat.beat_track(y=y, sr=sr)
+    # hop_length pinned rather than left to librosa's default because the
+    # octave correction below samples the SAME onset envelope on these beat
+    # frames: if the two hops ever diverged the tests would read the onsets at
+    # the wrong times and quietly become noise. 512 is today's default either
+    # way, so this changes nothing on its own.
+    tempo, beat_frames = librosa.beat.beat_track(y=y, sr=sr, hop_length=ONSET_HOP)
     bpm = float(np.atleast_1d(tempo)[0])
+
+    # Onset envelope, computed once: the octave correction and the pace curve
+    # both read it.
+    onset_env = onset_envelope(y, sr, librosa)
+
+    # Octave correction (#1417) — beat_track's 120-centred prior returns the
+    # DOUBLE on slow material, and nothing downstream ever noticed. Carries the
+    # beat grid with it so bars stay bars. bpm_confidence is None when the fit
+    # could not be measured, which is the old behaviour exactly.
+    bpm, beat_frames, bpm_confidence = corrected_tempo(
+        y, sr, librosa, bpm, beat_frames, onset_env=onset_env
+    )
 
     # Per-beat timestamps (ms) — already computed by beat_track, previously
     # discarded. Downbeats are a 4/4 heuristic (every 4th beat from the first):
@@ -1707,7 +1970,7 @@ def analyze(librosa, url=None, path=None, embed=None, vocal=None, complete=None,
     beats_ms = []
     bars_ms = []
     try:
-        bt = librosa.frames_to_time(beat_frames, sr=sr)
+        bt = librosa.frames_to_time(beat_frames, sr=sr, hop_length=ONSET_HOP)
         beats_ms = [int(round(float(t) * 1000.0)) for t in bt]
         bars_ms = beats_ms[::4]
     except Exception as e:  # noqa: BLE001 — beat grid is best-effort
@@ -1737,7 +2000,7 @@ def analyze(librosa, url=None, path=None, embed=None, vocal=None, complete=None,
     sections = estimate_sections(y, sr, librosa, chroma=chroma)
 
     # Perceptual energy/momentum curve (decoupled from BPM).
-    pace = estimate_pace(y, sr, librosa)
+    pace = estimate_pace(y, sr, librosa, onset_env=onset_env)
 
     # Perceptual loudness (LUFS) over the decoded window — feeds per-track gain
     # normalisation toward a target on the playback side. Measured off the
@@ -1745,9 +2008,20 @@ def analyze(librosa, url=None, path=None, embed=None, vocal=None, complete=None,
     # pyloudnorm is absent or measurement fails.
     loudness_lufs, peak_db = measure_loudness(y_src, sr)
 
-    # Overall confidence: dominated by how cleanly the key resolved, nudged by
-    # whether we got a plausible tempo. Kept conservative on purpose.
-    confidence = round(0.5 * key_sep + (0.5 if 40 <= bpm <= 220 else 0.0), 3)
+    # Overall confidence: dominated by how cleanly the key resolved, plus a
+    # tempo half that now MEASURES the tempo rather than rubber-stamping it.
+    # Before #1417 any BPM in 40..220 collected the full 0.5, so a doubled 152
+    # on a 76 BPM ballad scored exactly what a correct reading would and the
+    # field carried no tempo signal at all (mean confidence on a real library
+    # was identical above and below 140 BPM). The plausibility gate stays — an
+    # out-of-range tempo still contributes nothing — but inside the range the
+    # half is scaled by how unambiguous the octave choice was. An unmeasurable
+    # envelope falls back to 1.0, i.e. the old flat bonus: a track the tests
+    # cannot judge must not be penalised for the analyser's own blind spot.
+    tempo_term = bpm_confidence if bpm_confidence is not None else 1.0
+    confidence = round(
+        0.5 * key_sep + (0.5 * tempo_term if 40 <= bpm <= 220 else 0.0), 3
+    )
 
     result = {
         "bpm": round(bpm, 1),
@@ -1755,6 +2029,14 @@ def analyze(librosa, url=None, path=None, embed=None, vocal=None, complete=None,
         "intro_ms": int(intro_ms) if intro_ms is not None else None,
         "confidence": confidence,
     }
+    # Tempo's OWN confidence, separate from the composite above, because the
+    # two answer different questions: `confidence` is mostly about the key, and
+    # a consumer that wants to flag or withhold a dubious BPM has nothing to
+    # read in it. Only carried when measured — absence means "not judged", not
+    # "judged bad", so a worker that could not build an envelope looks exactly
+    # like today's.
+    if bpm_confidence is not None:
+        result["bpm_confidence"] = round(bpm_confidence, 3)
     # Only carry loudness fields when measured — absence signals "no loudness
     # this pass", so a worker without pyloudnorm is byte-for-byte today.
     if loudness_lufs is not None:

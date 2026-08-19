@@ -86,7 +86,15 @@ export interface TrackAcoustics {
 //   1  head line + Last.fm tags + lyric excerpt
 //   2  ... + the Sound: descriptor line (audio moods, tempo band, key mode,
 //      instrumental marker) + the Era: decade line (#1246)
-export const EMBED_TEXT_VERSION = 2;
+//   3  same SHAPE as 2, but the tempo word's INPUT was corrected (#1417). The
+//      recipe is what has to match across a KNN space, and tempoWord below is
+//      part of it: a doubled BPM embedded a slow ballad as "fast tempo", and
+//      those vectors form the graph the tagger's mood propagation votes over,
+//      so one bad reading skewed its neighbours too. Bumping here is what makes
+//      library-coverage flag the index as stale after a re-analysis — a soft
+//      advisory, as ever, since the vectors are still readable and the operator
+//      picks the moment to reseed.
+export const EMBED_TEXT_VERSION = 3;
 
 // Tempo as a word, not a number: an embedding model reads "uptempo" as a
 // musical property and "128" as an arbitrary token, so the band is the part
