@@ -114,6 +114,28 @@ export function applyBlockMarks(qc: QueryClient, marks: Record<string, BlockRef 
 }
 
 /**
+ * A manual era-year override landed (#1418). Same row-matching as
+ * applyTagEvent — the track, plus its album siblings when the save was scoped
+ * that way — so the editor's source note and the year column update without a
+ * refetch. `originalYear: null` is the CLEAR: the source goes back to null too,
+ * which is what returns the row to "the file's own year" in eraSourceNote.
+ */
+export function applyEraYearEvent(qc: QueryClient, ev: {
+  track: Track;
+  originalYear: number | null;
+  applyToAlbum: boolean;
+}) {
+  const hits = (r: Track) =>
+    r.id === ev.track.id || (ev.applyToAlbum && !!ev.track.album && r.album === ev.track.album);
+
+  patchAllRows(qc, r => (!hits(r) ? r : {
+    ...r,
+    originalYear: ev.originalYear,
+    originalYearSource: ev.originalYear == null ? null : 'manual',
+  }));
+}
+
+/**
  * A manual tag save or a single-track retag landed. Each list means something
  * different by it, so the plain patch is followed by the two exceptions.
  * `source` mirrors what the server stamped: 'manual' for the inline editor,

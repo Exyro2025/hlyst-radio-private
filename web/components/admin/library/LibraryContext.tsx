@@ -9,7 +9,7 @@ import { notify, errorMessage } from '../../../lib/notify';
 import type { PlaylistSummary } from './types';
 import type { Coverage, TaggerState } from '../LibraryTaggingPanel';
 import {
-  applyBlockMarks, applyLikeChange, applyTagEvent, libraryKeys, rowsOf,
+  applyBlockMarks, applyEraYearEvent, applyLikeChange, applyTagEvent, libraryKeys, rowsOf,
   useQueryErrorToast,
 } from './queries';
 import type {
@@ -71,6 +71,7 @@ export interface LibraryShared {
   flashId: string | null;
   editingId: string | null;
   manualBusy: string | null;
+  eraBusy: string | null;
   blocking: string | null;
   queueTrack: (t: Track) => Promise<void>;
   retagTrack: (t: Track) => Promise<void>;
@@ -79,6 +80,7 @@ export interface LibraryShared {
   saveManualTag: (
     t: Track, moods: string[], energy: string | null, applyToAlbum: boolean,
   ) => Promise<void>;
+  saveEraYear: (t: Track, originalYear: number | null, applyToAlbum: boolean) => Promise<void>;
   blockTrack: (t: Track, type: BlockType) => Promise<void>;
   unblockRow: (t: Track, ref: BlockRef) => Promise<void>;
   removeBlockEntry: (
@@ -365,6 +367,10 @@ export function LibraryProvider({
   const [flashId, setFlashId] = useState<string | null>(null);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [manualBusy, setManualBusy] = useState<string | null>(null);
+  // Separate from manualBusy: the two saves share one panel but are two
+  // requests, and one spinner covering both would grey out the tag chips
+  // while a year is saving.
+  const [eraBusy, setEraBusy] = useState<string | null>(null);
   const [blocking, setBlocking] = useState<string | null>(null);
 
   const flash = useCallback((id: string) => {
@@ -454,6 +460,38 @@ export function LibraryProvider({
     }
   }, [adminFetch, qc, flash, reloadCoverage]);
 
+  // The manual era override (#1418). Deliberately does NOT touch coverage or
+  // the untagged list — an original year is not a tag, and the track's tagging
+  // state is unchanged by it. The editor stays OPEN afterwards, unlike a tag
+  // save: setting a year is often the first of several corrections on the same
+  // row, and the source note updating in place is the confirmation.
+  const saveEraYear = useCallback(async (
+    track: Track, originalYear: number | null, applyToAlbum: boolean,
+  ) => {
+    setEraBusy(track.id);
+    try {
+      const r = await adminFetch('/library/original-year', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id: track.id, originalYear, applyToAlbum }),
+      });
+      const j = (await r.json().catch(() => ({}))) as
+        { ok?: boolean; updated?: number; cleared?: boolean; error?: string };
+      if (!r.ok) throw new Error(j.error || `save failed (${r.status})`);
+      const n = j.updated ?? 1;
+      const scope = applyToAlbum ? `${n} album track${n === 1 ? '' : 's'}` : 'track';
+      notify.ok(originalYear == null
+        ? `cleared the year override · ${scope}`
+        : `era year ${originalYear} · ${scope}`);
+      flash(track.id);
+      applyEraYearEvent(qc, { track, originalYear, applyToAlbum });
+    } catch (err) {
+      notify.err(errorMessage(err));
+    } finally {
+      setEraBusy(null);
+    }
+  }, [adminFetch, qc, flash]);
+
   // --- blocklist -----------------------------------------------------------
   // Shared by the Blocked tab's Unblock, the row-level unblock and the block
   // toast's Undo, so all three get the same list update and re-mark.
@@ -529,8 +567,8 @@ export function LibraryProvider({
     selected, toggleSelect, toggleAllRows, clearSelection,
     playlists, plBusy, addSelectedToPlaylist,
     vocab, seedVocab, ensureVocab,
-    queuing, retagging, flashId, editingId, manualBusy, blocking,
-    queueTrack, retagTrack, onEditTrack, cancelEdit, saveManualTag,
+    queuing, retagging, flashId, editingId, manualBusy, eraBusy, blocking,
+    queueTrack, retagTrack, onEditTrack, cancelEdit, saveManualTag, saveEraYear,
     blockTrack, unblockRow, removeBlockEntry,
   }), [
     adminFetch, ready, coverage, reloadCoverage, tagger, restampBlockMarks,
@@ -538,8 +576,8 @@ export function LibraryProvider({
     selected, toggleSelect, toggleAllRows, clearSelection,
     playlists, plBusy, addSelectedToPlaylist,
     vocab, seedVocab, ensureVocab,
-    queuing, retagging, flashId, editingId, manualBusy, blocking,
-    queueTrack, retagTrack, onEditTrack, cancelEdit, saveManualTag,
+    queuing, retagging, flashId, editingId, manualBusy, eraBusy, blocking,
+    queueTrack, retagTrack, onEditTrack, cancelEdit, saveManualTag, saveEraYear,
     blockTrack, unblockRow, removeBlockEntry,
   ]);
 

@@ -95,11 +95,15 @@ export function upsertTrackMeta(id: string, meta: TrackMeta): void {
         album        = COALESCE(excluded.album, tracks.album),
         year         = COALESCE(excluded.year, tracks.year),
         -- Walk-time 'album-tag' years never clobber a per-track 'musicbrainz'
-        -- resolution — the MB lookup is the more specific signal (issue #842).
-        original_year = CASE WHEN tracks.original_year_source = 'musicbrainz'
+        -- resolution — the MB lookup is the more specific signal (issue #842) —
+        -- nor a 'manual' one, which outranks both (#1418): an operator reading
+        -- the sleeve beats metadata that is wrong by construction on a reissue.
+        -- Every library walk re-visits every track, so without this a nightly
+        -- rescan would quietly undo the operator's correction.
+        original_year = CASE WHEN tracks.original_year_source IN ('musicbrainz', 'manual')
                              THEN tracks.original_year
                              ELSE COALESCE(excluded.original_year, tracks.original_year) END,
-        original_year_source = CASE WHEN tracks.original_year_source = 'musicbrainz'
+        original_year_source = CASE WHEN tracks.original_year_source IN ('musicbrainz', 'manual')
                                     THEN tracks.original_year_source
                                     ELSE COALESCE(excluded.original_year_source, tracks.original_year_source) END,
         is_compilation = COALESCE(excluded.is_compilation, tracks.is_compilation),
@@ -148,9 +152,44 @@ export function setOriginalYear(id: string, year: number | null): void {
          original_year            = COALESCE(?, original_year),
          original_year_source     = CASE WHEN ? IS NOT NULL THEN 'musicbrainz' ELSE original_year_source END,
          original_year_checked_at = ?
-       WHERE id = ?`,
+       -- Never touch a manual override (#1418), not even its checked_at stamp:
+       -- an operator answer is final until the operator clears it. Both callers
+       -- (phase-0, the retag route) already gate on needsOriginalYearLookup,
+       -- which a manual row fails on a non-null originalYear — this is the guard
+       -- at the write itself, so a third caller can't route around it.
+       WHERE id = ? AND (original_year_source IS NULL OR original_year_source <> 'manual')`,
     )
     .run(year, year, new Date().toISOString(), id);
+}
+
+// The operator's own answer for a track's original year (issue #1418), the
+// highest-precedence of the three sources. The automatic pipeline reads the
+// album tag (the reissue's date on an anthology) and asks MusicBrainz only for
+// albums Navidrome flags as compilations — which reissue anthologies are not —
+// so on exactly the records that motivated #842 there is otherwise no way to
+// get a right answer in at all.
+//
+// `year: null` REMOVES the override rather than pinning "unknown": original_year
+// and both its stamps go back to NULL, so the track re-enters the automatic
+// pipeline and a later pass may resolve it. Pinning unknown forever would make
+// "I was wrong about this one" unrecoverable without a reset.
+//
+// Deliberately does NOT invalidate the track's embedding. The `Era:` decade
+// line in the embed text is now stale, and it refreshes on the next retag or
+// tag pass — but dropping the vector to force that would pull the track out of
+// similarity search entirely until then, and one wrong decade WORD in a blob
+// carrying genre, tags, lyrics and acoustics is a far smaller distortion than a
+// hole in the KNN pool. Era FILTERING reads the column and is correct at once.
+export function setManualOriginalYear(id: string, year: number | null): void {
+  requireDb()
+    .prepare(
+      `UPDATE tracks SET
+         original_year            = ?,
+         original_year_source     = CASE WHEN ? IS NOT NULL THEN 'manual' ELSE NULL END,
+         original_year_checked_at = ?
+       WHERE id = ?`,
+    )
+    .run(year, year, year != null ? new Date().toISOString() : null, id);
 }
 
 export function upsertTrackEnrichment(id: string, enrich: TrackEnrichment): void {

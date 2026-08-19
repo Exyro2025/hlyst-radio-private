@@ -600,6 +600,14 @@ export interface FilteredRow {
   artist?: string | null;
   album?: string | null;
   year?: number | string | null;
+  // Era surface (#842/#1418) — the admin row editor shows the operator what
+  // era filtering, the DJ line and the picker will actually read, and whether
+  // the current answer came from the album tag, MusicBrainz or their own hand.
+  // Without `originalYearSource` the override UI cannot tell "resolved" from
+  // "the album tag echoed the release year", which is the whole confusion.
+  originalYear?: number | null;
+  originalYearSource?: string | null;
+  isCompilation?: boolean | null;
   genres?: string[];
   genre?: string | null;
   duration?: number | null;
@@ -628,6 +636,9 @@ export function filter(opts: FilterOpts = {}): { total: number; rows: FilteredRo
       artist: r.artist,
       album: r.album,
       year: r.year,
+      originalYear: r.originalYear,
+      originalYearSource: r.originalYearSource,
+      isCompilation: r.isCompilation,
       genres: r.genres,
       genre: r.genre,
       duration: r.durationSec,

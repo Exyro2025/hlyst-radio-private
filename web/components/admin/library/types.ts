@@ -7,6 +7,15 @@ export interface Track {
   artist?: string;
   album?: string;
   year?: number | string | null;
+  // Era surface (#842/#1418). `year` is the FILE's year — on a reissue
+  // anthology that's the reissue's date. `originalYear` is the resolved
+  // recording year when one is known, and `originalYearSource` says who
+  // resolved it: 'album-tag' (the album's originalReleaseDate, which on a
+  // reissue is just the reissue again), 'musicbrainz', or 'manual' — the
+  // operator's own answer, which outranks both. Absent on an older controller.
+  originalYear?: number | null;
+  originalYearSource?: string | null;
+  isCompilation?: boolean | null;
   genre?: string | null;
   duration?: number | null;
   moods?: string[];
