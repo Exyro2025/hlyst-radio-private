@@ -226,7 +226,7 @@ router.get('/now-playing', async (req, res) => {
         // strip, and a reissue anthology showed listeners the reissue's date.
         // #842 precedence; unknown leaves the field null and the skins, which
         // all render it conditionally, simply omit it.
-        const eraYear = resolveEraYear(rec.year, rec.originalYear, rec.isCompilation);
+        const eraYear = resolveEraYear(rec.year, rec.originalYear, rec.yearUntrusted);
         if (nowPlaying.year == null && eraYear != null) nowPlaying.year = eraYear;
       }
       // Duration isn't in the annotate metadata Liquidsoap reports, so the

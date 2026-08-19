@@ -24,7 +24,9 @@ const ENERGY_SEG: { id: string; label: string }[] = [
 function eraYearOf(track: Track): number | null {
   const oy = Number(track.originalYear);
   if (Number.isFinite(oy) && oy > 0) return oy;
-  if (track.isCompilation) return null;
+  // Either signal is enough — the flag is unset on exactly the reissue
+  // anthologies the derived verdict exists to catch (#1418).
+  if (track.isCompilation || track.eraUntrusted) return null;
   const y = Number(track.year);
   return Number.isFinite(y) && y > 0 ? y : null;
 }
@@ -35,7 +37,11 @@ function eraYearOf(track: Track): number | null {
 // the exact confusion #1418 is about.
 function eraSourceNote(track: Track): string {
   const era = eraYearOf(track);
-  if (era == null) return 'no era year — this track is invisible to era-bounded shows';
+  if (era == null) {
+    return track.isCompilation || track.eraUntrusted
+      ? 'no era year — the album\u2019s date is the release\u2019s, and the real one is unresolved, so era-bounded shows skip this track'
+      : 'no era year — this track is invisible to era-bounded shows';
+  }
   switch (track.originalYearSource) {
     case 'manual':      return `${era} · set by hand`;
     case 'musicbrainz': return `${era} · from MusicBrainz`;

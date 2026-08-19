@@ -21,10 +21,14 @@ export interface FilterTrack {
   genres?: string[] | null;
   genre?: string | null;
   year?: number | string | null;
-  // Original-release-year surface (issue #842). Library-sourced tracks carry
-  // both; raw Subsonic children carry neither (undefined ≠ "not a comp") and
-  // fall back to a library lookup in trackEraYear.
+  // Original-release-year surface (issue #842/#1418). Library-sourced tracks
+  // carry these; raw Subsonic children carry none (undefined ≠ "not a comp")
+  // and fall back to a library lookup in trackEraYear.
   originalYear?: number | null;
+  // What era resolution reads: Navidrome's compilation flag OR the derived
+  // anthology judgement, composed once in the library-db row mappers.
+  yearUntrusted?: boolean | null;
+  // The raw Navidrome flag, kept for display and as the pre-#1418 fallback.
   isCompilation?: boolean | null;
   energy?: string | null;
   moods?: string[] | null;
@@ -242,11 +246,17 @@ function inAnyWindow(year: number, eras: YearRange[]): boolean {
 export function resolveEraYear(
   year: number | string | null | undefined,
   originalYear: number | null | undefined,
-  isCompilation: boolean | null | undefined,
+  // "This album's year is the RELEASE's, not the recordings'." Composed once
+  // in the library-db row mappers as `yearUntrusted` — Navidrome's compilation
+  // flag OR the derived anthology judgement (#1418, music/era-suspect.ts).
+  // Never pass the raw `isCompilation` here: that flag is false on exactly the
+  // reissue anthologies this guard exists for, which is how a 1964 Stax single
+  // read as 2010s material.
+  yearUntrusted: boolean | null | undefined,
 ): number | null {
   const oy = Number(originalYear);
   if (Number.isFinite(oy) && oy > 0) return oy;
-  if (isCompilation) return null;
+  if (yearUntrusted) return null;
   const y = Number(year);
   return Number.isFinite(y) && y > 0 ? y : null;
 }
@@ -256,11 +266,14 @@ export function resolveEraYear(
 // children carry a bare `year` only, and undefined isn't "not a compilation").
 // Off-library tracks fall back to the plain year, today's behaviour.
 export function trackEraYear(t: FilterTrack | null | undefined): number | null {
-  if (t && (t.originalYear !== undefined || t.isCompilation !== undefined)) {
-    return resolveEraYear(t.year, t.originalYear, t.isCompilation);
+  if (t && (t.originalYear !== undefined || t.yearUntrusted !== undefined || t.isCompilation !== undefined)) {
+    // `yearUntrusted` when the source carries it (library rows do); the raw
+    // flag only as a fallback for shapes written before #1418, where it is
+    // still strictly better than nothing.
+    return resolveEraYear(t.year, t.originalYear, t.yearUntrusted ?? t.isCompilation);
   }
   const rec = t?.id ? library.getPlaybackMeta(t.id) : null;
-  if (rec) return resolveEraYear(rec.year ?? t?.year, rec.originalYear, rec.isCompilation);
+  if (rec) return resolveEraYear(rec.year ?? t?.year, rec.originalYear, rec.yearUntrusted);
   return resolveEraYear(t?.year, null, null);
 }
 

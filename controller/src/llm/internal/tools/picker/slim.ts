@@ -33,7 +33,7 @@ export function slim(s: any) {
   const eraYear = resolveEraYear(
     s.year ?? rec?.year,
     s.originalYear ?? rec?.originalYear,
-    s.isCompilation ?? rec?.isCompilation,
+    s.yearUntrusted ?? rec?.yearUntrusted ?? s.isCompilation ?? rec?.isCompilation,
   );
   const base = {
     id: s.id,

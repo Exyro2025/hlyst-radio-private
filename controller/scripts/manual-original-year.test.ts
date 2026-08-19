@@ -36,26 +36,87 @@ after(() => {
 // One reissue-anthology track, shaped like the report: a 1964 Stax single on a
 // 2012 comp that Navidrome does NOT flag as a compilation, so the walk copies
 // the album's originalReleaseDate (2012) straight in as the "original" year.
+// Post-#1418: the walk no longer records an uninformative album-tag year, and
+// stamps the derived era verdict instead. `eraUntrusted: true` is what
+// era-suspect.albumEraSuspect returns for this album (Various Artists, 8
+// credited artists, a 1964-65 range in the title).
 function seedAnthologyTrack(id: string) {
   db.upsertTrackMeta(id, {
     title: 'After Laughter (Comes Tears)',
     artist: 'Wendy Rene',
     album: 'After Laughter Comes Tears',
     year: 2012,
-    originalYear: 2012,   // the album tag, which is just the reissue again
+    originalYear: null,   // suspect album → the album tag is not recorded
     isCompilation: false, // Navidrome does not flag these
+    eraUntrusted: true,   // ...but era-suspect.ts does
   });
 }
 
-test('the reported defect: the walk records the reissue year as "original"', () => {
-  seedAnthologyTrack('t1');
-  const t = db.getTrack('t1')!;
+// The pre-#1418 shape, for the tests that need to show what changed.
+function seedAsBefore(id: string) {
+  db.upsertTrackMeta(id, {
+    title: 'After Laughter (Comes Tears)',
+    artist: 'Wendy Rene',
+    album: 'After Laughter Comes Tears',
+    year: 2012,
+    originalYear: 2012,   // the album tag, which is just the reissue again
+    isCompilation: false,
+  });
+}
+
+test('the reported defect, as it behaved before the fix', () => {
+  seedAsBefore('t0');
+  const t = db.getTrack('t0')!;
   assert.equal(t.originalYear, 2012);
   assert.equal(t.originalYearSource, 'album-tag');
-  // And so era filtering places a 1964 recording in the 2010s.
-  assert.equal(resolveEraYear(t.year, t.originalYear, t.isCompilation), 2012);
-  // With no way in: the MB lookup is gated on a flag this album does not set.
+  // The reissue year read as resolved, so era filtering put a 1964 recording
+  // in the 2010s...
+  assert.equal(resolveEraYear(t.year, t.originalYear, t.yearUntrusted), 2012);
+  // ...and the lookup that could have fixed it skipped the track twice over:
+  // the album is not flagged, and the year already looks answered.
   assert.equal(needsOriginalYearLookup(t), false);
+});
+
+test('after the fix the same album is suspect, unresolved, and queued for a lookup', () => {
+  seedAnthologyTrack('t1');
+  const t = db.getTrack('t1')!;
+  assert.equal(t.originalYear, null, 'an uninformative album tag is not recorded as resolved');
+  assert.equal(t.originalYearSource, null);
+  assert.equal(t.isCompilation, false, 'the raw Navidrome fact is preserved as-is');
+  assert.equal(t.eraUntrusted, true);
+  assert.equal(t.yearUntrusted, true, 'composed from either signal');
+  // The #842 rule finally fires: unknown, rather than confidently 2012.
+  assert.equal(resolveEraYear(t.year, t.originalYear, t.yearUntrusted), null);
+  // And there is now a way in.
+  assert.equal(needsOriginalYearLookup(t), true);
+  assert.ok(db.idsNeedingOriginalYear().includes('t1'));
+});
+
+test('an ordinary album is untouched by any of this', () => {
+  // The regression that matters: the widened gate must not sweep in normal
+  // records, which would cost a MusicBrainz request each and drop them out of
+  // era shows if the lookup missed.
+  db.upsertTrackMeta('ord', {
+    title: 'Nude', artist: 'Radiohead', album: 'In Rainbows',
+    year: 2007, originalYear: null, isCompilation: false, eraUntrusted: false,
+  });
+  const t = db.getTrack('ord')!;
+  assert.equal(t.yearUntrusted, false);
+  assert.equal(resolveEraYear(t.year, t.originalYear, t.yearUntrusted), 2007);
+  assert.equal(needsOriginalYearLookup(t), false);
+  assert.ok(!db.idsNeedingOriginalYear().includes('ord'));
+});
+
+test('a row never re-walked since the migration behaves exactly as it did', () => {
+  // era_untrusted NULL and is_compilation NULL — the upgrade must be
+  // byte-identical until a walk has run.
+  db.upsertTrackMeta('legacy', {
+    title: 'Old Row', artist: 'Someone', album: 'Some Album', year: 1994,
+  });
+  const t = db.getTrack('legacy')!;
+  assert.equal(t.eraUntrusted, null);
+  assert.equal(t.yearUntrusted, null);
+  assert.equal(resolveEraYear(t.year, t.originalYear, t.yearUntrusted), 1994);
 });
 
 test('the override writes the operator answer and stamps the source', () => {
@@ -63,7 +124,7 @@ test('the override writes the operator answer and stamps the source', () => {
   const t = db.getTrack('t1')!;
   assert.equal(t.originalYear, 1964);
   assert.equal(t.originalYearSource, 'manual');
-  assert.equal(resolveEraYear(t.year, t.originalYear, t.isCompilation), 1964);
+  assert.equal(resolveEraYear(t.year, t.originalYear, t.yearUntrusted), 1964);
 });
 
 test('a later library walk does NOT clobber the override', () => {
@@ -100,11 +161,13 @@ test('clearing REMOVES the override rather than pinning "unknown"', () => {
 
 test('after clearing, the automatic pipeline owns the track again', () => {
   // The point of clearing being a REMOVE: "I was wrong about this one" has to
-  // be recoverable without a library reset.
+  // be recoverable without a library reset. The track goes back to unresolved
+  // and era-suspect, i.e. queued for a lookup — not back to the wrong 2012.
   seedAnthologyTrack('t1');
   const t = db.getTrack('t1')!;
-  assert.equal(t.originalYear, 2012);
-  assert.equal(t.originalYearSource, 'album-tag');
+  assert.equal(t.originalYear, null);
+  assert.equal(t.originalYearSource, null);
+  assert.equal(needsOriginalYearLookup(t), true);
 });
 
 test('a genuine compilation still reaches MusicBrainz, and MB still wins over the tag', () => {
@@ -116,7 +179,7 @@ test('a genuine compilation still reaches MusicBrainz, and MB still wins over th
   });
   const before = db.getTrack('t2')!;
   assert.equal(needsOriginalYearLookup(before), true);
-  assert.equal(resolveEraYear(before.year, before.originalYear, before.isCompilation), null,
+  assert.equal(resolveEraYear(before.year, before.originalYear, before.yearUntrusted), null,
     'an unresolved compilation reads as unknown, not 2013');
 
   db.setOriginalYear('t2', 1978);
@@ -156,4 +219,49 @@ test('a checked-but-missed row is still reachable by the override', () => {
   db.setManualOriginalYear('t3', 1969);
   assert.equal(db.getTrack('t3')!.originalYear, 1969);
   assert.equal(db.getTrack('t3')!.originalYearSource, 'manual');
+});
+
+// ── migration 21's data change ───────────────────────────────────────────────
+// The one statement in #1418 that deletes something an operator already has.
+// What it SPARES matters as much as what it clears, so both directions are
+// pinned. Called directly rather than by re-running the migration: the test DB
+// is already at the current version, and the helper exists precisely so this
+// SQL is reachable.
+
+test('the migration clears an album-tag year that only echoes the release year', () => {
+  db.upsertTrackMeta('m1', { title: 'Echo', artist: 'A', album: 'Ordinary', year: 2007, originalYear: 2007 });
+  assert.equal(db.getTrack('m1')!.originalYearSource, 'album-tag');
+
+  db.clearEchoedAlbumTagYears(db.requireDb());
+
+  const t = db.getTrack('m1')!;
+  assert.equal(t.originalYear, null);
+  assert.equal(t.originalYearSource, null, 'no provenance left claiming a value that is gone');
+  // Behaviour-neutral: a trusted album falls through to the identical year.
+  assert.equal(resolveEraYear(t.year, t.originalYear, t.yearUntrusted), 2007);
+});
+
+test('the migration SPARES an album-tag year that carries real reissue information', () => {
+  // The 995-row case on the reported library — the tag genuinely knew better
+  // than the file. Throwing these away would be a regression, not a cleanup.
+  db.upsertTrackMeta('m2', { title: 'Reissued', artist: 'B', album: 'Remaster', year: 2015, originalYear: 1973 });
+  db.clearEchoedAlbumTagYears(db.requireDb());
+  assert.equal(db.getTrack('m2')!.originalYear, 1973);
+  assert.equal(db.getTrack('m2')!.originalYearSource, 'album-tag');
+});
+
+test('the migration SPARES a musicbrainz answer that happens to equal the file year', () => {
+  db.upsertTrackMeta('m3', { title: 'Resolved', artist: 'C', album: 'Comp', year: 1978, isCompilation: true });
+  db.setOriginalYear('m3', 1978); // MB agreed with the file — resolved, not echoed
+  db.clearEchoedAlbumTagYears(db.requireDb());
+  assert.equal(db.getTrack('m3')!.originalYear, 1978);
+  assert.equal(db.getTrack('m3')!.originalYearSource, 'musicbrainz');
+});
+
+test('the migration SPARES a manual override that equals the file year', () => {
+  db.upsertTrackMeta('m4', { title: 'Hand-set', artist: 'D', album: 'Odd', year: 1969 });
+  db.setManualOriginalYear('m4', 1969);
+  db.clearEchoedAlbumTagYears(db.requireDb());
+  assert.equal(db.getTrack('m4')!.originalYear, 1969);
+  assert.equal(db.getTrack('m4')!.originalYearSource, 'manual');
 });

@@ -51,7 +51,7 @@ export async function phaseEmbed(
           title: t.title, artist: t.artist, album: t.album, year: t.year, genres: t.genres,
           // Era precedence lives in ONE place (show-filter, #842) — never raw
           // year, whose digits on a compilation are the compilation's date.
-          eraYear: resolveEraYear(t.year, t.originalYear, t.isCompilation),
+          eraYear: resolveEraYear(t.year, t.originalYear, t.yearUntrusted),
         },
         { lastfmTags: t.lastfmTags, lyricExcerpt: t.lyricExcerpt },
         // Measured acoustics (#1246) — whatever the analyze pass has already

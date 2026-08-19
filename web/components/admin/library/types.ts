@@ -15,7 +15,11 @@ export interface Track {
   // operator's own answer, which outranks both. Absent on an older controller.
   originalYear?: number | null;
   originalYearSource?: string | null;
+  // Navidrome's raw compilation flag, and the station's own derived verdict
+  // (#1418) — an album can be an anthology with the flag unset, which is the
+  // whole defect. Era resolution treats either as "the year is the release's".
   isCompilation?: boolean | null;
+  eraUntrusted?: boolean | null;
   genre?: string | null;
   duration?: number | null;
   moods?: string[];

@@ -25,10 +25,13 @@ export interface TrackLite {
   moods: string[];
   energy: string | null;
   year: number | null;
-  // Era-year surface (issue #842) — lets show-filter resolve a track's true
-  // era without the full getTrack() blob parse. null = unresolved / unknown.
+  // Era-year surface (issues #842, #1418) — lets show-filter resolve a track's
+  // true era without the full getTrack() blob parse. null = unresolved /
+  // unknown. `yearUntrusted` is the composed flag era resolution reads;
+  // `isCompilation` stays the raw Navidrome fact beside it.
   originalYear: number | null;
   isCompilation: boolean | null;
+  yearUntrusted: boolean | null;
   durationSec: number | null;
 }
 
@@ -41,8 +44,8 @@ export interface TrackLite {
 // concurrent HTTP response, making the whole UI sluggish (#723).
 export function getTrackLite(id: string): TrackLite | null {
   const row = requireDb()
-    .prepare(`SELECT genres, genre, bpm, musical_key, moods, energy, year, original_year, is_compilation, duration_sec FROM tracks WHERE id = ?`)
-    .get(id) as Pick<TrackRow, 'genres' | 'genre' | 'bpm' | 'musical_key' | 'moods' | 'energy' | 'year' | 'original_year' | 'is_compilation' | 'duration_sec'> | undefined;
+    .prepare(`SELECT genres, genre, bpm, musical_key, moods, energy, year, original_year, is_compilation, era_untrusted, duration_sec FROM tracks WHERE id = ?`)
+    .get(id) as Pick<TrackRow, 'genres' | 'genre' | 'bpm' | 'musical_key' | 'moods' | 'energy' | 'year' | 'original_year' | 'is_compilation' | 'era_untrusted' | 'duration_sec'> | undefined;
   if (!row) return null;
   return {
     genres: row.genres ? safeParseArray(row.genres) : [],
@@ -54,6 +57,11 @@ export function getTrackLite(id: string): TrackLite | null {
     year: row.year ?? null,
     originalYear: row.original_year ?? null,
     isCompilation: row.is_compilation == null ? null : !!row.is_compilation,
+    // Same composition as rowToTrack — era consumers read this, never the
+    // raw flag (#1418).
+    yearUntrusted: (row.is_compilation === 1 || row.era_untrusted === 1)
+      ? true
+      : (row.is_compilation == null && row.era_untrusted == null ? null : false),
     durationSec: row.duration_sec ?? null,
   };
 }
@@ -87,8 +95,8 @@ export function upsertTrackMeta(id: string, meta: TrackMeta): void {
   requireDb()
     .prepare(
       `
-      INSERT INTO tracks (id, title, artist, album, year, original_year, original_year_source, is_compilation, genres, duration_sec)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      INSERT INTO tracks (id, title, artist, album, year, original_year, original_year_source, is_compilation, era_untrusted, genres, duration_sec)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       ON CONFLICT(id) DO UPDATE SET
         title        = COALESCE(excluded.title, tracks.title),
         artist       = COALESCE(excluded.artist, tracks.artist),
@@ -107,6 +115,7 @@ export function upsertTrackMeta(id: string, meta: TrackMeta): void {
                                     THEN tracks.original_year_source
                                     ELSE COALESCE(excluded.original_year_source, tracks.original_year_source) END,
         is_compilation = COALESCE(excluded.is_compilation, tracks.is_compilation),
+        era_untrusted  = COALESCE(excluded.era_untrusted, tracks.era_untrusted),
         genres       = COALESCE(excluded.genres, tracks.genres),
         duration_sec = COALESCE(excluded.duration_sec, tracks.duration_sec)
     `,
@@ -120,6 +129,7 @@ export function upsertTrackMeta(id: string, meta: TrackMeta): void {
       normaliseYear(meta.originalYear),
       normaliseYear(meta.originalYear) != null ? 'album-tag' : null,
       meta.isCompilation == null ? null : meta.isCompilation ? 1 : 0,
+      meta.eraUntrusted == null ? null : meta.eraUntrusted ? 1 : 0,
       meta.genres?.length ? JSON.stringify(meta.genres) : null,
       Number.isFinite(meta.duration as number) ? (meta.duration as number) : null,
     );
@@ -135,7 +145,13 @@ export function idsNeedingOriginalYear(retryMisses = false): string[] {
   return (
     requireDb()
       .prepare(
-        `SELECT id FROM tracks WHERE is_compilation = 1 AND original_year IS NULL ${extra}`,
+        // Era-SUSPECT, not just flagged (#1418) — the JS twin of
+        // musicbrainz.needsOriginalYearLookup, and the two must stay in
+        // agreement. Keying this on is_compilation alone is what limited the
+        // pass to 27 tracks out of 27,860 on the reported library.
+        `SELECT id FROM tracks
+          WHERE (is_compilation = 1 OR era_untrusted = 1)
+            AND original_year IS NULL ${extra}`,
       )
       .all() as Array<{ id: string }>
   ).map((r) => r.id);

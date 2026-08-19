@@ -8,6 +8,7 @@ import * as settings from '../settings.js';
 import * as subLog from './subsonic-log.js';
 import * as blocklist from './blocklist.js';
 import { trackEraYear } from './show-filter.js';
+import { albumEraSuspect } from './era-suspect.js';
 
 function buildAuth() {
   const salt = crypto.randomBytes(8).toString('hex');
@@ -716,6 +717,12 @@ export async function getStructuredLyrics(
 // rips). The walk (tag-library.walkNavidrome) turns these into per-track
 // original-year/compilation columns; the raw fields ride here so policy stays
 // out of the client.
+//
+// `albumEraUntrusted` (#1418) is the ONE judgement made here rather than
+// downstream, and only because the inputs exist nowhere else: deciding whether
+// an album is a reissue anthology needs the album record AND its full track
+// list in the same place, which is exactly this loop and nothing after it. The
+// judgement itself still lives in music/era-suspect.ts — this only feeds it.
 export async function* iterateAllSongs() {
   let offset = 0;
   const BATCH = 500;
@@ -729,8 +736,27 @@ export async function* iterateAllSongs() {
         const ord = r.album?.originalReleaseDate?.year;
         const originalYear = Number.isFinite(ord) && ord > 0 ? ord : null;
         // Same station-archive drop as getAlbum() (issue #273).
-        for (const s of rejectArchive(r.album?.song || [])) {
-          yield { ...s, albumIsCompilation: isCompilation, albumOriginalYear: originalYear };
+        const songs = rejectArchive(r.album?.song || []);
+        // Counted over the KEPT songs, so a dropped archive entry can't inflate
+        // the artist count into a false anthology.
+        const distinctTrackArtists = new Set(
+          songs.map((s) => String(s.artist ?? '').trim().toLowerCase()).filter(Boolean),
+        ).size;
+        const suspicion = albumEraSuspect({
+          isCompilation,
+          albumArtist: r.album?.artist ?? album.artist ?? null,
+          title: r.album?.name ?? album.name ?? null,
+          year: Number.isFinite(r.album?.year) ? r.album.year : null,
+          distinctTrackArtists,
+        });
+        for (const s of songs) {
+          yield {
+            ...s,
+            albumIsCompilation: isCompilation,
+            albumOriginalYear: originalYear,
+            albumEraUntrusted: suspicion.suspect,
+            albumEraReason: suspicion.reason,
+          };
         }
       } catch (err) {
         console.error(`[subsonic] getAlbum(${album.id}) failed: ${err.message}`);

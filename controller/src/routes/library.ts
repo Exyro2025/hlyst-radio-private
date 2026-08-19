@@ -816,7 +816,7 @@ router.post('/library/retag', requireAdmin, async (req, res) => {
             year: song.year ?? null,
             genres: subsonic.songGenres(song),
             eraYear: resolveEraYear(
-              rec?.year ?? song.year, rec?.originalYear ?? null, rec?.isCompilation ?? null,
+              rec?.year ?? song.year, rec?.originalYear ?? null, rec?.yearUntrusted ?? null,
             ),
           },
           { lastfmTags, lyricExcerpt },
