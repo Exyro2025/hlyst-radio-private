@@ -7,6 +7,7 @@ import { config } from '../config.js';
 import * as settings from '../settings.js';
 import * as subLog from './subsonic-log.js';
 import * as blocklist from './blocklist.js';
+import { trackEraYear } from './show-filter.js';
 
 function buildAuth() {
   const salt = crypto.randomBytes(8).toString('hex');
@@ -890,7 +891,15 @@ export function getAnnotatedUri(song, opts: { maxDurationSec?: number | null; cu
     `album="${escAnnotate(song.album)}"`,
     `subsonic_id="${escAnnotate(song.id)}"`,
   ];
-  if (song.year) fields.push(`year="${escAnnotate(song.year)}"`);
+  // Era year, never the raw `year` (issue #1418). A reissue anthology carries
+  // the reissue's date, so a 1964 Stax single annotates as 2012 and every
+  // surface downstream of the metadata inherits it. trackEraYear applies the
+  // #842 precedence (resolved original year wins; an unresolved compilation
+  // reads as unknown) and falls back to the plain year for off-library tracks,
+  // which is the pre-#1418 behaviour. Unknown emits NO year field rather than
+  // a wrong one.
+  const eraYear = trackEraYear(song);
+  if (eraYear) fields.push(`year="${escAnnotate(eraYear)}"`);
   const genres = songGenres(song);
   if (genres.length) fields.push(`genre="${escAnnotate(genres.join(', '))}"`);
   // DJ-mode adaptive blend: the queue stashes a per-transition crossfade length
