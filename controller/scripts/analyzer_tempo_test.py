@@ -169,6 +169,51 @@ def beats_past_the_envelope_are_dropped():
     assert fit is not None and fit["action"] in ("keep", "halve", "double")
 
 
+class ArrayLike:
+    """Minimal stand-in for a numpy array: iterable and sized, but raises on
+    truthiness exactly as numpy does for more than one element. beat_track
+    returns a real ndarray, so every entry point has to survive this — and
+    `values or []` does not. Reproduced without importing numpy so this suite
+    stays dependency-free (the box running it may not have numpy at all).
+    """
+
+    def __init__(self, items):
+        self._items = list(items)
+
+    def __iter__(self):
+        return iter(self._items)
+
+    def __len__(self):
+        return len(self._items)
+
+    def __bool__(self):
+        raise ValueError(
+            "The truth value of an array with more than one element is ambiguous"
+        )
+
+
+def numpy_style_inputs_are_judged_not_swallowed():
+    # The regression that pure-list tests cannot see. `beat_frames or []` raises
+    # on an ndarray; corrected_tempo catches it, logs, and keeps the reported
+    # tempo — so the correction ships as a silent no-op on EVERY track while the
+    # unit suite stays green. Caught only by running the real worker on real
+    # audio, which is why this case is pinned here now.
+    env = envelope(SLOW_PERIOD, [1.0])
+    fit = aw.tempo_octave_fit(ArrayLike(env), ArrayLike(grid(SLOW_PERIOD // 2)))
+    assert fit is not None and fit["action"] == "halve", fit
+    bpm, _beats, applied = aw.apply_tempo_octave(
+        152.0, ArrayLike(grid(SLOW_PERIOD // 2)), fit
+    )
+    assert applied and abs(bpm - 76.0) < 1e-9, bpm
+    # And end to end through the wrapper, where the swallowing happened.
+    bpm2, _b2, conf = aw.corrected_tempo(
+        None, 22050, None, 152.0, ArrayLike(grid(SLOW_PERIOD // 2)),
+        onset_env=ArrayLike(env),
+    )
+    assert abs(bpm2 - 76.0) < 1e-9, f"correction silently skipped: {bpm2}"
+    assert conf is not None and conf > 0.8, conf
+
+
 def negative_frames_do_not_shift_the_parity():
     # strongOffset is a PARITY over the fit's filtered beat list, so
     # apply_tempo_octave has to filter identically. A stray negative frame
@@ -232,6 +277,7 @@ test("refuses an implausibly fast doubling", refuses_an_implausibly_fast_doublin
 test("too little grid is unmeasured", too_little_grid_is_unmeasured)
 test("silent envelope is unmeasured", silent_envelope_is_unmeasured)
 test("beats past the envelope are dropped", beats_past_the_envelope_are_dropped)
+test("numpy-style inputs are judged, not swallowed", numpy_style_inputs_are_judged_not_swallowed)
 test("negative frames do not shift the parity", negative_frames_do_not_shift_the_parity)
 test("unmeasured fit leaves the reading alone", unmeasured_fit_leaves_the_reading_alone)
 test("applied correction reports its confidence", applied_correction_reports_its_confidence)

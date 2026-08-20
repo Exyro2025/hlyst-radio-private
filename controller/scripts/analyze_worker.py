@@ -951,6 +951,20 @@ def onset_envelope(y, sr, librosa):
         return None
 
 
+def _seq(values, cast):
+    """A sequence as a plain list, via an EXPLICIT None check.
+
+    Never `values or []`: beat_track hands back a numpy ARRAY, and `or` on one
+    raises "truth value of an array with more than one element is ambiguous".
+    Inside tempo_octave_fit that raise is caught by corrected_tempo, logged, and
+    turned into "keep the reported tempo" — so the whole correction degrades to a
+    silent no-op on every track while still looking like it shipped. An empty
+    array is also falsy, which would take the same path for a different reason."""
+    if values is None:
+        return []
+    return [cast(v) for v in values]
+
+
 def _onset_at(env, frame):
     """Onset strength at `frame`, taking the strongest of ±1 frame so a beat
     landing a frame either side of a constant-tempo grid still reads as a beat.
@@ -978,9 +992,9 @@ def tempo_octave_fit(onset_env, beat_frames):
     crossed — or, for "keep", from the nearest threshold it did NOT cross —
     normalised so 1.0 is the unambiguous extreme. It says how far the call was
     from flipping, never how accurate the tempo is in absolute terms."""
-    env = [float(v) for v in (onset_env or [])]
+    env = _seq(onset_env, float)
     n = len(env)
-    beats = sorted({int(b) for b in (beat_frames or []) if 0 <= int(b) < n})
+    beats = sorted({b for b in _seq(beat_frames, int) if 0 <= b < n})
     # Four beats is the floor for two two-sample alternating sets. Fewer means
     # the window caught an intro or a decode stub, not a groove.
     if n < 8 or len(beats) < 4:
@@ -1066,7 +1080,7 @@ def apply_tempo_octave(bpm, beat_frames, fit):
     # half" silently keeps the silent half instead. The fit also drops frames at
     # or past the envelope's end, but those are a trailing slice and cannot move
     # the parity — a negative frame would.
-    beats = sorted({int(b) for b in (beat_frames or []) if int(b) >= 0})
+    beats = sorted({b for b in _seq(beat_frames, int) if b >= 0})
     if fit["action"] == "halve":
         target = bpm / 2.0
         if target < OCTAVE_HALVE_FLOOR:
@@ -1097,7 +1111,8 @@ def corrected_tempo(y, sr, librosa, bpm, beat_frames, onset_env=None, label=""):
     tag = f" ({label})" if label else ""
     try:
         env = onset_env if onset_env is not None else onset_envelope(y, sr, librosa)
-        fit = tempo_octave_fit(env, beat_frames) if env else None
+        # len(), not truthiness — see _seq: `if env` on a numpy array raises.
+        fit = tempo_octave_fit(env, beat_frames) if env is not None and len(env) else None
     except Exception as e:  # noqa: BLE001 — a failed fit leaves the reading be
         log(f"tempo octave fit failed{tag}: {e}")
         return bpm, beat_frames, None
