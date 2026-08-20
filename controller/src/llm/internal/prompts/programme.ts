@@ -175,6 +175,10 @@ export async function generateProgrammePlan({
     schema: planSchema(featureCount),
     temperature: 0.9,
     kind: 'generateProgrammePlan',
+    // The episode plan is a backstage structured decision. Keep its routing
+    // separate from the Persona-written programme beats so Producer-model
+    // evaluations can exercise the plan without changing delivery.
+    role: 'producer',
   });
 }
 
