@@ -39,14 +39,14 @@ function eraSourceNote(track: Track): string {
   const era = eraYearOf(track);
   if (era == null) {
     return track.isCompilation || track.eraUntrusted
-      ? 'no era year — the album\u2019s date is the release\u2019s, and the real one is unresolved, so era-bounded shows skip this track'
+      ? 'no era year — the album’s date is the release’s, and the real one is unresolved, so era-bounded shows skip this track'
       : 'no era year — this track is invisible to era-bounded shows';
   }
   switch (track.originalYearSource) {
     case 'manual':      return `${era} · set by hand`;
     case 'musicbrainz': return `${era} · from MusicBrainz`;
-    case 'album-tag':   return `${era} · from the album tag — on a reissue this is the reissue's date`;
-    default:            return `${era} · the file's own year`;
+    case 'album-tag':   return `${era} · from the album tag — on a reissue this is the reissue’s date`;
+    default:            return `${era} · the file’s own year`;
   }
 }
 
@@ -144,14 +144,18 @@ export function ManualTagEditor(props: {
             </Btn>
           )}
         </div>
-        <p className="text-[11px] text-ink-soft">
+        {/* House helper-text classes (text-muted, leading-[1.6]) — NOT
+            text-ink-soft, which is `color-mix(ink 6%, transparent)`, a surface
+            token: as a text colour it renders all but invisible. Capped to a
+            readable measure because this is much the longest string in the
+            panel and the row editor spans the full table width. */}
+        <p className="mt-1 max-w-[68ch] text-[11px] leading-[1.6] text-muted">
           {/* State first, instruction second: the operator opened this row
               because the year looked wrong, so what the station currently
               believes is the thing they came to read. */}
-          {eraSourceNote(track)}. Set the real recording year when the file
-          carries a reissue&rsquo;s date — this outranks the album tag and
-          MusicBrainz, and drives era shows, the DJ&rsquo;s intro and the
-          player&rsquo;s year.
+          {eraSourceNote(track)}. Set the real recording year here — it
+          outranks the album tag and MusicBrainz, and drives era shows, the
+          DJ&rsquo;s intro and the player&rsquo;s year.
         </p>
       </div>
       <label className="flex items-center gap-2 text-[12px] text-ink">
