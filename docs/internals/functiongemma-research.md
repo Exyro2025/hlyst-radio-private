@@ -678,3 +678,25 @@ This is not yet a bundled installation feature or a replacement for the
 advanced Producer settings. It is a controlled live experiment intended to
 collect latency, recovery, route distribution and downstream selection data
 before any commitment fine-tune is considered.
+
+## Preferred playlist routing guard — 2026-08-20
+
+A live preferred-playlist show exposed a routing-policy collapse: the V3
+FunctionGemma router repeatedly selected `showPlaylistTracks` even while the
+current track and downstream Producer selection continued changing. All calls
+were valid, so success-rate telemetry alone did not reveal the loss of source
+diversity.
+
+This is now a controller policy, not a V4 training target. When a preferred
+(non-strict) playlist track is on air, the next FunctionGemma route is not
+offered `showPlaylistTracks` and is directed to choose another library axis.
+Strict playlists remain exempt: their playlist source stays available on every
+pick.
+
+Regression coverage proves the two-route sequence: the first route may choose
+the playlist tool, while the following route cannot receive it. The local live
+test controller was rebuilt with this guard on 2026-08-20.
+
+Future work:
+
+- Continue generic Producer/Persona split features on `codex/producer-routing`.

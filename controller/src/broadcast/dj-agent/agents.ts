@@ -132,16 +132,20 @@ export function producerRouterMessage({
   current = null,
   activeShow = null,
   playlistAvailable = false,
+  playlistCoolingDown = false,
   journeyActive = false,
   explore = false,
 }: {
   current?: any;
   activeShow?: any;
   playlistAvailable?: boolean;
+  playlistCoolingDown?: boolean;
   journeyActive?: boolean;
   explore?: boolean;
 } = {}): string {
-  const direction = playlistAvailable
+  const direction = playlistCoolingDown
+    ? 'The current track already came from the show\'s preferred pinned playlist. Deliberately use a different library discovery axis for this pick so the playlist remains an anchor, not the only source.'
+    : playlistAvailable
     ? 'This programme has an operator-pinned playlist. Begin discovery inside that curated source.'
     : journeyActive
       ? 'The active sonic journey has a current waypoint. Discover music toward that waypoint.'

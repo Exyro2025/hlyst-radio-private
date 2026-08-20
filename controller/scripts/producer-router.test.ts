@@ -226,3 +226,46 @@ test('routes and executes exactly one segment research tool', async () => {
   assert.equal(records[0].kind, 'djProducerSegmentRoute');
   assert.equal(records[0].ok, true);
 });
+
+test('preferred playlist discovery alternates to another tool on the following route', async () => {
+  const requests: any[] = [];
+  const buildTools = () => {
+    const seen = new Map<string, any>();
+    return {
+      seen,
+      tools: {
+        showPlaylistTracks: tool({ description: 'pinned playlist', inputSchema: z.object({}), execute: async () => {
+          seen.set('playlist-track', { id: 'playlist-track' });
+          return [{ id: 'playlist-track' }];
+        } }),
+        tracksByMood: tool({ description: 'mood tags', inputSchema: z.object({}), execute: async () => {
+          seen.set('library-track', { id: 'library-track' });
+          return [{ id: 'library-track' }];
+        } }),
+      },
+    };
+  };
+  const config = { baseUrl: 'http://router/v1', model: 'router.gguf', timeoutMs: 5000 };
+  const fetchImpl = (async (_url: any, init: any) => {
+    const request = JSON.parse(init.body);
+    requests.push(request);
+    const names = request.tools.map((entry: any) => entry.function.name);
+    const name = names.includes('showPlaylistTracks') ? 'showPlaylistTracks' : 'tracksByMood';
+    return jsonResponse({ role: 'assistant', content: `<start_function_call>call:${name}{}<end_function_call>` });
+  }) as any;
+
+  const first = await routeProducerDiscovery({
+    scope: {} as any, prompt: 'Start inside the preferred playlist.', config, fetchImpl,
+    buildTools: (() => buildTools()) as any, recordImpl: (() => {}) as any,
+  });
+  const second = await routeProducerDiscovery({
+    scope: {} as any, prompt: 'Use another discovery axis.', config, fetchImpl,
+    buildTools: (() => buildTools()) as any,
+    excludeToolNames: new Set(['showPlaylistTracks']), recordImpl: (() => {}) as any,
+  });
+
+  assert.equal(first.toolCalls[0].name, 'showPlaylistTracks');
+  assert.equal(second.toolCalls[0].name, 'tracksByMood');
+  assert.ok(requests[0].tools.some((entry: any) => entry.function.name === 'showPlaylistTracks'));
+  assert.ok(!requests[1].tools.some((entry: any) => entry.function.name === 'showPlaylistTracks'));
+});

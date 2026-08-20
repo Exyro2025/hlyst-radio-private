@@ -279,6 +279,15 @@ async function pickViaAgent(queue, ctx, { wantLink, audioWaypoint = null, curren
   const playlistPool = activeShow ? await resolveShowPlaylistPool(activeShow) : null;
   const playlistLock = playlistPool && activeShow?.playlistStrict ? playlistPool.ids : null;
   const playlistTracks = playlistPool?.tracks ?? null;
+  // Soft playlists are an editorial preference, not an exclusive source. Once
+  // a playlist track is on air, make the next FunctionGemma discovery round
+  // take a different library axis. Strict playlists remain unchanged.
+  const playlistCoolingDown = !!(
+    playlistPool?.ids.size
+    && !activeShow?.playlistStrict
+    && current?.id
+    && playlistPool.ids.has(current.id)
+  );
   const excludedIds = activeShow ? await resolveExcludedPlaylistIds(activeShow) : null;
 
   // Strict music locks for the discovery tools (filtersStrict). Resolved HERE,
@@ -371,10 +380,12 @@ async function pickViaAgent(queue, ctx, { wantLink, audioWaypoint = null, curren
           const routed = await routeProducerDiscovery({
             scope,
             config: routerConfig,
+            excludeToolNames: playlistCoolingDown ? new Set(['showPlaylistTracks']) : undefined,
             prompt: producerRouterMessage({
               current,
               activeShow,
-              playlistAvailable: !!playlistTracks?.length,
+              playlistAvailable: !!playlistTracks?.length && !playlistCoolingDown,
+              playlistCoolingDown,
               journeyActive: !!audioWaypoint,
               explore: producerExplore,
             }),

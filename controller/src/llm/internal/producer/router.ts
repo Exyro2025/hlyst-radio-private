@@ -167,6 +167,7 @@ export async function routeProducerDiscovery({
   fetchImpl = fetch,
   buildTools = buildPickerTools,
   recordImpl = record,
+  excludeToolNames = new Set<string>(),
 }: {
   scope: PickerScope;
   prompt: string;
@@ -174,6 +175,11 @@ export async function routeProducerDiscovery({
   fetchImpl?: typeof fetch;
   buildTools?: typeof buildPickerTools;
   recordImpl?: typeof record;
+  // Controller policy may temporarily remove a valid tool from a discovery
+  // round. This is deliberately an availability constraint, not a prose-only
+  // instruction: tiny deterministic routers otherwise keep selecting the same
+  // successful source despite being asked to vary.
+  excludeToolNames?: ReadonlySet<string>;
 }): Promise<RoutedDiscovery> {
   if (!config) throw new Error('Producer Router is not configured');
   const { tools, seen } = buildTools(scope);
@@ -199,7 +205,8 @@ export async function routeProducerDiscovery({
       // live testing showed both the tiny router and the larger fallback model
       // repeatedly reconstructing the same plan when the failed route remained
       // available.
-      const roundToolEntries = Object.entries(tools).filter(([name]) => !exhaustedTools.has(name));
+      const roundToolEntries = Object.entries(tools).filter(([name]) =>
+        !exhaustedTools.has(name) && !excludeToolNames.has(name));
       const roundTools = Object.fromEntries(roundToolEntries) as ToolSet;
       const offered = openAiTools(roundTools);
       if (!offered.length) throw new Error('Producer Router has no untried recovery tools');
