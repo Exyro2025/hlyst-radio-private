@@ -11,6 +11,23 @@
 const MAX_TTS_CALLS = 120;
 export const ttsCalls: any[] = [];
 
+// Local diagnostics for the Stats page. Unlike the LLM ring (which holds model
+// calls, each possibly containing several tool calls), these retain the last
+// 120 individual tool calls and the last 120 actual track transitions.
+const MAX_DEBUG_EVENTS = 120;
+export const toolCalls: any[] = [];
+export const trackTransitions: any[] = [];
+
+export function recordToolCall(call: any) {
+  toolCalls.unshift(call);
+  if (toolCalls.length > MAX_DEBUG_EVENTS) toolCalls.length = MAX_DEBUG_EVENTS;
+}
+
+export function recordTrackTransition(transition: string) {
+  trackTransitions.unshift({ transition });
+  if (trackTransitions.length > MAX_DEBUG_EVENTS) trackTransitions.length = MAX_DEBUG_EVENTS;
+}
+
 // Recorded by audio/tts.js on every speak(): one entry per spoken segment,
 // success or failure, including whether the engine fell back to a local one.
 // Shape: { kind, engine, requested, fellBack, ok, ms, chars, text, persona, error?, t }
@@ -202,6 +219,51 @@ export function summarizeDjLog(djLog) {
   return {
     count: djLog.length,
     byKind: [...m.entries()].map(([kind, count]) => ({ kind, count })).sort((a, b) => b.count - a.count),
+  };
+}
+
+// --- local debugging summaries -----------------------------------------
+
+// The picker schema permits one chosen effect per track. A capped track can
+// additionally receive an automatic washout exit, so these are the complete
+// set of combinations that can actually be armed on-air. Keep all eleven rows
+// in the response so unused but valid outcomes still read as zero.
+export const TRACK_TRANSITION_COMBINATIONS = [
+  'normal',
+  'sweep',
+  'washout',
+  'blend',
+  'dissolve',
+  'chop',
+  'loop',
+  'sweep + washout',
+  'blend + washout',
+  'dissolve + washout',
+  'chop + washout',
+] as const;
+
+export function summarizeDebug(toolCallEvents, transitionEvents, toolNames: readonly string[]) {
+  const byCountThenName = <T extends { name: string; count: number }>(rows: T[]) =>
+    rows.sort((a, b) => b.count - a.count || a.name.localeCompare(b.name));
+  const tally = (events: any[], key: string, names: readonly string[]) => {
+    const counts = new Map<string, number>(names.map(name => [name, 0]));
+    for (const event of events) {
+      const name = event?.[key];
+      if (typeof name === 'string' && counts.has(name)) counts.set(name, (counts.get(name) || 0) + 1);
+    }
+    return byCountThenName(names.map(name => ({ name, count: counts.get(name) || 0 })));
+  };
+
+  return {
+    toolCalls: {
+      window: MAX_DEBUG_EVENTS,
+      count: toolCallEvents.length,
+      byName: byCountThenName(toolNames.map(name => {
+        const calls = toolCallEvents.filter(event => event?.name === name);
+        return { name, count: calls.length, failed: calls.filter(call => call.failed).length };
+      })),
+    },
+    transitions: { window: MAX_DEBUG_EVENTS, count: transitionEvents.length, byName: tally(transitionEvents, 'transition', TRACK_TRANSITION_COMBINATIONS) },
   };
 }
 

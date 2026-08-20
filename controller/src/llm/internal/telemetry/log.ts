@@ -10,6 +10,7 @@ import { statSync, renameSync } from 'node:fs';
 import { STATE_DIR } from '../../../config.js';
 import { logEvent, cap } from '../../../observability/events.js';
 import { addDailyUsage } from './budget.js';
+import { recordToolCall } from '../../../stats.js';
 
 const MAX_CALLS = 120;
 export const recentCalls: any[] = [];
@@ -72,6 +73,14 @@ export function record(call: any) {
 
   // One event per agent tool call, so tool use is individually on the timeline.
   for (const tc of call.toolCalls || []) {
+    // `done` is an internal structured-output control tool, not a music
+    // discovery call. Keep this diagnostic focused on the picker registry.
+    if (tc.name !== 'done') {
+      // A failed LLM attempt can still have completed discovery calls before
+      // it failed to produce a final answer. Skill tools also report their own
+      // timeout/exception as `{ error }`, so preserve both failure paths.
+      recordToolCall({ name: tc.name, failed: !call.ok || !!tc.result?.error });
+    }
     logEvent('tool', {
       kind: call.kind,
       name: tc.name,

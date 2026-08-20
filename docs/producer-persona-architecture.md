@@ -19,6 +19,43 @@ candidate scores, picker rationale, or Producer-authored prose.
 
 The governing rule is: **Producer decides; Persona speaks.**
 
+## Current experimental model responsibility map
+
+The Producer role may temporarily be implemented by two models during the
+FunctionGemma experiment. This is a test topology, not a second supported
+configuration surface: the normal optional Producer leg remains Qwen3-4B, and
+the FunctionGemma router is enabled only in the separate live-test setup.
+
+| Responsibility | FunctionGemma | Qwen3-4B Producer | Persona |
+| --- | --- | --- | --- |
+| Track discovery | Selects one library discovery tool and validated arguments; may make one bounded recovery call after an empty result. | Receives the grounded candidate set and makes the editorial commit: exact track id and transition. Also performs the complete pick when the router is not configured or fails. | Writes a link only after a track has been selected. |
+| Track re-pick | Not used. | Chooses a grounded replacement when the initial pick is invalid or violates the artist guard. | Preserves the established legacy link fallback if delivery fails. |
+| Autonomous skill research | When explicitly enabled, selects one eligible research tool and its arguments. It does not decide airtime, select SFX, or write speech. | Evaluates the returned evidence, decides whether to air, selects the capability/SFX, and keeps the private reason. It runs the complete director when the router is off or fails. | Writes the grounded segment only after the Producer has approved it. |
+| Programme plan | Not used. | Creates the structured episode angle, feature topics and host notes while this path is under evaluation. | Writes the intro, feature and outro that listeners hear. |
+
+FunctionGemma is therefore being evaluated first as a **tool-function router**,
+not as a general editorial Producer or a presenter. Its routing success must
+not be counted as proof that it can choose a musically defensible final track.
+The Qwen3-4B hand-off remains necessary for that final editorial decision in
+the current experiment.
+
+### Possible Qwen3-4B retirement
+
+If FunctionGemma proves sufficiently reliable and worth retaining, removing
+Qwen3-4B is a future architecture decision, not an automatic consequence of a
+successful router test. Each remaining Qwen3-4B responsibility must be
+evaluated separately. Until FunctionGemma has passed its own final-choice and
+evidence-decision tests, the safe fallback is to return the affected operation
+to the configured primary Persona model using the established all-in-one
+contracts. That preserves availability, but it intentionally gives up the
+clean split for that operation; it must not be described as FunctionGemma
+having replaced the whole Producer role.
+
+Before removing Qwen3-4B, record results for: grounded candidate commitment,
+artist/transition safeguards, evidence and airtime decisions, programme-plan
+quality, queue-runway latency, and fallback frequency. No Producer-generated
+prose may be introduced into Persona prompts during that transition.
+
 ## Experimental stages
 
 The implementation is being kept identifiable in three stages so identical
