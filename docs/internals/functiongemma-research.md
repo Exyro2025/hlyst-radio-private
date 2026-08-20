@@ -700,3 +700,53 @@ test controller was rebuilt with this guard on 2026-08-20.
 Future work:
 
 - Continue generic Producer/Persona split features on `codex/producer-routing`.
+
+## Live-test findings and V4 hand-off — 2026-08-20
+
+The first post-guard observation window showed the preferred-playlist policy
+working as intended: `showPlaylistTracks` no longer monopolised routing, with
+`tracksTowardJourney` and other discovery axes continuing to receive calls.
+The important remaining router failure is instead malformed
+`tracksByMood` arguments.
+
+The router recorded forms such as `type: "mood"`, `hormonal: "high"`,
+`age: None`, and `mood: "mood"`. None is a library or candidate-recovery
+failure: the live contract requires the exact keys `mood` and `energy`, with
+`mood` drawn from the station vocabulary and `energy` one of `low`, `medium`,
+`high`, or JSON `null`. Invalid calls are honestly recorded as failed
+`djProducerRoute` events and fall through to the complete Producer picker,
+preserving the queue but losing the router's latency benefit.
+
+The next fine-tune should therefore be a targeted V4, rather than a longer
+run over unchanged data. It is the final planned tool-function training pass
+for this experiment and should include `generateProgrammePlan`, which has
+already passed its Qwen3-4B implementation tests on `codex/producer-routing`.
+Before training:
+
+1. Add regression examples for the malformed `tracksByMood` forms, requiring
+   only the live keys and exact enum/null values.
+2. Freeze held-out acceptance cases for every supported function, including
+   strict and preferred-playlist behaviour, cooldown routing, empty-result
+   recovery, and programme-plan routing. Do not train on those prompts.
+3. Keep representative sanitised live prompts as an independent acceptance
+   set, and compare V3 and V4 by valid-call rate, correct-tool rate,
+   argument-validity rate, recovery success, latency, and fallback frequency.
+4. Consider a bounded controller recovery that removes `tracksByMood` after
+   invalid arguments before invoking the complete Producer fallback; evaluate
+   this separately from the model fine-tune.
+
+The observed `djProducerSelect` average is an improvement, not a regression:
+it is approximately ten seconds faster than before FunctionGemma took part in
+the live path, though still about eight seconds slower than the original
+GPU-hosted all-in-one function. Prioritise route correctness before further
+selection-latency work.
+
+The longer-term intended topology is FunctionGemma for bounded tool calls,
+with remaining Qwen3-4B responsibilities returning to the Persona model once
+the router is proven. Final track selection is explicitly a separate future
+evaluation: it must demonstrate grounded candidate commitment, artist and
+show constraints, transition choice, musical continuity, and safe fallback;
+router validity alone is not evidence for that promotion.
+
+The architecture document on `codex/producer-routing` currently lists
+programme planning as Qwen3-4B-only while it is under evaluation. When
