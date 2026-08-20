@@ -34,6 +34,7 @@ import type { TurnMeta } from './session.js';
 import { getFullContext, energyForDaypart } from '../context.js';
 import * as settings from '../settings.js';
 import { logEvent } from '../observability/events.js';
+import { logDjSpeech } from '../observability/dj-speech-log.js';
 import { djCallsAllowed, presentListeners } from './listeners.js';
 import { autoVoiceAllowed } from './voice-policy.js';
 import * as webhooks from './webhooks.js';
@@ -118,6 +119,8 @@ interface SegmentDesc {
   logText?: string | null;
   /** Whether this segment also fires the legacy dj.say/dj.link event. */
   legacy?: boolean;
+  /** Track the segment accompanies, captured before the asynchronous air wait. */
+  track?: Track | null;
 }
 
 // Re-exported so every existing `from './queue.js'` import keeps working.
@@ -1326,7 +1329,7 @@ class Queue {
       const targetFile = kind === 'link'
         ? config.liquidsoap.introFile
         : config.liquidsoap.sayFile;
-      const seg: SegmentDesc = { kind, channel: kind === 'link' ? 'intro' : 'say', text, meta, persona };
+      const seg: SegmentDesc = { kind, channel: kind === 'link' ? 'intro' : 'say', text, meta, persona, track: this.current?.track ?? null };
       const handoff = await airVoice(targetFile, wavPath, text, voiceGainDb(kind, persona), {
         onQueued: q => this.onQueued(q, seg),
       });
@@ -1378,7 +1381,7 @@ class Queue {
   }
 
   onSpoken(handoff: VoiceHandoff, {
-    kind, channel, text, meta = {}, persona = null, logText = null, legacy = true,
+    kind, channel, text, meta = {}, persona = null, logText = null, legacy = true, track = null,
   }: SegmentDesc) {
     void handoff.aired.then(airedAt => {
       try {
@@ -1389,6 +1392,19 @@ class Queue {
           ...(airedAt != null ? { airedAt: new Date(airedAt).toISOString() } : {}),
         };
         this.log(kind, logText ?? text, voiceMeta);
+        // Keep this separately from events.jsonl: it is an operator-facing
+        // transcript of what reached the DJ speech path, not diagnostic JSON.
+        // Use the measured live-edge time when the mixer supplied one.
+        const timestamp = airedAt ?? Date.now();
+        const show = settings.resolveActiveShow(new Date(timestamp))?.name || 'Auto DJ';
+        logDjSpeech({
+          airedAt: timestamp,
+          speaker: persona?.name ?? (meta.personaName as string | undefined) ?? 'DJ',
+          show,
+          kind,
+          text,
+          track,
+        });
         session.appendTurn({
           role: 'segment',
           kind,
@@ -1567,7 +1583,7 @@ class Queue {
     try {
       // Deferred idents ride the INTRO file (light duck at a track boundary),
       // whatever their kind — see announceAtNextTrack.
-      const seg: SegmentDesc = { kind: p.kind, channel: 'intro', text: p.text, meta: p.meta, persona: p.persona };
+      const seg: SegmentDesc = { kind: p.kind, channel: 'intro', text: p.text, meta: p.meta, persona: p.persona, track: this.current?.track ?? null };
       const handoff = await airVoice(config.liquidsoap.introFile, p.wavPath, p.text, voiceGainDb(p.kind, p.persona), {
         onQueued: q => this.onQueued(q, seg),
       });
@@ -1675,6 +1691,7 @@ class Queue {
         meta: item.introPersona
           ? { personaId: item.introPersona.id, personaName: item.introPersona.name }
           : {},
+        track: item.track,
       };
       const handoff = await airVoice(targetFile, item.introWav, item.introScript || '', voiceGainDb(kind, item.introPersona || undefined), {
         onQueued: q => this.onQueued(q, seg),
