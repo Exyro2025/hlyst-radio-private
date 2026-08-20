@@ -7,6 +7,11 @@
 // ones that matter, because a false positive costs a MusicBrainz request and
 // can drop a perfectly good album out of era-bounded shows.
 //
+// Every artist-count case below is taken from a REAL catalogue (9,216 tracks,
+// 3,989 albums) that the first cut of this detector got wrong — it flagged 24%
+// of that library. The three fixtures named after real albums are the ones that
+// drove each threshold, so a future loosening has to argue with them.
+//
 // Run: npm test -- era-suspect
 
 import test from 'node:test';
@@ -65,19 +70,61 @@ test('a Various Artists album artist is enough on its own', () => {
   }
 });
 
-test('three or more distinct credited artists is an anthology', () => {
+// n tracks, each by a different lead — the shape of a sampler.
+const manyLeads = (n: number) => Array.from({ length: n }, (_, i) => `Artist ${i}`);
+// n tracks fronted by one artist, with a different guest on each — the shape of
+// an ordinary features-heavy record, and the case the naive rule got wrong.
+const oneLeadWithGuests = (n: number) =>
+  Array.from({ length: n }, (_, i) => `Main Artist feat. Guest ${i}`);
+
+test('a sampler with no artist at the front of it is an anthology', () => {
   assert.deepEqual(
-    albumEraSuspect({ albumArtist: 'Various', distinctTrackArtists: 12, year: 2012, isCompilation: false }),
-    { suspect: true, reason: 'various-artists' },
+    albumEraSuspect({ albumArtist: 'Stax', title: 'Label Sampler', year: 2012, trackArtists: manyLeads(12) }),
+    { suspect: true, reason: 'many-artists' },
   );
-  assert.equal(albumEraSuspect({ albumArtist: 'Stax', distinctTrackArtists: 3, year: 2012 }).reason, 'many-artists');
 });
 
-test('TWO credited artists is NOT enough', () => {
-  // The precision line. A duo record, a split, a collaboration album and any
-  // features-heavy rap record all credit two — flagging them would fire
-  // constantly and mean nothing.
-  assert.equal(albumEraSuspect({ albumArtist: 'Simon & Garfunkel', distinctTrackArtists: 2, year: 1970 }).suspect, false);
+test('a features-heavy album by ONE artist is not', () => {
+  // Measured failure. "Slauson Boy 2" counted 13 distinct artist STRINGS and
+  // "Mr. Morale & The Big Steppers" 9, because the raw `artist` field carries
+  // the features — both are single-artist records. Counting the LEAD is what
+  // fixes it, and it is the biggest correctness win in this module.
+  assert.equal(albumEraSuspect({ albumArtist: 'Main Artist', year: 2022, trackArtists: oneLeadWithGuests(18) }).suspect, false);
+});
+
+test('a guest-heavy record still reads as its lead even at album length', () => {
+  const mostlyOne = [...Array(14).fill('Kendrick Lamar'), 'Kendrick Lamar feat. Baby Keem', 'Sampha', 'Ghostface Killah'];
+  assert.equal(albumEraSuspect({ albumArtist: 'Kendrick Lamar', year: 2022, trackArtists: mostlyOne }).suspect, false);
+});
+
+test('a SHORT multi-artist release is not an anthology', () => {
+  // The other measured failure: on a 4-track EP with four collaborators no one
+  // holds a third of the record, so any ratio test fires on arithmetic alone.
+  // The real catalogue is full of these ("Nasha - Single", "Say Less - EP").
+  assert.equal(albumEraSuspect({ albumArtist: 'Someone', year: 2024, trackArtists: manyLeads(4) }).suspect, false);
+  assert.equal(albumEraSuspect({ albumArtist: 'Someone', year: 2024, trackArtists: manyLeads(7) }).suspect, false);
+  assert.equal(albumEraSuspect({ albumArtist: 'Someone', year: 2024, trackArtists: manyLeads(8) }).suspect, true);
+});
+
+test('FOUR leads is below the floor, five clears it', () => {
+  assert.equal(albumEraSuspect({ year: 2012, trackArtists: manyLeads(4).concat(manyLeads(4)) }).suspect, false);
+  assert.equal(albumEraSuspect({ year: 2012, trackArtists: manyLeads(5).concat(manyLeads(5)) }).suspect, true);
+});
+
+test('a title that SAYS it is a collection fires on its own', () => {
+  // Catches the single-artist "Best of", which no artist-count signal can see.
+  for (const t of ['The Collection', 'Kaun Nachdi (The Ultimate Collection)',
+                   'Best of Diljit Dosanjh', 'Free Fire (DJ Mix)', 'Rarities', 'Greatest Hits']) {
+    assert.equal(albumEraSuspect({ albumArtist: 'One Artist', title: t, year: 2020, trackArtists: ['One Artist'] }).suspect, true, t);
+  }
+});
+
+test('loose collection-ish words do NOT fire', () => {
+  // "Vol." and a bare "Collection" appear in ordinary album titles; the word
+  // list is short on purpose.
+  for (const t of ['Mxrci Season, Vol. 1', 'Hard Drive, Vol. 2', 'Spring Collection Blues', 'The Best Day']) {
+    assert.equal(albumEraSuspect({ albumArtist: 'One Artist', title: t, year: 2020, trackArtists: ['One Artist'] }).suspect, false, t);
+  }
 });
 
 test('the reported single-artist anthology is caught by its title range', () => {
@@ -89,7 +136,7 @@ test('the reported single-artist anthology is caught by its title range', () => 
       albumArtist: 'Allen Toussaint',
       title: 'The Atco/Atlantic Singles 1968-1974',
       year: 2015,
-      distinctTrackArtists: 1,
+      trackArtists: Array(14).fill('Allen Toussaint'),
     }),
     { suspect: true, reason: 'title-year-range' },
   );
@@ -102,7 +149,7 @@ test('the other reported anthology is caught too', () => {
       albumArtist: 'Various Artists',
       title: 'After Laughter Comes Tears: Complete Stax & Volt Singles + Rarities 1964–65',
       year: 2012,
-      distinctTrackArtists: 8,
+      trackArtists: manyLeads(8),
     }).suspect,
     true,
   );
@@ -114,7 +161,7 @@ test('an ordinary single-artist album is not suspect', () => {
   assert.deepEqual(
     albumEraSuspect({
       isCompilation: false, albumArtist: 'Radiohead', title: 'In Rainbows',
-      year: 2007, distinctTrackArtists: 1,
+      year: 2007, trackArtists: Array(10).fill('Radiohead'),
     }),
     { suspect: false, reason: null },
   );
@@ -123,7 +170,7 @@ test('an ordinary single-artist album is not suspect', () => {
 test('a range that CLOSES in the album year is describing when it was made', () => {
   // "Sessions 2014-2015" on a 2015 album is not an anthology.
   assert.equal(
-    albumEraSuspect({ albumArtist: 'A Band', title: 'Sessions 2014-2015', year: 2015, distinctTrackArtists: 1 }).suspect,
+    albumEraSuspect({ albumArtist: 'A Band', title: 'Sessions 2014-2015', year: 2015, trackArtists: ['A Band'] }).suspect,
     false,
   );
 });
@@ -132,7 +179,7 @@ test('a title range with no album year to compare against stays clear', () => {
   // Untagged year — we cannot tell "collects older material" from "made then",
   // and guessing is the expensive direction.
   assert.equal(
-    albumEraSuspect({ albumArtist: 'A Band', title: 'Recordings 1968-1974', year: null, distinctTrackArtists: 1 }).suspect,
+    albumEraSuspect({ albumArtist: 'A Band', title: 'Recordings 1968-1974', year: null, trackArtists: ['A Band'] }).suspect,
     false,
   );
 });

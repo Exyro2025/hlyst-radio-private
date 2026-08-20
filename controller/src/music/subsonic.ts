@@ -737,17 +737,15 @@ export async function* iterateAllSongs() {
         const originalYear = Number.isFinite(ord) && ord > 0 ? ord : null;
         // Same station-archive drop as getAlbum() (issue #273).
         const songs = rejectArchive(r.album?.song || []);
-        // Counted over the KEPT songs, so a dropped archive entry can't inflate
-        // the artist count into a false anthology.
-        const distinctTrackArtists = new Set(
-          songs.map((s) => String(s.artist ?? '').trim().toLowerCase()).filter(Boolean),
-        ).size;
         const suspicion = albumEraSuspect({
           isCompilation,
           albumArtist: r.album?.artist ?? album.artist ?? null,
           title: r.album?.name ?? album.name ?? null,
           year: Number.isFinite(r.album?.year) ? r.album.year : null,
-          distinctTrackArtists,
+          // Raw strings, one per KEPT song — era-suspect owns the lead-artist
+          // normalisation, and counting over the kept set stops a dropped
+          // station-archive entry inflating the album into a false anthology.
+          trackArtists: songs.map((s) => s.artist),
         });
         for (const s of songs) {
           yield {

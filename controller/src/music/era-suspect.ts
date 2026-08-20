@@ -20,10 +20,29 @@
 // request (1/s, so it is a real cost at library scale) and, if the lookup then
 // misses, drops the album out of era-bounded shows entirely — the "leave it out
 // rather than play it in the wrong decade" rule firing on an album that was
-// fine. A false negative just leaves today's behaviour in place. So every
-// signal below is an anthology MARKER, never a weak correlate: "this album has
-// two credited artists" is not one of them, because duo records, split singles
-// and any features-heavy rap album would trip it.
+// fine. A false negative just leaves today's behaviour in place.
+//
+// The artist-count signal is TUNED AGAINST A REAL CATALOGUE (9,216 tracks,
+// 3,989 albums, heavy on modern Punjabi and rap) rather than reasoned about,
+// because reasoning about it got it badly wrong. Three findings changed the
+// shape of it:
+//
+//  1. `artist` is the raw per-track string and usually carries the features, so
+//     a one-artist record reads as many: "Slauson Boy 2" counted 13 artists,
+//     "Mr. Morale & The Big Steppers" 9, "Moosetape" 10 — all single-artist
+//     albums. Counting artistRootKey (the LEAD) collapses those to 1 and is the
+//     single biggest correctness win here.
+//  2. A bare "3 or more artists" rule flagged 207 albums / 2,221 tracks — 24%
+//     of the library — overwhelmingly ordinary records with guest verses.
+//  3. Small releases break any ratio test: a 4-track EP with four collaborators
+//     has no dominant artist by arithmetic alone, not because it is an
+//     anthology. Hence the track floor.
+//
+// The tuned rule lands on 5.4% of that library, and reads as DJ mixes,
+// soundtracks, label samplers and various-artist collections — which is what it
+// is supposed to be. Re-measure before loosening any of the three numbers.
+
+import { artistRootKey } from './recency.js';
 
 /** Album-level facts the walk can read without a single extra request. */
 export interface AlbumEraFacts {
@@ -34,22 +53,33 @@ export interface AlbumEraFacts {
   title?: string | null;
   /** The album's release year. */
   year?: number | null;
-  /** How many DISTINCT track artists the album credits. */
-  distinctTrackArtists?: number | null;
+  /**
+   * Every track's raw `artist` string, one per track. Raw on purpose: the
+   * lead-artist normalisation is this module's job, not the caller's, so the
+   * walk cannot accidentally count "Artist feat. Guest" as a second artist.
+   */
+  trackArtists?: Array<string | null | undefined> | null;
 }
 
 export interface EraSuspicion {
   suspect: boolean;
   /** Which marker fired, for the tagger log and the admin row editor. Null when clear. */
-  reason: 'compilation-flag' | 'various-artists' | 'many-artists' | 'title-year-range' | null;
+  reason:
+    | 'compilation-flag'
+    | 'various-artists'
+    | 'many-artists'
+    | 'title-year-range'
+    | 'title-compilation'
+    | null;
 }
 
 const CLEAR: EraSuspicion = { suspect: false, reason: null };
 
-// Three or more, not two. Two distinct credited artists is the ordinary shape
-// of a duo record, a split, a collaboration album and anything with a guest
-// verse — on a real catalogue it fires constantly and means nothing.
-const MANY_ARTISTS_MIN = 3;
+// All three measured together; see the header. Five distinct LEAD artists, on a
+// release of at least eight tracks, with no lead accounting for 30% of it.
+const MANY_ARTISTS_MIN = 5;
+const MANY_ARTISTS_MIN_TRACKS = 8;
+const MANY_ARTISTS_MAX_SHARE = 0.30;
 
 // The earliest year a recording could plausibly carry, matching
 // musicbrainz.ts MIN_YEAR. Below this a 4-digit number in a title is a
@@ -62,6 +92,39 @@ function norm(s: unknown): string {
 
 // Navidrome writes the album artist for a multi-artist release as one of these.
 const VARIOUS = new Set(['variousartists', 'various', 'va', 'verschiedene', 'diversos', 'divers']);
+
+// Titles that SAY the record is a collection. Deliberately a short, specific
+// list: on the measured catalogue it fires on 12 albums out of 3,989, and the
+// three it catches that no other signal does are single-artist collections
+// ("The Collection", "Kaun Nachdi (The Ultimate Collection)", a "Best of") —
+// the same shape as the reported Toussaint anthology. Loose words are left out
+// on purpose: a bare "Collection" or "Vol." appears in ordinary album titles.
+const COMPILATION_TITLE = new RegExp(
+  '\\b(?:'
+  + 'anthology|rarities|b-sides|greatest hits|best of'
+  + '|dj mix|megamix|the ultimate collection|the collection'
+  + '|complete[^,;]{0,24}singles|singles collection'
+  + ')\\b',
+  'i',
+);
+
+// Distinct LEAD artists and the biggest one's share of the record. Lead, not
+// raw: see finding 1 in the header — the raw string carries the features, so
+// counting it reads a one-artist album as a dozen.
+//
+// A local copy of recency.artistRootKey's split rules would be a second copy of
+// a policy that already exists, so this imports it.
+function leadArtistProfile(artists: Array<string | null | undefined>): { leads: number; tracks: number; topShare: number } {
+  const counts = new Map<string, number>();
+  let tracks = 0;
+  for (const raw of artists) {
+    const key = artistRootKey(String(raw ?? '')) || '(unknown)';
+    counts.set(key, (counts.get(key) ?? 0) + 1);
+    tracks += 1;
+  }
+  if (!tracks) return { leads: 0, tracks: 0, topShare: 1 };
+  return { leads: counts.size, tracks, topShare: Math.max(...counts.values()) / tracks };
+}
 
 // The earliest year in an explicit RANGE in the title — "…Singles 1964-65",
 // "The Atco/Atlantic Singles 1968-1974", "Recordings 1972–1975". A range is the
@@ -111,13 +174,24 @@ export function albumEraSuspect(f: AlbumEraFacts): EraSuspicion {
   //    which is exactly the gap #1418 is about.
   if (VARIOUS.has(norm(f.albumArtist))) return { suspect: true, reason: 'various-artists' };
 
-  // 3. Three or more distinct credited artists on one album. Ordinary albums
-  //    do not look like this; anthologies and label samplers do.
-  if ((f.distinctTrackArtists ?? 0) >= MANY_ARTISTS_MIN) {
+  // 3. A record with no one at the front of it. All three conditions were
+  //    measured, not guessed (see the header): enough distinct LEAD artists,
+  //    on a release long enough for the ratio to mean anything, with nobody
+  //    accounting for even a third of it. Ordinary albums — including
+  //    features-heavy ones, which is where the naive version failed — always
+  //    have a dominant lead.
+  const p = leadArtistProfile(f.trackArtists ?? []);
+  if (p.leads >= MANY_ARTISTS_MIN && p.tracks >= MANY_ARTISTS_MIN_TRACKS && p.topShare < MANY_ARTISTS_MAX_SHARE) {
     return { suspect: true, reason: 'many-artists' };
   }
 
-  // 4. The sleeve prints a date range that CLOSES before the album's own year.
+  // 4. The title says it is a collection. Catches the single-artist "Best of",
+  //    which every artist-count signal misses by construction.
+  if (COMPILATION_TITLE.test(String(f.title ?? ''))) {
+    return { suspect: true, reason: 'title-compilation' };
+  }
+
+  // 5. The sleeve prints a date range that CLOSES before the album's own year.
   //    This is the single-artist anthology the artist-count signals cannot see
   //    — "Allen Toussaint: The Atco/Atlantic Singles 1968-1974" on a 2015
   //    release credits one artist throughout. The close-before-release test is
