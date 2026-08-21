@@ -49,6 +49,11 @@ import {
   DEADLINE_PICK_COOLDOWN_SEC,
 } from './drain-policy.js';
 import {
+  MIN_PLAIN_TRANSITIONS_BETWEEN_EFFECTS,
+  editorialEffectAllowed,
+  nextPlainTransitionsSinceEffect,
+} from './transition-effect-policy.js';
+import {
   commitSatisfied,
   skipPrepAction,
   SKIP_COMMIT_WAIT_MS,
@@ -147,7 +152,8 @@ class Queue {
   _transitionsSinceSfx = 999;  // DJ-mode transition-FX spacing counter (see drainToLiquidsoap)
   _lastBed: string | null = null;      // last bed aired — anti-repeat for bed-policy.pickBed
   _lastBedStartedAt = 0;               // bed-playing.json's last-seen startedAt — the edge onBedStarted fires on
-  _recentEffects: string[] = [];  // the model's last few transition CHOICES — anti-streak guard + fed back into the pick event turn
+  _recentEffects: string[] = [];  // final transition treatments, oldest first — fed back into the next pick
+  _plainTransitionsSinceEffect = MIN_PLAIN_TRANSITIONS_BETWEEN_EFFECTS; // cold start may honour an editorial effect
   _persistTimer: NodeJS.Timeout | null = null; // debounce for the queue.json snapshot
   _recentPlaysTimer: NodeJS.Timeout | null = null; // debounce for the recent-plays.json sidecar
   _recentPlays: RecentPlay[] = [];
@@ -576,10 +582,8 @@ class Queue {
     return Infinity;
   }
 
-  // The model's recent transition choices, oldest first — surfaced into the
-  // pick event turn so the model can SEE its own habit and break it (it has
-  // no other way to know what it recently chose; session-history imitation is
-  // how both the all-normal and all-blend monocultures formed).
+  // Final transition treatments, oldest first. The picker must see what aired,
+  // not the discarded effect requests a model happened to make.
   recentTransitionChoices(): string[] {
     return [...this._recentEffects];
   }
@@ -594,6 +598,25 @@ class Queue {
     delete track.dissolve;
     delete track.chop;
     delete track.loop;
+    this.log('mix', `${kind} dropped (${reason})`);
+  }
+
+  // Preserve a deterministic length-cap washout while dropping only a model's
+  // editorial request. A forced exit is a safety treatment, not a creative
+  // choice subject to the spacing policy.
+  stripEditorialEffects(track: Track, reason: string) {
+    const kind = track.sweep ? 'sweep' : track.blend ? 'blend' : track.dissolve ? 'dissolve' : track.chop ? 'chop' : track.loop ? 'loop' : 'washout';
+    delete track.sweep;
+    delete track.blend;
+    delete track.dissolve;
+    delete track.chop;
+    delete track.chopPeriod;
+    delete track.loop;
+    delete track.loopBar;
+    if (!track.washoutAuto) {
+      delete track.washout;
+      delete track.washoutDelay;
+    }
     this.log('mix', `${kind} dropped (${reason})`);
   }
 
@@ -800,34 +823,6 @@ class Queue {
       }
     }
 
-    // The two flags are independent boundaries — sweep shapes ENTRY, washout
-    // EXIT — so both can ride one pick and are validated separately. No cooldown
-    // by design: pacing is the DJ's call, and the analyzer veto only judges
-    // whether a sweep is musically wrong between locked tracks, never frequency.
-    //
-    // Anti-streak: the model imitates its own session history, so once it finds
-    // a defensible favourite it repeats it mechanically (observed as all-normal,
-    // then all-blend). The third consecutive IDENTICAL choice is stripped —
-    // variety is a station rule, not a model virtue. The ledger tracks what the
-    // model ASKED FOR, not what aired, so a stripped blend still evidences
-    // monoculture and a stuck model stays stripped until it genuinely varies.
-    // Auto (length-cap) washouts are deterministic, not choices, and are
-    // invisible to the ledger in both directions.
-    const choice: string | null =
-      item.track.sweep ? 'sweep' : item.track.blend ? 'blend'
-        : item.track.dissolve ? 'dissolve'
-        : item.track.chop ? 'chop'
-        : item.track.loop ? 'loop'
-        : (item.track.washout && !item.track.washoutAuto) ? 'washout'
-        : item.track.washoutAuto ? null : 'normal';
-    const last2 = this._recentEffects.slice(-2);
-    if (choice && choice !== 'normal' && last2.length >= 2 && last2.every(k => k === choice)) {
-      this.stripEffect(item.track, `variety — third ${choice} in a row`);
-    }
-    if (choice) {
-      this._recentEffects.push(choice);
-      if (this._recentEffects.length > 4) this._recentEffects.shift();
-    }
     // Entry-side effects (sweep/dissolve/chop) garnish the PREVIOUS track's
     // ending — a loop exit already armed on that track IS the transition, so
     // they all yield to it (radio.liq enforces the same precedence; stripping
@@ -907,6 +902,16 @@ class Queue {
       item.track.loopBar = mix.loopBarFor(next.bpm);
       this.log('mix', `loop armed: ${item.track.crossSec}s canvas, ${item.track.loopBar}s bar → ${item.track.title}`);
     }
+    const editorialEffectRequested = !!(
+      item.track.sweep || item.track.blend || item.track.dissolve || item.track.chop
+      || item.track.loop || (item.track.washout && !item.track.washoutAuto)
+    );
+    if (editorialEffectRequested && !editorialEffectAllowed(this._plainTransitionsSinceEffect)) {
+      this.stripEditorialEffects(
+        item.track,
+        `pacing — require ${MIN_PLAIN_TRANSITIONS_BETWEEN_EFFECTS} plain transitions after an effect`,
+      );
+    }
     if (item.track.washout) {
       item.track.crossSec = mix.washoutCrossSecondsFor(next, maxSec);
       item.track.washoutDelay = mix.washoutDelayFor(next.bpm);
@@ -926,6 +931,12 @@ class Queue {
     ].filter(Boolean).join(' + ') || 'normal';
     recordTrackTransition(transition);
     const effectFired = !!(item.track.sweep || item.track.washout || item.track.blend || item.track.dissolve || item.track.chop || item.track.loop);
+    this._recentEffects.push(transition);
+    if (this._recentEffects.length > 4) this._recentEffects.shift();
+    this._plainTransitionsSinceEffect = nextPlainTransitionsSinceEffect({
+      plainTransitionsSinceEffect: this._plainTransitionsSinceEffect,
+      effectFired,
+    });
 
     // Feature 2 — transition FX, spaced by the chattiness ladder and gated on
     // settings.sfx.enabled; never two transitions in a row, and never a riser
