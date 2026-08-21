@@ -67,7 +67,7 @@ function toolDescription(name: string): string {
     songsByGenre: 'Tracks carrying a named library genre tag.',
     searchLibrary: 'Search for a named artist, title, genre or vibe.',
     tracksByEnergy: 'Tracks at one structured energy level: low, medium or high.',
-    tracksByMood: 'Tracks carrying one supported station mood, optionally narrowed by energy.',
+    tracksByMood: 'Tracks carrying one supported station mood. Call with exactly mood and energy; energy is low, medium, high, or null.',
     deepCuts: 'Tracks never aired or absent from rotation for a long time.',
     starredSongs: "The operator's starred tracks.",
     recentlyAdded: 'Tracks from recently added albums.',
@@ -87,6 +87,7 @@ function toolDescription(name: string): string {
     skill_weather_v2: 'Fetch current weather plus a short look ahead.',
     skill_web_search: 'Search for recent news about the artist now playing.',
     skill_web_search_v2: 'Search curated music sources for recent news about the artist now playing.',
+    generateProgrammePlan: 'Create the current show\'s backstage episode plan before on-air writing begins.',
     done: 'Commit the final grounded track id, private reason and transition.',
   };
   return descriptions[name] ?? `SUB/WAVE picker function ${name}.`;

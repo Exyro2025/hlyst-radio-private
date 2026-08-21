@@ -85,14 +85,28 @@ const contracts: Record<string, ToolContract> = {
   skill_now_playing_dig_v2: noArgs('skill_now_playing_dig_v2'),
   skill_weather_v2: noArgs('skill_weather_v2'),
   skill_web_search_v2: { name: 'skill_web_search_v2', required: ['query'], enums: { query: [null] } },
+  // A bounded backstage request with no model-supplied arguments.
+  generateProgrammePlan: noArgs('generateProgrammePlan'),
 };
 
 const routeFamilies = [
   'pinned-playlist', 'pinned-playlist',
   'sonic-journey', 'sonic-journey',
   'named-genre', 'named-genre', 'named-genre',
+  // V4.1: preserve the exact canonical genre token when it is a prefix of a
+  // more common word (for example electro, not electrochemical).
+  'genre-boundary-regression', 'genre-boundary-regression', 'genre-boundary-regression', 'genre-boundary-regression',
+  // Keep genres and station moods distinct. In particular, Art Rock belongs in
+  // songsByGenre, never in tracksByMood.mood.
+  'genre-vs-mood-regression', 'genre-vs-mood-regression', 'genre-vs-mood-regression', 'genre-vs-mood-regression',
+  // Every hierarchy direction is exact: never shorten a multi-word tag or
+  // expand a shorter canonical tag into a child label.
+  'genre-hierarchy-regression', 'genre-hierarchy-regression', 'genre-hierarchy-regression',
+  'genre-hierarchy-regression', 'genre-hierarchy-regression', 'genre-hierarchy-regression',
   'energy', 'energy', 'energy',
   'mood', 'mood', 'mood',
+  // V4: deliberately over-sample the live schema boundary which V3 violated.
+  'mood-schema-regression', 'mood-schema-regression', 'mood-schema-regression',
   'deep-cuts', 'deep-cuts',
   'starred',
   'recently-added',
@@ -107,6 +121,7 @@ const routeFamilies = [
   'segment-anniversary',
   'segment-curiosity',
   'segment-library-deep-cut',
+  'programme-plan',
 ] as const;
 
 const recoveryFamilies = [
@@ -119,6 +134,13 @@ const recoveryFamilies = [
   'recover-playlist-to-mood',
   'recover-journey-to-mood',
   'recover-journey-to-genre',
+  // Paired recovery examples stop a genre from leaking into the closed mood
+  // vocabulary when a journey waypoint is empty.
+  'recover-journey-mood-vocabulary',
+  'recover-journey-genre-boundary',
+  // An empty journey must preserve a multi-word genre exactly on recovery.
+  'recover-journey-exact-genre-collision',
+  'recover-journey-exact-genre-collision',
 ] as const;
 
 const splitPools = {
@@ -249,6 +271,46 @@ function routeExample(family: typeof routeFamilies[number], context: ExampleCont
       args = { genre };
       tools = ['songsByGenre', 'searchLibrary', 'tracksByMood', 'randomSongs'];
       break;
+    case 'genre-boundary-regression':
+      prompt = pick([
+        'The library genre is exactly electro. Use the genre-aware tool and preserve that exact genre label; do not expand it into a related word.',
+        'Find tracks carrying the canonical library tag electro. The requested tag is the complete value, not the beginning of a longer genre name.',
+        'Route this exact genre request through songsByGenre with the station label electro. Do not infer or append a different genre such as electrochemical.',
+      ], context.random);
+      target = 'songsByGenre';
+      args = { genre: 'electro' };
+      tools = ['songsByGenre', 'searchLibrary', 'tracksByMood', 'randomSongs'];
+      break;
+    case 'genre-vs-mood-regression': {
+      const exactGenre = pick(['art rock', 'electro', 'electro house', 'electronica'] as const, context.random);
+      prompt = pick([
+        `The show is exploring the exact library genre ${exactGenre}. This is a genre tag, not a station mood; use songsByGenre and preserve the complete label.`,
+        `Find music with the canonical ${exactGenre} library genre. Do not put this genre into tracksByMood: mood accepts only station moods.`,
+        `Use genre-aware discovery for ${exactGenre}. Keep genre and mood fields separate, even when the genre sounds descriptive.`,
+      ], context.random);
+      target = 'songsByGenre';
+      args = { genre: exactGenre };
+      tools = ['songsByGenre', 'tracksByMood', 'searchLibrary', 'randomSongs'];
+      break;
+    }
+    case 'genre-hierarchy-regression': {
+      const [parent, child] = pick([
+        ['electro', 'electro house'],
+        ['soul', 'northern soul'],
+        ['rock', 'garage rock'],
+        ['art rock', 'alternative rock'],
+      ] as const, context.random);
+      const exactGenre = context.random() > 0.5 ? parent : child;
+      prompt = pick([
+        `Use songsByGenre with the exact canonical library tag ${exactGenre}. Do not shorten a multi-word tag or extend a shorter tag into a related child genre.`,
+        `The requested library genre is exactly ${exactGenre}. Copy the whole label unchanged; its parent and child genres are distinct library tags.`,
+        `Find tracks carrying the complete genre ${exactGenre}. Genre-aware discovery must preserve every word of the supplied canonical tag.`,
+      ], context.random);
+      target = 'songsByGenre';
+      args = { genre: exactGenre };
+      tools = ['songsByGenre', 'searchLibrary', 'tracksByMood', 'randomSongs'];
+      break;
+    }
     case 'energy':
       prompt = `Move the music to ${energy} energy. No mood has been requested.`;
       target = 'tracksByEnergy';
@@ -261,6 +323,18 @@ function routeExample(family: typeof routeFamilies[number], context: ExampleCont
       args = { mood, energy: prompt.includes(' energy') ? energy : null };
       tools = ['tracksByMood', 'tracksByEnergy', 'searchLibrary', 'randomSongs'];
       break;
+    case 'mood-schema-regression': {
+      const restricted = context.random() > 0.5;
+      prompt = pick([
+        `Route through the station mood tags: ${mood}${restricted ? ` at ${energy} energy` : ''}. Call tracksByMood with exactly mood and energy; energy is ${restricted ? energy : 'null'} when unrestricted.`,
+        `Use the structured ${mood} mood filter${restricted ? ` and keep the energy at ${energy}` : ''}. The live tracksByMood contract accepts only mood plus energy, and energy must be ${restricted ? energy : 'null'}.`,
+        `Find music matching the ${mood} station mood. Do not send type, hormonal, age, or placeholder values; send mood and the required energy field (${restricted ? energy : 'null'}).`,
+      ], context.random);
+      target = 'tracksByMood';
+      args = { mood, energy: restricted ? energy : null };
+      tools = ['tracksByMood', 'tracksByEnergy', 'searchLibrary', 'randomSongs'];
+      break;
+    }
     case 'deep-cuts':
       prompt = pick([
         'Explore neglected catalogue tracks that have never aired or have been absent for a long time.',
@@ -352,6 +426,15 @@ function routeExample(family: typeof routeFamilies[number], context: ExampleCont
       prompt = 'Choose one research function for a between-track segment. Find a long-unplayed library track by the artist currently on air.';
       target = 'skill_library_deep_cut';
       tools = [target, 'skill_now_playing_dig', 'skill_web_search', 'skill_news'];
+      break;
+    case 'programme-plan':
+      prompt = pick([
+        'The programme is beginning. Generate the backstage episode plan before any on-air writing or music selection.',
+        'Prepare today\'s Producer-only running plan for this one-hour show. This is a programme-planning decision, not a listener-facing script.',
+        'Choose the operational function that creates the current show\'s episode plan, including its opening, feature shape and sign-off direction.',
+      ], context.random);
+      target = 'generateProgrammePlan';
+      tools = ['generateProgrammePlan', 'skill_news_v2', 'randomSongs'];
       break;
   }
 
@@ -446,6 +529,34 @@ function recoveryExample(family: typeof recoveryFamilies[number], context: Examp
       nextArgs = { genre };
       names = ['tracksTowardJourney', 'songsByGenre', 'tracksByMood', 'randomSongs'];
       break;
+    case 'recover-journey-mood-vocabulary':
+      prompt = `Continue the active sonic journey inside a reflective, ${energy}-energy art-rock show. If the waypoint is empty, recover with the station mood reflective, not the genre art rock.`;
+      first = 'tracksTowardJourney';
+      next = 'tracksByMood';
+      nextArgs = { mood: 'reflective', energy };
+      names = ['tracksTowardJourney', 'tracksByMood', 'songsByGenre', 'randomSongs'];
+      break;
+    case 'recover-journey-genre-boundary':
+      prompt = 'Continue the active sonic journey inside an art rock show. If its waypoint is empty, recover through the exact library genre art rock, not a station mood.';
+      first = 'tracksTowardJourney';
+      next = 'songsByGenre';
+      nextArgs = { genre: 'art rock' };
+      names = ['tracksTowardJourney', 'songsByGenre', 'tracksByMood', 'randomSongs'];
+      break;
+    case 'recover-journey-exact-genre-collision': {
+      const [parent, child] = pick([
+        ['electro', 'electro house'],
+        ['soul', 'northern soul'],
+        ['rock', 'garage rock'],
+      ] as const, context.random);
+      const exactGenre = context.random() > 0.5 ? parent : child;
+      prompt = `Continue the active sonic journey inside the exact ${exactGenre} genre. If the waypoint is empty, recover through songsByGenre with the complete genre label; do not shorten or expand it.`;
+      first = 'tracksTowardJourney';
+      next = 'songsByGenre';
+      nextArgs = { genre: exactGenre };
+      names = ['tracksTowardJourney', 'songsByGenre', 'tracksByMood', 'randomSongs'];
+      break;
+    }
   }
 
   prompt = productionPrompt(prompt, { id: seed, title, artist }, context);
@@ -510,6 +621,8 @@ export function validateTrainingSets(
     'reflective-01', 'reflective-02', 'safe-favourite-01',
     'trap-01', 'trap-02', 'fresh-01', 'quiet-01', 'metal-01', 'dance-01',
     'single-01', 'album-01', 'album-02', 'Northbound', 'Southbank', 'Britpop',
+    'G9qL2mN7rT4vX8cB1dF5hJ', 'L6nQ1wE8rT3yU9iO2pA5sD', 'K4mR7tV2xY9zC1bN5qW8eH',
+    'E2lC7tR4oQ9wN1mK6vP8xD', 'Bright Wire', 'Pinned Signal', 'Second Source', 'Voltage Bloom', 'Phase Array', 'Late Shift',
   ];
   const families: Record<string, number> = {};
 
@@ -555,6 +668,15 @@ export function validateTrainingSets(
       }
       const contract = contracts[name];
       const args = assistantCall.function.arguments;
+      const known = new Set([
+        ...(contract?.required ?? []),
+        ...Object.keys(contract?.enums ?? {}),
+      ]);
+      if (contract?.additionalProperties !== true) {
+        for (const key of Object.keys(args)) {
+          if (!known.has(key)) violations.push(`${example.id}: ${name} has unexpected argument ${key}`);
+        }
+      }
       for (const key of contract?.required ?? []) {
         if (!(key in args)) violations.push(`${example.id}: ${name} missing required argument ${key}`);
       }

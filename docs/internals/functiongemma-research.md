@@ -679,6 +679,31 @@ advanced Producer settings. It is a controlled live experiment intended to
 collect latency, recovery, route distribution and downstream selection data
 before any commitment fine-tune is considered.
 
+## Transition-effect pacing policy — 2026-08-21
+
+The FunctionGemma selection experiment is being prepared on
+`codex/producer-routing` with a temporary controller-side transition policy:
+after any final on-air effect, the next two transitions must be plain before a
+Producer-requested editorial effect may arm again. The ledger supplied to the
+next picker records the treatments that actually armed, not effect requests
+that later controller validation rejected. Automatic length-cap washouts are
+never suppressed as editorial choices, but they do reset the same spacing
+counter because they are still an audible effect on air.
+
+This does **not** match upstream vanilla `develop`. Vanilla only removes a
+third consecutive request for the same effect. It does not prevent an
+alternating effect sequence such as washout → loop → sweep, and it records the
+model-requested choices rather than final armed treatments.
+
+The stricter policy is deliberate for the Gemma selection test: it gives every
+candidate model the same deterministic on-air pacing contract and removes a
+known source of effect-heavy transition runs from the comparison. It is a test
+control, not yet a settled product decision. Once selection testing is complete,
+review the observed transition distribution and listening results; if the
+constraint is no longer needed, change the controller back to the vanilla
+same-effect anti-streak behaviour (or replace it with a separately justified
+production policy).
+
 ## Preferred playlist routing guard — 2026-08-20
 
 A live preferred-playlist show exposed a routing-policy collapse: the V3
@@ -749,4 +774,146 @@ show constraints, transition choice, musical continuity, and safe fallback;
 router validity alone is not evidence for that promotion.
 
 The architecture document on `codex/producer-routing` currently lists
-programme planning as Qwen3-4B-only while it is under evaluation. When
+programme planning as Qwen3-4B-only while it is under evaluation. Keep that
+boundary until V4 passes its independent acceptance and soak tests.
+
+### V4 package prepared — 2026-08-21
+
+The V4 generator is now ready for the final bounded tool-function experiment.
+It keeps the V3 routing and recovery families, adds a deliberately
+over-sampled `tracksByMood` schema-regression family, and adds the no-argument
+`generateProgrammePlan` route. The mood examples explicitly target the live
+closed contract: exactly `mood` plus `energy`, with `energy` set to a valid
+level or JSON `null`.
+
+The frozen acceptance set now includes strict-playlist routing, the
+controller-owned preferred-playlist cooldown, a live-shaped mood-schema case,
+and programme-plan routing. The scorer treats an unexpected argument as a
+Protocol failure, so a superficially correct call such as
+`tracksByMood({mood: "energetic", energy: "high", type: "mood"})` cannot
+pass merely because its required values happen to be present.
+
+Generate and train V4 separately from all earlier checkpoints:
+
+```bash
+npm run functiongemma:data
+python scripts/functiongemma/training/train.py \
+  --train scripts/functiongemma/training/data/train.jsonl \
+  --development scripts/functiongemma/training/data/development.jsonl \
+  --output scripts/functiongemma/training/output/router-v4 \
+  --epochs 8 \
+  --batch-size 4 \
+  --gradient-accumulation 2 \
+  --max-length 1536 \
+  --learning-rate 5e-5
+```
+
+No V4 weights have been trained or promoted by this preparation step. After a
+checkpoint is selected, run the native evaluator, CPU GGUF evaluator and
+novel-id soak against V3 and V4 using the same endpoint conditions. Promotion
+requires zero malformed mood calls, no V3 route/recovery regressions, and a
+separately recorded live fallback comparison; it does not authorise final
+track commitment or listener-facing writing.
+
+### Router-v4 native result — 2026-08-21
+
+V4 trained from the original BF16 `google/functiongemma-270m-it` weights on
+the RTX 3060. It stopped after three epochs under the existing two-evaluation
+early-stopping policy; checkpoint 384 was selected by development loss.
+
+| Measurement | Result |
+| --- | ---: |
+| Best development loss | 0.009743 |
+| Reported training loss | 0.021919 |
+| Runtime | 769.1s |
+| Selected checkpoint | 384 |
+
+Five deterministic passes through the native held-out evaluator preserved all
+trained-scope results: routing 80/80 and recovery 10/10. The new V4
+acceptance cases for the closed `tracksByMood` schema, strict playlist,
+preferred-playlist cooldown and `generateProgrammePlan` routing all passed on
+every pass. The 15 protocol failures in the full 95-scenario report belong
+only to the deliberately untrained final-commit controls; V4 remains a router,
+not a final candidate selector.
+
+`prepare_gguf.py` successfully created the text-only staging source and
+verified the 262,144-token vocabulary after removing only the two unusable
+image markers. The Q8 conversion was then served CPU-only through llama.cpp.
+It preserved the five-pass frozen result exactly: routing 80/80 and recovery
+10/10. Across all 95 calls, latency averaged 656ms, with 393ms p50, 2.677s
+p95 and 2.827s maximum.
+
+V4 nevertheless fails its promotion gate. The 300-example novel-id CPU soak
+made 384 independent decisions and passed 378/384 (98.4%), at 912ms average,
+973ms p50, 1.458s p95 and 1.731s maximum. Every miss was the same deterministic
+regression: for a valid requested library genre `electro`, V4 called
+`songsByGenre({genre: "electrochemical"})`. The existing V3 Q8 checkpoint
+passes all six corresponding cases with the exact `electro` argument, so this
+is not an acceptable pre-existing soak limitation or a conversion artefact.
+
+Keep V3 as the live router benchmark and do not promote V4. Any follow-up must
+add a new non-overlapping genre-boundary acceptance family and rebalance the
+training mix before a separately named retraining run; it must not weaken the
+exact-argument soak assertion or relabel `electrochemical` as acceptable.
+
+### Proposed Router-v4 genre fix
+
+The corrective run is intentionally small and continues from V4 checkpoint
+384 rather than repeating the full original-weight training run. Its generated
+bundle contains 600 training and 100 development conversations, retains every
+existing route/recovery family, and contains 56 `genre-boundary-regression`
+training examples. Those examples teach the canonical `electro` token without
+copying the frozen acceptance prompt or its entities. The held-out
+`route.genre-exact-electro` case and the existing 300-example novel-id soak
+remain scoring gates.
+
+Run it into an independent directory with two epochs. This uses approximately
+one sixth of V4's supervised decision volume and keeps training output local:
+
+```bash
+cd /home/jaz666/subwave-functiongemma/controller
+HF_HOME=/home/jaz666/.cache/huggingface \
+  .functiongemma-venv/bin/python scripts/functiongemma/training/train.py \
+  --model scripts/functiongemma/training/output/router-v4/best \
+  --train scripts/functiongemma/training/data/router-v4-genrefix/train.jsonl \
+  --development scripts/functiongemma/training/data/router-v4-genrefix/development.jsonl \
+  --output scripts/functiongemma/training/output/router-v4-genrefix \
+  --epochs 2 --batch-size 4 --gradient-accumulation 2 \
+  --max-length 1536 --learning-rate 2e-5 \
+  > scripts/functiongemma/training/output/router-v4-genrefix/train.log 2>&1
+chmod 640 scripts/functiongemma/training/output/router-v4-genrefix/best/model.safetensors
+```
+
+The lower learning rate is deliberate for a continuation from a selected
+checkpoint. Do not use `--resume`: this is a new corrective experiment, not a
+continuation of V4's optimiser state. Evaluate the selected `best` directory
+against the frozen native suite, CPU Q8 suite and full soak before promotion.
+
+#### Credit-efficient execution requirement
+
+For future heavyweight experiments, Codex should prepare and validate the
+smallest defensible dataset, command and acceptance gates, but the operator
+should run the long training/conversion command locally with output redirected
+to an artifact-local log. Codex should then inspect the concise run summary,
+reports and only the relevant log tail on failure. Do not stream routine epoch,
+tokenisation or conversion progress through the chat. Prefer a targeted
+continuation from a selected checkpoint and a compact mixed dataset when fixing
+one measured regression; a full original-weight run is reserved for a changed
+model scope or a demonstrated need to reset the learned behaviour.
+
+#### Router-v4 genre fix result — 2026-08-21
+
+The compact continuation completed in 133.9s and selected checkpoint 192 with
+development loss 0.006987. It repaired the new exact-`electro` acceptance
+case, but it fails the established native recovery gate: on all five passes of
+`recover.empty-journey-waypoint`, its second decision calls
+`tracksByMood({mood: "art-rock", energy: "low"})`. `art-rock` is a genre, not
+one of the station's allowed mood values. The model also emits a third journey
+call after that invalid result.
+
+This is a deterministic regression from V4's previously clean 10/10 recovery
+result. Do not convert or soak this checkpoint and do not promote it. The
+failed narrow continuation demonstrates that over-weighting one argument-copy
+boundary can erode a neighbouring structured-field boundary; any further
+experiment needs a deliberately balanced corrective matrix for genre and mood
+copying, with the existing recovery fixture retained as a hard gate.

@@ -47,6 +47,15 @@ function protocolViolations(
 
 function validateArguments(contract: ToolContract, call: PredictedToolCall, index: number): string[] {
   const violations: string[] = [];
+  const known = new Set([
+    ...(contract.required ?? []),
+    ...Object.keys(contract.enums ?? {}),
+  ]);
+  if (contract.additionalProperties !== true) {
+    for (const key of Object.keys(call.arguments)) {
+      if (!known.has(key)) violations.push(`call-${index + 1}:unexpected-argument:${key}`);
+    }
+  }
   for (const key of contract.required ?? []) {
     if (!(key in call.arguments)) violations.push(`call-${index + 1}:missing-argument:${key}`);
   }
@@ -87,7 +96,11 @@ function recoveryViolations(scenario: FunctionGemmaScenario, calls: readonly Pre
   if (!scenario.recovery.nextCallOneOf.includes(next.name)) {
     return [`recovery:wrong-alternative:${next.name}`];
   }
-  return [];
+  const violations: string[] = [];
+  for (const [key, expected] of Object.entries(scenario.recovery.arguments ?? {})) {
+    if (!sameScalar(expected, next.arguments?.[key])) violations.push(`recovery:wrong-argument:${key}`);
+  }
+  return violations;
 }
 
 function commitCall(calls: readonly PredictedToolCall[]): PredictedToolCall | undefined {

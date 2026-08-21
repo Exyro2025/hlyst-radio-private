@@ -4,6 +4,8 @@ export interface ToolContract {
   name: string;
   required?: readonly string[];
   enums?: Readonly<Record<string, readonly (string | null)[]>>;
+  /** The live function schemas are closed; extra keys are invalid calls. */
+  additionalProperties?: boolean;
 }
 
 export interface ExpectedRoute {
@@ -14,6 +16,8 @@ export interface ExpectedRoute {
 export interface ExpectedRecovery {
   emptyTool: string;
   nextCallOneOf: readonly string[];
+  /** Exact arguments required on the recovery decision, when its tool is fixed. */
+  arguments?: Readonly<Record<string, unknown>>;
 }
 
 export interface ExpectedCommit {

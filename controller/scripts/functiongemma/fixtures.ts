@@ -41,6 +41,8 @@ const tracksByEnergy: ToolContract = {
   enums: { energy: ['low', 'medium', 'high'] },
 };
 
+const programmePlan = noArgs('generateProgrammePlan');
+
 const songsByGenre: ToolContract = {
   name: 'songsByGenre',
   required: ['genre'],
@@ -88,6 +90,58 @@ export const FUNCTIONGEMMA_VALIDATION_SCENARIOS: readonly FunctionGemmaScenario[
     prompt: 'The show brief asks for a Britpop selection. Find tracks carrying that library genre.',
     tools: [songsByGenre, { name: 'searchLibrary', required: ['query'] }, noArgs('randomSongs')],
     route: { firstCallOneOf: ['songsByGenre'], arguments: { genre: 'britpop' } },
+  },
+  {
+    id: 'route.genre-exact-electro',
+    stage: 'route',
+    split: 'validation',
+    description: 'A canonical genre token must not be expanded into a related word.',
+    prompt: productionPrompt(
+      'The show needs the exact canonical library genre electro. Use genre-aware discovery with that complete tag; related terms are not interchangeable.',
+      { id: 'E2lC7tR4oQ9wN1mK6vP8xD', title: 'Voltage Bloom', artist: 'Phase Array' },
+      { name: 'Electronic Noon', topic: 'Precise electronic selections.', genres: ['electro'], moods: [], energies: ['medium'], eras: [], filtersStrict: false, playlistStrict: false },
+    ),
+    tools: [songsByGenre, { name: 'searchLibrary', required: ['query'] }, noArgs('randomSongs')],
+    route: { firstCallOneOf: ['songsByGenre'], arguments: { genre: 'electro' } },
+  },
+  {
+    id: 'route.genre-not-station-mood',
+    stage: 'route',
+    split: 'validation',
+    description: 'A library genre must not be inserted into the closed station mood vocabulary.',
+    prompt: productionPrompt(
+      'The show needs the exact canonical library genre Art Rock. This is a genre, not a station mood: use the genre tool with the complete tag.',
+      { id: 'A7rK3mV9tQ2xL6nB4cD8eF', title: 'Paper Horizon', artist: 'Signal Orchard' },
+      { name: 'Afterimage', topic: 'Detailed guitar music.', genres: ['Art Rock'], moods: ['reflective'], energies: ['low'], eras: [], filtersStrict: false, playlistStrict: false },
+    ),
+    tools: [songsByGenre, tracksByMood, { name: 'searchLibrary', required: ['query'] }],
+    route: { firstCallOneOf: ['songsByGenre'], arguments: { genre: 'art rock' } },
+  },
+  {
+    id: 'route.genre-exact-electro-house',
+    stage: 'route',
+    split: 'validation',
+    description: 'A multi-word genre must not be shortened to its parent tag.',
+    prompt: productionPrompt(
+      'The show needs the exact canonical library genre Electro House. Use genre-aware discovery with the complete two-word tag, not the broader Electro label.',
+      { id: 'H4pT8wR2nL6cV1mQ9xD3kF', title: 'Glass Circuit', artist: 'Neon Transit' },
+      { name: 'Midnight Current', topic: 'Precise club electronics.', genres: ['Electro House'], moods: ['night'], energies: ['high'], eras: [], filtersStrict: false, playlistStrict: false },
+    ),
+    tools: [songsByGenre, tracksByMood, { name: 'searchLibrary', required: ['query'] }],
+    route: { firstCallOneOf: ['songsByGenre'], arguments: { genre: 'electro house' } },
+  },
+  {
+    id: 'route.genre-exact-northern-soul',
+    stage: 'route',
+    split: 'validation',
+    description: 'A multi-word genre must preserve its modifier rather than collapse to its parent.',
+    prompt: productionPrompt(
+      'The show needs the exact canonical library genre Northern Soul. Use songsByGenre with the complete tag; Soul alone is a different library genre.',
+      { id: 'N8vC2qL5rT1mX7bK4dF9wH', title: 'All Night Signal', artist: 'The Bright Hours' },
+      { name: 'Northern Lines', topic: 'Rare dancefloor discoveries.', genres: ['Northern Soul'], moods: ['celebratory'], energies: ['medium'], eras: [], filtersStrict: false, playlistStrict: false },
+    ),
+    tools: [songsByGenre, tracksByMood, { name: 'searchLibrary', required: ['query'] }],
+    route: { firstCallOneOf: ['songsByGenre'], arguments: { genre: 'northern soul' } },
   },
   {
     id: 'route.lower-energy',
@@ -140,6 +194,59 @@ export const FUNCTIONGEMMA_VALIDATION_SCENARIOS: readonly FunctionGemmaScenario[
     ),
     tools: [tracksByMood, tracksByEnergy, noArgs('randomSongs')],
     route: { firstCallOneOf: ['tracksByMood'], arguments: { mood: 'reflective', energy: null } },
+  },
+  {
+    id: 'route.mood-live-schema',
+    stage: 'route',
+    split: 'validation',
+    description: 'Mood routing must reject plausible-but-unknown keys and use only the live schema.',
+    prompt: productionPrompt(
+      'Use the structured station mood route for energetic music at high energy. The only valid arguments are mood and energy; do not use type, hormonal, age, or placeholder values.',
+      { id: 'G9qL2mN7rT4vX8cB1dF5hJ', title: 'Bright Wire', artist: 'Delta Static' },
+      { name: 'Night Drive', topic: 'Forward-moving electronic music.', genres: ['Electronic'], moods: ['energetic'], energies: ['high'], eras: [], filtersStrict: false, playlistStrict: false },
+    ),
+    tools: [tracksByMood, tracksByEnergy, noArgs('searchLibrary')],
+    route: { firstCallOneOf: ['tracksByMood'], arguments: { mood: 'energetic', energy: 'high' } },
+  },
+  {
+    id: 'route.strict-playlist',
+    stage: 'route',
+    split: 'validation',
+    description: 'A strict show playlist remains available and mandatory on every route.',
+    prompt: productionPrompt(
+      'This show has a strict operator playlist. Select the discovery source inside that playlist; no general-library route is permitted.',
+      { id: 'L6nQ1wE8rT3yU9iO2pA5sD', title: 'Pinned Signal', artist: 'Radio Glass' },
+      { name: 'Strict Hour', topic: 'Only operator-selected records.', genres: [], moods: [], energies: [], eras: [], filtersStrict: false, playlistStrict: true },
+    ),
+    tools: [noArgs('showPlaylistTracks'), tracksByMood, noArgs('randomSongs')],
+    route: { firstCallOneOf: ['showPlaylistTracks'] },
+  },
+  {
+    id: 'route.preferred-playlist-cooldown',
+    stage: 'route',
+    split: 'validation',
+    description: 'After a preferred playlist route, controller policy removes that source for one turn.',
+    prompt: productionPrompt(
+      'The preferred playlist supplied the immediately previous route and is cooling down. Continue the calm, low-energy show through another offered discovery axis.',
+      { id: 'K4mR7tV2xY9zC1bN5qW8eH', title: 'Second Source', artist: 'Cloud Dial' },
+      { name: 'The Scenic Route', topic: 'Gentle variety beyond a preferred playlist.', genres: [], moods: ['calm'], energies: ['low'], eras: [], filtersStrict: false, playlistStrict: false },
+    ),
+    // Its absence is the controller-owned cooldown.
+    tools: [tracksByMood, tracksByEnergy, noArgs('deepCuts')],
+    route: { firstCallOneOf: ['tracksByMood'], arguments: { mood: 'calm', energy: 'low' } },
+  },
+  {
+    id: 'programme.route.generate-plan',
+    stage: 'route',
+    split: 'validation',
+    description: 'Programme planning is a bounded Producer operation, separate from selection and speech.',
+    prompt: productionPrompt(
+      'The one-hour show is starting. Create its backstage episode plan before any music discovery or listener-facing writing.',
+      null,
+      { name: 'Late Shift', topic: 'Warm nocturnal discoveries.', genres: ['Ambient'], moods: ['night'], energies: ['low'], eras: [], filtersStrict: false, playlistStrict: false },
+    ),
+    tools: [programmePlan, noArgs('randomSongs'), segmentTool('skill_news_v2')],
+    route: { firstCallOneOf: ['generateProgrammePlan'] },
   },
   {
     id: 'segment.route.exact-track-fact',
@@ -239,7 +346,8 @@ export const FUNCTIONGEMMA_VALIDATION_SCENARIOS: readonly FunctionGemmaScenario[
     route: { firstCallOneOf: ['tracksTowardJourney'] },
     recovery: {
       emptyTool: 'tracksTowardJourney',
-      nextCallOneOf: ['tracksByMood', 'songsByGenre'],
+      nextCallOneOf: ['tracksByMood'],
+      arguments: { mood: 'reflective', energy: 'low' },
     },
   },
   {
