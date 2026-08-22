@@ -648,12 +648,11 @@ export function ShowEditor({
               <div className="mt-2 grid gap-1 border border-ink bg-[var(--muted)] p-3 text-sm">
                 {hasAnyMusicFilter(show) ? (
                   <>
-                    <span><strong>{visibleCandidateReport.library.matchingFilters.toLocaleString()}</strong> tracks match these music filters.</span>
-                    <span className="field-hint">{visibleCandidateReport.library.afterExclusions.toLocaleString()} remain after excluded playlists.</span>
-                    <span className="field-hint">
-                      {visibleCandidateReport.strict
-                        ? 'Strict filter keeps the DJ within these results, except as a last resort.'
-                        : 'With Strict filter off, the DJ can go outside these results for flow.'}
+                    <span>
+                      <strong>{visibleCandidateReport.library.afterExclusions.toLocaleString()}</strong>{' '}
+                      tracks match these music filters after excluded playlists{visibleCandidateReport.strict
+                        ? ', and form this show’s selection pool.'
+                        : '. With Strict filter off, the DJ prefers them but can go outside them for flow.'}
                     </span>
                   </>
                 ) : (
