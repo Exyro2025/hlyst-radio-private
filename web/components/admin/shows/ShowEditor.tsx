@@ -599,8 +599,18 @@ export function ShowEditor({
             {candidateError && <span role="alert" className="field-hint text-vermilion">Could not calculate candidates: {candidateError}</span>}
             {visibleCandidateReport && (
               <div className="mt-2 grid gap-1 border border-ink bg-[var(--muted)] p-3 text-sm">
-                <span><strong>{visibleCandidateReport.library.effective.toLocaleString()}</strong> tracks in this show’s current candidate universe</span>
-                <span className="field-hint">{visibleCandidateReport.library.matchingFilters.toLocaleString()} match the configured music filters · {visibleCandidateReport.library.afterExclusions.toLocaleString()} remain after excluded playlists</span>
+                {hasAnyMusicFilter(show) ? (
+                  <>
+                    <span><strong>{visibleCandidateReport.library.matchingFilters.toLocaleString()}</strong> tracks match this show’s music filters</span>
+                    {visibleCandidateReport.strict ? (
+                      <span className="field-hint">{visibleCandidateReport.library.effective.toLocaleString()} remain available under this show’s strict rules after excluded playlists</span>
+                    ) : (
+                      <span className="field-hint">Soft filter is on: this is a filter-fit count, not a hard candidate limit. {visibleCandidateReport.library.afterExclusions.toLocaleString()} matching tracks remain after excluded playlists.</span>
+                    )}
+                  </>
+                ) : (
+                  <span className="field-hint">No music filters are configured for this show.</span>
+                )}
                 {visibleCandidateReport.playlist && (
                   <span className="field-hint">Pinned playlists: {visibleCandidateReport.playlist.total.toLocaleString()} tracks · {visibleCandidateReport.playlist.matchingFilters.toLocaleString()} match filters · {visibleCandidateReport.playlist.afterExclusions.toLocaleString()} after exclusions</span>
                 )}
