@@ -585,39 +585,6 @@ export function ShowEditor({
             (auto) follows the station&apos;s own mood instead of pinning one.
           </span>
 
-          <Field>
-            <FieldTitle>candidate availability</FieldTitle>
-            <FieldDescription>
-              Check the current draft against the local library and any pinned playlists. This is a configuration audit: it does not include no-repeat protection, the current track, or a sonic journey.
-            </FieldDescription>
-            <div className="mt-2 flex items-center gap-2">
-              <Btn className="min-h-9 sm:min-h-0" onClick={calculateCandidates} disabled={!valid || candidateBusy}>
-                {candidateBusy ? 'Calculating…' : 'Calculate candidates'}
-              </Btn>
-              {!valid && <span className="field-hint">Finish the required show fields first.</span>}
-            </div>
-            {candidateError && <span role="alert" className="field-hint text-vermilion">Could not calculate candidates: {candidateError}</span>}
-            {visibleCandidateReport && (
-              <div className="mt-2 grid gap-1 border border-ink bg-[var(--muted)] p-3 text-sm">
-                {hasAnyMusicFilter(show) ? (
-                  <>
-                    <span><strong>{visibleCandidateReport.library.matchingFilters.toLocaleString()}</strong> tracks match this show’s music filters</span>
-                    {visibleCandidateReport.strict ? (
-                      <span className="field-hint">{visibleCandidateReport.library.effective.toLocaleString()} remain available under this show’s strict rules after excluded playlists</span>
-                    ) : (
-                      <span className="field-hint">Soft filter is on: this is a filter-fit count, not a hard candidate limit. {visibleCandidateReport.library.afterExclusions.toLocaleString()} matching tracks remain after excluded playlists.</span>
-                    )}
-                  </>
-                ) : (
-                  <span className="field-hint">No music filters are configured for this show.</span>
-                )}
-                {visibleCandidateReport.playlist && (
-                  <span className="field-hint">Pinned playlists: {visibleCandidateReport.playlist.total.toLocaleString()} tracks · {visibleCandidateReport.playlist.matchingFilters.toLocaleString()} match filters · {visibleCandidateReport.playlist.afterExclusions.toLocaleString()} after exclusions</span>
-                )}
-                {visibleCandidateReport.warnings.map(warning => <span key={warning} className="field-hint text-vermilion">{warning}</span>)}
-              </div>
-            )}
-          </Field>
 
           <Field>
             <PlaylistIdsField
@@ -662,6 +629,42 @@ export function ShowEditor({
                 here (up to 10).
               </span>
             </PlaylistIdsField>
+          </Field>
+          <Field>
+            <FieldTitle>matching tracks</FieldTitle>
+            <FieldDescription>
+              See how many tracks fit the music filters above. Excluded playlists
+              are already removed from the count. Live picks also account for
+              recent plays and the track already on air.
+            </FieldDescription>
+            <div className="mt-2 flex items-center gap-2">
+              <Btn className="min-h-9 sm:min-h-0" onClick={calculateCandidates} disabled={!valid || candidateBusy}>
+                {candidateBusy ? 'Counting…' : 'Count matching tracks'}
+              </Btn>
+              {!valid && <span className="field-hint">Finish the required show fields first.</span>}
+            </div>
+            {candidateError && <span role="alert" className="field-hint text-vermilion">Could not count matching tracks: {candidateError}</span>}
+            {visibleCandidateReport && (
+              <div className="mt-2 grid gap-1 border border-ink bg-[var(--muted)] p-3 text-sm">
+                {hasAnyMusicFilter(show) ? (
+                  <>
+                    <span><strong>{visibleCandidateReport.library.matchingFilters.toLocaleString()}</strong> tracks match these music filters.</span>
+                    <span className="field-hint">{visibleCandidateReport.library.afterExclusions.toLocaleString()} remain after excluded playlists.</span>
+                    <span className="field-hint">
+                      {visibleCandidateReport.strict
+                        ? 'Strict filter keeps the DJ within these results, except as a last resort.'
+                        : 'With Strict filter off, the DJ can go outside these results for flow.'}
+                    </span>
+                  </>
+                ) : (
+                  <span className="field-hint">No music filters selected. Add a mood, era, energy, vocal type, or genre to count matches.</span>
+                )}
+                {visibleCandidateReport.playlist && (
+                  <span className="field-hint">Playlist anchor: {visibleCandidateReport.playlist.total.toLocaleString()} tracks · {visibleCandidateReport.playlist.matchingFilters.toLocaleString()} match these filters · {visibleCandidateReport.playlist.afterExclusions.toLocaleString()} after exclusions</span>
+                )}
+                {visibleCandidateReport.warnings.map(warning => <span key={warning} className="field-hint text-vermilion">{warning}</span>)}
+              </div>
+            )}
           </Field>
 
           {scopedRuleCount > 0 && (
