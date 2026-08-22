@@ -216,3 +216,38 @@ export function genreCentroids(): Array<{ genre: string; count: number; centroid
 }
 
 
+
+// Lean, whole-library projection for the explicit Show-editor candidate
+// diagnostic. It avoids the heavyweight analysis JSON that full track reads
+// carry while retaining every field used by the strict show locks.
+export function candidateFilterTracks(): Array<{
+  id: string;
+  title: string | null;
+  artist: string | null;
+  year: number | null;
+  originalYear: number | null;
+  isCompilation: boolean | null;
+  genres: string[];
+  genre: string | null;
+  moods: string[];
+  audioMoods: string[];
+  energy: EnergyValue;
+  vocalRanges: unknown[] | null;
+}> {
+  const rows = requireDb().prepare(`SELECT id, title, artist, year, original_year,
+    is_compilation, genres, genre, moods, audio_moods, energy, vocal_ranges_json FROM tracks`).all() as Array<Record<string, any>>;
+  return rows.map((row) => ({
+    id: row.id,
+    title: row.title ?? null,
+    artist: row.artist ?? null,
+    year: row.year ?? null,
+    originalYear: row.original_year ?? null,
+    isCompilation: row.is_compilation == null ? null : !!row.is_compilation,
+    genres: row.genres ? safeParseArray(row.genres) : [],
+    genre: row.genre ?? null,
+    moods: row.moods ? safeParseArray(row.moods) : [],
+    audioMoods: row.audio_moods ? safeParseArray(row.audio_moods) : [],
+    energy: row.energy ?? null,
+    vocalRanges: row.vocal_ranges_json == null ? null : safeParseArray(row.vocal_ranges_json),
+  }));
+}
