@@ -113,6 +113,32 @@ export function deepCutTracks(cutoffIso: string, limit: number): TrackRecord[] {
   return ids.map((id) => byId.get(id)).filter((r): r is TrackRow => !!r).map(rowToTrack);
 }
 
+// Lifetime plays per artist, keyed by lowercased+trimmed artist name (the same
+// normalisation the "title|artist" half of lastAiredIndex uses) — the picker
+// tools have no artist id to group on, only the free-text field. One GROUP BY
+// over the whole table: cheap next to lastAiredIndex's two, and memoised the
+// same way (library.ts's artistPlayStats), so it still runs once per TTL
+// window rather than once per candidate.
+export interface ArtistPlayStats {
+  count: number;
+  lastPlayedAtMs: number;
+}
+
+export function artistPlayIndex(): Map<string, ArtistPlayStats> {
+  const d = requireDb();
+  const out = new Map<string, ArtistPlayStats>();
+  for (const r of d.prepare(`
+    SELECT LOWER(TRIM(artist)) AS artist, COUNT(*) AS n, MAX(played_at) AS last_at
+    FROM plays WHERE artist IS NOT NULL AND TRIM(artist) != ''
+    GROUP BY LOWER(TRIM(artist))
+  `).all() as Array<{ artist: string; n: number; last_at: string }>) {
+    const at = Date.parse(r.last_at);
+    if (!Number.isFinite(at)) continue;
+    out.set(r.artist, { count: r.n, lastPlayedAtMs: at });
+  }
+  return out;
+}
+
 export function listPlays(opts: { limit?: number; offset?: number } = {}): { total: number; rows: PlayRecord[] } {
   const d = requireDb();
   const limit = Math.min(Math.max(opts.limit ?? 50, 1), 200);
