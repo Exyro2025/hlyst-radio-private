@@ -110,6 +110,11 @@ function resolvedStoredEra(row: StoredEra): number | null {
   return resolveEraYear(row.year, row.original_year, untrusted);
 }
 
+export function resolvedEraYearForTrack(id: string): number | null {
+  const row = storedEra(id);
+  return row ? resolvedStoredEra(row) : null;
+}
+
 function markTextVectorDirtyIfEraChanged(id: string, before: StoredEra | null): void {
   if (!before) return;
   const after = storedEra(id);
@@ -550,7 +555,11 @@ export function clearAnalysis(opts: { keepVocal?: boolean; clearStems?: boolean 
   d.prepare('DELETE FROM track_audio_vectors').run();
 }
 
-export function upsertTrackVector(id: string, vector: number[] | Float32Array): void {
+export function upsertTrackVector(
+  id: string,
+  vector: number[] | Float32Array,
+  expectedEraYear: number | null,
+): void {
   if (getEmbeddingDim() === null) {
     throw new Error('library-db opened without embedding dim');
   }
@@ -567,7 +576,20 @@ export function upsertTrackVector(id: string, vector: number[] | Float32Array): 
   const d = requireDb();
   d.prepare(`DELETE FROM track_vectors WHERE id = ?`).run(id);
   d.prepare(`INSERT INTO track_vectors (id, embedding) VALUES (?, ?)`).run(id, buf);
-  d.prepare(`UPDATE tracks SET text_vector_dirty = 0 WHERE id = ?`).run(id);
+  // Embedding is an external await. Compare the era used to build this vector
+  // with the row as it exists at completion so a concurrent metadata/manual
+  // edit cannot have its refresh marker cleared by a stale writer.
+  d.prepare(
+    `UPDATE tracks
+        SET text_vector_dirty = CASE
+          WHEN (CASE
+            WHEN original_year > 0 THEN original_year
+            WHEN is_compilation = 1 OR era_untrusted = 1 THEN NULL
+            WHEN year > 0 THEN year
+            ELSE NULL
+          END) IS ? THEN 0 ELSE 1 END
+      WHERE id = ?`,
+  ).run(expectedEraYear, id);
 }
 
 export function dropVectors(): void {
@@ -598,4 +620,3 @@ export function upsertTrackAudioVector(id: string, vector: number[] | Float32Arr
   d.prepare(`DELETE FROM track_audio_vectors WHERE id = ?`).run(id);
   d.prepare(`INSERT INTO track_audio_vectors (id, embedding) VALUES (?, ?)`).run(id, buf);
 }
-

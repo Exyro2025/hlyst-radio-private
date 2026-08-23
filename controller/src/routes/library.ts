@@ -43,6 +43,10 @@ interface LibrarySong {
   artist?: string | null;
   album?: string | null;
   year?: number | string | null;
+  originalYear?: number | null;
+  originalYearSource?: string | null;
+  isCompilation?: boolean | null;
+  eraUntrusted?: boolean | null;
   genre?: string | null;
   duration?: number | null;
 }
@@ -153,6 +157,10 @@ router.get('/library/liked', requireAdmin, async (req, res) => {
         artist: rec?.artist ?? snap.artist ?? null,
         album: rec?.album ?? snap.album ?? null,
         year: rec?.year ?? snap.year ?? null,
+        originalYear: rec?.originalYear ?? null,
+        originalYearSource: rec?.originalYearSource ?? null,
+        isCompilation: rec?.isCompilation ?? null,
+        eraUntrusted: rec?.eraUntrusted ?? null,
         genre: rec?.genre ?? snap.genre ?? null,
         // The snapshot names it `duration`, library.db `durationSec`; the table
         // reads `duration`, so normalise here rather than at the call site.
@@ -235,6 +243,10 @@ router.get('/library/search-sound', requireAdmin, async (req, res) => {
         artist: t.artist ?? null,
         album: t.album ?? null,
         year: t.year ?? null,
+        originalYear: t.originalYear ?? null,
+        originalYearSource: t.originalYearSource ?? null,
+        isCompilation: t.isCompilation ?? null,
+        eraUntrusted: t.eraUntrusted ?? null,
         genre: t.genre ?? null,
         duration: t.durationSec ?? null,
         moods: t.moods ?? [],
@@ -553,12 +565,17 @@ router.get('/library/untagged', requireAdmin, async (req, res) => {
           const s = songs[j];
           visited++;
           if (library.has(s.id)) continue;
+          const era = library.get(s.id);
           rows.push({
             id: s.id,
             title: s.title,
             artist: s.artist,
             album: s.album,
             year: s.year ?? null,
+            originalYear: era?.originalYear ?? null,
+            originalYearSource: era?.originalYearSource ?? null,
+            isCompilation: era?.isCompilation ?? null,
+            eraUntrusted: era?.eraUntrusted ?? null,
             genre: s.genre ?? null,
             duration: s.duration ?? null,
           });
@@ -808,6 +825,9 @@ router.post('/library/retag', requireAdmin, async (req, res) => {
         // the SAME text as phaseEmbed would, or this one track drifts in the
         // KNN space exactly like a task-prefix mismatch would.
         const rec = db.getTrack(id);
+        const eraYear = resolveEraYear(
+          rec?.year ?? song.year, rec?.originalYear ?? null, rec?.yearUntrusted ?? null,
+        );
         const text = embeddings.formatTrackText(
           {
             title: song.title,
@@ -815,9 +835,7 @@ router.post('/library/retag', requireAdmin, async (req, res) => {
             album: song.album,
             year: song.year ?? null,
             genres: subsonic.songGenres(song),
-            eraYear: resolveEraYear(
-              rec?.year ?? song.year, rec?.originalYear ?? null, rec?.yearUntrusted ?? null,
-            ),
+            eraYear,
           },
           { lastfmTags, lyricExcerpt },
           rec
@@ -834,7 +852,7 @@ router.post('/library/retag', requireAdmin, async (req, res) => {
           db.vectorCount(),
         );
         const [vec] = await embeddings.embedDocTexts([text], textMode);
-        if (vec) db.upsertTrackVector(id, vec);
+        if (vec) db.upsertTrackVector(id, vec, eraYear);
       } catch (err) {
         queue.log('warn', `/library/retag embed ${id}: ${err.message}`);
       }
@@ -1036,7 +1054,7 @@ router.post(
           // What era filtering, the DJ line and the picker will read from now
           // on — echoed back so the editor can show the effect rather than the
           // input, which is the whole point of the override.
-          eraYear: resolveEraYear(t.year, originalYear, null),
+          eraYear: db.resolvedEraYearForTrack(t.id),
         })),
       });
     } catch (err) {

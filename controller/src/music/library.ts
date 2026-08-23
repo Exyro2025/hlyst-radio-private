@@ -103,7 +103,9 @@ export function get(songId: string): any {
     // the album's year is TRUSTED. `yearUntrusted` is the composed flag
     // resolution reads; `isCompilation` rides along as the raw Navidrome fact.
     originalYear: t.originalYear,
+    originalYearSource: t.originalYearSource,
     isCompilation: t.isCompilation,
+    eraUntrusted: t.eraUntrusted,
     yearUntrusted: t.yearUntrusted,
     genres: t.genres,
     genre: t.genre,

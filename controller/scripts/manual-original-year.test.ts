@@ -24,9 +24,11 @@ const stateDir = mkdtempSync(join(tmpdir(), 'subwave-manual-era-'));
 process.env.STATE_DIR = stateDir;
 
 const db = await import('../src/music/library-db.js');
+const library = await import('../src/music/library.js');
 const { needsOriginalYearLookup } = await import('../src/music/musicbrainz.js');
 const { resolveEraYear } = await import('../src/music/show-filter.js');
 await db.open({ embeddingDim: 768, adoptStoredDim: true });
+await library.load();
 
 after(() => {
   db.close?.();
@@ -149,6 +151,13 @@ test('the override writes the operator answer and stamps the source', () => {
   assert.equal(t.originalYear, 1964);
   assert.equal(t.originalYearSource, 'manual');
   assert.equal(resolveEraYear(t.year, t.originalYear, t.yearUntrusted), 1964);
+
+  // Search/recent rows are shaped from library.get(), not the browse record.
+  // If this projection drops either field, the shared editor claims the file
+  // year is authoritative and offers no way to clear a persisted override.
+  const admin = library.get('t1');
+  assert.equal(admin.originalYearSource, 'manual');
+  assert.equal(admin.eraUntrusted, true);
 });
 
 test('a later library walk does NOT clobber the override', () => {
@@ -192,6 +201,8 @@ test('after clearing, the automatic pipeline owns the track again', () => {
   assert.equal(t.originalYear, null);
   assert.equal(t.originalYearSource, null);
   assert.equal(needsOriginalYearLookup(t), true);
+  assert.equal(db.resolvedEraYearForTrack('t1'), null,
+    'an API response must read the stored suspect verdict instead of trusting the request body');
 });
 
 test('a genuine compilation still reaches MusicBrainz, and MB still wins over the tag', () => {
@@ -295,7 +306,7 @@ test('an era change keeps the old vector usable but schedules a text-vector refr
     title: 'Old Recording', artist: 'Someone', album: 'Later Anthology',
     year: 2012, isCompilation: false, eraUntrusted: false,
   });
-  db.upsertTrackVector('dirty-era', new Array(768).fill(0.01));
+  db.upsertTrackVector('dirty-era', new Array(768).fill(0.01), 2012);
 
   // A later walk discovers that the release year is not a trustworthy
   // recording year. The old vector must remain searchable until the embed pass
@@ -309,8 +320,28 @@ test('an era change keeps the old vector usable but schedules a text-vector refr
   assert.equal(db.hasVector('dirty-era'), true, 'the last usable vector stays in the KNN index');
   assert.ok(db.textVectorDirtyIds().includes('dirty-era'), 'the next embed pass is told to replace the stale vector');
 
-  db.upsertTrackVector('dirty-era', new Array(768).fill(0.02));
+  db.upsertTrackVector('dirty-era', new Array(768).fill(0.02), null);
   assert.ok(!db.textVectorDirtyIds().includes('dirty-era'), 'a successful replacement clears the marker');
+});
+
+test('an embed built before an era change cannot clear the newer refresh marker', () => {
+  db.upsertTrackMeta('embed-race', {
+    title: 'Old Recording', artist: 'Someone', album: 'Later Anthology',
+    year: 2012, isCompilation: false, eraUntrusted: false,
+  });
+  db.upsertTrackVector('embed-race', new Array(768).fill(0.01), 2012);
+
+  // phaseEmbed snapshots the row before awaiting the external embedding
+  // service. The operator changes the era while that await is in flight.
+  const staleEraYear = resolveEraYear(2012, null, false);
+  db.setManualOriginalYear('embed-race', 1964);
+  assert.ok(db.textVectorDirtyIds().includes('embed-race'));
+
+  // Completion of the stale request may replace the vector, but it must leave
+  // the marker set so the next pass repairs it. Unconditionally clearing here
+  // loses the only durable record that the vector still describes 2012.
+  db.upsertTrackVector('embed-race', new Array(768).fill(0.02), staleEraYear);
+  assert.ok(db.textVectorDirtyIds().includes('embed-race'));
 });
 
 test('seed decade bucketing uses the same unresolved-era rule as show filtering', () => {
@@ -329,7 +360,7 @@ test('migration 22 backfills the refresh marker for era-special existing vectors
     title: 'Resolved Recording', artist: 'Someone', album: 'Later Reissue',
     year: 2012, originalYear: 1964, isCompilation: false,
   });
-  db.upsertTrackVector('pre-v22-vector', new Array(768).fill(0.03));
+  db.upsertTrackVector('pre-v22-vector', new Array(768).fill(0.03), 1964);
   assert.ok(!db.textVectorDirtyIds().includes('pre-v22-vector'));
 
   // Recreate the on-disk shape an installation already running PR #1431 can
