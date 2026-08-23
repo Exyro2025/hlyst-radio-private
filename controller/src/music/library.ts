@@ -209,6 +209,11 @@ export function countTagged(): number {
   return loaded ? db.countTagged() : 0;
 }
 
+// Lean whole-library projection for the explicitly requested Show-editor candidate diagnostic.
+export function candidateFilterTracks() {
+  return loaded ? db.candidateFilterTracks() : [];
+}
+
 // Lean metadata for the /now-playing hot path — only the fields the player's
 // metadata strip renders (genre · BPM · key · mood · energy · year). Backed by
 // db.getTrackLite so a per-listener poll never SELECTs or JSON.parses the heavy
