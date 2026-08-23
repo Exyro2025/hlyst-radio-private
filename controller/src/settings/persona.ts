@@ -306,15 +306,36 @@ export function renderDjPrompt(persona: unknown, ctx: unknown = {}) {
 // spoken line whichever prompt path writes it: TTS control tags, "spell out
 // numbers and dates", locale orthography (issue #1182). The djPrompt template
 // only renders on the scripted-talk path (renderDjPrompt → djSystem); the
-// tool-loop agents build their own prompts from agentPersonaPreamble — so
-// path-agnostic rules live in settings.djHouseRules and BOTH paths append this
-// block. `scope` frames who the rules bind (free text is all speech; agent
-// output has internal fields the rules must not leak into). Returns '' when
-// unset, keeping default installs byte-identical on both paths.
+// tool-loop agents build their own prompts from agentPersonaPreamble, and the
+// multi-voice cast paths hand-roll a third shape (castHouseRulesBlock below) —
+// so path-agnostic rules live in settings.djHouseRules and ALL THREE append
+// this block. `scope` frames who the rules bind (free text is all speech;
+// structured output has internal fields the rules must not leak into).
+// Returns '' when unset, keeping default installs byte-identical everywhere.
 function houseRulesBlock(scope: string): string {
   const rules = String(peek()?.djHouseRules ?? '').trim();
   if (!rules) return '';
   return `\n\nStation house rules — ${scope}:\n${rules}`;
+}
+
+// The multi-voice cast paths — mid-show banter (llm/internal/prompts/banter.ts)
+// and the guest-show programme open/close exchanges (prompts/programme.ts
+// exchangeSystem) — write a WHOLE exchange in one structured call, so they
+// build their system prompt around a per-call speaker enum rather than going
+// through renderDjPrompt OR agentPersonaPreamble. That made them the one class
+// of spoken output the house rules never reached (issue #1420): an operator
+// whose rules carry TTS control tags saw them applied to every link and
+// segment but silently dropped from every banter line.
+//
+// Both call sites share this ONE wording rather than each framing the scope
+// themselves: the two prompts emit the same {speaker, text} shape, and a rule
+// like "write numbers out in words" mangles a persona id as readily as it
+// mangles a track id on the agent path.
+export function castHouseRulesBlock(): string {
+  return houseRulesBlock(
+    "follow these in every line's spoken text (the words the listener hears on air); "
+    + 'they do not apply to the "speaker" field, which stays an exact persona id from the cast list',
+  );
 }
 
 // Persona prelude shared by every tool-loop agent system prompt — the picker

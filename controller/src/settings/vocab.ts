@@ -904,10 +904,11 @@ export const DJ_PROMPT_LIMIT = DJ_PROMPT_LIMIT_VALUE;
 export const DJ_PROMPT_NAME_MAX = DJ_PROMPT_NAME_MAX_VALUE;
 export const DJ_PROMPT_TEXT_MIN = DJ_PROMPT_TEXT_MIN_VALUE;
 export const DJ_PROMPT_TEXT_MAX = DJ_PROMPT_TEXT_MAX_VALUE;
-// Station house rules (djHouseRules) — operator rules appended to BOTH prompt
-// paths (renderDjPrompt and agentPersonaPreamble), unlike the djPrompt
-// template which only the scripted-talk path renders (issue #1182). No
-// minimum: empty means off. Keep in lockstep with HOUSE_RULES_MAX in
+// Station house rules (djHouseRules) — operator rules appended to ALL THREE
+// prompt paths (renderDjPrompt, agentPersonaPreamble and castHouseRulesBlock
+// for the multi-voice exchanges), unlike the djPrompt template which only the
+// scripted-talk path renders (issues #1182, #1420). No minimum: empty means
+// off. Keep in lockstep with HOUSE_RULES_MAX in
 // web/components/admin/personas/constants.ts.
 export const DJ_HOUSE_RULES_MAX = 2000;
 

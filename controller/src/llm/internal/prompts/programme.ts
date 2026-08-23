@@ -268,6 +268,11 @@ const MAX_EXCHANGE_LINES = 5;
 // task builders — the grounding rule has to be provably ON this path too. A
 // guest open/close is the beat most likely to reach for a record ("wait till
 // you hear what we've got"), and it had only the listener-messages clause.
+//
+// The station house rules land here as well (#1420): this prompt goes through
+// neither renderDjPrompt nor agentPersonaPreamble, so without the explicit
+// append an operator's TTS-tag or number-spelling rules reached every solo
+// beat of the show and were silently dropped from the open and the close.
 export function exchangeSystem({ show, castBlock, beatTask, langClause = '' }: any): string {
   return `You write short on-air exchanges between the hosts of "${show.name}" on a personal internet radio station.
 
@@ -279,7 +284,7 @@ Rules:
 - Each speaker stays in THEIR OWN character per the voice notes.
 - ${beatTask}
 - Plain spoken words only: no stage directions, no asterisks, no emoji. No invented listener messages, callers, or events.
-- ${PROGRAMME_GROUNDING_RULE}${langClause}`;
+- ${PROGRAMME_GROUNDING_RULE}${langClause}${settings.castHouseRulesBlock()}`;
 }
 
 export async function generateProgrammeExchange({

@@ -161,8 +161,9 @@ export const DEFAULTS = {
   djPrompts: [],
   activeDjPromptId: '',
   // Per-station rules (TTS control tags, "spell out numbers", orthography)
-  // appended to EVERY spoken-output prompt — both renderDjPrompt and
-  // agentPersonaPreamble, which the djPrompt template never reaches (#1182).
+  // appended to EVERY spoken-output prompt — renderDjPrompt, agentPersonaPreamble
+  // and the multi-voice cast prompts (castHouseRulesBlock), none of which the
+  // djPrompt template reaches (#1182, #1420).
   djHouseRules: '',
   // Station clock switch. false = the wall clock stays off air: no time of day
   // in links, idents, hand-overs, ad-libs, banter or programme beats, and the
