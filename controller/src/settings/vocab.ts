@@ -316,13 +316,13 @@ export function clampRepeatPenalty(raw: unknown, def: number): number {
   return Math.min(2.0, Math.max(1.0, raw));
 }
 
-// Coerce a stored agent-deadline value (ms). Clamped to [5s, 180s] and floored
+// Coerce a stored agent-deadline value (ms). Clamped to [5s, 300s] and floored
 // to an integer; non-numeric/NaN falls back to `def`. The lower bound keeps a
 // fat-fingered save from making every agent pick fail instantly; the upper
 // bound keeps a stalling model from tying up an inference slot for minutes.
 export function clampAgentTimeout(raw: unknown, def: number): number {
   if (typeof raw !== 'number' || !Number.isFinite(raw)) return def;
-  return Math.min(180_000, Math.max(5_000, Math.floor(raw)));
+  return Math.min(300_000, Math.max(5_000, Math.floor(raw)));
 }
 
 // Daily LLM token cap. 0 disables (the default — never cap a free local box);
@@ -1147,4 +1147,3 @@ export const AAC_BITRATES = SETTINGS_AAC_BITRATES;
 // the analyzer's measured LUFS, or tag-with-measured-fallback (the default).
 export const LOUDNESS_SOURCES = SETTINGS_LOUDNESS_SOURCES;
 export type LoudnessSource = (typeof LOUDNESS_SOURCES)[number];
-

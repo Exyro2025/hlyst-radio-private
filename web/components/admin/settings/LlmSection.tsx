@@ -1007,7 +1007,7 @@ export function LlmSection({ data, form, setForm, busy, saveSettings, adminFetch
             <Input
               type="number"
               min={5}
-              max={180}
+              max={300}
               step={5}
               value={Math.round(form.llm.agentTimeoutMs / 1000)}
               onChange={(e: ChangeEvent<HTMLInputElement>) =>
@@ -1020,7 +1020,7 @@ export function LlmSection({ data, form, setForm, busy, saveSettings, adminFetch
               How long an agent pick or listener request may run before falling
               back to the stateless picker. Slow reasoning models often need
               20&ndash;40s per pick; lower it for snappier fallbacks on a fast
-              model. 5&ndash;180s.
+              model. 5&ndash;300s.
             </div>
           </div>
         )}
