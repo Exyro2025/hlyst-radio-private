@@ -129,6 +129,7 @@ export interface LlmForm {
   toolChoice: string;
   pickerAgent: boolean;
   noRepeatWindow: string;
+  artistVarietyWindow: string;
   requestWebResolve: boolean;
   agentTimeoutMs: number;
   pauseWhenEmpty: boolean;

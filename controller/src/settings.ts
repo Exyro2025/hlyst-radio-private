@@ -60,6 +60,7 @@ import {
   clampMaxOutputTokens,
   clampDiscoverySteps,
   clampNoRepeatWindow,
+  clampArtistVarietyWindow,
   clampNumCtx,
   clampRepeatPenalty,
   clampTtsGain,
@@ -792,6 +793,13 @@ export async function load() {
       // Clamped to [0, 1000] (≤ the 2500-entry sidecar cap); pre-field
       // settings.json picks up the config/env-seeded default.
       noRepeatWindow: clampNoRepeatWindow(stored.llm?.noRepeatWindow, DEFAULTS.llm.noRepeatWindow),
+      // Clamped to [0, 25]; a settings.json written before the field existed
+      // picks up the shipped default, so an upgrade turns spacing on rather
+      // than silently keeping the on-air-only guard it was filed against.
+      artistVarietyWindow: clampArtistVarietyWindow(
+        stored.llm?.artistVarietyWindow,
+        DEFAULTS.llm.artistVarietyWindow,
+      ),
       requestWebResolve:
         typeof stored.llm?.requestWebResolve === 'boolean'
           ? stored.llm.requestWebResolve
@@ -1593,6 +1601,11 @@ export async function update(patch) {
     }
     if (l.noRepeatWindow !== undefined) {
       next.llm.noRepeatWindow = clampNoRepeatWindow(Number(l.noRepeatWindow), next.llm.noRepeatWindow);
+    }
+    if (l.artistVarietyWindow !== undefined) {
+      next.llm.artistVarietyWindow = clampArtistVarietyWindow(
+        Number(l.artistVarietyWindow), next.llm.artistVarietyWindow,
+      );
     }
     if (l.requestWebResolve !== undefined) {
       next.llm.requestWebResolve = !!l.requestWebResolve;
