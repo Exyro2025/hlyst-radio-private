@@ -222,3 +222,68 @@ export function genreCentroids(): Array<{ genre: string; count: number; centroid
   }
   return out;
 }
+// Lean, whole-library projection for the explicit Show-editor candidate
+// diagnostic. It avoids the heavyweight analysis JSON that full track reads
+// carry while retaining every field used by the strict show locks.
+export function candidateFilterTracks(): Array<{
+  id: string;
+  title: string | null;
+  artist: string | null;
+  year: number | null;
+  originalYear: number | null;
+  isCompilation: boolean | null;
+  yearUntrusted: boolean | null;
+  genres: string[];
+  genre: string | null;
+  moods: string[];
+  audioMoods: string[];
+  energy: EnergyValue;
+  vocalRanges: unknown[] | null;
+}> {
+  type CandidateFilterRow = {
+    id: string;
+    title: string | null;
+    artist: string | null;
+    year: number | null;
+    original_year: number | null;
+    is_compilation: number | null;
+    era_untrusted: number | null;
+    genres: string | null;
+    genre: string | null;
+    moods: string | null;
+    audio_moods: string | null;
+    energy: EnergyValue;
+    vocal_range_count: number | null;
+  };
+  const rows = requireDb().prepare(`SELECT id, title, artist, year, original_year,
+    is_compilation, era_untrusted, genres, genre, moods, audio_moods, energy,
+    CASE
+      WHEN vocal_ranges_json IS NULL THEN NULL
+      WHEN json_valid(vocal_ranges_json) AND json_type(vocal_ranges_json) = 'array'
+        THEN json_array_length(vocal_ranges_json)
+      ELSE NULL
+    END AS vocal_range_count
+    FROM tracks`).all() as CandidateFilterRow[];
+  return rows.map((row) => ({
+    id: row.id,
+    title: row.title ?? null,
+    artist: row.artist ?? null,
+    year: row.year ?? null,
+    originalYear: row.original_year ?? null,
+    isCompilation: row.is_compilation == null ? null : !!row.is_compilation,
+    yearUntrusted: (row.is_compilation === 1 || row.era_untrusted === 1)
+      ? true
+      : (row.is_compilation == null && row.era_untrusted == null ? null : false),
+    genres: row.genres ? safeParseArray(row.genres) : [],
+    genre: row.genre ?? null,
+    moods: row.moods ? safeParseArray(row.moods) : [],
+    audioMoods: row.audio_moods ? safeParseArray(row.audio_moods) : [],
+    energy: row.energy ?? null,
+    // The show filter only reads this field's tri-state: null = unmeasured,
+    // [] = instrumental, non-empty = vocal. Keep the projection lean by
+    // carrying presence rather than parsing every stored span object.
+    vocalRanges: row.vocal_range_count == null
+      ? null
+      : row.vocal_range_count === 0 ? [] : [{}],
+  }));
+}
