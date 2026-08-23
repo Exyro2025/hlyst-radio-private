@@ -622,7 +622,6 @@ export async function runAnalysisPass(opts: AnalyzeOptions = {}): Promise<Analyz
         musicalKey: a.musicalKey,
         introMs: lyricVocal?.introMs != null ? lyricVocal.introMs : a.introMs,
         confidence: a.confidence,
-        bpmConfidence: a.bpmConfidence,
         loudnessLufs: a.loudnessLufs,
         peakDb: a.peakDb,
         sections: a.sections,

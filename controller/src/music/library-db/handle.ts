@@ -24,14 +24,7 @@ export const TAGGER_VERSION = 3;
 // v4: added the pace curve (pace_json).
 // v5: added the beat/bar grid (beats_json, bars_json).
 // v6: added per-region key ranges (key_ranges_json).
-// v7: tempo octave correction (#1417) — beat_track's 120-centred prior returned
-//     the DOUBLE on slow material (a 76 BPM ballad stored as 152.0) and nothing
-//     downstream corrected it. Every v<=6 row's bpm, beats_json, bars_json and
-//     analysis_confidence may be an octave out, and re-running the OLD code
-//     would reproduce the same numbers byte for byte (librosa is deterministic
-//     over identical audio) — so the bump is the only thing that actually gets
-//     existing libraries re-measured. Also adds bpm_confidence.
-export const ANALYSIS_VERSION = 7;
+export const ANALYSIS_VERSION = 6;
 
 // CLAP audio-embedding dim. Fixed by the model (LAION-CLAP's audio projection
 // is 512-d), so — unlike the text index in track_vectors — there's no per-model
@@ -87,5 +80,4 @@ export function setHandle(next: {
   if ('embeddingDim' in next) currentEmbeddingDim = next.embeddingDim ?? null;
   if (next.nonce !== undefined) dbNonce = next.nonce;
 }
-
 

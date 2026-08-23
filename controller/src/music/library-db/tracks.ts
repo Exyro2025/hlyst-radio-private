@@ -218,9 +218,6 @@ interface TrackAnalysisWrite {
   musicalKey?: string | null;
   introMs?: number | null;
   confidence?: number | null;
-  // Tempo's own octave-margin confidence (#1417). undefined/null writes NULL,
-  // i.e. "not judged" — the honest value for a worker that could not measure it.
-  bpmConfidence?: number | null;
   loudnessLufs?: number | null;
   peakDb?: number | null;
   sections?: TrackSection[] | null;
@@ -253,7 +250,6 @@ export function upsertTrackAnalysis(id: string, a: TrackAnalysisWrite): void {
         musical_key         = ?,
         intro_ms            = ?,
         analysis_confidence = ?,
-        bpm_confidence      = ?,
         loudness_lufs       = ?,
         peak_db             = ?,
         structure_json      = ?,
@@ -287,7 +283,6 @@ export function upsertTrackAnalysis(id: string, a: TrackAnalysisWrite): void {
       a.musicalKey ?? null,
       Number.isFinite(a.introMs as number) ? Math.round(a.introMs as number) : null,
       Number.isFinite(a.confidence as number) ? (a.confidence as number) : null,
-      Number.isFinite(a.bpmConfidence as number) ? (a.bpmConfidence as number) : null,
       Number.isFinite(a.loudnessLufs as number) ? (a.loudnessLufs as number) : null,
       Number.isFinite(a.peakDb as number) ? (a.peakDb as number) : null,
       a.sections && a.sections.length ? JSON.stringify(a.sections) : null,
@@ -426,7 +421,7 @@ export function clearAnalysis(opts: { keepVocal?: boolean; clearStems?: boolean 
   const stemsCol = opts.clearStems ? ' stems_at = NULL,' : '';
   d.prepare(
     `UPDATE tracks SET bpm = NULL, musical_key = NULL, intro_ms = NULL,
-      analysis_confidence = NULL, bpm_confidence = NULL, loudness_lufs = NULL, peak_db = NULL,
+      analysis_confidence = NULL, loudness_lufs = NULL, peak_db = NULL,
       structure_json = NULL, pace_json = NULL, beats_json = NULL, bars_json = NULL,
       key_ranges_json = NULL, outro_json = NULL,${vocalCol}${stemsCol} analysis_version = NULL,
       audio_moods = NULL, audio_mood_scores_json = NULL,
@@ -487,5 +482,4 @@ export function upsertTrackAudioVector(id: string, vector: number[] | Float32Arr
   d.prepare(`DELETE FROM track_audio_vectors WHERE id = ?`).run(id);
   d.prepare(`INSERT INTO track_audio_vectors (id, embedding) VALUES (?, ?)`).run(id, buf);
 }
-
 

@@ -457,10 +457,6 @@ router.get('/library/observatory/track/:id', requireAdmin, async (req, res) => {
         musicalKey: t.musicalKey,
         introMs: t.introMs,
         analysisConfidence: t.analysisConfidence,
-        // Tempo's own octave-margin confidence (#1417) — the dossier, not the
-        // bulk list, which is deliberately lean. null = not judged, which the
-        // UI must not render as a bad score.
-        bpmConfidence: t.bpmConfidence,
         analysisVersion: t.analysisVersion,
         // Acoustic detail — the curves/ranges the dossier's SONG SHAPE timeline
         // draws. All null-safe; the UI hides what isn't computed. (beats/bars

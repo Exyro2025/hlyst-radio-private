@@ -37,7 +37,6 @@ export function rowToTrack(row: TrackRow): TrackRecord {
     musicalKey: row.musical_key ?? null,
     introMs: row.intro_ms ?? null,
     analysisConfidence: row.analysis_confidence ?? null,
-    bpmConfidence: row.bpm_confidence ?? null,
     analysisVersion: row.analysis_version ?? null,
     loudnessLufs: row.loudness_lufs ?? null,
     peakDb: row.peak_db ?? null,

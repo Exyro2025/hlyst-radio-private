@@ -472,7 +472,6 @@ async def analyze(req: AnalyzeRequest):
     # Optional fields — passed through only when the worker computed them, so
     # the client maps omissions to null.
     for k in (
-        "bpm_confidence",
         "loudness_lufs", "peak_db", "sections", "vocal_ranges",
         "pace_curve", "beats", "bars", "key_ranges", "outro", "stems_cached",
     ):

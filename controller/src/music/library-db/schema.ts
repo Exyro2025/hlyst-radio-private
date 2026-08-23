@@ -403,26 +403,6 @@ export async function migrate(embeddingDim: number, reseed = false, adoptStoredD
     d.pragma('user_version = 20');
   }
 
-  if (userVersion < 21) {
-    // Tempo's OWN confidence, separate from analysis_confidence (#1417).
-    //
-    // analysis_confidence is half key-separation plus a flat half-point for any
-    // BPM in 40..220, so a doubled 152 on a 76 BPM ballad collected the full
-    // tempo bonus that a correct reading would — measured across a real
-    // library, mean confidence was identical above and below 140 BPM. The field
-    // carried no tempo signal at all, and a consumer wanting to flag or hold
-    // back a dubious BPM had nothing to read.
-    //
-    // This one is the octave decision's own margin: how far the onset evidence
-    // sat from flipping between a tempo and its half/double. NULL means the
-    // analyser could not judge it (no envelope, too short a beat grid, or a row
-    // written before v7) — never "judged bad", so nothing may treat NULL as a
-    // low score. The composite keeps its old meaning and now scales its tempo
-    // half by this.
-    runDdl(d, `ALTER TABLE tracks ADD COLUMN bpm_confidence REAL;`);
-    d.pragma('user_version = 21');
-  }
-
   // Reconcile the requested embedding dim against what physically exists.
   //
   // The vec0 table's `FLOAT[N]` schema is the authority for what inserts accept —
@@ -538,5 +518,4 @@ function vecTableDim(d: Database.Database): number | null {
 function vecCount(d: Database.Database): number {
   return (d.prepare('SELECT COUNT(*) AS n FROM track_vectors').get() as { n: number }).n;
 }
-
 

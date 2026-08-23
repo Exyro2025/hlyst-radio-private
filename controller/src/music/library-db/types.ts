@@ -46,11 +46,6 @@ export interface TrackRecord {
   musicalKey: string | null;   // Camelot code, e.g. '8A'
   introMs: number | null;
   analysisConfidence: number | null;
-  // How unambiguous the tempo's OCTAVE was (#1417) — the onset evidence's
-  // distance from flipping between `bpm` and its half/double, 0..1. null =
-  // not judged (unmeasurable envelope, or analysed before ANALYSIS_VERSION 7),
-  // which is never the same as a low score.
-  bpmConfidence: number | null;
   analysisVersion: number | null;
   loudnessLufs: number | null; // integrated LUFS (BS.1770); null → unity gain
   peakDb: number | null;       // sample peak in dBFS over the analysis window
@@ -150,7 +145,6 @@ export interface TrackRow {
   musical_key: string | null;
   intro_ms: number | null;
   analysis_confidence: number | null;
-  bpm_confidence: number | null;
   analysis_version: number | null;
   loudness_lufs: number | null;
   peak_db: number | null;
@@ -228,5 +222,4 @@ export interface LibraryStats {
   withAudioEmbedding: number;
   updatedAt: string | null;
 }
-
 
