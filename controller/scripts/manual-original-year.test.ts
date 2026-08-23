@@ -289,3 +289,58 @@ test('the migration SPARES a manual override that equals the file year', () => {
   assert.equal(db.getTrack('m4')!.originalYear, 1969);
   assert.equal(db.getTrack('m4')!.originalYearSource, 'manual');
 });
+
+test('an era change keeps the old vector usable but schedules a text-vector refresh', () => {
+  db.upsertTrackMeta('dirty-era', {
+    title: 'Old Recording', artist: 'Someone', album: 'Later Anthology',
+    year: 2012, isCompilation: false, eraUntrusted: false,
+  });
+  db.upsertTrackVector('dirty-era', new Array(768).fill(0.01));
+
+  // A later walk discovers that the release year is not a trustworthy
+  // recording year. The old vector must remain searchable until the embed pass
+  // replaces it, but that pass must no longer mistake "has a vector" for
+  // "this vector reflects the current era".
+  db.upsertTrackMeta('dirty-era', {
+    title: 'Old Recording', artist: 'Someone', album: 'Later Anthology',
+    year: 2012, isCompilation: false, eraUntrusted: true,
+  });
+
+  assert.equal(db.hasVector('dirty-era'), true, 'the last usable vector stays in the KNN index');
+  assert.ok(db.textVectorDirtyIds().includes('dirty-era'), 'the next embed pass is told to replace the stale vector');
+
+  db.upsertTrackVector('dirty-era', new Array(768).fill(0.02));
+  assert.ok(!db.textVectorDirtyIds().includes('dirty-era'), 'a successful replacement clears the marker');
+});
+
+test('seed decade bucketing uses the same unresolved-era rule as show filtering', () => {
+  db.upsertTrackMeta('unresolved-decade', {
+    title: 'Old Recording', artist: 'Someone', album: '2012 Anthology',
+    year: 2012, originalYear: null, isCompilation: false, eraUntrusted: true,
+  });
+
+  const buckets = db.trackIdsByGenreDecade();
+  assert.ok(buckets.get('|0')?.includes('unresolved-decade'), 'unknown era belongs in the unknown bucket');
+  assert.ok(!buckets.get('|2010')?.includes('unresolved-decade'), 'the reissue year must not become the recording decade');
+});
+
+test('migration 22 backfills the refresh marker for era-special existing vectors', async () => {
+  db.upsertTrackMeta('pre-v22-vector', {
+    title: 'Resolved Recording', artist: 'Someone', album: 'Later Reissue',
+    year: 2012, originalYear: 1964, isCompilation: false,
+  });
+  db.upsertTrackVector('pre-v22-vector', new Array(768).fill(0.03));
+  assert.ok(!db.textVectorDirtyIds().includes('pre-v22-vector'));
+
+  // Recreate the on-disk shape an installation already running PR #1431 can
+  // have: schema 21, a populated vec index, and no dirty-marker column yet.
+  const d = db.requireDb();
+  d.prepare(`ALTER TABLE tracks DROP COLUMN text_vector_dirty`).run();
+  d.pragma('user_version = 21');
+  db.close();
+  await db.open({ embeddingDim: 768, adoptStoredDim: true });
+
+  assert.ok(db.textVectorDirtyIds().includes('pre-v22-vector'),
+    'upgrade schedules a replacement instead of permanently accepting the old era text');
+  assert.equal(db.hasVector('pre-v22-vector'), true, 'the upgrade does not create a KNN hole');
+});

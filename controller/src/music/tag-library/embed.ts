@@ -23,7 +23,9 @@ export async function phaseEmbed(
 ): Promise<void> {
   // Embed any track in scope that doesn't already have a vector. Includes
   // already-tagged tracks (legacy v1) so they can serve as KNN neighbours.
-  const needsEmbed: string[] = [];
+  // A dirty vector remains searchable until this pass replaces it, so it must
+  // be included even though hasVector(id) is true.
+  const needsEmbed: string[] = db.textVectorDirtyIds();
   for (const id of targetIds) {
     if (!db.hasVector(id)) needsEmbed.push(id);
   }
@@ -83,4 +85,3 @@ export async function phaseEmbed(
     }
   }
 }
-

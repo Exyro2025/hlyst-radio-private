@@ -138,6 +138,7 @@ export interface TrackRow {
   original_year_checked_at: string | null;
   is_compilation: number | null;
   era_untrusted: number | null;
+  text_vector_dirty: number;
   genres: string | null; // JSON array; `genre` is generated from genres[0]
   genre: string | null;
   duration_sec: number | null;
@@ -237,5 +238,4 @@ export interface LibraryStats {
   withAudioEmbedding: number;
   updatedAt: string | null;
 }
-
 

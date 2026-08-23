@@ -5,6 +5,7 @@ import { ANALYSIS_VERSION, AUDIO_EMBEDDING_DIM, SQL_HAS_MOODS, TAGGER_VERSION, g
 import type { TagWrite, TrackEnrichment, TrackKeyRange, TrackMeta, TrackOutro, TrackPaceSpan, TrackRecord, TrackRow, TrackSection } from './types.js';
 import { normaliseYear, rowToTrack, safeParseArray } from './rows.js';
 import { runDdl } from './schema.js';
+import { resolveEraYear } from '../era-year.js';
 
 // ---------------------------------------------------------------------------
 // Track CRUD
@@ -91,7 +92,50 @@ export function hasVector(id: string): boolean {
   return !!row;
 }
 
+interface StoredEra {
+  year: number | null;
+  original_year: number | null;
+  is_compilation: number | null;
+  era_untrusted: number | null;
+}
+
+function storedEra(id: string): StoredEra | null {
+  return (requireDb()
+    .prepare(`SELECT year, original_year, is_compilation, era_untrusted FROM tracks WHERE id = ?`)
+    .get(id) as StoredEra | undefined) ?? null;
+}
+
+function resolvedStoredEra(row: StoredEra): number | null {
+  const untrusted = row.is_compilation === 1 || row.era_untrusted === 1;
+  return resolveEraYear(row.year, row.original_year, untrusted);
+}
+
+function markTextVectorDirtyIfEraChanged(id: string, before: StoredEra | null): void {
+  if (!before) return;
+  const after = storedEra(id);
+  if (!after || resolvedStoredEra(before) === resolvedStoredEra(after)) return;
+  requireDb()
+    .prepare(
+      `UPDATE tracks SET text_vector_dirty = 1
+        WHERE id = ? AND EXISTS (SELECT 1 FROM track_vectors WHERE id = tracks.id)`,
+    )
+    .run(id);
+}
+
+// Existing vectors whose era-bearing source text changed. They remain in the
+// KNN index until phaseEmbed successfully replaces them.
+export function textVectorDirtyIds(): string[] {
+  return (requireDb()
+    .prepare(
+      `SELECT t.id FROM tracks t
+        JOIN track_vectors v ON v.id = t.id
+        WHERE t.text_vector_dirty = 1`,
+    )
+    .all() as Array<{ id: string }>).map(r => r.id);
+}
+
 export function upsertTrackMeta(id: string, meta: TrackMeta): void {
+  const eraBefore = storedEra(id);
   requireDb()
     .prepare(
       `
@@ -146,6 +190,7 @@ export function upsertTrackMeta(id: string, meta: TrackMeta): void {
       meta.genres?.length ? JSON.stringify(meta.genres) : null,
       Number.isFinite(meta.duration as number) ? (meta.duration as number) : null,
     );
+  markTextVectorDirtyIfEraChanged(id, eraBefore);
 }
 
 // Tracks still owed an original-year lookup (issue #842): compilation-album
@@ -175,6 +220,7 @@ export function idsNeedingOriginalYear(retryMisses = false): string[] {
 // tracks it already asked MusicBrainz about; a miss leaves original_year NULL
 // (era filtering then treats a compilation track's year as unknown).
 export function setOriginalYear(id: string, year: number | null): void {
+  const eraBefore = storedEra(id);
   requireDb()
     .prepare(
       `UPDATE tracks SET
@@ -189,6 +235,7 @@ export function setOriginalYear(id: string, year: number | null): void {
        WHERE id = ? AND (original_year_source IS NULL OR original_year_source <> 'manual')`,
     )
     .run(year, year, new Date().toISOString(), id);
+  markTextVectorDirtyIfEraChanged(id, eraBefore);
 }
 
 // The operator's own answer for a track's original year (issue #1418), the
@@ -203,13 +250,11 @@ export function setOriginalYear(id: string, year: number | null): void {
 // pipeline and a later pass may resolve it. Pinning unknown forever would make
 // "I was wrong about this one" unrecoverable without a reset.
 //
-// Deliberately does NOT invalidate the track's embedding. The `Era:` decade
-// line in the embed text is now stale, and it refreshes on the next retag or
-// tag pass — but dropping the vector to force that would pull the track out of
-// similarity search entirely until then, and one wrong decade WORD in a blob
-// carrying genre, tags, lyrics and acoustics is a far smaller distortion than a
-// hole in the KNN pool. Era FILTERING reads the column and is correct at once.
+// The old embedding stays available to similarity search, but is marked dirty
+// so the next tag pass replaces its stale `Era:` line. Dropping it immediately
+// would create a hole in the KNN pool until that pass completes.
 export function setManualOriginalYear(id: string, year: number | null): void {
+  const eraBefore = storedEra(id);
   requireDb()
     .prepare(
       `UPDATE tracks SET
@@ -219,6 +264,7 @@ export function setManualOriginalYear(id: string, year: number | null): void {
        WHERE id = ?`,
     )
     .run(year, year, year != null ? new Date().toISOString() : null, id);
+  markTextVectorDirtyIfEraChanged(id, eraBefore);
 }
 
 export function upsertTrackEnrichment(id: string, enrich: TrackEnrichment): void {
@@ -521,6 +567,7 @@ export function upsertTrackVector(id: string, vector: number[] | Float32Array): 
   const d = requireDb();
   d.prepare(`DELETE FROM track_vectors WHERE id = ?`).run(id);
   d.prepare(`INSERT INTO track_vectors (id, embedding) VALUES (?, ?)`).run(id, buf);
+  d.prepare(`UPDATE tracks SET text_vector_dirty = 0 WHERE id = ?`).run(id);
 }
 
 export function dropVectors(): void {
@@ -531,6 +578,7 @@ export function dropVectors(): void {
     `CREATE VIRTUAL TABLE track_vectors USING vec0(` +
       `id TEXT PRIMARY KEY, embedding FLOAT[${getEmbeddingDim()}] distance_metric=cosine)`,
   );
+  d.prepare(`UPDATE tracks SET text_vector_dirty = 0`).run();
 }
 
 // Write a CLAP audio embedding for a track. Independent of getEmbeddingDim()

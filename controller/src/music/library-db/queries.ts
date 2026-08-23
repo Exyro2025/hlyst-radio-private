@@ -155,11 +155,19 @@ export function embeddedIds(): string[] {
 }
 
 // Bucket every untagged track by (genre, decade). Used by seed-selector to
-// stratify so rare-mood corners of the library each get a seed pick.
+// stratify so rare-mood corners of the library each get a seed pick. The CASE
+// is the SQL twin of era-year.resolveEraYear: original wins, an unresolved
+// compilation/anthology is unknown, then a trusted file year may fall through.
 export function trackIdsByGenreDecade(): Map<string, string[]> {
   const rows = requireDb()
     .prepare(
-      `SELECT id, COALESCE(genre, '') AS g, (COALESCE(original_year, year, 0) / 10) * 10 AS decade
+      `SELECT id, COALESCE(genre, '') AS g,
+              CASE
+                WHEN original_year > 0 THEN (original_year / 10) * 10
+                WHEN is_compilation = 1 OR era_untrusted = 1 THEN 0
+                WHEN year > 0 THEN (year / 10) * 10
+                ELSE 0
+              END AS decade
        FROM tracks WHERE moods IS NULL`,
     )
     .all() as Array<{ id: string; g: string; decade: number }>;
@@ -214,5 +222,3 @@ export function genreCentroids(): Array<{ genre: string; count: number; centroid
   }
   return out;
 }
-
-

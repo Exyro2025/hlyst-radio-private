@@ -433,6 +433,31 @@ export async function migrate(embeddingDim: number, reseed = false, adoptStoredD
     d.pragma('user_version = 21');
   }
 
+  if (userVersion < 22) {
+    // A text embedding contains an `Era:` line. Era metadata can change after
+    // a vector was written (a later walk recognises an anthology, MusicBrainz
+    // resolves the recording, or an operator supplies an override). Keep the
+    // old vector usable until phase 1 replaces it, but durably remember that it
+    // no longer describes the row.
+    runDdl(d, `ALTER TABLE tracks ADD COLUMN text_vector_dirty INTEGER NOT NULL DEFAULT 0;`);
+
+    // Databases that ran #1418 before this follow-up may already contain stale
+    // vectors. Only era-special rows can differ from the old plain-year text;
+    // only rows with an existing vector need a replacement marker. Fresh DBs
+    // have no vec table yet and need no backfill.
+    const hasTextVectors = d
+      .prepare(`SELECT 1 FROM sqlite_master WHERE type='table' AND name='track_vectors'`)
+      .get();
+    if (hasTextVectors) {
+      d.prepare(
+        `UPDATE tracks SET text_vector_dirty = 1
+          WHERE (original_year IS NOT NULL OR is_compilation = 1 OR era_untrusted = 1)
+            AND id IN (SELECT id FROM track_vectors)`,
+      ).run();
+    }
+    d.pragma('user_version = 22');
+  }
+
   // Reconcile the requested embedding dim against what physically exists.
   //
   // The vec0 table's `FLOAT[N]` schema is the authority for what inserts accept —
@@ -582,5 +607,4 @@ function vecTableDim(d: Database.Database): number | null {
 function vecCount(d: Database.Database): number {
   return (d.prepare('SELECT COUNT(*) AS n FROM track_vectors').get() as { n: number }).n;
 }
-
 

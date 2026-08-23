@@ -10,6 +10,9 @@
 // equally. An empty list means "no constraint" and passes everything through.
 
 import * as library from './library.js';
+import { resolveEraYear } from './era-year.js';
+
+export { resolveEraYear };
 
 // The narrow track shape the show filters read: raw Subsonic children and
 // slimTrack library rows both satisfy it structurally. Every field is optional
@@ -229,36 +232,6 @@ function inAnyWindow(year: number, eras: YearRange[]): boolean {
     if (e.toYear != null && year > e.toYear) return false;
     return true;
   });
-}
-
-// The year a track's ERA is judged by (issue #842). Precedence: the resolved
-// original release year (walk-time album tag or MusicBrainz enrichment) wins;
-// a plain `year` only counts when the track is NOT on a compilation album —
-// a compilation's year is the compilation's own release date ("100 Hits: 70s
-// Chartbusters" is 2013), so trusting it both mis-includes the track in the
-// wrong era and misses it in the right one. Returns null for "unknown".
-//
-// Junk-year guard shared by both fields: Number(null)/Number('') are 0, and
-// some taggers write TYER=0000 → a literal 0 — either would sail through a
-// window with an open lower bound ("1989 and earlier": 0 <= 1989). A real
-// recording year is always > 0, so null / '' / non-finite / non-positive all
-// read as unknown.
-export function resolveEraYear(
-  year: number | string | null | undefined,
-  originalYear: number | null | undefined,
-  // "This album's year is the RELEASE's, not the recordings'." Composed once
-  // in the library-db row mappers as `yearUntrusted` — Navidrome's compilation
-  // flag OR the derived anthology judgement (#1418, music/era-suspect.ts).
-  // Never pass the raw `isCompilation` here: that flag is false on exactly the
-  // reissue anthologies this guard exists for, which is how a 1964 Stax single
-  // read as 2010s material.
-  yearUntrusted: boolean | null | undefined,
-): number | null {
-  const oy = Number(originalYear);
-  if (Number.isFinite(oy) && oy > 0) return oy;
-  if (yearUntrusted) return null;
-  const y = Number(year);
-  return Number.isFinite(y) && y > 0 ? y : null;
 }
 
 // Per-track era year — from the track's own fields when the source carries
