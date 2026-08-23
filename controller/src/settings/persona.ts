@@ -252,8 +252,8 @@ export function agentLanguageReminder(persona: unknown, fields: string) {
 // operator-facing label for the coordinates and is never spoken or published;
 // weather.lat/lng never leave the Open-Meteo call.
 //
-// context.ts passes { weather: config.weather } instead of the cache default so
-// its weather block stays the single source it derives lat/lng/units from.
+// context.ts passes the exact live weather block used for its forecast query so
+// the public/spoken location and the private coordinates cannot drift.
 export function resolveOnAirLocation(s: unknown = peek()) {
   const w = (s as { weather?: { onAirLocation?: unknown; locationName?: unknown } } | null | undefined)?.weather;
   return (
@@ -376,4 +376,3 @@ export function onAirRosterClause(persona: unknown, date: Date = new Date()): st
   }
   return '';
 }
-
