@@ -106,14 +106,27 @@ export function upsertTrackMeta(id: string, meta: TrackMeta): void {
         -- resolution — the MB lookup is the more specific signal (issue #842) —
         -- nor a 'manual' one, which outranks both (#1418): an operator reading
         -- the sleeve beats metadata that is wrong by construction on a reissue.
-        -- Every library walk re-visits every track, so without this a nightly
-        -- rescan would quietly undo the operator's correction.
-        original_year = CASE WHEN tracks.original_year_source IN ('musicbrainz', 'manual')
-                             THEN tracks.original_year
-                             ELSE COALESCE(excluded.original_year, tracks.original_year) END,
-        original_year_source = CASE WHEN tracks.original_year_source IN ('musicbrainz', 'manual')
-                                    THEN tracks.original_year_source
-                                    ELSE COALESCE(excluded.original_year_source, tracks.original_year_source) END,
+        -- Conversely, when a completed album becomes era-suspect, discard an
+        -- album-tag answer recorded by an earlier partial walk. Leaving it in
+        -- place makes the non-null value look resolved and blocks MB backfill.
+        original_year = CASE
+          WHEN tracks.original_year_source IN ('musicbrainz', 'manual')
+            THEN tracks.original_year
+          WHEN excluded.era_untrusted = 1
+            AND excluded.original_year IS NULL
+            AND tracks.original_year_source = 'album-tag'
+            THEN NULL
+          ELSE COALESCE(excluded.original_year, tracks.original_year)
+        END,
+        original_year_source = CASE
+          WHEN tracks.original_year_source IN ('musicbrainz', 'manual')
+            THEN tracks.original_year_source
+          WHEN excluded.era_untrusted = 1
+            AND excluded.original_year IS NULL
+            AND tracks.original_year_source = 'album-tag'
+            THEN NULL
+          ELSE COALESCE(excluded.original_year_source, tracks.original_year_source)
+        END,
         is_compilation = COALESCE(excluded.is_compilation, tracks.is_compilation),
         era_untrusted  = COALESCE(excluded.era_untrusted, tracks.era_untrusted),
         genres       = COALESCE(excluded.genres, tracks.genres),
@@ -537,5 +550,4 @@ export function upsertTrackAudioVector(id: string, vector: number[] | Float32Arr
   d.prepare(`DELETE FROM track_audio_vectors WHERE id = ?`).run(id);
   d.prepare(`INSERT INTO track_audio_vectors (id, embedding) VALUES (?, ?)`).run(id, buf);
 }
-
 

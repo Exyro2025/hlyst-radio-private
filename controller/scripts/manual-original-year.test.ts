@@ -92,6 +92,30 @@ test('after the fix the same album is suspect, unresolved, and queued for a look
   assert.ok(db.idsNeedingOriginalYear().includes('t1'));
 });
 
+test('a later suspect walk clears a stale album-tag year and queues a lookup', () => {
+  // The trust verdict is album-wide and can change as a walk sees more tracks.
+  // This row was first visited while the album still looked ordinary, so it
+  // already holds a plausible-looking album tag that differs from the file
+  // year. Once the completed album is suspect, that stale answer must not keep
+  // the track out of the MusicBrainz backfill.
+  db.upsertTrackMeta('late-suspect', {
+    title: 'Old Recording', artist: 'Singer A', album: 'Greatest Hits',
+    year: 2015, originalYear: 1990, isCompilation: false, eraUntrusted: false,
+  });
+  assert.equal(db.getTrack('late-suspect')!.originalYearSource, 'album-tag');
+
+  db.upsertTrackMeta('late-suspect', {
+    title: 'Old Recording', artist: 'Singer A', album: 'Greatest Hits',
+    year: 2015, originalYear: null, isCompilation: false, eraUntrusted: true,
+  });
+
+  const t = db.getTrack('late-suspect')!;
+  assert.equal(t.originalYear, null, 'the now-untrusted album tag must be discarded');
+  assert.equal(t.originalYearSource, null);
+  assert.equal(t.eraUntrusted, true);
+  assert.ok(db.idsNeedingOriginalYear().includes('late-suspect'));
+});
+
 test('an ordinary album is untouched by any of this', () => {
   // The regression that matters: the widened gate must not sweep in normal
   // records, which would cost a MusicBrainz request each and drop them out of

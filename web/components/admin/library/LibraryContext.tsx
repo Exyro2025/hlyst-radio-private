@@ -476,7 +476,7 @@ export function LibraryProvider({
         body: JSON.stringify({ id: track.id, originalYear, applyToAlbum }),
       });
       const j = (await r.json().catch(() => ({}))) as
-        { ok?: boolean; updated?: number; cleared?: boolean; error?: string };
+        { ok?: boolean; updated?: number; cleared?: boolean; error?: string; tracks?: Array<{ id: string }> };
       if (!r.ok) throw new Error(j.error || `save failed (${r.status})`);
       const n = j.updated ?? 1;
       const scope = applyToAlbum ? `${n} album track${n === 1 ? '' : 's'}` : 'track';
@@ -484,7 +484,13 @@ export function LibraryProvider({
         ? `cleared the year override · ${scope}`
         : `era year ${originalYear} · ${scope}`);
       flash(track.id);
-      applyEraYearEvent(qc, { track, originalYear, applyToAlbum });
+      applyEraYearEvent(qc, {
+        originalYear,
+        // Current controllers return the authoritative target set. The
+        // fallback keeps a newer web build safe against an older controller:
+        // patch the selected row only instead of guessing album identity.
+        trackIds: j.tracks?.map((t) => t.id) ?? [track.id],
+      });
     } catch (err) {
       notify.err(errorMessage(err));
     } finally {
