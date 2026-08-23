@@ -352,6 +352,13 @@ read_state_num() {
 	esac
 }
 
+# Keep the listener-time offset under controller ownership. Accepting an env
+# override here would make the Icecast burst disagree with /now-playing and
+# voice-event timing even though all four processes share this container.
+stream_buffer_seconds() {
+	read_state_num liquidsoap_stream_buffer_seconds.txt 22
+}
+
 render_icecast() {
 	# Non-numeric would render invalid XML and fail icecast at boot — fall
 	# back to 100 with a warning instead.
@@ -368,7 +375,7 @@ render_icecast() {
 	# settings.stream.bufferSeconds x each mount's bitrate.
 	local STREAM_BITRATE BUFFER_SECONDS OPUS_BITRATE AAC_BITRATE FLAC_BITRATE_EST
 	STREAM_BITRATE="${ICECAST_STREAM_BITRATE:-$(read_state_num liquidsoap_stream_bitrate.txt 192)}"
-	BUFFER_SECONDS="${ICECAST_BUFFER_SECONDS:-$(read_state_num liquidsoap_stream_buffer_seconds.txt 22)}"
+	BUFFER_SECONDS="$(stream_buffer_seconds)"
 	case "$STREAM_BITRATE" in *[!0-9]*|'') STREAM_BITRATE=192 ;; esac
 	case "$BUFFER_SECONDS" in *[!0-9]*|'') BUFFER_SECONDS=22 ;; esac
 	[ "$BUFFER_SECONDS" -gt 60 ] && BUFFER_SECONDS=60
