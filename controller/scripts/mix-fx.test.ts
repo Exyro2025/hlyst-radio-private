@@ -51,6 +51,7 @@ async function main() {
     assert.equal(loopBarFor(slow.bpm), loopBarFor(doubled.bpm));
     assert.equal(loopCrossSecondsFor(slow), loopCrossSecondsFor(doubled));
     assert.equal(chopPeriodFor(slow.bpm), chopPeriodFor(doubled.bpm));
+    assert.equal(chopPeriodFor(55), chopPeriodFor(110));
 
     // A second corpus edge catches rounding inside the washout canvas: this
     // pair differs under raw BPM even though 65 and 130 are the same pulse.
@@ -102,7 +103,7 @@ async function main() {
 
   console.log('washoutDelayFor (tempo-synced comb tap):');
 
-  await test('dotted eighth of the track tempo', () => {
+  await test('dotted eighth of the octave-safe timing pulse', () => {
     // 120 folds to the safer 60 BPM pulse; its 0.75s tap reaches the audible
     // clamp, matching a track reported directly at 60.
     assert.equal(washoutDelayFor(120), 0.45);

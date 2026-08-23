@@ -182,15 +182,15 @@ export const CROSS_MAX_SECONDS = 14;
 
 // Tempo estimators can describe the same pulse at N or 2N. The measured
 // #1417 failure is one-directional — librosa doubles slow material — so timing
-// uses the slower member of any pair above 110 BPM. This does NOT rewrite or
-// reinterpret the stored BPM: a genuine 160 BPM track simply times effects at
-// 80 BPM, where every pulse is still aligned to every other real beat. Never
-// multiply a low reading; doing that could turn a genuine slow bar into a
-// half-bar. Keeping the fold here means every duration consumer agrees.
+// uses the slower member of any pair at or above 110 BPM. This does NOT rewrite
+// or reinterpret the stored BPM: a genuine 160 BPM track simply times effects
+// at 80 BPM, where every pulse is still aligned to every other real beat.
+// Never multiply a low reading; doing that could turn a genuine slow bar into
+// a half-bar. Keeping the fold here means every duration consumer agrees.
 function timingBpm(bpm: number | null): number | null {
   if (typeof bpm !== 'number' || !Number.isFinite(bpm) || bpm <= 0) return null;
   let folded = bpm;
-  while (folded > 110) folded /= 2;
+  while (folded >= 110) folded /= 2;
   return folded;
 }
 
@@ -276,8 +276,9 @@ export function crossSecondsFor(
   secs += -energyDelta * 4;
 
   // Beat-grid snap (feature: beat/bar grid): round the blend to a whole number
-  // of the OUTGOING track's bars (4 beats, 4/4) so the fade.out spans a musical
-  // unit instead of an arbitrary count. Only when the outgoing tempo is known
+  // of the OUTGOING track's octave-safe bars (4 beats at the folded pulse) so
+  // the fade.out spans a musical unit instead of an arbitrary count. Only when
+  // the outgoing tempo is known
   // and the snap stays in range; the intro cap below still wins over it.
   const curTimingBpm = timingBpm(cur.bpm);
   if (curTimingBpm != null) {
@@ -415,10 +416,10 @@ export function endingCrossSecondsFor(
 export const WASHOUT_CROSS_TARGET_SECONDS = 12;
 
 // Blend canvas for a washout: target 12 s snapped to whole bars of the flagged
-// track's own tempo, clamped to [8, min(14, admin ceiling)]. Unknown BPM →
-// fixed 10 s. No incoming-intro cap: the next track isn't known when this
-// track is annotated — a tail decaying over the next track's opening is an
-// accepted (and DJ-authentic) hazard.
+// track's octave-safe timing pulse, clamped to [8, min(14, admin ceiling)].
+// Unknown BPM → fixed 10 s. No incoming-intro cap: the next track isn't known
+// when this track is annotated — a tail decaying over the next track's opening
+// is an accepted (and DJ-authentic) hazard.
 export function washoutCrossSecondsFor(a: Analysis, maxSec: number | null = null): number {
   const ceil = typeof maxSec === 'number' && maxSec > 0 ? Math.min(maxSec, CROSS_MAX_SECONDS) : CROSS_MAX_SECONDS;
   const lo = Math.min(8, ceil);
@@ -434,9 +435,9 @@ export function washoutCrossSecondsFor(a: Analysis, maxSec: number | null = null
 }
 
 // Comb tap spacing for the washout tail — a dotted eighth of the flagged
-// track's tempo (the classic dub-throw subdivision), clamped so extreme tempi
-// stay in the audible-echo range. Unknown BPM → 0.30 s (the neutral default
-// radio.liq also falls back to when the stamp is absent).
+// track's octave-safe timing pulse (the classic dub-throw subdivision), clamped
+// so extreme tempi stay in the audible-echo range. Unknown BPM → 0.30 s (the
+// neutral default radio.liq also falls back to when the stamp is absent).
 export function washoutDelayFor(bpm: number | null): number {
   const folded = timingBpm(bpm);
   if (folded == null) return 0.3;
@@ -445,11 +446,11 @@ export function washoutDelayFor(bpm: number | null): number {
 }
 
 // Loop tap for the exit loop — one bar (4 beats, 4/4) of the flagged track's
-// own tempo, halved/doubled into a 1.2–3.4 s window so extreme tempi still
-// yield a musical, comb-sized loop (a half-bar at very slow tempi, two bars
-// at very fast ones — both still whole beat multiples, so the loop repeats
-// in time). Unknown BPM → 2.0 s, but the queue strips the effect before that
-// matters (a loop without a measured bar is noise); 2.0 is only the
+// octave-safe timing pulse, halved/doubled into a 1.2–3.4 s window so extreme
+// tempi still yield a musical, comb-sized loop (a half-bar at very slow tempi,
+// two bars at very fast ones — both still whole beat multiples, so the loop
+// repeats in time). Unknown BPM → 2.0 s, but the queue strips the effect before
+// that matters (a loop without a measured bar is noise); 2.0 is only the
 // radio.liq fallback when the stamp is somehow absent.
 export function loopBarFor(bpm: number | null): number {
   const folded = timingBpm(bpm);
@@ -527,11 +528,12 @@ export function effectAllowedFor(kind: 'sweep' | 'washout' | 'blend' | 'dissolve
   return compat < 0.6;
 }
 
-// Gate period for the chop — one beat of the OUTGOING track (the one being
-// cut), clamped so extreme tempi stay in the stab-audible range. Unknown BPM →
-// 0.5 s (the neutral default radio.liq also falls back to when the stamp is
-// absent). Unlike the washout's dotted-eighth echo tap, the chop cuts ON the
-// beat: the gate opens at each beat start so the downbeat transient survives.
+// Gate period for the chop — one beat of the OUTGOING track's octave-safe
+// timing pulse (the one being cut), clamped so extreme tempi stay in the
+// stab-audible range. Unknown BPM → 0.5 s (the neutral default radio.liq also
+// falls back to when the stamp is absent). Unlike the washout's dotted-eighth
+// echo tap, the chop cuts ON the beat: the gate opens at each beat start so the
+// downbeat transient survives.
 export function chopPeriodFor(bpm: number | null): number {
   const folded = timingBpm(bpm);
   if (folded == null) return 0.5;

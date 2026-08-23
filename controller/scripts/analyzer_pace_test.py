@@ -14,6 +14,7 @@ fake_numpy.max = max
 fake_numpy.mean = lambda values: sum(values) / len(values)
 sys.modules["numpy"] = fake_numpy
 
+
 class ArrayLike:
     """Enough ndarray shape for the production onset-strength boundary."""
 
@@ -58,4 +59,4 @@ assert curve == [
     {"startMs": 3000, "endMs": 4000, "value": 1.0},
 ], curve
 
-print("analyzer pace: shared list envelope preserves the curve")
+print("analyzer pace: onset envelope preserves the curve")
