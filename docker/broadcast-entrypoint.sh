@@ -85,6 +85,22 @@ bootstrap_state_dirs() {
     return 0
 }
 
+# Listener buffer depth comes only from the controller-written handoff. An env
+# override would change Icecast's real burst without changing /now-playing or
+# voice-event timing, putting every listener-facing clock on the wrong offset.
+read_state_num() {
+    # $1 = filename, $2 = fallback. Non-numeric or missing → fallback.
+    _v=$(cat "$STATE_DIR/$1" 2>/dev/null || true)
+    case "$_v" in
+        ''|*[!0-9]*) echo "$2" ;;
+        *) echo "$_v" ;;
+    esac
+}
+
+stream_buffer_seconds() {
+    read_state_num liquidsoap_stream_buffer_seconds.txt 22
+}
+
 # Sourcing with SUBWAVE_BROADCAST_LIB=1 defines the helpers above WITHOUT
 # booting a station, so scripts/state-bootstrap.test.ts can drive them.
 if [ "${SUBWAVE_BROADCAST_LIB:-}" = "1" ]; then
@@ -184,19 +200,10 @@ esac
 # Listener buffer depth (<burst-size>, #993/#1114). Sized in SECONDS and
 # converted per bitrate here, because burst-size is a byte count — a fixed one
 # means wildly different depths per mount (512 KB is ~22s at 192k, ~66s at
-# 64k). Env override > controller-written settings files > default; read from
-# state so a settings change applies on the next bounce.
-read_state_num() {
-    # $1 = filename, $2 = fallback. Non-numeric or missing → fallback.
-    _v=$(cat "$STATE_DIR/$1" 2>/dev/null || true)
-    case "$_v" in
-        ''|*[!0-9]*) echo "$2" ;;
-        *) echo "$_v" ;;
-    esac
-}
-
+# 64k). Read from controller-written state so the real and advertised depths
+# stay identical; a settings change applies on the next container bounce.
 STREAM_BITRATE="${ICECAST_STREAM_BITRATE:-$(read_state_num liquidsoap_stream_bitrate.txt 192)}"
-BUFFER_SECONDS="${ICECAST_BUFFER_SECONDS:-$(read_state_num liquidsoap_stream_buffer_seconds.txt 22)}"
+BUFFER_SECONDS="$(stream_buffer_seconds)"
 case "$STREAM_BITRATE" in *[!0-9]*|'') STREAM_BITRATE=192 ;; esac
 case "$BUFFER_SECONDS" in *[!0-9]*|'') BUFFER_SECONDS=22 ;; esac
 [ "$BUFFER_SECONDS" -gt 60 ] && BUFFER_SECONDS=60
