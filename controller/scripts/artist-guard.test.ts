@@ -70,8 +70,37 @@ for (const [raw, want] of variants) {
   assert.equal(artistRootKey(raw), want, `"${raw}" \u2192 "${want}"`);
 }
 
-// Stripping must never empty a key — an empty root matches nothing and would
-// silently switch the guard off for that artist.
+// An ensemble word can be part of an act's real name rather than a removable
+// credit. Generic suffix stripping turns these unrelated pairs into the same
+// hard-block key, so the fallback rescue can discard a legitimate alternative.
+const distinctEnsembleNames: [string, string, string][] = [
+  ['The Beta Band', 'beta band', 'Beta'],
+  ['Manchester Orchestra', 'manchester orchestra', 'Manchester'],
+  ['Unknown Mortal Orchestra', 'unknown mortal orchestra', 'Unknown Mortal'],
+  ['Kronos Quartet', 'kronos quartet', 'Kronos'],
+];
+for (const [raw, want, unrelated] of distinctEnsembleNames) {
+  assert.equal(artistRootKey(raw), want, `"${raw}" must keep its complete act name`);
+  assert.notEqual(
+    artistRootKey(raw),
+    artistRootKey(unrelated),
+    `"${raw}" and "${unrelated}" are unrelated artists`,
+  );
+}
+
+const betaRescuePool = [
+  { id: 'beta', title: 'A Different Track', artist: 'Beta' },
+];
+assert.deepEqual(
+  filterPickerCandidates(betaRescuePool, {
+    blockedArtists: new Set([artistRootKey('The Beta Band')]),
+  }).map((song) => song.id),
+  ['beta'],
+  'a hard rescue block for The Beta Band must not discard Beta',
+);
+
+// Normalisation must never empty a key — an empty root matches nothing and
+// would silently switch the guard off for that artist.
 assert.equal(artistRootKey('The Band'), 'band', 'an act that is ONLY a suffix keeps it');
 assert.equal(artistRootKey('The The'), 'the', 'an act that is ONLY an article keeps it');
 assert.equal(artistRootKey('Orchestra'), 'orchestra', 'a bare suffix is a name, not a suffix');
