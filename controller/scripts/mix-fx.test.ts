@@ -5,10 +5,15 @@
 
 import assert from 'node:assert/strict';
 import {
+  chopPeriodFor,
+  crossSecondsFor,
+  endingCrossSecondsFor,
   washoutCrossSecondsFor,
   washoutDelayFor,
   effectAllowedFor,
   gainForLoudness,
+  loopBarFor,
+  loopCrossSecondsFor,
   loudnessFromReplayGain,
   WASHOUT_CROSS_TARGET_SECONDS,
   CROSS_MAX_SECONDS,
@@ -26,6 +31,36 @@ function test(name: string, fn: () => void | Promise<void>) {
 }
 
 async function main() {
+  console.log('tempo-derived timing (octave-error defence):');
+
+  await test('half/double readings produce identical transition timing', () => {
+    // The measured failure in #1417 is strictly octave-shaped: slow material
+    // at 62–88 BPM is often stored at 124–176. Either reading describes the
+    // same rhythmic grid for transition purposes, so no timing consumer may
+    // change merely because beat_track chose the other octave.
+    const slow = { bpm: 76, key: '8A' };
+    const doubled = { bpm: 152, key: '8A' };
+    const next = { bpm: 103, key: '3B' };
+
+    assert.equal(crossSecondsFor(slow, next), crossSecondsFor(doubled, next));
+    assert.equal(
+      endingCrossSecondsFor({ ...slow, ending: 'cold' }, null),
+      endingCrossSecondsFor({ ...doubled, ending: 'cold' }, null),
+    );
+    assert.equal(washoutDelayFor(slow.bpm), washoutDelayFor(doubled.bpm));
+    assert.equal(loopBarFor(slow.bpm), loopBarFor(doubled.bpm));
+    assert.equal(loopCrossSecondsFor(slow), loopCrossSecondsFor(doubled));
+    assert.equal(chopPeriodFor(slow.bpm), chopPeriodFor(doubled.bpm));
+    assert.equal(chopPeriodFor(55), chopPeriodFor(110));
+
+    // A second corpus edge catches rounding inside the washout canvas: this
+    // pair differs under raw BPM even though 65 and 130 are the same pulse.
+    assert.equal(
+      washoutCrossSecondsFor({ bpm: 65, key: null }),
+      washoutCrossSecondsFor({ bpm: 130, key: null }),
+    );
+  });
+
   console.log('washoutCrossSecondsFor (canvas: bar snap, clamps, ceiling):');
 
   await test('snaps to whole bars of the flagged track', () => {
@@ -33,9 +68,9 @@ async function main() {
     assert.equal(washoutCrossSecondsFor({ bpm: 120, key: null }), 12);
     // 100 BPM → bar = 2.4s → round(12 / 2.4) = 5 bars = 12s.
     assert.equal(washoutCrossSecondsFor({ bpm: 100, key: null }), 12);
-    // 140 BPM → bar ≈ 1.714s → 7 bars = 12s target again.
-    assert.equal(washoutCrossSecondsFor({ bpm: 140, key: null }), 12);
-    // 70 BPM → bar ≈ 3.43s → round(3.5) = 4 bars ≈ 13.7s (within [8,14]).
+    // 140 is the doubled reading of 70, so both use the slower pulse: bar
+    // ≈3.43s → round(3.5) = 4 bars ≈13.7s (within [8,14]).
+    assert.equal(washoutCrossSecondsFor({ bpm: 140, key: null }), 13.7);
     assert.equal(washoutCrossSecondsFor({ bpm: 70, key: null }), 13.7);
   });
 
@@ -68,16 +103,19 @@ async function main() {
 
   console.log('washoutDelayFor (tempo-synced comb tap):');
 
-  await test('dotted eighth of the track tempo', () => {
-    // 120 BPM → beat 0.5s → dotted eighth 0.375s.
-    assert.equal(washoutDelayFor(120), 0.38);
+  await test('dotted eighth of the octave-safe timing pulse', () => {
+    // 120 folds to the safer 60 BPM pulse; its 0.75s tap reaches the audible
+    // clamp, matching a track reported directly at 60.
+    assert.equal(washoutDelayFor(120), 0.45);
     // 100 BPM → 0.45s (right at the clamp edge).
     assert.equal(washoutDelayFor(100), 0.45);
   });
 
   await test('clamped for extreme tempi', () => {
     assert.equal(washoutDelayFor(60), 0.45);   // slow → capped high
-    assert.equal(washoutDelayFor(300), 0.18);  // fast → capped low
+    // 300 folds through 150 to the aligned 75 BPM pulse, then caps high. A
+    // genuine fast track still lands on every fourth beat at that pulse.
+    assert.equal(washoutDelayFor(300), 0.45);
   });
 
   await test('unknown BPM → 0.30s neutral default (radio.liq fallback twin)', () => {
