@@ -46,6 +46,10 @@ try {
   );
   assert.match(dirNoLang, /canonical Latin spelling/i, 'Latin speech asks for the canonical CJK name');
   assert.match(dirNoLang, /natural romanization/i, 'unknown CJK names have a spoken fallback');
+  assert.match(dirNoLang, /ZERO CJK characters/, 'Latin speech explicitly forbids native-script leakage');
+  assert.match(dirNoLang, /ウルフルズ becomes Ulfuls/, 'the directive gives a concrete Japanese-name rewrite');
+  assert.match(dirNoLang, /周杰倫 becomes Jay Chou/, 'the directive gives a concrete Chinese-name rewrite');
+  assert.match(dirNoLang, /Never include the native spelling beside the Latin form/, 'bilingual spellings cannot leak into TTS');
   assert.match(
     dirNoLang,
     /Never read or describe the characters themselves/i,
@@ -69,6 +73,7 @@ try {
   );
   assert.match(remNoLang, /canonical Latin spelling/i, 'the tool-loop reminder carries the spoken-name policy');
   assert.match(remNoLang, /natural romanization/i, 'the tool-loop reminder carries the fallback policy');
+  assert.match(remNoLang, /ZERO CJK characters/, 'the tool-loop reminder carries the hard script boundary');
   assert.match(remNoLang, /Never read or describe the characters themselves/i, 'the tool-loop reminder forbids character descriptions');
 
   const remTurkish = settings.agentLanguageReminder(turkishPersona, 'the "ack" and "intro" lines');

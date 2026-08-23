@@ -228,7 +228,7 @@ export function pickOnAirSpeaker(date: Date = new Date()) {
 // never-switch clause is the raid fix itself.
 export function spokenProperNounDirective(persona: unknown): string {
   const lang = String((persona as { language?: unknown } | null | undefined)?.language || '').trim() || 'English';
-  return `Keep proper nouns (artist names, song titles, the station name) untranslated, but make off-script names speakable: when a name is written in a script ${lang} does not normally use, write its established form in the script ${lang} uses. In Latin-script speech, use the artist or title's canonical Latin spelling for CJK names; if none is known, use a natural romanization. Never read or describe the characters themselves.`;
+  return `Preserve the identity of proper nouns (artist names, song titles, the station name), not an off-script spelling: when a name is written in a script ${lang} does not normally use, write its established form in the script ${lang} uses. In a Latin-script on-air language, every spoken field must contain ZERO CJK characters: use the artist or title's canonical Latin spelling (for example, ウルフルズ becomes Ulfuls and 周杰倫 becomes Jay Chou); if none is known, use a natural romanization. Never include the native spelling beside the Latin form. Never read or describe the characters themselves.`;
 }
 
 export function languageDirective(persona: unknown) {
