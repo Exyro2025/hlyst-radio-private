@@ -11,6 +11,7 @@ import { loadSecretsIntoEnv } from '../../setup/secrets.js';
 import { loadSetupConfig } from '../../setup/config.js';
 import { reportProgress } from '../tagger-progress.js';
 import { logEvent } from './log.js';
+import { backfillOriginalYears, pendingOriginalYearIds } from './enrich.js';
 
 
 // ---------------------------------------------------------------------------
@@ -178,6 +179,15 @@ export async function walkNavidrome(): Promise<{ walked: number; liveIds: Set<st
 // Standalone reconcile: diff library-db against the live Navidrome catalogue and
 // drop rows (and their vectors) for tracks that are gone. No embedding preflight
 // and no LLM — opens the existing DB at its stored dim so vectors are untouched.
+//
+// The walk it shares with the full run is not read-only: it stamps
+// era_untrusted on suspect albums and clears their stale album-tag years
+// (#1418), which makes those tracks read as unknown-year until something asks
+// MusicBrainz. That something used to be only phase-0 of a full tag pass —
+// which nothing schedules — so a reconcile could open an unbounded window of
+// unknown-year tracks. Hence the backfill below: keyless, checked_at-stamped
+// (incremental — later reconciles skip straight past answered tracks), and
+// throttled at MB's 1 req/s, so only the first pass after an upgrade is slow.
 export async function reconcileOnly() {
   await db.open({ embeddingDim: embeddings.resolveEmbeddingDim(), adoptStoredDim: true });
   console.log('[tag] reconcile-only: walking Navidrome to prune orphaned rows');
@@ -186,6 +196,8 @@ export async function reconcileOnly() {
   if (walked > 0) {
     pruned = db.pruneMissingTracks(liveIds);
     console.log(`[tag] reconcile pruned ${pruned} orphaned tracks no longer in Navidrome`);
+    const resolved = await backfillOriginalYears(pendingOriginalYearIds(false), false, 4);
+    if (resolved) console.log(`[tag] reconcile resolved ${resolved} original years via MusicBrainz`);
   } else {
     // A transient empty Navidrome response must never wipe the DB.
     console.warn('[tag] reconcile: Navidrome returned 0 tracks — skipping prune');

@@ -442,16 +442,24 @@ export async function migrate(embeddingDim: number, reseed = false, adoptStoredD
     runDdl(d, `ALTER TABLE tracks ADD COLUMN text_vector_dirty INTEGER NOT NULL DEFAULT 0;`);
 
     // Databases that ran #1418 before this follow-up may already contain stale
-    // vectors. Only era-special rows can differ from the old plain-year text;
-    // only rows with an existing vector need a replacement marker. Fresh DBs
-    // have no vec table yet and need no backfill.
+    // vectors. The scope is exactly the rows whose Era: text #1418 CHANGED:
+    // pre-#1418 embeds already resolved through resolveEraYear(year,
+    // originalYear, isCompilation), and original_year still wins before any
+    // flag is consulted — so a resolved row's text is byte-identical, and an
+    // unresolved compilation was already era-less. Only the new era_untrusted
+    // verdict on an UNRESOLVED row flips the output (a year the old text
+    // asserted now reads as unknown). Marking the broader era-special set
+    // (every original_year / is_compilation row) scheduled a pointless
+    // library-wide re-embed of identical text on upgrade. Only rows with an
+    // existing vector need a replacement marker; fresh DBs have no vec table
+    // yet and need no backfill.
     const hasTextVectors = d
       .prepare(`SELECT 1 FROM sqlite_master WHERE type='table' AND name='track_vectors'`)
       .get();
     if (hasTextVectors) {
       d.prepare(
         `UPDATE tracks SET text_vector_dirty = 1
-          WHERE (original_year IS NOT NULL OR is_compilation = 1 OR era_untrusted = 1)
+          WHERE era_untrusted = 1 AND original_year IS NULL
             AND id IN (SELECT id FROM track_vectors)`,
       ).run();
     }

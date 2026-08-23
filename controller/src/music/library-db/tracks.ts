@@ -260,15 +260,33 @@ export function setOriginalYear(id: string, year: number | null): void {
 // would create a hole in the KNN pool until that pass completes.
 export function setManualOriginalYear(id: string, year: number | null): void {
   const eraBefore = storedEra(id);
-  requireDb()
-    .prepare(
-      `UPDATE tracks SET
-         original_year            = ?,
-         original_year_source     = CASE WHEN ? IS NOT NULL THEN 'manual' ELSE NULL END,
-         original_year_checked_at = ?
-       WHERE id = ?`,
-    )
-    .run(year, year, year != null ? new Date().toISOString() : null, id);
+  if (year != null) {
+    requireDb()
+      .prepare(
+        `UPDATE tracks SET
+           original_year            = ?,
+           original_year_source     = 'manual',
+           original_year_checked_at = ?
+         WHERE id = ?`,
+      )
+      .run(year, new Date().toISOString(), id);
+  } else {
+    // Clearing removes an OVERRIDE, so it only touches rows that hold one.
+    // The route's applyToAlbum loop runs this over every album track, and a
+    // sibling may carry a 'musicbrainz' or informative 'album-tag' year — a
+    // RESOLUTION, not an override. Nulling those would read as unknown-year
+    // everywhere (era filter, DJ line, /now-playing) until a manual
+    // enrichment pass, so a non-manual row is a no-op here.
+    requireDb()
+      .prepare(
+        `UPDATE tracks SET
+           original_year            = NULL,
+           original_year_source     = NULL,
+           original_year_checked_at = NULL
+         WHERE id = ? AND original_year_source = 'manual'`,
+      )
+      .run(id);
+  }
   markTextVectorDirtyIfEraChanged(id, eraBefore);
 }
 

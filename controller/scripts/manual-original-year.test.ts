@@ -205,6 +205,33 @@ test('after clearing, the automatic pipeline owns the track again', () => {
     'an API response must read the stored suspect verdict instead of trusting the request body');
 });
 
+test('clearing only removes an actual override — a resolved sibling is untouched', () => {
+  // The album-wide clear (applyToAlbum) runs setManualOriginalYear(null) over
+  // EVERY album track. A sibling holding a 'musicbrainz' or informative
+  // 'album-tag' year was RESOLVED, not overridden — nulling it would read as
+  // unknown-year everywhere until a manual enrichment pass.
+  db.upsertTrackMeta('sib-mb', {
+    title: 'Sibling A', artist: 'Wendy Rene', album: 'After Laughter Comes Tears',
+    year: 2012, originalYear: null, isCompilation: true,
+  });
+  db.setOriginalYear('sib-mb', 1964);
+  db.upsertTrackMeta('sib-tag', {
+    title: 'Sibling B', artist: 'Wendy Rene', album: 'After Laughter Comes Tears',
+    year: 2015, originalYear: 1973, isCompilation: false,
+  });
+
+  db.setManualOriginalYear('sib-mb', null);
+  db.setManualOriginalYear('sib-tag', null);
+
+  const mb = db.getTrack('sib-mb')!;
+  assert.equal(mb.originalYear, 1964);
+  assert.equal(mb.originalYearSource, 'musicbrainz');
+  assert.ok(mb.originalYearCheckedAt, 'the MB stamp survives so passes still skip it');
+  const tag = db.getTrack('sib-tag')!;
+  assert.equal(tag.originalYear, 1973);
+  assert.equal(tag.originalYearSource, 'album-tag');
+});
+
 test('a genuine compilation still reaches MusicBrainz, and MB still wins over the tag', () => {
   // Guard against fixing #1418 by breaking #842: the existing path is
   // untouched for albums Navidrome DOES flag.
@@ -355,7 +382,24 @@ test('seed decade bucketing uses the same unresolved-era rule as show filtering'
   assert.ok(!buckets.get('|2010')?.includes('unresolved-decade'), 'the reissue year must not become the recording decade');
 });
 
-test('migration 22 backfills the refresh marker for era-special existing vectors', async () => {
+test('migration 22 backfills the refresh marker ONLY where the era text changed', async () => {
+  // The text an embed carries has resolved through resolveEraYear(year,
+  // originalYear, isCompilation) since before #1418, and original_year wins
+  // before any flag is consulted — so the only vectors #1418 made stale are
+  // UNRESOLVED rows the new era_untrusted verdict flipped to unknown-era.
+  // Marking a resolved row schedules a re-embed of byte-identical text; on a
+  // real library that was every originalYear/compilation row at once.
+  // Embedded while trusted, then a walk stamps the era verdict — the #1418
+  // sequence that happened on v21 DBs before the marker column existed.
+  db.upsertTrackMeta('pre-v22-stale', {
+    title: 'Unresolved Anthology Cut', artist: 'Someone', album: 'Singles 1968-1974',
+    year: 2015, originalYear: null, isCompilation: false, eraUntrusted: false,
+  });
+  db.upsertTrackVector('pre-v22-stale', new Array(768).fill(0.04), 2015);
+  db.upsertTrackMeta('pre-v22-stale', {
+    title: 'Unresolved Anthology Cut', artist: 'Someone', album: 'Singles 1968-1974',
+    year: 2015, originalYear: null, isCompilation: false, eraUntrusted: true,
+  });
   db.upsertTrackMeta('pre-v22-vector', {
     title: 'Resolved Recording', artist: 'Someone', album: 'Later Reissue',
     year: 2012, originalYear: 1964, isCompilation: false,
@@ -371,7 +415,9 @@ test('migration 22 backfills the refresh marker for era-special existing vectors
   db.close();
   await db.open({ embeddingDim: 768, adoptStoredDim: true });
 
-  assert.ok(db.textVectorDirtyIds().includes('pre-v22-vector'),
+  assert.ok(db.textVectorDirtyIds().includes('pre-v22-stale'),
     'upgrade schedules a replacement instead of permanently accepting the old era text');
-  assert.equal(db.hasVector('pre-v22-vector'), true, 'the upgrade does not create a KNN hole');
+  assert.ok(!db.textVectorDirtyIds().includes('pre-v22-vector'),
+    'a resolved row embeds the same Era: text before and after — marking it is a pointless mass re-embed');
+  assert.equal(db.hasVector('pre-v22-stale'), true, 'the upgrade does not create a KNN hole');
 });
