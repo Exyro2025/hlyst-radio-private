@@ -234,8 +234,29 @@ export function candidateFilterTracks(): Array<{
   energy: EnergyValue;
   vocalRanges: unknown[] | null;
 }> {
+  type CandidateFilterRow = {
+    id: string;
+    title: string | null;
+    artist: string | null;
+    year: number | null;
+    original_year: number | null;
+    is_compilation: number | null;
+    genres: string | null;
+    genre: string | null;
+    moods: string | null;
+    audio_moods: string | null;
+    energy: EnergyValue;
+    vocal_range_count: number | null;
+  };
   const rows = requireDb().prepare(`SELECT id, title, artist, year, original_year,
-    is_compilation, genres, genre, moods, audio_moods, energy, vocal_ranges_json FROM tracks`).all() as Array<Record<string, any>>;
+    is_compilation, genres, genre, moods, audio_moods, energy,
+    CASE
+      WHEN vocal_ranges_json IS NULL THEN NULL
+      WHEN json_valid(vocal_ranges_json) AND json_type(vocal_ranges_json) = 'array'
+        THEN json_array_length(vocal_ranges_json)
+      ELSE NULL
+    END AS vocal_range_count
+    FROM tracks`).all() as CandidateFilterRow[];
   return rows.map((row) => ({
     id: row.id,
     title: row.title ?? null,
@@ -248,6 +269,11 @@ export function candidateFilterTracks(): Array<{
     moods: row.moods ? safeParseArray(row.moods) : [],
     audioMoods: row.audio_moods ? safeParseArray(row.audio_moods) : [],
     energy: row.energy ?? null,
-    vocalRanges: row.vocal_ranges_json == null ? null : safeParseArray(row.vocal_ranges_json),
+    // The show filter only reads this field's tri-state: null = unmeasured,
+    // [] = instrumental, non-empty = vocal. Keep the projection lean by
+    // carrying presence rather than parsing every stored span object.
+    vocalRanges: row.vocal_range_count == null
+      ? null
+      : row.vocal_range_count === 0 ? [] : [{}],
   }));
 }

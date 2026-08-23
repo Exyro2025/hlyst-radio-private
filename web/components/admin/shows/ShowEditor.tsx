@@ -45,6 +45,7 @@ import {
 import type { EraWindow, Persona, PlaylistIndexStatus, Show, ShowsFormValues, SkillOption, ThemeOption } from './types';
 import { hasAnyMusicFilter, showPayload } from './lib';
 import { ChipRow } from './ChipRow';
+import { displayedMatchingTracks, type CandidateDiagnostic } from './candidate-diagnostic';
 
 // The footer names the field the schema objected to; the schema's own keys are
 // developer-facing, so the common ones get an operator-facing label.
@@ -159,7 +160,6 @@ export function ShowEditor({
   const genresCtl = useController({ control, name: path('genres') });
   const maxTrackSecondsCtl = useController({ control, name: path('maxTrackSeconds') });
 
-  type CandidateDiagnostic = { strict: boolean; library: { indexed: number; matchingFilters: number; afterExclusions: number; effective: number }; playlist: null | { total: number; matchingFilters: number; afterExclusions: number; effective: number }; warnings: string[] };
   const candidateKey = JSON.stringify(showPayload(show));
   const [candidateBusy, setCandidateBusy] = useState(false);
   const [candidateError, setCandidateError] = useState<string | null>(null);
@@ -649,7 +649,7 @@ export function ShowEditor({
                 {hasAnyMusicFilter(show) ? (
                   <>
                     <span>
-                      <strong>{visibleCandidateReport.library.afterExclusions.toLocaleString()}</strong>{' '}
+                      <strong>{displayedMatchingTracks(visibleCandidateReport).toLocaleString()}</strong>{' '}
                       tracks match these music filters after excluded playlists{visibleCandidateReport.strict
                         ? ', and form this show’s selection pool.'
                         : '. With Strict filter off, the DJ prefers them but can go outside them for flow.'}
