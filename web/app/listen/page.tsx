@@ -4,11 +4,11 @@ import PlayerPageEffects from '@/components/player/PlayerPageEffects';
 import { pageMeta } from '@/lib/seo';
 import { fetchStationMeta } from '@/lib/station';
 
-// Fallback whenever the controller has nothing station-specific to say.
+// HLYST fallback whenever the controller has nothing station-specific to say.
 const GENERIC = pageMeta({
-  title: 'SUB/WAVE — Player',
+  title: 'HLYST — Listen Live',
   description:
-    'Tune in to the SUB/WAVE broadcast — one live stream, with an AI DJ picking tracks and talking between them. See what is on air right now.',
+    'Listen live to HLYST — legendary records, new discoveries, original programming, and distinct on-air personalities in one continuous broadcast.',
   path: '/listen',
   // The player is this station's own page — self-canonical on every install.
   scope: 'station',
