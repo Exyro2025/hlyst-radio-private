@@ -1,13 +1,12 @@
-// HLYST DJ roster — owned by the web app directly, independent of the
-// controller's persona schema (which only has id/name/tagline/avatar/soul).
-// This holds the richer editorial fields from the HLYST Programming Bible.
+// HLYST DJ roster — all 15, with real portrait paths matching the actual
+// uploaded filenames in web/public/ (spaces and all — browsers handle this
+// fine in image src paths).
 //
-// Place this file at: web/lib/djs.ts
+// Place this file at: web/lib/djs.ts (REPLACES the existing 6-DJ version)
 //
-// PLACEHOLDER TEXT: every bio/quote/field below is a placeholder marked
-// with [PLACEHOLDER] — replace with real content once written. Portrait
-// paths point to /djs/<slug>.jpg — upload real photos to web/public/djs/
-// with those exact filenames and the placeholders disappear automatically.
+// Vanessa King has REAL content, transcribed from her poster. Everyone else
+// still has [PLACEHOLDER] text — send each DJ's poster copy the same way
+// and I'll fill theirs in next, one at a time or all at once.
 
 export interface DjProfile {
   slug: string;
@@ -15,7 +14,7 @@ export interface DjProfile {
   onAirName: string;
   title: string;
   schedule: string;
-  portrait: string; // path under /public
+  portrait: string; // path under /public — real uploaded filename
   about: string;
   inHisLane: string;
   onAirStyle: string;
@@ -28,12 +27,28 @@ export interface DjProfile {
 
 export const djs: DjProfile[] = [
   {
+    slug: 'vanessa-king',
+    name: 'Vanessa King',
+    onAirName: 'Vanessa King',
+    title: 'The Weekend Editor',
+    schedule: 'Weekend DJ · Saturdays 10AM–2PM, Sundays 6PM–10PM',
+    portrait: '/Vanessa King.png',
+    about: "Vanessa King curates the perfect soundtrack for your weekend. She's the editor—blending the classics, the current, and the culture. Every set is intentional. Every transition is smooth. Every vibe is exactly what the weekend needs. From feel-good mornings to laid-back afternoons to unforgettable nights, Vanessa sets the tone and keeps it HLYST. She doesn't follow the playlist—she edits the experience. The right music. The right time. Every time. That's Vanessa King.",
+    inHisLane: 'R&B / Neo-Soul / House / Old School / Hip-Hop / Weekend Favorites',
+    onAirStyle: 'Warm. Smooth. Conversational. Intentional. Effortless flow.',
+    theVibe: 'Feel-Good. Soulful. Chill. Uplifting. Weekend energy.',
+    theAudience: 'Everyone. All ages. Good people. Culture lovers.',
+    whatHeBrings: 'The right music. The right mood. The right timing. The right energy.',
+    trustedFor: 'The right music. The right transitions. The right moments. The right vibe.',
+    signatureQuote: "I don't just play music. I edit moments. I curate vibes. I make your weekend sound better. This is HLYST.",
+  },
+  {
     slug: 'bellamy-tha-blueprint',
     name: 'Bellamy',
     onAirName: 'Bellamy tha Blueprint',
     title: 'The architect of the vibe',
     schedule: 'Weekend DJ · Saturday 6PM–10PM',
-    portrait: '/djs/bellamy-tha-blueprint.jpg',
+    portrait: '/Bellamy Tha Blueprint.png',
     about: '[PLACEHOLDER] About Bellamy — background, how he got into radio, what brought him to HLYST.',
     inHisLane: '[PLACEHOLDER] R&B, neo-soul, contemporary soul.',
     onAirStyle: '[PLACEHOLDER] Smooth, measured pacing, dry humor, deep music knowledge.',
@@ -49,7 +64,7 @@ export const djs: DjProfile[] = [
     onAirName: 'Winslow the Cypher',
     title: '[PLACEHOLDER title]',
     schedule: '[PLACEHOLDER schedule]',
-    portrait: '/djs/winslow-the-cypher.jpg',
+    portrait: '/Winslow_ The Cypher.png',
     about: '[PLACEHOLDER]',
     inHisLane: '[PLACEHOLDER] Hip-hop, boom bap, conscious rap, spoken word.',
     onAirStyle: '[PLACEHOLDER] Direct, high energy, culture-deep.',
@@ -65,7 +80,7 @@ export const djs: DjProfile[] = [
     onAirName: 'Uncle Ray',
     title: '[PLACEHOLDER title]',
     schedule: '[PLACEHOLDER schedule]',
-    portrait: '/djs/uncle-ray.jpg',
+    portrait: '/Uncle Ray.png',
     about: '[PLACEHOLDER]',
     inHisLane: '[PLACEHOLDER]',
     onAirStyle: '[PLACEHOLDER] Warm, relaxed, deep history, storytelling.',
@@ -81,7 +96,7 @@ export const djs: DjProfile[] = [
     onAirName: 'Lady T',
     title: '[PLACEHOLDER title]',
     schedule: '[PLACEHOLDER schedule]',
-    portrait: '/djs/lady-t.jpg',
+    portrait: '/Lady T.png',
     about: '[PLACEHOLDER]',
     inHisLane: '[PLACEHOLDER]',
     onAirStyle: '[PLACEHOLDER]',
@@ -97,7 +112,7 @@ export const djs: DjProfile[] = [
     onAirName: 'Eric Jordan',
     title: '[PLACEHOLDER title]',
     schedule: '[PLACEHOLDER schedule]',
-    portrait: '/djs/eric-jordan.jpg',
+    portrait: '/Eric Jordan.png',
     about: '[PLACEHOLDER]',
     inHisLane: '[PLACEHOLDER]',
     onAirStyle: '[PLACEHOLDER]',
@@ -113,7 +128,135 @@ export const djs: DjProfile[] = [
     onAirName: 'Nicole James',
     title: '[PLACEHOLDER title]',
     schedule: '[PLACEHOLDER schedule]',
-    portrait: '/djs/nicole-james.jpg',
+    portrait: '/Nicole Jame.png',
+    about: '[PLACEHOLDER]',
+    inHisLane: '[PLACEHOLDER]',
+    onAirStyle: '[PLACEHOLDER]',
+    theVibe: '[PLACEHOLDER]',
+    theAudience: '[PLACEHOLDER]',
+    whatHeBrings: '[PLACEHOLDER]',
+    trustedFor: '[PLACEHOLDER]',
+    signatureQuote: '[PLACEHOLDER]',
+  },
+  {
+    slug: 'aaron-price',
+    name: 'Aaron Price',
+    onAirName: 'Aaron Price',
+    title: '[PLACEHOLDER title]',
+    schedule: '[PLACEHOLDER schedule]',
+    portrait: '/Aaron Price.png',
+    about: '[PLACEHOLDER]',
+    inHisLane: '[PLACEHOLDER]',
+    onAirStyle: '[PLACEHOLDER]',
+    theVibe: '[PLACEHOLDER]',
+    theAudience: '[PLACEHOLDER]',
+    whatHeBrings: '[PLACEHOLDER]',
+    trustedFor: '[PLACEHOLDER]',
+    signatureQuote: '[PLACEHOLDER]',
+  },
+  {
+    slug: 'marcus-reed',
+    name: 'Marcus Reed',
+    onAirName: 'Marcus Reed',
+    title: '[PLACEHOLDER title]',
+    schedule: '[PLACEHOLDER schedule]',
+    portrait: '/Marcus Reed.png',
+    about: '[PLACEHOLDER]',
+    inHisLane: '[PLACEHOLDER]',
+    onAirStyle: '[PLACEHOLDER]',
+    theVibe: '[PLACEHOLDER]',
+    theAudience: '[PLACEHOLDER]',
+    whatHeBrings: '[PLACEHOLDER]',
+    trustedFor: '[PLACEHOLDER]',
+    signatureQuote: '[PLACEHOLDER]',
+  },
+  {
+    slug: 'julian-cross',
+    name: 'Julian Cross',
+    onAirName: 'Julian Cross',
+    title: '[PLACEHOLDER title]',
+    schedule: '[PLACEHOLDER schedule]',
+    portrait: '/Julian Cross.png',
+    about: '[PLACEHOLDER]',
+    inHisLane: '[PLACEHOLDER]',
+    onAirStyle: '[PLACEHOLDER]',
+    theVibe: '[PLACEHOLDER]',
+    theAudience: '[PLACEHOLDER]',
+    whatHeBrings: '[PLACEHOLDER]',
+    trustedFor: '[PLACEHOLDER]',
+    signatureQuote: '[PLACEHOLDER]',
+  },
+  {
+    slug: 'miss-renee-cole',
+    name: 'Miss Renee Cole',
+    onAirName: 'Miss Renee Cole',
+    title: '[PLACEHOLDER title]',
+    schedule: '[PLACEHOLDER schedule]',
+    portrait: '/Miss Renee Cole.png',
+    about: '[PLACEHOLDER]',
+    inHisLane: '[PLACEHOLDER]',
+    onAirStyle: '[PLACEHOLDER]',
+    theVibe: '[PLACEHOLDER]',
+    theAudience: '[PLACEHOLDER]',
+    whatHeBrings: '[PLACEHOLDER]',
+    trustedFor: '[PLACEHOLDER]',
+    signatureQuote: '[PLACEHOLDER]',
+  },
+  {
+    slug: 'miles-grant',
+    name: 'Miles Grant',
+    onAirName: 'Miles Grant',
+    title: '[PLACEHOLDER title]',
+    schedule: '[PLACEHOLDER schedule]',
+    portrait: '/Miles Grant.png',
+    about: '[PLACEHOLDER]',
+    inHisLane: '[PLACEHOLDER]',
+    onAirStyle: '[PLACEHOLDER]',
+    theVibe: '[PLACEHOLDER]',
+    theAudience: '[PLACEHOLDER]',
+    whatHeBrings: '[PLACEHOLDER]',
+    trustedFor: '[PLACEHOLDER]',
+    signatureQuote: '[PLACEHOLDER]',
+  },
+  {
+    slug: 'monica-hayes',
+    name: 'Monica Hayes',
+    onAirName: 'Monica Hayes',
+    title: '[PLACEHOLDER title]',
+    schedule: '[PLACEHOLDER schedule]',
+    portrait: '/Monica Hayes.png',
+    about: '[PLACEHOLDER]',
+    inHisLane: '[PLACEHOLDER]',
+    onAirStyle: '[PLACEHOLDER]',
+    theVibe: '[PLACEHOLDER]',
+    theAudience: '[PLACEHOLDER]',
+    whatHeBrings: '[PLACEHOLDER]',
+    trustedFor: '[PLACEHOLDER]',
+    signatureQuote: '[PLACEHOLDER]',
+  },
+  {
+    slug: 'simone-ellis',
+    name: 'Simone Ellis',
+    onAirName: 'Simone Ellis',
+    title: '[PLACEHOLDER title]',
+    schedule: '[PLACEHOLDER schedule]',
+    portrait: '/Simone Ellis.png',
+    about: '[PLACEHOLDER]',
+    inHisLane: '[PLACEHOLDER]',
+    onAirStyle: '[PLACEHOLDER]',
+    theVibe: '[PLACEHOLDER]',
+    theAudience: '[PLACEHOLDER]',
+    whatHeBrings: '[PLACEHOLDER]',
+    trustedFor: '[PLACEHOLDER]',
+    signatureQuote: '[PLACEHOLDER]',
+  },
+  {
+    slug: 'terri-mitchell',
+    name: 'Terri Mitchell',
+    onAirName: 'Terri Mitchell',
+    title: '[PLACEHOLDER title]',
+    schedule: '[PLACEHOLDER schedule]',
+    portrait: '/Terri Mitchell.png',
     about: '[PLACEHOLDER]',
     inHisLane: '[PLACEHOLDER]',
     onAirStyle: '[PLACEHOLDER]',
