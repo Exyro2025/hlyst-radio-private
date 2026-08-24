@@ -170,7 +170,7 @@ export default function HomePage() {
         <section style={{ padding: '3rem 2rem', borderBottom: '1px solid #222', display: 'flex', gap: '2rem', flexWrap: 'wrap' }}>
           <div style={{ position: 'relative', width: 160, height: 160, flexShrink: 0, borderRadius: '50%', overflow: 'hidden' }}>
             {comingUp.dj.portrait && (
-              <Image src={comingUp.dj.portrait} alt={comingUp.dj.onAirName} fill style={{ objectFit: 'cover' }} sizes="160px" />
+              <Image src={encodeURI(comingUp.dj.portrait)} alt={comingUp.dj.onAirName} fill style={{ objectFit: 'cover' }} sizes="160px" />
             )}
           </div>
           <div>
@@ -194,7 +194,7 @@ export default function HomePage() {
           {voices.map(dj => (
             <a key={dj.slug} href={`/djs/${dj.slug}`} style={{ textDecoration: 'none', color: IVORY }}>
               <div style={{ position: 'relative', width: '100%', aspectRatio: '3/4', background: '#161616', marginBottom: '0.75rem' }}>
-                {dj.portrait && <Image src={dj.portrait} alt={dj.onAirName} fill style={{ objectFit: 'cover' }} sizes="25vw" />}
+                {dj.portrait && <Image src={encodeURI(dj.portrait)} alt={dj.onAirName} fill style={{ objectFit: 'cover' }} sizes="25vw" />}
               </div>
               <p style={{ fontWeight: 700, fontSize: '0.95rem', margin: 0 }}>{dj.name}</p>
               <p style={{ color: GOLD, fontSize: '0.75rem', margin: '0.15rem 0 0' }}>{dj.title}</p>
