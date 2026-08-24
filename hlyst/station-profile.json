@@ -1,0 +1,42 @@
+{
+  "station": {
+    "name": "HLYST",
+    "publicDescription": "The past has a pulse. The future has a frequency.",
+    "publicAiDisclosure": false,
+    "rosterCount": 15
+  },
+  "onAirPolicy": {
+    "brandUse": "tasteful-not-exhausting",
+    "stationNameEveryBreak": false,
+    "djPersonalityFreedom": true,
+    "djLanguageFreedom": "within-established-persona-and-brand-guardrails",
+    "allowUnscriptedTransitions": true,
+    "requireVerbatimStationIds": false,
+    "avoidRepeatedStationLines": true,
+    "avoidRepeatedJingles": true,
+    "allowDjToSayHLYST": true,
+    "prohibitRogueBrandClaims": true,
+    "prohibitGenericRadioCliches": true,
+    "prohibitPublicAiFraming": true
+  },
+  "imagingPolicy": {
+    "rotationRequired": true,
+    "shortFormsSupported": true,
+    "longFormsSupported": true,
+    "newsBedsSupported": true,
+    "instrumentalRnbBedsSupported": true,
+    "crowdOpenCloseAllowedWhenAssetCallsForIt": true
+  },
+  "runtimeMapping": {
+    "stationName": "settings.station",
+    "stationDescription": "settings.stationDescription",
+    "houseRules": "settings.djHouseRules",
+    "personas": "settings.personas",
+    "activePersona": "settings.activePersonaId",
+    "shows": "settings.shows",
+    "schedule": "settings.schedule",
+    "tts": "settings.tts",
+    "privacy": "settings.privacy",
+    "requests": "settings.requests"
+  }
+}
