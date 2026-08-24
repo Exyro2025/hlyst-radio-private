@@ -55,7 +55,7 @@ const nextConfig = {
   // The repo root carries its own package.json (the `sub-wave` CLI), so Next would
   // otherwise infer it as the workspace root — destabilising module resolution and
   // crashing the dev server when it loads tailwind.config.js through the ESM loader.
-  outputFileTracingRoot: __dirname,
+  outputFileTracingRoot: process.env.VERCEL ? undefined : __dirname,
   // Verifying the onboarding wizard needs a SECOND `next dev` running
   // concurrently against a second controller (needsSetup is only ever true
   // there — see web/scripts/verify-forms.py's `onboarding` check), from this
