@@ -20,9 +20,9 @@ interface Slot {
 function parseClock(raw: string): { h: number; m: number } {
   const match = raw.match(/(\d{1,2})(?::(\d{2}))?\s*(AM|PM)/i);
   if (!match) return { h: 0, m: 0 };
-  let h = parseInt(match[1], 10);
+  let h = parseInt(match[1] ?? '0', 10);
   const m = match[2] ? parseInt(match[2], 10) : 0;
-  const isPM = match[3].toUpperCase() === 'PM';
+  const isPM = (match[3] ?? '').toUpperCase() === 'PM';
   if (h === 12) h = isPM ? 12 : 0;
   else if (isPM) h += 12;
   return { h, m };
