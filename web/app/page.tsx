@@ -20,10 +20,16 @@ const IVORY = '#f5f0e8';
 export default function HomePage() {
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const [playing, setPlaying] = useState(false);
+  const [lystAdded, setLystAdded] = useState(false);
 
   const onAirDj = getOnAirNow();
   const comingUp = getComingUp();
   const voices = djs.slice(0, 4);
+
+  const handleLystThis = () => {
+    setLystAdded(true);
+    setTimeout(() => setLystAdded(false), 2000);
+  };
 
   const togglePlay = () => {
     const el = audioRef.current;
@@ -132,12 +138,29 @@ export default function HomePage() {
             <div style={{ width: '35%', height: '100%', background: GOLD }} />
           </div>
         </div>
-        <button onClick={togglePlay} aria-label={playing ? 'Pause' : 'Play'} style={{
+                <button onClick={togglePlay} aria-label={playing ? 'Pause' : 'Play'} style={{
           width: 60, height: 60, borderRadius: '50%', background: GOLD, border: 'none',
           cursor: 'pointer', fontSize: '1.5rem', color: BG, flexShrink: 0,
         }}>
           {playing ? '❚❚' : '▶'}
         </button>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '0.6rem', flexShrink: 0 }}>
+          <div style={{ display: 'flex', gap: '1rem' }}>
+            <button aria-label="Volume" style={{ background: 'none', border: 'none', color: '#888', fontSize: '0.75rem', letterSpacing: '0.06em', cursor: 'pointer', padding: 0 }}>
+              VOLUME
+            </button>
+            <button aria-label="Share" style={{ background: 'none', border: 'none', color: '#888', fontSize: '0.75rem', letterSpacing: '0.06em', cursor: 'pointer', padding: 0 }}>
+              SHARE
+            </button>
+          </div>
+          <button onClick={handleLystThis} style={{
+            border: `1px solid ${GOLD}`, color: GOLD, background: 'transparent',
+            padding: '0.4rem 0.9rem', fontSize: '0.7rem', letterSpacing: '0.08em',
+            textTransform: 'uppercase', cursor: 'pointer', borderRadius: 999,
+          }}>
+            {lystAdded ? 'Added to your Lyst' : '+ Lyst This'}
+          </button>
+        </div>
         <div style={{ fontSize: '0.75rem', color: '#888', lineHeight: 1.6 }}>
           <p style={{ margin: 0 }}>Previously: Different — PJ Morton</p>
           <p style={{ margin: 0 }}>Next: Do 4 Love — Snoh Aalegra</p>
