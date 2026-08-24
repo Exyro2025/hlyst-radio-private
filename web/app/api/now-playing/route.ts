@@ -18,7 +18,12 @@ export async function GET() {
   const payload: NowPlayingResponse = {
     nowPlaying: null, // Live365 metadata not yet confirmed reachable — see stationOrigin/live365 notes
     context: null,
-    dj: undefined,
+        dj: {
+      name: 'HLYST',
+      tagline: 'The lyst that never gets old.',
+      avatar: '',
+      station: 'HLYST Radio',
+    },
     activeShow: null,
     listeners: undefined,
     streamOnline: streamConfigured,
