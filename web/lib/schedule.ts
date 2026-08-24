@@ -37,8 +37,8 @@ function buildSlots(): Slot[] {
     dayRangeRe.lastIndex = 0;
     while ((match = dayRangeRe.exec(dj.schedule)) !== null) {
       const dayIdx = DAY_MAP[(match[1] ?? '').toLowerCase()];
-      const start = parseClock(match[2]);
-      const end = parseClock(match[3]);
+      const start = parseClock(match[2] ?? '');
+      const end = parseClock(match[3] ?? '');
       const startWeekMin = dayIdx * 1440 + start.h * 60 + start.m;
       let endWeekMin = dayIdx * 1440 + end.h * 60 + end.m;
       if (endWeekMin <= startWeekMin) endWeekMin += 1440; // crosses midnight
