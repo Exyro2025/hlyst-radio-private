@@ -16,6 +16,7 @@ export async function GET() {
     locale: 'en-US',
     ui: { boothBuddy: false, skin: 'classic', tuneInOverlay: true },
     privacy: { privatePlayer: false, listenerAuth: false },
+    station: { id: 'hlyst', name: 'HLYST Radio', multiStation: false },
   };
 
   return NextResponse.json(payload);
