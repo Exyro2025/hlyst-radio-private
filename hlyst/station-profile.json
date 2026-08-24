@@ -1,19 +1,35 @@
 {
   "station": {
     "name": "HLYST",
-    "publicDescription": "The past has a pulse. The future has a frequency.",
+    "coreBrandLine": "REAL DJs. REAL MUSIC. REAL CULTURE.",
+    "homeMarket": "Cleveland, Ohio",
+    "reach": "Worldwide",
     "publicAiDisclosure": false,
-    "rosterCount": 15,
+    "activeDjCount": 16,
+    "reserveIdentityCount": 3,
+    "canonicalPortraitPoolCount": 19,
     "timezone": "America/New_York",
     "locale": "en-US"
   },
   "programming": {
-    "sourceOfTruth": "hlyst/programming-bible.json",
+    "sourceOfTruth": "HLYST Programming Bible — Version 1.0",
+    "implementationReference": "hlyst/programming-bible.json",
     "weekdayBlocks": 6,
     "saturdayBlocks": 6,
     "sundayBlocks": 6,
     "sundayGospelStart": "06:00",
-    "sundayGospelEnd": "22:00"
+    "sundayGospelEnd": "22:00",
+    "doctrine": [
+      "HLYST is a music station first.",
+      "The station may be broad. The show is never random.",
+      "Music receives first claim on the hour.",
+      "Adjacency before variety.",
+      "New music is not a genre.",
+      "Independent is not a genre.",
+      "HLYST is Cleveland-rooted, not Cleveland-limited.",
+      "Editorial status cannot be purchased.",
+      "If nothing needs saying, play another record."
+    ]
   },
   "onAirPolicy": {
     "brandUse": "tasteful-not-exhausting",
@@ -29,18 +45,34 @@
     "prohibitGenericRadioCliches": true,
     "prohibitPublicAiFraming": true,
     "fixedDjIdentity": true,
+    "fixedDjFace": true,
     "fixedDjVoice": true,
     "fixedDjPersonality": true,
+    "fixedDjMusicalLane": true,
+    "fixedDjBiography": true,
+    "controlledImprovisationPreferred": true,
+    "djTalkAfterEveryRecord": false,
+    "technologyRemainsBackstage": true,
     "sundayGospelMusicCentered": true,
     "sundayDjsDoNotPreach": true
   },
+  "canonicalGovernance": {
+    "unconfirmedValuePolicy": "TBD",
+    "inventReplacementValues": false,
+    "identityAndScheduleChangesMustBeDeliberate": true,
+    "masterDocumentMustReflectCanonicalChanges": true,
+    "portraitRule": "Use original supplied human portraits via HTML/CSS compositing; do not regenerate faces with image models."
+  },
   "imagingPolicy": {
+    "oneRecognizableSonicIdentity": true,
+    "daypartSpecificTreatments": true,
     "rotationRequired": true,
     "shortFormsSupported": true,
     "longFormsSupported": true,
     "newsBedsSupported": true,
     "instrumentalRnbBedsSupported": true,
-    "crowdOpenCloseAllowedWhenAssetCallsForIt": true
+    "crowdOpenCloseAllowedWhenAssetCallsForIt": true,
+    "avoidAutomatedSoundingFrequency": true
   },
   "runtimeMapping": {
     "stationName": "settings.station",
