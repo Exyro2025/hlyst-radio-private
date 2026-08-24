@@ -22,6 +22,8 @@ export default function HomePage() {
   const [playing, setPlaying] = useState(false);
   const [lystAdded, setLystAdded] = useState(false);
   const [talkWaveOpen, setTalkWaveOpen] = useState(false);
+  const [volume, setVolume] = useState(1);
+  const [shareCopied, setShareCopied] = useState(false);
 
   const onAirDj = getOnAirNow();
   const comingUp = getComingUp();
@@ -30,6 +32,28 @@ export default function HomePage() {
   const handleLystThis = () => {
     setLystAdded(true);
     setTimeout(() => setLystAdded(false), 2000);
+  };
+
+    const handleVolumeChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const v = parseFloat(e.target.value);
+    setVolume(v);
+    if (audioRef.current) audioRef.current.volume = v;
+  };
+
+  const handleShare = async () => {
+    const shareText = `Listening to ${onAirDj.onAirName} on HLYST Radio\nReal DJs. Real Music. Real Culture.`;
+    const shareUrl = typeof window !== 'undefined' ? window.location.origin : '';
+    if (typeof navigator !== 'undefined' && navigator.share) {
+      try {
+        await navigator.share({ title: 'HLYST Radio', text: shareText, url: shareUrl });
+      } catch {}
+    } else if (typeof navigator !== 'undefined' && navigator.clipboard) {
+      try {
+        await navigator.clipboard.writeText(`${shareText}\n${shareUrl}`);
+        setShareCopied(true);
+        setTimeout(() => setShareCopied(false), 2000);
+      } catch {}
+    }
   };
 
   const togglePlay = () => {
@@ -146,12 +170,14 @@ export default function HomePage() {
           {playing ? '❚❚' : '▶'}
         </button>
         <div style={{ display: 'flex', flexDirection: 'column', gap: '0.6rem', flexShrink: 0 }}>
-          <div style={{ display: 'flex', gap: '1rem' }}>
-            <button aria-label="Volume" style={{ background: 'none', border: 'none', color: '#888', fontSize: '0.75rem', letterSpacing: '0.06em', cursor: 'pointer', padding: 0 }}>
-              VOLUME
-            </button>
-            <button aria-label="Share" style={{ background: 'none', border: 'none', color: '#888', fontSize: '0.75rem', letterSpacing: '0.06em', cursor: 'pointer', padding: 0 }}>
-              SHARE
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
+            <input
+              type="range" min="0" max="1" step="0.01" value={volume}
+              onChange={handleVolumeChange} aria-label="Volume"
+              style={{ width: '70px', accentColor: GOLD }}
+            />
+            <button onClick={handleShare} style={{ background: 'none', border: 'none', color: '#888', fontSize: '0.75rem', letterSpacing: '0.06em', cursor: 'pointer', padding: 0 }}>
+              {shareCopied ? 'LINK COPIED' : 'SHARE'}
             </button>
           </div>
           <button onClick={handleLystThis} style={{
