@@ -12,8 +12,9 @@ export function generateStaticParams() {
   return djs.map(dj => ({ slug: dj.slug }));
 }
 
-export default function DjProfilePage({ params }: { params: { slug: string } }) {
-  const dj = getDjBySlug(params.slug);
+export default async function DjProfilePage({ params }: { params: Promise<{ slug: string }> }) {
+  const { slug } = await params;
+  const dj = getDjBySlug(slug);
   if (!dj) return notFound();
 
   const fields: { label: string; value: string }[] = [
