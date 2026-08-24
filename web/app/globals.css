@@ -108,10 +108,10 @@
 /* Base palette. Dark mode flips bg/ink to charcoal + off-white and inverts the
    paper-grain blend so the texture still reads. */
 :root {
-    --bg: #f3efe6;
-    --ink: #161412;
-    --muted: #6d675e; /* ~5.6:1 on the cream — raised from #7a736a (~4.6:1) */
-    --accent: oklch(0.62 0.22 25); /* ~ #d94b2a hot vermilion */
+    --bg: #0a0a0a;
+    --ink: #f5f0e8;
+    --muted: #9a9186; /* warm gray, ~4.7:1 on the black bg */
+    --accent: #c9a44c; /* HLYST gold, matches the logo */
     --soft-border: rgba(0, 0, 0, 0.08);
     --separator-soft: rgba(0, 0, 0, 0.08);
     --separator-strong: rgba(0, 0, 0, 0.1);
@@ -121,8 +121,8 @@
     --drawer-shadow: -30px 0 60px -20px rgba(0, 0, 0, 0.15);
     --grain-color: 0.4 0.35 0.3; /* feColorMatrix RGB triplet for paper grain */
     --grain-alpha: 0.4;
-    --grain-blend: multiply;
-    color-scheme: light;
+    --grain-blend: screen;
+    color-scheme: dark;
 
     /* shadcn/ui token bridge onto the palette above. --bg/--ink/--muted/--overlay
      already flip in dark mode, so these inherit the flip and need no dark-mode
