@@ -8,7 +8,7 @@ import { NextResponse } from 'next/server';
 import type { StationState } from '@/lib/types';
 
 export async function GET() {
-  const payload: StationState = {
+  const payload: StationState & { station?: unknown } = {
     upcoming: [],
     history: [],
     djLog: [],
