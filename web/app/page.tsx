@@ -184,9 +184,19 @@ export default function HomePage() {
             <p style={{ color: '#ccc', maxWidth: 480, margin: '0.5rem 0 1rem' }}>
               {comingUp.dj.about.split('.')[0] + '.'}
             </p>
-            <a href={`/djs/${comingUp.dj.slug}`} style={{ color: GOLD, fontSize: '0.85rem', textDecoration: 'none' }}>
+                        <a href={`/djs/${comingUp.dj.slug}`} style={{ color: GOLD, fontSize: '0.85rem', textDecoration: 'none' }}>
               Meet {comingUp.dj.name} →
             </a>
+            <div style={{ display: 'flex', gap: '2rem', marginTop: '1.5rem', paddingTop: '1.5rem', borderTop: '1px solid #222' }}>
+              <div>
+                <p style={{ color: GOLD, fontSize: '0.7rem', letterSpacing: '0.1em', margin: 0 }}>NOW</p>
+                <p style={{ color: IVORY, fontSize: '0.85rem', margin: '0.2rem 0 0' }}>{onAirDj.onAirName}</p>
+              </div>
+              <div>
+                <p style={{ color: GOLD, fontSize: '0.7rem', letterSpacing: '0.1em', margin: 0 }}>{comingUp.startsAt}</p>
+                <p style={{ color: IVORY, fontSize: '0.85rem', margin: '0.2rem 0 0' }}>{comingUp.dj.onAirName}</p>
+              </div>
+            </div>
           </div>
         </section>
       )}
