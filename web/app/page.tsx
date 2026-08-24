@@ -21,6 +21,7 @@ export default function HomePage() {
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const [playing, setPlaying] = useState(false);
   const [lystAdded, setLystAdded] = useState(false);
+  const [talkWaveOpen, setTalkWaveOpen] = useState(false);
 
   const onAirDj = getOnAirNow();
   const comingUp = getComingUp();
@@ -244,6 +245,19 @@ export default function HomePage() {
         </a>
       </section>
 
+            {/* TALK WAVE INVITATION */}
+      <section style={{ padding: '3rem 2rem', borderBottom: '1px solid #222', textAlign: 'center' }}>
+        <p style={{ color: GOLD, fontSize: '0.75rem', letterSpacing: '0.16em', margin: '0 0 0.75rem' }}>TALK WAVE</p>
+        <h3 style={{ fontSize: '1.6rem', fontWeight: 800, margin: '0 0 0.75rem' }}>The booth is listening.</h3>
+        <button onClick={() => setTalkWaveOpen(true)} style={{
+          border: `1px solid ${GOLD}`, color: GOLD, background: 'transparent',
+          padding: '0.65rem 1.5rem', fontSize: '0.8rem', letterSpacing: '0.1em',
+          textTransform: 'uppercase', cursor: 'pointer', borderRadius: 999,
+        }}>
+          Open Talk Wave
+        </button>
+      </section>
+
       {/* MANIFESTO */}
       <section style={{ padding: '4rem 2rem', textAlign: 'center', borderBottom: '1px solid #222' }}>
         <p style={{ color: GOLD, fontSize: '0.75rem', letterSpacing: '0.2em', margin: '0 0 1.5rem' }}>
@@ -293,6 +307,52 @@ export default function HomePage() {
           </div>
         </div>
       </footer>
+          
+
+      {/* TALK WAVE FLOATING TRIGGER */}
+      <button onClick={() => setTalkWaveOpen(true)} style={{
+        position: 'fixed', bottom: '2rem', right: '2rem', zIndex: 50,
+        background: GOLD, color: BG, border: 'none', borderRadius: 999,
+        padding: '0.85rem 1.5rem', fontSize: '0.75rem', letterSpacing: '0.08em',
+        textTransform: 'uppercase', cursor: 'pointer', fontWeight: 700,
+      }}>
+        Talk Wave
+      </button>
+
+      {/* TALK WAVE PANEL */}
+      <div style={{
+        position: 'fixed', top: 0, right: 0, bottom: 0, width: '380px', maxWidth: '90vw',
+        background: '#0a0a0a', borderLeft: '1px solid #222', zIndex: 100,
+        transform: talkWaveOpen ? 'translateX(0)' : 'translateX(100%)',
+        transition: 'transform 0.35s ease', padding: '2rem', overflowY: 'auto',
+      }}>
+        <button onClick={() => setTalkWaveOpen(false)} style={{
+          background: 'none', border: 'none', color: '#888', fontSize: '1.2rem',
+          cursor: 'pointer', marginBottom: '2rem', padding: 0,
+        }}>
+          ✕
+        </button>
+        <p style={{ color: GOLD, fontSize: '0.75rem', letterSpacing: '0.16em', margin: '0 0 0.5rem' }}>TALK WAVE</p>
+        <h3 style={{ fontSize: '1.4rem', fontWeight: 800, margin: '0 0 0.5rem' }}>The booth is listening.</h3>
+        <p style={{ color: GOLD, fontSize: '0.85rem', margin: '0 0 2rem' }}>
+          {onAirDj.onAirName}'s Line — Open
+        </p>
+
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+          <div style={{ border: '1px solid #222', padding: '1.25rem', cursor: 'pointer' }}>
+            <p style={{ color: IVORY, fontWeight: 700, margin: '0 0 0.3rem' }}>CALL</p>
+            <p style={{ color: '#999', fontSize: '0.85rem', margin: 0 }}>Talk live when the line is open.</p>
+          </div>
+          <div style={{ border: '1px solid #222', padding: '1.25rem', cursor: 'pointer' }}>
+            <p style={{ color: IVORY, fontWeight: 700, margin: '0 0 0.3rem' }}>MESSAGE</p>
+            <p style={{ color: '#999', fontSize: '0.85rem', margin: 0 }}>Send something directly to the booth.</p>
+          </div>
+          <div style={{ border: '1px solid #222', padding: '1.25rem', cursor: 'pointer' }}>
+            <p style={{ color: IVORY, fontWeight: 700, margin: '0 0 0.3rem' }}>VOICE NOTE</p>
+            <p style={{ color: '#999', fontSize: '0.85rem', margin: 0 }}>Leave the DJ a message.</p>
+          </div>
+        </div>
+      </div>
     </div>
   );
 }
