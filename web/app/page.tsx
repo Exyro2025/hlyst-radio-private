@@ -226,7 +226,7 @@ export default function HomePage() {
         </h2>
       </section>
 
-      {/* FOOTER */}
+            {/* FOOTER */}
       <footer style={{ padding: '3rem 2rem', borderTop: '1px solid #222', fontSize: '0.8rem', color: '#999' }}>
         <div style={{ marginBottom: '1.5rem' }}>
           <p style={{ color: '#c9a44c', fontWeight: 800, fontSize: '1rem', margin: '0 0 0.25rem', letterSpacing: '0.04em' }}>
@@ -235,7 +235,6 @@ export default function HomePage() {
           <p style={{ margin: 0, color: '#888' }}>REAL DJS. REAL MUSIC. REAL CULTURE.</p>
           <p style={{ margin: '0.25rem 0 0', color: '#888' }}>Cleveland · Worldwide</p>
         </div>
-
         <div style={{ display: 'flex', flexWrap: 'wrap', gap: '1.25rem', marginBottom: '1.5rem' }}>
           <a href="#live" style={{ color: '#999', textDecoration: 'none' }}>Listen Live</a>
           <a href="#lyst" style={{ color: '#999', textDecoration: 'none' }}>The Lyst</a>
@@ -245,12 +244,10 @@ export default function HomePage() {
           <a href="/about" style={{ color: '#999', textDecoration: 'none' }}>About</a>
           <a href="#talkwave" style={{ color: '#999', textDecoration: 'none' }}>Talk Wave</a>
         </div>
-
         <div style={{ marginBottom: '1.5rem' }}>
           <p style={{ color: '#c9a44c', fontSize: '0.7rem', letterSpacing: '0.14em', margin: '0 0 0.4rem' }}>OUR STANDARD</p>
           <p style={{ margin: 0, color: '#888' }}>Curated by Humans · Earned Not Bought · Culture First</p>
         </div>
-
         <div style={{ borderTop: '1px solid #222', paddingTop: '1.25rem', display: 'flex', justifyContent: 'space-between', flexWrap: 'wrap', gap: '0.75rem' }}>
           <div>
             <p style={{ margin: 0 }}>HLYST Radio is a JH Broadcast Group property.</p>
@@ -263,7 +260,6 @@ export default function HomePage() {
           </div>
         </div>
       </footer>
-            </footer>
     </div>
   );
 }
