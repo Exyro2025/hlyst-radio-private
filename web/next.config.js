@@ -30,7 +30,7 @@ const version = resolveAppVersion();
 
 /** @type {import('next').NextConfig} */
 const nextConfig = {
-  output: 'standalone',
+  output: process.env.VERCEL ? undefined : 'standalone',
   reactStrictMode: true,
   // The /apps directory renders submitter-supplied icons + screenshots from the
   // community catalog. Those URLs are a trust boundary: an arbitrary host would
