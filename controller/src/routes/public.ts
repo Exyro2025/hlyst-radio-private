@@ -12,6 +12,7 @@ import * as settings from '../settings.js';
 import { getFullContext, geocodePlace } from '../context.js';
 import { queue } from '../broadcast/queue.js';
 import * as session from '../broadcast/session.js';
+import { getCurrentTalkState } from './webhooks/talkwave.js';
 import { getStreamStatus } from '../broadcast/listeners.js';
 import { isIdle } from '../broadcast/stream-idle.js';
 import { currentStarve } from '../broadcast/music-starve.js';
@@ -196,6 +197,25 @@ router.get('/persona-avatar/:id', async (req, res) => {
 // ---------------------------------------------------------------------------
 router.get('/now-playing', async (req, res) => {
   try {
+        const talkState = getCurrentTalkState();
+    if (talkState) {
+      const stream = getStreamStatus();
+      return res.json({
+        nowPlaying: null,
+        blockType: 'talk',
+        talk: talkState.talk,
+        dj: talkState.currentDj
+          ? { name: talkState.currentDj.name, tagline: '', avatar: avatarUrlFor(talkState.currentDj.id), station: settings.get().station }
+          : { name: 'Frequency', tagline: '', avatar: '', station: settings.get().station },
+        activeShow: talkState.currentShow ? { name: talkState.currentShow.name, persona: null, guests: [] } : null,
+        session: null,
+        listeners: stream.listeners,
+        streamOnline: stream.online,
+        streamBitrate: stream.bitrate,
+        timezone: getStationTimezone(),
+        locale: settings.get().locale,
+      });
+    }
     const [nowPlaying, ctx] = await Promise.all([
       queue.getNowPlaying(),
       getFullContext(),
