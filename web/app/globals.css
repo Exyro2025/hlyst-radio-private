@@ -119,8 +119,8 @@
     --scrollbar: rgba(22, 20, 18, 0.25);
     --scrollbar-hover: rgba(22, 20, 18, 0.5);
     --drawer-shadow: -30px 0 60px -20px rgba(0, 0, 0, 0.15);
-    --grain-color: 0.4 0.35 0.3; /* feColorMatrix RGB triplet for paper grain */
-    --grain-alpha: 0.4;
+    --grain-color: 0.75 0.62 0.35;
+    --grain-alpha: 0.15;
     --grain-blend: screen;
     color-scheme: dark;
 
