@@ -36,7 +36,7 @@ function buildSlots(): Slot[] {
     let match: RegExpExecArray | null;
     dayRangeRe.lastIndex = 0;
     while ((match = dayRangeRe.exec(dj.schedule)) !== null) {
-      const dayIdx = DAY_MAP[(match[1] ?? '').toLowerCase()];
+      const dayIdx = DAY_MAP[(match[1] ?? '').toLowerCase()] ?? 0;
       const start = parseClock(match[2] ?? '');
       const end = parseClock(match[3] ?? '');
       const startWeekMin = dayIdx * 1440 + start.h * 60 + start.m;
