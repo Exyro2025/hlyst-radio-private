@@ -76,11 +76,23 @@ export default function HomePage() {
       {/* IMMERSIVE HERO */}
       <div style={{ position: 'relative', minHeight: '620px', display: 'flex', alignItems: 'flex-end' }}>
         {onAirDj.portrait && (
-  <div style={{ position: 'absolute', right: '3rem', top: '3rem', bottom: '3rem', width: '360px', zIndex: 0 }}>
-    <div style={{ position: 'relative', width: '100%', height: '100%', borderRadius: 4, overflow: 'hidden' }}>
-      <Image src={onAirDj.portrait} alt={onAirDj.onAirName} fill
-        style={{ objectFit: 'contain', objectPosition: 'top' }} sizes="360px" priority />
-    </div>
+  <div style={{ position: 'absolute', inset: 0, zIndex: 0 }}>
+    <Image
+      src={onAirDj.portrait}
+      alt={onAirDj.onAirName}
+      fill
+      style={{ objectFit: 'cover', objectPosition: 'center 15%' }}
+      sizes="100vw"
+      priority
+    />
+    <div style={{
+      position: 'absolute', inset: 0,
+      background: 'linear-gradient(90deg, #0a0a0a 0%, #0a0a0a 38%, rgba(10,10,10,0.75) 50%, rgba(10,10,10,0.15) 65%, transparent 100%)',
+    }} />
+    <div style={{
+      position: 'absolute', inset: 0,
+      background: 'linear-gradient(180deg, transparent 55%, #0a0a0a 100%)',
+    }} />
   </div>
 )}
         <div style={{ position: 'relative', zIndex: 1, padding: '3rem 2rem', maxWidth: '520px' }}>
