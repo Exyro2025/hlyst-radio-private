@@ -76,26 +76,19 @@ export default function HomePage() {
       {/* IMMERSIVE HERO */}
       <div style={{ position: 'relative', minHeight: '620px', display: 'flex', alignItems: 'flex-end' }}>
         {onAirDj.portrait && (
-  <div style={{ position: 'absolute', inset: 0, zIndex: 0, overflow: 'hidden' }}>
-    <div style={{
-      position: 'absolute',
-      top: '-5%',
-      right: '-15%',
-      width: '85%',
-      height: '130%',
-      backgroundImage: `url(${onAirDj.portrait})`,
-      backgroundSize: '220% auto',
-      backgroundPosition: '18% 12%',
-      backgroundRepeat: 'no-repeat',
-    }} />
-    <div style={{
-      position: 'absolute', inset: 0,
-      background: 'linear-gradient(90deg, #0a0a0a 0%, #0a0a0a 38%, rgba(10,10,10,0.75) 50%, rgba(10,10,10,0.15) 65%, transparent 100%)',
-    }} />
-    <div style={{
-      position: 'absolute', inset: 0,
-      background: 'linear-gradient(180deg, transparent 55%, #0a0a0a 100%)',
-    }} />
+  <div style={{ position: 'absolute', inset: 0, zIndex: 0 }}>
+    <Image
+      src={encodeURI(onAirDj.portrait)}
+      alt={onAirDj.onAirName}
+      fill
+      style={{ objectFit: 'cover', objectPosition: 'center 20%' }}
+      sizes="100vw"
+      priority
+    />
+    <div style={{ position: 'absolute', inset: 0,
+      background: 'linear-gradient(90deg, #0a0a0a 0%, #0a0a0a 38%, rgba(10,10,10,0.75) 50%, rgba(10,10,10,0.15) 65%, transparent 100%)' }} />
+    <div style={{ position: 'absolute', inset: 0,
+      background: 'linear-gradient(180deg, transparent 55%, #0a0a0a 100%)' }} />
   </div>
 )}
         <div style={{ position: 'relative', zIndex: 1, padding: '3rem 2rem', maxWidth: '520px' }}>
