@@ -81,7 +81,7 @@ export default function HomePage() {
       src={encodeURI(onAirDj.portrait)}
       alt={onAirDj.onAirName}
       fill
-      style={{ objectFit: 'cover', objectPosition: 'center 35%' }}
+      style={{ objectFit: 'cover', objectPosition: 'center 45%' }}
       sizes="100vw"
       priority
     />
