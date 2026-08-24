@@ -76,19 +76,23 @@ export default function HomePage() {
       {/* IMMERSIVE HERO */}
       <div style={{ position: 'relative', minHeight: '620px', display: 'flex', alignItems: 'flex-end' }}>
         {onAirDj.portrait && (
-  <div style={{ position: 'absolute', inset: 0, zIndex: 0 }}>
+  <div style={{ position: 'absolute', top: 0, right: 0, bottom: 0, width: '58%', zIndex: 0 }}>
     <Image
       src={encodeURI(onAirDj.portrait)}
       alt={onAirDj.onAirName}
       fill
-      style={{ objectFit: 'cover', objectPosition: 'center 55%' }}
-      sizes="100vw"
+      style={{ objectFit: 'cover', objectPosition: 'center 30%' }}
+      sizes="60vw"
       priority
     />
-    <div style={{ position: 'absolute', inset: 0,
-      background: 'linear-gradient(90deg, #0a0a0a 0%, #0a0a0a 38%, rgba(10,10,10,0.75) 50%, rgba(10,10,10,0.15) 65%, transparent 100%)' }} />
-    <div style={{ position: 'absolute', inset: 0,
-      background: 'linear-gradient(180deg, transparent 55%, #0a0a0a 100%)' }} />
+    <div style={{
+      position: 'absolute', inset: 0,
+      background: 'linear-gradient(90deg, #0a0a0a 0%, rgba(10,10,10,0.6) 25%, transparent 60%)',
+    }} />
+    <div style={{
+      position: 'absolute', inset: 0,
+      background: 'linear-gradient(180deg, transparent 55%, #0a0a0a 100%)',
+    }} />
   </div>
 )}
         <div style={{ position: 'relative', zIndex: 1, padding: '3rem 2rem', maxWidth: '520px' }}>
