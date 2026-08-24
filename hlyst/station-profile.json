@@ -3,7 +3,17 @@
     "name": "HLYST",
     "publicDescription": "The past has a pulse. The future has a frequency.",
     "publicAiDisclosure": false,
-    "rosterCount": 15
+    "rosterCount": 15,
+    "timezone": "America/New_York",
+    "locale": "en-US"
+  },
+  "programming": {
+    "sourceOfTruth": "hlyst/programming-bible.json",
+    "weekdayBlocks": 6,
+    "saturdayBlocks": 6,
+    "sundayBlocks": 6,
+    "sundayGospelStart": "06:00",
+    "sundayGospelEnd": "22:00"
   },
   "onAirPolicy": {
     "brandUse": "tasteful-not-exhausting",
@@ -17,7 +27,12 @@
     "allowDjToSayHLYST": true,
     "prohibitRogueBrandClaims": true,
     "prohibitGenericRadioCliches": true,
-    "prohibitPublicAiFraming": true
+    "prohibitPublicAiFraming": true,
+    "fixedDjIdentity": true,
+    "fixedDjVoice": true,
+    "fixedDjPersonality": true,
+    "sundayGospelMusicCentered": true,
+    "sundayDjsDoNotPreach": true
   },
   "imagingPolicy": {
     "rotationRequired": true,
