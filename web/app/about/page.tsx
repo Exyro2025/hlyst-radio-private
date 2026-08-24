@@ -8,32 +8,29 @@ export default function AboutPage() {
       </a>
       <h1 style={{ fontSize: '2.25rem', fontWeight: 800, margin: '0 0 1.5rem' }}>About HLYST Radio</h1>
 
+      <p style={{ color: '#e0dbd0', fontSize: '1.05rem', lineHeight: 1.7, margin: '0 0 1.5rem' }}>
+        HLYST Radio is a Cleveland-rooted, worldwide digital radio station built around
+        real DJs, intentional music curation, cultural credibility, discovery, and human
+        connection. Its standard is simple: Real DJs. Real Music. Real Culture. Programming
+        is curated by people with distinct musical identities—not generated playlists
+        chasing algorithms. HLYST moves across generations and genres while respecting the
+        history behind the music and creating room for what deserves to be heard next.
+      </p>
+
+      <p style={{ color: '#e0dbd0', fontSize: '1.05rem', lineHeight: 1.7, margin: '0 0 1.5rem' }}>
+        HLYST believes influence should be earned, not bought. Editorial recognition, The
+        Lyst, interviews, and cultural coverage are governed by that principle. Commercial
+        relationships do not purchase editorial approval.
+      </p>
+
       <p style={{ color: '#e0dbd0', fontSize: '1.05rem', lineHeight: 1.7, margin: '0 0 2rem' }}>
-        HLYST Radio is a cultural radio and editorial property — real DJs, real music,
-        real culture. Not a nightclub. Not a streaming dashboard. Not automated
-        programming. Every voice on air is a real person with a real perspective,
-        curating sets that reflect genuine taste rather than an algorithm.
+        Through its DJs, specialty programming, The Lyst, interviews, and Talk Wave, HLYST
+        is designed to feel less like a streaming platform and more like what great radio
+        has always been: a place with taste, personality, discovery, conversation, and a
+        point of view.
       </p>
 
-      <div style={{ marginBottom: '2rem' }}>
-        <p style={{ color: '#c9a44c', fontSize: '0.75rem', letterSpacing: '0.16em', margin: '0 0 1rem' }}>
-          OUR STANDARD. OUR PROMISE.
-        </p>
-        <div style={{ display: 'flex', gap: '2rem', flexWrap: 'wrap', fontSize: '0.95rem' }}>
-          <span>Curated by Humans</span>
-          <span>Earned Not Bought</span>
-          <span>Culture First</span>
-        </div>
-      </div>
-
-      <p style={{ color: '#999', fontSize: '0.9rem', lineHeight: 1.7, margin: '0 0 2rem' }}>
-        The Lyst — HLYST's editorial picks — is earned, never for sale. No payola.
-        No politics. Just excellence.
-      </p>
-
-      <p style={{ color: '#888', fontSize: '0.85rem', margin: 0 }}>
-        HLYST Radio is a JH Broadcast Group property.
-      </p>
+      <p style={{ color: '#c9a44c', fontSize: '0.95rem', margin: 0 }}>Cleveland • Worldwide.</p>
     </div>
   );
 }
