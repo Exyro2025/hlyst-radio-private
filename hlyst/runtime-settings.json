@@ -1,0 +1,31 @@
+{
+  "station": "HLYST",
+  "stationDescription": "REAL DJs. REAL MUSIC. REAL CULTURE.",
+  "timezone": "America/New_York",
+  "locale": "en-US",
+  "djHouseRulesSource": "controller/src/hlyst/preset.ts#HLYST_HOUSE_RULES",
+  "personasSource": "controller/src/hlyst/preset.ts#HLYST_PERSONAS",
+  "showsSource": "controller/src/hlyst/preset.ts#HLYST_SHOWS",
+  "scheduleSource": "controller/src/hlyst/preset.ts#hlystSchedule",
+  "activePersonaId": "marcus_reed",
+  "voicePolicy": {
+    "ttsEnabled": true,
+    "exactDjVoiceIds": "TBD",
+    "placeholderEngine": "piper",
+    "placeholderVoice": "",
+    "rule": "Do not invent or substitute final voice IDs. Each confirmed DJ receives one fixed voice when assigned."
+  },
+  "portraitPolicy": {
+    "realHumanFacesOnly": true,
+    "generatedReplacementFaces": false,
+    "exactAssignments": "TBD",
+    "rule": "Use the original supplied HLYST human portrait for each DJ. Do not regenerate or substitute faces."
+  },
+  "canonicalRosterStatus": {
+    "confirmedNamedPersonas": 15,
+    "programmingBibleActiveDjModel": 16,
+    "reserveIdentities": 3,
+    "unconfirmedActiveIdentity": "TBD",
+    "rule": "The 16th active identity must not be instantiated until its canonical name, face, voice and biography are confirmed."
+  }
+}
