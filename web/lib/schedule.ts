@@ -60,7 +60,7 @@ export function getOnAirNow(now: Date = new Date()): DjProfile {
     // "now" that's read as being in the following week)
     if (nowWeekMin + 7 * 1440 >= slot.startWeekMin && nowWeekMin + 7 * 1440 < slot.endWeekMin) return slot.dj;
   }
-  return djs[0];
+  return djs[0]!;
 }
 
 /** The next scheduled slot after now, chronologically — for "Coming Up". */
