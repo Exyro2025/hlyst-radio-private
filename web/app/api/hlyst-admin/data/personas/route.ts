@@ -9,8 +9,8 @@ const PersonaSchema = z.object({
   name: z.string().min(1).max(40),
   tagline: z.string().max(80),
   soul: z.string().max(2000),
-  frequency: z.enum(['rare', 'moderate', 'frequent']),
-  scriptLength: z.enum(['concise', 'standard', 'extended']),
+  frequency: z.enum(['silent', 'quiet', 'moderate', 'chatty', 'aggressive']),
+  scriptLength: z.enum(['one-liner', 'concise', 'extended', 'storyteller']),
   djMode: z.boolean(),
   humour: z.number().int().min(0).max(10),
   localColour: z.number().int().min(0).max(10),
@@ -43,13 +43,11 @@ export async function POST(req: Request) {
   if (!(await isAuthed())) {
     return Response.json({ error: 'Unauthorized' }, { status: 401 });
   }
-
   const parsed = PersonaSchema.safeParse(await req.json());
   if (!parsed.success) {
     return Response.json({ error: 'Invalid persona.', issues: parsed.error.issues }, { status: 400 });
   }
   const p = parsed.data;
-
   await sql`
     UPDATE personas SET
       name = ${p.name}, tagline = ${p.tagline}, soul = ${p.soul},
@@ -62,6 +60,5 @@ export async function POST(req: Request) {
       updated_at = now()
     WHERE id = ${p.id}
   `;
-
   return Response.json({ ok: true });
 }
