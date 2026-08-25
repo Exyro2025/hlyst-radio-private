@@ -1,8 +1,10 @@
-// Parses schedule strings like "Weekend DJ · Saturdays 6PM–10PM" and
-// determines who's actually on air right now and who's up next.
+// Parses schedule strings and determines who's actually on air right now
+// and who's up next. Handles single days ("Saturday"), "Weekdays"
+// (Mon–Fri), "Weekends" (Sat–Sun), and arbitrary text between a day word
+// and its time range (e.g. "Sunday · Gospel · 6AM–10AM").
 //
-// Place this file at: web/lib/schedule.ts (REPLACES the current broken
-// version entirely — every TypeScript strict-null issue is fixed here)
+// Place this file at: web/lib/schedule.ts (REPLACES the current version
+// entirely)
 
 import { djs, type DjProfile } from './djs';
 
@@ -10,6 +12,9 @@ const DAY_MAP: Record<string, number> = {
   sunday: 0, monday: 1, tuesday: 2, wednesday: 3,
   thursday: 4, friday: 5, saturday: 6,
 };
+
+const WEEKDAYS = [1, 2, 3, 4, 5];
+const WEEKENDS = [0, 6];
 
 interface Slot {
   dj: DjProfile;
@@ -28,23 +33,59 @@ function parseClock(raw: string): { h: number; m: number } {
   return { h, m };
 }
 
+const DAY_TOKEN_RE = /\b(weekdays|weekends|sunday|monday|tuesday|wednesday|thursday|friday|saturday)s?\b/gi;
+const TIME_RANGE_RE = /(\d{1,2}(?::\d{2})?\s*[AP]M)\s*[–-]\s*(\d{1,2}(?::\d{2})?\s*[AP]M)/gi;
+
+function dayTokenToIndices(token: string): number[] {
+  const lower = token.toLowerCase();
+  if (lower === 'weekdays') return WEEKDAYS;
+  if (lower === 'weekends') return WEEKENDS;
+  const idx = DAY_MAP[lower];
+  return idx !== undefined ? [idx] : [];
+}
+
 function buildSlots(): Slot[] {
   const slots: Slot[] = [];
-  const dayRangeRe = /(sunday|monday|tuesday|wednesday|thursday|friday|saturday)s?\s+(\d{1,2}(?::\d{2})?\s*[AP]M)\s*[–-]\s*(\d{1,2}(?::\d{2})?\s*[AP]M)/gi;
 
   for (const dj of djs) {
-    let match: RegExpExecArray | null;
-    dayRangeRe.lastIndex = 0;
-    while ((match = dayRangeRe.exec(dj.schedule)) !== null) {
-      const dayIdx = DAY_MAP[(match[1] ?? '').toLowerCase()] ?? 0;
-      const start = parseClock(match[2] ?? '');
-      const end = parseClock(match[3] ?? '');
-      const startWeekMin = dayIdx * 1440 + start.h * 60 + start.m;
-      let endWeekMin = dayIdx * 1440 + end.h * 60 + end.m;
-      if (endWeekMin <= startWeekMin) endWeekMin += 1440;
-      slots.push({ dj, startWeekMin, endWeekMin });
+    const text = dj.schedule;
+
+    const dayTokens: { indices: number[]; pos: number }[] = [];
+    DAY_TOKEN_RE.lastIndex = 0;
+    let dMatch: RegExpExecArray | null;
+    while ((dMatch = DAY_TOKEN_RE.exec(text)) !== null) {
+      dayTokens.push({ indices: dayTokenToIndices(dMatch[1] ?? ''), pos: dMatch.index });
+    }
+
+    const timeRanges: { start: string; end: string; pos: number }[] = [];
+    TIME_RANGE_RE.lastIndex = 0;
+    let tMatch: RegExpExecArray | null;
+    while ((tMatch = TIME_RANGE_RE.exec(text)) !== null) {
+      timeRanges.push({ start: tMatch[1] ?? '', end: tMatch[2] ?? '', pos: tMatch.index });
+    }
+
+    // Pair each day token with the next time range that appears after it
+    // (and before the following day token, if any) — this tolerates any
+    // text in between ("· Gospel ·", "(Overnight R&B/Soul)", etc.).
+    for (let i = 0; i < dayTokens.length; i++) {
+      const token = dayTokens[i];
+      if (!token) continue;
+      const nextTokenPos = dayTokens[i + 1]?.pos ?? Infinity;
+      const range = timeRanges.find(r => r.pos > token.pos && r.pos < nextTokenPos);
+      if (!range) continue;
+
+      const start = parseClock(range.start);
+      const end = parseClock(range.end);
+
+      for (const dayIdx of token.indices) {
+        const startWeekMin = dayIdx * 1440 + start.h * 60 + start.m;
+        let endWeekMin = dayIdx * 1440 + end.h * 60 + end.m;
+        if (endWeekMin <= startWeekMin) endWeekMin += 1440;
+        slots.push({ dj, startWeekMin, endWeekMin });
+      }
     }
   }
+
   return slots;
 }
 
