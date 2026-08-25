@@ -24,3 +24,4 @@ export async function POST(req: Request) {
     return Response.json({ error: 'Could not submit message.' }, { status: 500 });
   }
 }
+
