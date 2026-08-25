@@ -25,6 +25,14 @@ export default function HomePage() {
   const [volume, setVolume] = useState(1);
   const [shareCopied, setShareCopied] = useState(false);
 
+  const [twMode, setTwMode] = useState<'menu' | 'message' | 'voice' | null>(null);
+  const [twName, setTwName] = useState('');
+  const [twMessage, setTwMessage] = useState('');
+  const [twStatus, setTwStatus] = useState<'idle' | 'sending' | 'sent' | 'error'>('idle');
+  const [twRecording, setTwRecording] = useState(false);
+  const [twAudioBlob, setTwAudioBlob] = useState<Blob | null>(null);
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+
   const onAirDj = getOnAirNow();
   const comingUp = getComingUp();
   const voices = djs.slice(0, 4);
@@ -51,6 +59,71 @@ export default function HomePage() {
     const v = parseFloat(e.target.value);
     setVolume(v);
     if (audioRef.current) audioRef.current.volume = v;
+  };
+
+    const handleSendMessage = async () => {
+    if (!twMessage.trim()) return;
+    setTwStatus('sending');
+    try {
+      const res = await fetch('/api/talkwave/message', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ listenerName: twName, message: twMessage }),
+      });
+      if (!res.ok) throw new Error('failed');
+      setTwStatus('sent');
+      setTwMessage('');
+    } catch {
+      setTwStatus('error');
+    }
+  };
+
+  const startRecording = async () => {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const recorder = new MediaRecorder(stream);
+      const chunks: BlobPart[] = [];
+      recorder.ondataavailable = (e) => chunks.push(e.data);
+      recorder.onstop = () => {
+        setTwAudioBlob(new Blob(chunks, { type: 'audio/webm' }));
+        stream.getTracks().forEach((t) => t.stop());
+      };
+      recorder.start();
+      mediaRecorderRef.current = recorder;
+      setTwRecording(true);
+    } catch {
+      setTwStatus('error');
+    }
+  };
+
+  const stopRecording = () => {
+    mediaRecorderRef.current?.stop();
+    setTwRecording(false);
+  };
+
+  const handleSendVoiceNote = async () => {
+    if (!twAudioBlob) return;
+    setTwStatus('sending');
+    try {
+      const formData = new FormData();
+      formData.append('audio', twAudioBlob, 'voice-note.webm');
+      formData.append('listenerName', twName);
+      const res = await fetch('/api/talkwave/voice-note', { method: 'POST', body: formData });
+      if (!res.ok) throw new Error('failed');
+      setTwStatus('sent');
+      setTwAudioBlob(null);
+    } catch {
+      setTwStatus('error');
+    }
+  };
+
+  const resetTalkWave = () => {
+    setTwMode(null);
+    setTwName('');
+    setTwMessage('');
+    setTwStatus('idle');
+    setTwAudioBlob(null);
+    setTwRecording(false);
   };
 
   const handleShare = async () => {
@@ -372,7 +445,7 @@ export default function HomePage() {
         transform: talkWaveOpen ? 'translateX(0)' : 'translateX(100%)',
         transition: 'transform 0.35s ease', padding: '2rem', overflowY: 'auto',
       }}>
-        <button onClick={() => setTalkWaveOpen(false)} style={{
+          <button onClick={() => { setTalkWaveOpen(false); resetTalkWave(); }} style={{
           background: 'none', border: 'none', color: '#888', fontSize: '1.2rem',
           cursor: 'pointer', marginBottom: '2rem', padding: 0,
         }}>
@@ -384,20 +457,105 @@ export default function HomePage() {
           {onAirDj.onAirName}'s Line — Open
         </p>
 
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
-          <div style={{ border: '1px solid #222', padding: '1.25rem', cursor: 'pointer' }}>
-            <p style={{ color: IVORY, fontWeight: 700, margin: '0 0 0.3rem' }}>CALL</p>
-            <p style={{ color: '#999', fontSize: '0.85rem', margin: 0 }}>Talk live when the line is open.</p>
+                {twMode === null && (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+            <div style={{ border: '1px solid #222', padding: '1.25rem', opacity: 0.5 }}>
+              <p style={{ color: IVORY, fontWeight: 700, margin: '0 0 0.3rem' }}>CALL</p>
+              <p style={{ color: '#999', fontSize: '0.85rem', margin: 0 }}>Coming soon — telephone integration not yet active.</p>
+            </div>
+            <div onClick={() => setTwMode('message')} style={{ border: '1px solid #222', padding: '1.25rem', cursor: 'pointer' }}>
+              <p style={{ color: IVORY, fontWeight: 700, margin: '0 0 0.3rem' }}>MESSAGE</p>
+              <p style={{ color: '#999', fontSize: '0.85rem', margin: 0 }}>Send something directly to the booth.</p>
+            </div>
+            <div onClick={() => setTwMode('voice')} style={{ border: '1px solid #222', padding: '1.25rem', cursor: 'pointer' }}>
+              <p style={{ color: IVORY, fontWeight: 700, margin: '0 0 0.3rem' }}>VOICE NOTE</p>
+              <p style={{ color: '#999', fontSize: '0.85rem', margin: 0 }}>Leave the DJ a message.</p>
+            </div>
           </div>
-          <div style={{ border: '1px solid #222', padding: '1.25rem', cursor: 'pointer' }}>
-            <p style={{ color: IVORY, fontWeight: 700, margin: '0 0 0.3rem' }}>MESSAGE</p>
-            <p style={{ color: '#999', fontSize: '0.85rem', margin: 0 }}>Send something directly to the booth.</p>
+        )}
+
+        {twMode === 'message' && (
+          <div>
+            {twStatus === 'sent' ? (
+              <>
+                <p style={{ color: GOLD, fontWeight: 700, margin: '0 0 1rem' }}>Message sent to the booth.</p>
+                <button onClick={resetTalkWave} style={{ background: 'none', border: `1px solid ${GOLD}`, color: GOLD, padding: '0.5rem 1rem', borderRadius: 999, cursor: 'pointer' }}>Done</button>
+              </>
+            ) : (
+              <>
+                <input
+                  placeholder="Your name (optional)"
+                  value={twName}
+                  onChange={(e) => setTwName(e.target.value)}
+                  style={{ width: '100%', background: '#111', border: '1px solid #222', color: IVORY, padding: '0.65rem', borderRadius: 4, marginBottom: '0.75rem' }}
+                />
+                <textarea
+                  placeholder="Your message to the booth"
+                  value={twMessage}
+                  onChange={(e) => setTwMessage(e.target.value)}
+                  rows={4}
+                  style={{ width: '100%', background: '#111', border: '1px solid #222', color: IVORY, padding: '0.65rem', borderRadius: 4, marginBottom: '0.75rem', resize: 'vertical' }}
+                />
+                {twStatus === 'error' && <p style={{ color: '#e88', fontSize: '0.85rem', margin: '0 0 0.75rem' }}>Something went wrong — try again.</p>}
+                <div style={{ display: 'flex', gap: '0.75rem' }}>
+                  <button onClick={handleSendMessage} disabled={twStatus === 'sending' || !twMessage.trim()} style={{
+                    border: `1px solid ${GOLD}`, color: GOLD, background: 'transparent', padding: '0.6rem 1.25rem',
+                    borderRadius: 999, cursor: 'pointer', opacity: twStatus === 'sending' || !twMessage.trim() ? 0.5 : 1,
+                  }}>
+                    {twStatus === 'sending' ? 'Sending…' : 'Send'}
+                  </button>
+                  <button onClick={resetTalkWave} style={{ background: 'none', border: 'none', color: '#888', cursor: 'pointer' }}>Cancel</button>
+                </div>
+              </>
+            )}
           </div>
-          <div style={{ border: '1px solid #222', padding: '1.25rem', cursor: 'pointer' }}>
-            <p style={{ color: IVORY, fontWeight: 700, margin: '0 0 0.3rem' }}>VOICE NOTE</p>
-            <p style={{ color: '#999', fontSize: '0.85rem', margin: 0 }}>Leave the DJ a message.</p>
+        )}
+
+        {twMode === 'voice' && (
+          <div>
+            {twStatus === 'sent' ? (
+              <>
+                <p style={{ color: GOLD, fontWeight: 700, margin: '0 0 1rem' }}>Voice note sent to the booth.</p>
+                <button onClick={resetTalkWave} style={{ background: 'none', border: `1px solid ${GOLD}`, color: GOLD, padding: '0.5rem 1rem', borderRadius: 999, cursor: 'pointer' }}>Done</button>
+              </>
+            ) : (
+              <>
+                <input
+                  placeholder="Your name (optional)"
+                  value={twName}
+                  onChange={(e) => setTwName(e.target.value)}
+                  style={{ width: '100%', background: '#111', border: '1px solid #222', color: IVORY, padding: '0.65rem', borderRadius: 4, marginBottom: '1rem' }}
+                />
+                {!twAudioBlob ? (
+                  <button
+                    onClick={twRecording ? stopRecording : startRecording}
+                    style={{
+                      border: `1px solid ${twRecording ? '#e88' : GOLD}`, color: twRecording ? '#e88' : GOLD,
+                      background: 'transparent', padding: '0.75rem 1.5rem', borderRadius: 999, cursor: 'pointer', width: '100%',
+                    }}
+                  >
+                    {twRecording ? '● Stop Recording' : '● Start Recording'}
+                  </button>
+                ) : (
+                  <>
+                    <audio controls src={URL.createObjectURL(twAudioBlob)} style={{ width: '100%', marginBottom: '1rem' }} />
+                    {twStatus === 'error' && <p style={{ color: '#e88', fontSize: '0.85rem', margin: '0 0 0.75rem' }}>Something went wrong — try again.</p>}
+                    <div style={{ display: 'flex', gap: '0.75rem' }}>
+                      <button onClick={handleSendVoiceNote} disabled={twStatus === 'sending'} style={{
+                        border: `1px solid ${GOLD}`, color: GOLD, background: 'transparent', padding: '0.6rem 1.25rem',
+                        borderRadius: 999, cursor: 'pointer', opacity: twStatus === 'sending' ? 0.5 : 1,
+                      }}>
+                        {twStatus === 'sending' ? 'Sending…' : 'Send'}
+                      </button>
+                      <button onClick={() => setTwAudioBlob(null)} style={{ background: 'none', border: 'none', color: '#888', cursor: 'pointer' }}>Re-record</button>
+                    </div>
+                  </>
+                )}
+                <button onClick={resetTalkWave} style={{ background: 'none', border: 'none', color: '#888', cursor: 'pointer', marginTop: '0.75rem', display: 'block' }}>Cancel</button>
+              </>
+            )}
           </div>
-        </div>
+        )}
       </div>
     </div>
   );
