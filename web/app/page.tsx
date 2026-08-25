@@ -347,9 +347,9 @@ export default function HomePage() {
             <p style={{ margin: '0.25rem 0 0' }}>© 2026 JH Broadcast Group. All Rights Reserved.</p>
           </div>
           <div style={{ display: 'flex', gap: '1rem' }}>
-            <a href="#" style={{ color: '#999', textDecoration: 'none' }}>Privacy</a>
-            <a href="#" style={{ color: '#999', textDecoration: 'none' }}>Terms</a>
-            <a href="#" style={{ color: '#999', textDecoration: 'none' }}>Contact</a>
+            <a href="/privacy" style={{ color: '#999', textDecoration: 'none' }}>Privacy</a>
+            <a href="/terms" style={{ color: '#999', textDecoration: 'none' }}>Terms</a>
+            <a href="/contact" style={{ color: '#999', textDecoration: 'none' }}>Contact</a>
           </div>
         </div>
       </footer>
