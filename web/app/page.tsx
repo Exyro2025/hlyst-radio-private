@@ -7,12 +7,12 @@
 
 'use client';
 
-import { useRef, useState } from 'react';
+import { useRef, useState, useEffect } from 'react';
 import Image from 'next/image';
 import { djs } from '@/lib/djs';
 import { getOnAirNow, getComingUp } from '@/lib/schedule';
 
-const STREAM_URL = process.env.NEXT_PUBLIC_STREAM_URL || '';
+const STREAM_URL = process.env.NEXT_PUBLIC_LIVE365_STREAM_URL || '';
 const GOLD = '#c9a44c';
 const BG = '#0a0a0a';
 const IVORY = '#f5f0e8';
@@ -28,6 +28,19 @@ export default function HomePage() {
   const onAirDj = getOnAirNow();
   const comingUp = getComingUp();
   const voices = djs.slice(0, 4);
+  const [nowPlaying, setNowPlaying] = useState<{ live: boolean; title?: string; artist?: string; album?: string; artwork?: string } | null>(null);
+
+  useEffect(() => {
+    const fetchNowPlaying = () => {
+      fetch('/api/now-playing')
+        .then(res => res.json())
+        .then(setNowPlaying)
+        .catch(() => setNowPlaying({ live: false }));
+    };
+    fetchNowPlaying();
+    const interval = setInterval(fetchNowPlaying, 30000);
+    return () => clearInterval(interval);
+  }, []);
 
   const handleLystThis = () => {
     setLystAdded(true);
@@ -154,15 +167,25 @@ export default function HomePage() {
         display: 'flex', alignItems: 'center', gap: '1.5rem', padding: '1.75rem 2rem',
         borderBottom: '1px solid #222', flexWrap: 'wrap',
       }}>
-        <div style={{ width: 88, height: 88, background: '#161616', border: '1px solid #2a2a2a', flexShrink: 0 }} />
+                <div style={{
+          width: 88, height: 88, background: '#161616', border: '1px solid #2a2a2a', flexShrink: 0,
+          backgroundImage: nowPlaying?.artwork ? `url(${encodeURI(nowPlaying.artwork)})` : undefined,
+          backgroundSize: 'cover', backgroundPosition: 'center',
+        }} />
         <div style={{ flex: 1, minWidth: 200 }}>
           <p style={{ color: GOLD, fontSize: '0.7rem', letterSpacing: '0.14em', margin: '0 0 0.25rem' }}>NOW PLAYING</p>
-          <p style={{ fontSize: '1.7rem', fontWeight: 800, margin: 0 }}>Gold</p>
-          <p style={{ color: '#999', fontSize: '0.85rem', margin: '0.2rem 0 0' }}>Cleo Sol · Gold · 2023</p>
-          <div style={{ height: 2, background: '#222', marginTop: '0.75rem', maxWidth: 320 }}>
-            <div style={{ width: '35%', height: '100%', background: GOLD }} />
-          </div>
+          {nowPlaying?.live && nowPlaying.title ? (
+            <>
+              <p style={{ fontSize: '1.7rem', fontWeight: 800, margin: 0 }}>{nowPlaying.title}</p>
+              <p style={{ color: '#999', fontSize: '0.85rem', margin: '0.2rem 0 0' }}>
+                {[nowPlaying.artist, nowPlaying.album].filter(Boolean).join(' · ')}
+              </p>
+            </>
+          ) : (
+            <p style={{ color: '#999', fontSize: '1rem', margin: 0 }}>Live on HLYST Radio</p>
+          )}
         </div>
+      
                 <button onClick={togglePlay} aria-label={playing ? 'Pause' : 'Play'} style={{
           width: 60, height: 60, borderRadius: '50%', background: GOLD, border: 'none',
           cursor: 'pointer', fontSize: '1.5rem', color: BG, flexShrink: 0,
@@ -188,10 +211,7 @@ export default function HomePage() {
             {lystAdded ? 'Added to your Lyst' : '+ Lyst This'}
           </button>
         </div>
-        <div style={{ fontSize: '0.75rem', color: '#888', lineHeight: 1.6 }}>
-          <p style={{ margin: 0 }}>Previously: Different — PJ Morton</p>
-          <p style={{ margin: 0 }}>Next: Do 4 Love — Snoh Aalegra</p>
-        </div>
+        
       </div>
 
       {/* FROM THE LYST */}
