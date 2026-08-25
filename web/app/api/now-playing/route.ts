@@ -4,29 +4,33 @@
 //
 // Place this file at: web/app/api/now-playing/route.ts
 //
-// Honest about what Live365 can and can't provide: streamOnline reflects
-// whether a real Live365 stream URL is configured; nowPlaying/dj/activeShow
-// stay null until either Live365's metadata is confirmed reachable, or the
-// real HLYST controller takes over (see NEXT_PUBLIC_API_URL later).
+// Reads through broadcastProvider.ts rather than talking to Live365 (or
+// hardcoding streamConfigured) directly — see that file's header for why
+// nowPlaying/dj/activeShow stay honestly null even once Live365 is
+// configured. streamOnline now reflects the provider's real configState
+// instead of a separate env-var check that could drift out of sync with it.
 
 import { NextResponse } from 'next/server';
 import type { NowPlayingResponse } from '@/lib/types';
+import { broadcastProvider } from '@/lib/broadcastProvider';
 
 export async function GET() {
-  const streamConfigured = !!process.env.NEXT_PUBLIC_STREAM_URL;
+  const status = await broadcastProvider.getStatus();
 
   const payload: NowPlayingResponse = {
-    nowPlaying: null, // Live365 metadata not yet confirmed reachable — see stationOrigin/live365 notes
+    nowPlaying: status.artist && status.title
+      ? { artist: status.artist, title: status.title }
+      : null,
     context: null,
-            dj: {
-      name: 'HLYST',
+    dj: {
+      name: status.currentDj || 'HLYST',
       tagline: 'The lyst that never gets old.',
       avatar: '',
       station: 'HLYST',
     },
-    activeShow: null,
+    activeShow: status.currentShow ? { name: status.currentShow } : null,
     listeners: undefined,
-    streamOnline: streamConfigured,
+    streamOnline: status.connected,
     streamBitrate: null,
     stream: {
       mount: '/stream.mp3',
@@ -37,10 +41,10 @@ export async function GET() {
       opusEnabled: false,
       flacEnabled: false,
       aacEnabled: false,
-      bufferSeconds: 22, // matches the controller's own default fallback
+      bufferSeconds: 22,
     },
     llmTokens: null,
-    timezone: 'America/New_York', // HLYST is Cleveland-rooted — adjust if needed
+    timezone: 'America/New_York',
     locale: 'en-US',
   };
 
