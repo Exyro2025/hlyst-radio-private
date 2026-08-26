@@ -20,6 +20,10 @@ async function tableStatus(query: () => Promise<unknown[]>): Promise<{ ok: boole
     const count = Number((rows[0] as { count?: unknown })?.count ?? 0);
     return { ok: true, count };
   } catch (e) {
+    // Most common cause: the table/column doesn't exist yet (relation does
+    // not exist / column does not exist) — that's an honest "not set up",
+    // not a system failure, so it's reported as ok:false with the reason
+    // rather than a 500.
     return { ok: false, error: e instanceof Error ? e.message : 'Unknown error' };
   }
 }
@@ -46,6 +50,7 @@ export async function GET() {
   return Response.json({
     checkedAt: new Date().toISOString(),
     elevenLabsConfigured: Boolean(process.env.ELEVENLABS_API_KEY),
+    llmConfigured: Boolean(process.env.ANTHROPIC_API_KEY || process.env.OPENAI_API_KEY),
     live365Configured: Boolean(process.env.LIVE365_STATION_ID && process.env.LIVE365_STREAM_URL),
     talkWaveEngineSecretConfigured: Boolean(process.env.TALKWAVE_ENGINE_SECRET),
     personasTable: personas,
