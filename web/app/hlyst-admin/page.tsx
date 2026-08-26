@@ -65,7 +65,7 @@ export default function HlystAdminPage() {
   const [messages, setMessages] = useState<MessageRow[]>([]);
   const [voiceNotes, setVoiceNotes] = useState<VoiceNoteRow[]>([]);
   const [loading, setLoading] = useState(false);
-  const [tab, setTab] = useState<'talkwave' | 'personas' | 'health'>('talkwave');
+  const [tab, setTab] = useState<'talkwave' | 'personas' | 'health' | 'breaks'>('talkwave');
 
   const [personas, setPersonas] = useState<PersonaRow[]>([]);
   const [personasLoading, setPersonasLoading] = useState(false);
@@ -78,6 +78,11 @@ export default function HlystAdminPage() {
   const [previewText, setPreviewText] = useState('');
   const [previewLoading, setPreviewLoading] = useState(false);
   const [previewError, setPreviewError] = useState('');
+
+  const [breaksLog, setBreaksLog] = useState<any[]>([]);
+  const [breaksLoading, setBreaksLoading] = useState(false);
+  const [tickResult, setTickResult] = useState<any>(null);
+  const [tickLoading, setTickLoading] = useState(false);
 
   const [health, setHealth] = useState<any>(null);
   const [healthLoading, setHealthLoading] = useState(false);
@@ -116,6 +121,29 @@ export default function HlystAdminPage() {
     setHealthLoading(false);
   };
 
+  const fetchBreaksLog = async () => {
+    setBreaksLoading(true);
+    const res = await fetch('/api/hlyst-admin/dj-breaks');
+    if (res.ok) {
+      const data = await res.json();
+      setBreaksLog(data.breaks || []);
+    }
+    setBreaksLoading(false);
+  };
+
+  const runEngineTick = async () => {
+    setTickLoading(true);
+    setTickResult(null);
+    try {
+      const res = await fetch('/api/hlyst-admin/engine-tick', { method: 'POST' });
+      setTickResult(await res.json());
+    } catch {
+      setTickResult({ error: 'Could not reach the engine-tick endpoint.' });
+    }
+    setTickLoading(false);
+    fetchBreaksLog();
+  };
+
   useEffect(() => {
     fetchData();
   }, []);
@@ -126,6 +154,9 @@ export default function HlystAdminPage() {
     }
     if (tab === 'health' && authed) {
       fetchHealth();
+    }
+    if (tab === 'breaks' && authed) {
+      fetchBreaksLog();
     }
   }, [tab, authed]);
 
@@ -281,7 +312,7 @@ export default function HlystAdminPage() {
     </div>
   );
 
-  const TabButton = ({ id, label }: { id: 'talkwave' | 'personas' | 'health'; label: string }) => (
+  const TabButton = ({ id, label }: { id: 'talkwave' | 'personas' | 'health' | 'breaks'; label: string }) => (
     <button
       onClick={() => setTab(id)}
       style={{
@@ -308,6 +339,7 @@ export default function HlystAdminPage() {
         <TabButton id="talkwave" label="Talk Wave" />
         <TabButton id="personas" label="DJ Personas" />
         <TabButton id="health" label="Engine Health" />
+        <TabButton id="breaks" label="DJ Breaks" />
       </div>
 
       {tab === 'talkwave' && (
@@ -526,6 +558,72 @@ export default function HlystAdminPage() {
               </button>
             </div>
           )}
+        </div>
+      )}
+
+      {tab === 'breaks' && (
+        <div>
+          <div style={{ marginBottom: '1.5rem' }}>
+            <button
+              onClick={runEngineTick}
+              disabled={tickLoading}
+              style={{
+                border: `1px solid ${GOLD}`, color: GOLD, background: 'transparent',
+                padding: '0.65rem 1.4rem', borderRadius: 8, cursor: 'pointer',
+              }}
+            >
+              {tickLoading ? 'Running…' : 'Run engine tick now'}
+            </button>
+            <p style={{ color: '#888', fontSize: '0.8rem', marginTop: '0.6rem' }}>
+              Manually runs the real decide-then-generate pipeline for whoever's on the current schedule slot right now.
+              A real deployment would call this automatically every few minutes — that scheduling isn't wired up yet.
+            </p>
+          </div>
+
+          {tickResult && (
+            <div style={{
+              background: '#111', border: `1px solid ${tickResult.error ? '#7a3030' : '#222'}`, borderRadius: 8,
+              padding: '1rem 1.2rem', marginBottom: '1.5rem',
+            }}>
+              <p style={{ margin: 0, fontSize: '0.85rem', color: '#999' }}>
+                {tickResult.personaName ? `${tickResult.personaName} — ` : ''}{tickResult.reason}
+              </p>
+              {tickResult.text && (
+                <p style={{ margin: '0.6rem 0 0', fontStyle: 'italic', fontSize: '0.95rem' }}>{tickResult.text}</p>
+              )}
+              {tickResult.error && (
+                <p style={{ margin: '0.6rem 0 0', color: '#e88', fontSize: '0.85rem' }}>{tickResult.error}</p>
+              )}
+            </div>
+          )}
+
+          <div style={{ borderTop: '1px solid #222', paddingTop: '1.5rem' }}>
+            <label style={labelStyle}>Recent breaks (last 50)</label>
+            {breaksLoading && <p style={{ color: '#888' }}>Loading…</p>}
+            {!breaksLoading && breaksLog.length === 0 && (
+              <p style={{ color: '#666', fontSize: '0.85rem' }}>Nothing generated yet — run a tick above, or wait for real activity once this is on a schedule.</p>
+            )}
+            {breaksLog.map((b) => (
+              <div key={b.id} style={{
+                padding: '0.9rem 0', borderBottom: '1px solid #1a1a1a',
+                display: 'flex', justifyContent: 'space-between', gap: '1rem',
+              }}>
+                <div>
+                  <div style={{ fontSize: '0.9rem' }}>
+                    <b>{b.persona_name}</b> · {b.break_type}
+                    {b.status === 'error' && <span style={{ color: '#e88' }}> · error</span>}
+                  </div>
+                  <div style={{ fontSize: '0.85rem', color: '#ccc', marginTop: '0.2rem', fontStyle: 'italic' }}>
+                    {b.text || b.error_detail}
+                  </div>
+                  <div style={{ fontSize: '0.75rem', color: '#666', marginTop: '0.2rem' }}>{b.reason}</div>
+                </div>
+                <div style={{ fontSize: '0.75rem', color: '#666', whiteSpace: 'nowrap' }}>
+                  {new Date(b.created_at).toLocaleString()}
+                </div>
+              </div>
+            ))}
+          </div>
         </div>
       )}
     </div>
