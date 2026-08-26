@@ -22,9 +22,6 @@ interface VoiceNoteRow {
   created_at: string;
 }
 
-// Matches the personas table (snake_case, as Postgres returns it) — kept
-// separate from the camelCase shape the save API expects, and mapped
-// explicitly below rather than guessed field-by-field.
 interface PersonaRow {
   id: string;
   name: string;
@@ -78,6 +75,8 @@ export default function HlystAdminPage() {
   const [previewText, setPreviewText] = useState('');
   const [previewLoading, setPreviewLoading] = useState(false);
   const [previewError, setPreviewError] = useState('');
+  const [previewAudioUrl, setPreviewAudioUrl] = useState('');
+  const [previewAudioError, setPreviewAudioError] = useState('');
 
   const [breaksLog, setBreaksLog] = useState<any[]>([]);
   const [breaksLoading, setBreaksLoading] = useState(false);
@@ -206,6 +205,8 @@ export default function HlystAdminPage() {
     setSaveError('');
     setPreviewText('');
     setPreviewError('');
+    setPreviewAudioUrl('');
+    setPreviewAudioError('');
   };
 
   const generatePreview = async () => {
@@ -213,6 +214,8 @@ export default function HlystAdminPage() {
     setPreviewLoading(true);
     setPreviewError('');
     setPreviewText('');
+    setPreviewAudioUrl('');
+    setPreviewAudioError('');
     try {
       const res = await fetch('/api/hlyst-admin/generate-break', {
         method: 'POST',
@@ -224,6 +227,8 @@ export default function HlystAdminPage() {
         setPreviewError(body.error || 'Generation failed.');
       } else {
         setPreviewText(body.text);
+        if (body.audioUrl) setPreviewAudioUrl(body.audioUrl);
+        if (body.audioError) setPreviewAudioError(body.audioError);
       }
     } catch {
       setPreviewError('Could not reach the generation endpoint.');
@@ -519,6 +524,12 @@ export default function HlystAdminPage() {
                   {previewText && (
                     <div style={{ marginTop: '0.75rem', padding: '0.9rem 1rem', background: '#111', border: '1px solid #222', borderRadius: 6 }}>
                       <p style={{ margin: 0, fontSize: '0.95rem', lineHeight: 1.6, fontStyle: 'italic' }}>{previewText}</p>
+                      {previewAudioUrl && (
+                        <audio controls src={previewAudioUrl} style={{ width: '100%', marginTop: '0.75rem' }} />
+                      )}
+                      {previewAudioError && (
+                        <p style={{ color: '#c9944c', fontSize: '0.8rem', marginTop: '0.6rem' }}>Audio not rendered: {previewAudioError}</p>
+                      )}
                     </div>
                   )}
                 </div>
@@ -631,11 +642,16 @@ export default function HlystAdminPage() {
                   <div style={{ fontSize: '0.9rem' }}>
                     <b>{b.persona_name}</b> · {b.break_type}
                     {b.status === 'error' && <span style={{ color: '#e88' }}> · error</span>}
+                    {b.status !== 'error' && b.audio_status === 'rendered' && <span style={{ color: '#8c8' }}> · audio</span>}
+                    {b.status !== 'error' && b.audio_status === 'failed' && <span style={{ color: '#c9944c' }}> · audio failed</span>}
                   </div>
                   <div style={{ fontSize: '0.85rem', color: '#ccc', marginTop: '0.2rem', fontStyle: 'italic' }}>
                     {b.text || b.error_detail}
                   </div>
                   <div style={{ fontSize: '0.75rem', color: '#666', marginTop: '0.2rem' }}>{b.reason}</div>
+                  {b.audio_url && (
+                    <audio controls src={b.audio_url} style={{ width: '100%', marginTop: '0.5rem', height: 32 }} />
+                  )}
                 </div>
                 <div style={{ fontSize: '0.75rem', color: '#666', whiteSpace: 'nowrap' }}>
                   {new Date(b.created_at).toLocaleString()}
