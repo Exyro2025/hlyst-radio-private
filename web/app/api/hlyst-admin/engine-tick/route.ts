@@ -1,17 +1,21 @@
-// Wakes the HLYST DJ engine on a real cadence. This does NOT mean "make the
-// DJ speak" — it means "ask the engine to evaluate whether anything needs
-// to happen right now." Two ways in: an admin session cookie (the "Run
-// engine tick now" button), or Authorization: Bearer <HLYST_ENGINE_CRON_SECRET>
-// (an external scheduler — GitHub Actions — calling this on a real cadence).
+// The real decide-then-generate-then-log pipeline. Two ways in:
+//  - Admin session cookie (the "Run engine tick now" button in the UI)
+//  - Authorization: Bearer <HLYST_ENGINE_CRON_SECRET> (an external scheduler
+//    — GitHub Actions — calling this on a real cadence). This is a secret
+//    we own, not Vercel's auto-provisioned CRON_SECRET, since we're
+//    deliberately not using Vercel Cron (see HLYST_ENGINE_CRON_SECRET in
+//    .env.example for why).
 //
 // Idempotent by design: a "claim" row is inserted with a deterministic
 // tick_key BEFORE any LLM call happens. If another tick already claimed
-// that exact key, this run backs off immediately — no duplicate break, no
-// wasted LLM call.
+// that exact key (UNIQUE(persona_id, tick_key)), this run backs off
+// immediately — no duplicate break, no wasted LLM call. This matters
+// because the trigger (GitHub Actions cron) is explicitly best-effort and
+// can occasionally double-fire or overlap.
 //
-// Audio rendering is isolated from text generation on purpose — a break
-// with real text but no audio still counts as generated. Nothing here can
-// turn a successful text generation into a logged error.
+// Every invocation — whether it spoke, stayed silent, or hit a duplicate —
+// is logged to engine_tick_log, so scheduler health is visible from the
+// Control Room independent of whether anything was actually generated.
 
 import { cookies } from 'next/headers';
 import { neon } from '@neondatabase/serverless';
@@ -122,9 +126,6 @@ export async function POST(req: Request) {
   const lastBreakAt = lastBreakRows.length ? new Date((lastBreakRows[0] as any).created_at) : null;
   const lastBreakType = lastBreakRows.length ? ((lastBreakRows[0] as any).break_type as BreakType) : null;
 
-    // Isolated on purpose: if the messages table is unreachable for any
-  // reason, Talk Wave availability just reads as zero for this tick —
-  // station IDs, hourly checks, and ad-libs must not go down with it.
   let approvedTalkWaveCount = 0;
   try {
     const talkWaveCountRows = await sql`
@@ -167,6 +168,7 @@ export async function POST(req: Request) {
   const systemPrompt = buildDjSystemPrompt(enginePersona);
 
   let talkWaveItem: { id: number; message: string } | null = null;
+  let spotlightTrack: { id: number; title: string; artist: string } | null = null;
   let userPrompt: string;
   if (decision.breakType === 'talkwave_response') {
     const itemRows = await sql`
@@ -177,6 +179,19 @@ export async function POST(req: Request) {
     if (itemRows.length) {
       talkWaveItem = itemRows[0] as any;
       userPrompt = `A listener sent in this message: "${talkWaveItem!.message}". Acknowledge it naturally, briefly.`;
+    } else {
+      userPrompt = BREAK_PROMPTS.ad_lib;
+    }
+  } else if (decision.breakType === 'ad_lib') {
+    const spotlightRows = await sql`
+      SELECT id, title, artist FROM artist_music
+      WHERE release_status = 'NEW_RELEASE'
+      ORDER BY last_featured_at ASC NULLS FIRST
+      LIMIT 1
+    `;
+    if (spotlightRows.length) {
+      spotlightTrack = spotlightRows[0] as any;
+      userPrompt = `Give a short, natural aside spotlighting "${spotlightTrack!.title}" by ${spotlightTrack!.artist} — a real new release. You may call it new, since it genuinely is. Don't invent details about it beyond the title and artist.`;
     } else {
       userPrompt = BREAK_PROMPTS.ad_lib;
     }
@@ -205,6 +220,10 @@ export async function POST(req: Request) {
         UPDATE messages SET used_at = now(), used_by_dj = ${personaId}, used_by_show = ${startTime}
         WHERE id = ${talkWaveItem.id}
       `;
+    }
+
+    if (spotlightTrack) {
+      await sql`UPDATE artist_music SET last_featured_at = now() WHERE id = ${spotlightTrack.id}`;
     }
 
     await logTick({ personaId, shouldSpeak: true, breakType: decision.breakType!, reason: decision.reason, skippedDuplicate: false, errorDetail: null });
