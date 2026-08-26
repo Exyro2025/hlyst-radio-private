@@ -64,7 +64,7 @@ export default function HlystAdminPage() {
   const [messages, setMessages] = useState<MessageRow[]>([]);
   const [voiceNotes, setVoiceNotes] = useState<VoiceNoteRow[]>([]);
   const [loading, setLoading] = useState(false);
-  const [tab, setTab] = useState<'talkwave' | 'personas' | 'health' | 'breaks' | 'vm' | 'production'>('talkwave');
+  const [tab, setTab] = useState<'talkwave' | 'personas' | 'health' | 'breaks' | 'vm' | 'production' | 'artist'>('talkwave');
 
   const [personas, setPersonas] = useState<PersonaRow[]>([]);
   const [personasLoading, setPersonasLoading] = useState(false);
@@ -228,6 +228,102 @@ export default function HlystAdminPage() {
     setProdLoading(false);
   };
 
+  const deleteProdItem = async (id: number) => {
+    if (!confirm('Delete this production track? This removes the file permanently, not just from the list.')) return;
+    await fetch('/api/hlyst-admin/production-music', {
+      method: 'DELETE',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ id }),
+    });
+    fetchProdItems();
+  };
+
+  const fetchArtistItems = async () => {
+    setArtistLoading(true);
+    const res = await fetch('/api/hlyst-admin/artist-music');
+    if (res.ok) {
+      const data = await res.json();
+      setArtistItems(data.items || []);
+    }
+    setArtistLoading(false);
+  };
+
+  const handleArtistFileSelect = async (file: File) => {
+    setArtistFile(file);
+    setArtistError('');
+    setArtistParsing(true);
+    try {
+      const metadata = await parseBlob(file);
+      setArtistTitle(metadata.common.title || file.name.replace(/\.[^.]+$/, ''));
+      setArtistArtist(metadata.common.artist || '');
+      setArtistComposer(metadata.common.composer?.join(', ') || '');
+      setArtistGenre(metadata.common.genre?.join(', ') || '');
+      setArtistDuration(metadata.format.duration ? Math.round(metadata.format.duration) : null);
+      setArtistFormat(metadata.format.container || file.type.split('/')[1] || '');
+    } catch {
+      setArtistTitle(file.name.replace(/\.[^.]+$/, ''));
+    }
+    setArtistParsing(false);
+  };
+
+  const uploadArtistTrack = async () => {
+    if (!artistFile || !artistTitle || !artistArtist) return;
+    setArtistUploading(true);
+    setArtistError('');
+    try {
+      const blob = await upload(artistFile.name, artistFile, {
+        access: 'public',
+        handleUploadUrl: '/api/hlyst-admin/artist-music/upload-token',
+      });
+
+      const res = await fetch('/api/hlyst-admin/artist-music', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          title: artistTitle,
+          artist: artistArtist,
+          composer: artistComposer,
+          genre: artistGenre,
+          durationSeconds: artistDuration,
+          fileFormat: artistFormat,
+          fileSizeBytes: artistFile.size,
+          audioUrl: blob.url,
+          releaseStatus: artistReleaseStatus,
+          releaseDate: artistReleaseDate || null,
+        }),
+      });
+      const body = await res.json();
+      if (!res.ok) {
+        setArtistError(body.error || 'Save failed.');
+      } else {
+        setArtistFile(null);
+        setArtistTitle('');
+        setArtistArtist('');
+        setArtistComposer('');
+        setArtistGenre('');
+        setArtistDuration(null);
+        setArtistFormat('');
+        setArtistReleaseStatus('CURRENT');
+        setArtistReleaseDate('');
+        if (artistFileInputRef.current) artistFileInputRef.current.value = '';
+        fetchArtistItems();
+      }
+    } catch (e) {
+      setArtistError(e instanceof Error ? e.message : 'Upload failed.');
+    }
+    setArtistUploading(false);
+  };
+
+  const deleteArtistItem = async (id: number) => {
+    if (!confirm('Delete this artist track? This removes the file permanently, not just from the list.')) return;
+    await fetch('/api/hlyst-admin/artist-music', {
+      method: 'DELETE',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ id }),
+    });
+    fetchArtistItems();
+  };
+
   const handleProdFileSelect = async (file: File) => {
     setProdFile(file);
     setProdError('');
@@ -329,6 +425,9 @@ export default function HlystAdminPage() {
     }
     if (tab === 'production' && authed) {
       fetchProdItems();
+    }
+    if (tab === 'artist' && authed) {
+      fetchArtistItems();
     }
   }, [tab, authed]);
 
@@ -490,7 +589,7 @@ export default function HlystAdminPage() {
     </div>
   );
 
-  const TabButton = ({ id, label }: { id: 'talkwave' | 'personas' | 'health' | 'breaks' | 'vm' | 'production'; label: string }) => (
+  const TabButton = ({ id, label }: { id: 'talkwave' | 'personas' | 'health' | 'breaks' | 'vm' | 'production' | 'artist'; label: string }) => (
     <button
       onClick={() => setTab(id)}
       style={{
@@ -1041,6 +1140,140 @@ export default function HlystAdminPage() {
                   </p>
                 )}
                 <audio controls src={item.audio_url} style={{ width: '100%', marginTop: '0.5rem', height: 32 }} />
+                <button
+                  onClick={() => deleteProdItem(item.id)}
+                  style={{
+                    marginTop: '0.6rem', fontSize: '0.75rem', padding: '0.3rem 0.7rem', borderRadius: 999, cursor: 'pointer',
+                    border: '1px solid #7a3030', color: '#e88', background: 'transparent',
+                  }}
+                >
+                  Delete
+                </button>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {tab === 'artist' && (
+        <div>
+          <p style={{ color: '#888', fontSize: '0.85rem', marginBottom: '1.5rem' }}>
+            Real artist releases — kept operationally separate from HLYST's own production beds. Artist stays
+            as detected, never overridden. Release status controls whether a DJ may call it "new."
+          </p>
+
+          <div style={{ border: '1px solid #222', borderRadius: 6, padding: '1.2rem', marginBottom: '2rem' }}>
+            <label style={labelStyle}>Upload an artist track</label>
+            <input
+              ref={artistFileInputRef}
+              type="file"
+              accept="audio/mpeg,audio/wav,audio/x-wav,audio/wave"
+              onChange={(e) => {
+                const f = e.target.files?.[0];
+                if (f) handleArtistFileSelect(f);
+              }}
+              style={{ ...fieldStyle, marginTop: '0.4rem' }}
+            />
+
+            {artistParsing && <p style={{ color: '#888', fontSize: '0.8rem', marginTop: '0.6rem' }}>Reading file…</p>}
+
+            {artistFile && !artistParsing && (
+              <>
+                <label style={labelStyle}>Title (detected — edit if needed)</label>
+                <input style={fieldStyle} value={artistTitle} onChange={(e) => setArtistTitle(e.target.value)} />
+
+                <label style={labelStyle}>Artist (detected — edit if needed)</label>
+                <input style={fieldStyle} value={artistArtist} onChange={(e) => setArtistArtist(e.target.value)} placeholder="e.g. Tarvona" />
+
+                <div style={{ display: 'flex', gap: '1rem' }}>
+                  <div style={{ flex: 1 }}>
+                    <label style={labelStyle}>Composer (detected)</label>
+                    <input style={fieldStyle} value={artistComposer} onChange={(e) => setArtistComposer(e.target.value)} />
+                  </div>
+                  <div style={{ flex: 1 }}>
+                    <label style={labelStyle}>Genre (detected)</label>
+                    <input style={fieldStyle} value={artistGenre} onChange={(e) => setArtistGenre(e.target.value)} />
+                  </div>
+                </div>
+
+                <p style={{ color: '#666', fontSize: '0.8rem', marginTop: '0.5rem' }}>
+                  Duration: {artistDuration ? `${Math.floor(artistDuration / 60)}:${String(artistDuration % 60).padStart(2, '0')}` : 'unknown'}
+                  {' · '}Format: {artistFormat || 'unknown'}
+                  {' · '}Size: {(artistFile.size / 1024 / 1024).toFixed(1)} MB
+                </p>
+
+                <div style={{ display: 'flex', gap: '1rem' }}>
+                  <div style={{ flex: 1 }}>
+                    <label style={labelStyle}>Release status</label>
+                    <select style={fieldStyle} value={artistReleaseStatus} onChange={(e) => setArtistReleaseStatus(e.target.value)}>
+                      <option value="NEW_RELEASE">New Release</option>
+                      <option value="CURRENT">Current</option>
+                      <option value="CATALOG">Catalog</option>
+                    </select>
+                  </div>
+                  <div style={{ flex: 1 }}>
+                    <label style={labelStyle}>Release date (optional)</label>
+                    <input type="date" style={fieldStyle} value={artistReleaseDate} onChange={(e) => setArtistReleaseDate(e.target.value)} />
+                  </div>
+                </div>
+                <p style={{ color: '#666', fontSize: '0.75rem', marginTop: '0.4rem' }}>
+                  Only tracks marked "New Release" here can be described on-air as new — this is an editorial
+                  status you control, not a fixed expiration window.
+                </p>
+
+                {artistError && <p style={{ color: '#e88', fontSize: '0.85rem', marginTop: '0.75rem' }}>{artistError}</p>}
+
+                <button
+                  onClick={uploadArtistTrack}
+                  disabled={artistUploading || !artistTitle || !artistArtist}
+                  style={{
+                    marginTop: '1.2rem', border: `1px solid ${GOLD}`, color: GOLD, background: 'transparent',
+                    padding: '0.6rem 1.5rem', borderRadius: 999, cursor: 'pointer',
+                  }}
+                >
+                  {artistUploading ? 'Uploading…' : 'Upload & save'}
+                </button>
+              </>
+            )}
+          </div>
+
+          <div style={{ borderTop: '1px solid #222', paddingTop: '1.5rem' }}>
+            <label style={labelStyle}>Library ({artistItems.length})</label>
+            {artistLoading && <p style={{ color: '#888' }}>Loading…</p>}
+            {!artistLoading && artistItems.length === 0 && (
+              <p style={{ color: '#666', fontSize: '0.85rem' }}>Nothing uploaded yet.</p>
+            )}
+            {artistItems.map((item) => (
+              <div key={item.id} style={{ border: '1px solid #222', padding: '1rem', marginBottom: '0.75rem', borderRadius: 4 }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.8rem', color: '#888', marginBottom: '0.4rem' }}>
+                  <span>
+                    <b style={{ color: IVORY }}>{item.title}</b>
+                    {' — '}{item.artist}
+                    {' · '}
+                    <span style={{
+                      color: item.release_status === 'NEW_RELEASE' ? GOLD : item.release_status === 'CATALOG' ? '#666' : '#8c8',
+                    }}>
+                      {item.release_status.replace('_', ' ')}
+                    </span>
+                  </span>
+                  <span>{new Date(item.uploaded_at).toLocaleDateString()}</span>
+                </div>
+                <p style={{ margin: 0, fontSize: '0.8rem', color: '#999' }}>
+                  {item.composer && `Composer: ${item.composer} · `}
+                  {item.genre && `${item.genre} · `}
+                  {item.duration_seconds ? `${Math.floor(item.duration_seconds / 60)}:${String(item.duration_seconds % 60).padStart(2, '0')} · ` : ''}
+                  {item.file_format}
+                </p>
+                <audio controls src={item.audio_url} style={{ width: '100%', marginTop: '0.5rem', height: 32 }} />
+                <button
+                  onClick={() => deleteArtistItem(item.id)}
+                  style={{
+                    marginTop: '0.6rem', fontSize: '0.75rem', padding: '0.3rem 0.7rem', borderRadius: 999, cursor: 'pointer',
+                    border: '1px solid #7a3030', color: '#e88', background: 'transparent',
+                  }}
+                >
+                  Delete
+                </button>
               </div>
             ))}
           </div>
