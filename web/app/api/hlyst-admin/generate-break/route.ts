@@ -1,18 +1,14 @@
 // Admin-only preview endpoint — generates ONE test line for a persona,
-// using the real system prompt (djPrompt.server.ts) and a real LLM call.
-// This is text-only: no TTS, no air, nothing cached or scheduled. Matches
-// the spec's "preview function that generates a test line... without
-// sending it to air" — the text half of that; audio waits on ElevenLabs
-// credentials.
-//
-// See engine-tick/route.ts for the real decide-then-generate-then-log
-// pipeline — this route is deliberately separate: always generates on
-// demand regardless of timing, and never writes to the DJ Breaks log.
+// using the real system prompt and a real LLM call, and (when the persona
+// has a voice ID and ElevenLabs is configured) a real rendered audio
+// preview. Nothing here writes to the DJ Breaks log or the schedule.
 
 import { cookies } from 'next/headers';
 import { neon } from '@neondatabase/serverless';
 import { buildDjSystemPrompt, type EnginePersona } from '@/lib/djPrompt.server';
 import { callLLM } from '@/lib/llm.server';
+import { synthesizeSpeech } from '@/lib/elevenlabs.server';
+import { put } from '@vercel/blob';
 
 const sql = neon(process.env.TALKWAVE_URL_POSTGRES_URL!);
 
@@ -40,7 +36,7 @@ export async function POST(req: Request) {
   }
 
   const rows = await sql`
-    SELECT name, soul, humour, local_colour, warmth, language
+    SELECT name, soul, humour, local_colour, warmth, language, tts_voice_id
     FROM personas WHERE id = ${personaId} LIMIT 1
   `;
   if (!rows.length) {
@@ -61,7 +57,24 @@ export async function POST(req: Request) {
 
   try {
     const { text, provider } = await callLLM(systemPrompt, userPrompt);
-    return Response.json({ text, provider, systemPrompt });
+
+    let audioUrl: string | null = null;
+    let audioError: string | null = null;
+    if (r.tts_voice_id && process.env.ELEVENLABS_API_KEY) {
+      try {
+        const audioBuffer = await synthesizeSpeech(text, r.tts_voice_id);
+        const blob = await put(`preview/${personaId}-${Date.now()}.mp3`, audioBuffer, {
+          access: 'public',
+          contentType: 'audio/mpeg',
+          addRandomSuffix: false,
+        });
+        audioUrl = blob.url;
+      } catch (e) {
+        audioError = e instanceof Error ? e.message : 'Audio rendering failed.';
+      }
+    }
+
+    return Response.json({ text, provider, systemPrompt, audioUrl, audioError });
   } catch (e) {
     const message = e instanceof Error ? e.message : 'Generation failed.';
     const status = message.startsWith('No LLM configured') ? 503 : 502;
