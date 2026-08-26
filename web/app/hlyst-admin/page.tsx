@@ -107,6 +107,22 @@ export default function HlystAdminPage() {
   const [prodError, setProdError] = useState('');
   const prodFileInputRef = useRef<HTMLInputElement>(null);
 
+  const [artistItems, setArtistItems] = useState<any[]>([]);
+  const [artistLoading, setArtistLoading] = useState(false);
+  const [artistFile, setArtistFile] = useState<File | null>(null);
+  const [artistTitle, setArtistTitle] = useState('');
+  const [artistArtist, setArtistArtist] = useState('');
+  const [artistComposer, setArtistComposer] = useState('');
+  const [artistGenre, setArtistGenre] = useState('');
+  const [artistDuration, setArtistDuration] = useState<number | null>(null);
+  const [artistFormat, setArtistFormat] = useState('');
+  const [artistReleaseStatus, setArtistReleaseStatus] = useState('CURRENT');
+  const [artistReleaseDate, setArtistReleaseDate] = useState('');
+  const [artistParsing, setArtistParsing] = useState(false);
+  const [artistUploading, setArtistUploading] = useState(false);
+  const [artistError, setArtistError] = useState('');
+  const artistFileInputRef = useRef<HTMLInputElement>(null);
+
   const [health, setHealth] = useState<any>(null);
   const [healthLoading, setHealthLoading] = useState(false);
 
@@ -504,6 +520,7 @@ export default function HlystAdminPage() {
         <TabButton id="breaks" label="DJ Breaks" />
         <TabButton id="vm" label="Station Imaging" />
         <TabButton id="production" label="Production Music" />
+        <TabButton id="artist" label="Artist Music" />
       </div>
 
       {tab === 'talkwave' && (
