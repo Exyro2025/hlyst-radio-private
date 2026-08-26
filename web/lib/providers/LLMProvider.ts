@@ -100,22 +100,25 @@ export class OpenAIProvider implements LLMProvider {
 //
 // Off Vercel (see DEPLOYMENT.md), set AI_GATEWAY_API_KEY instead, since
 // OIDC is a Vercel-runtime-only mechanism.
+//
+// Default model: anthropic/claude-haiku-4.5 — confirmed via the live
+// https://ai-gateway.vercel.sh/v1/models catalog, and its own listed
+// description explicitly names it as suited for "free tier products and
+// intelligence-sensitive applications with budget constraints." The
+// original default (a full Sonnet model) hit AI Gateway's free-tier
+// model restriction ("Free tier users do not have access to this
+// model"). Note the real model ID format uses periods (claude-haiku-4.5),
+// not hyphens — the first attempt's id string had that wrong too.
 
 export class GatewayProvider implements LLMProvider {
   readonly name = 'gateway';
   private readonly model: string;
 
-  constructor(model = 'anthropic/claude-sonnet-4-6') {
+  constructor(model = 'anthropic/claude-haiku-4.5') {
     this.model = model;
   }
 
   isConfigured(): boolean {
-    // On Vercel with OIDC federation enabled, the SDK resolves credentials
-    // itself with no env var required — so this can't check for a token's
-    // presence the way the other providers check for an API key. Instead,
-    // this provider is offered as a last-resort candidate (see
-    // getLLMProvider() below) and its actual availability is proven by
-    // whether generate() succeeds, not guessed at here.
     return true;
   }
 
