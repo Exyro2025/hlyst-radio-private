@@ -32,7 +32,9 @@ function resolveCurrentSlot(now: Date) {
   let hour = Number(parts.find((p) => p.type === 'hour')!.value);
   if (hour === 24) hour = 0; // ICU midnight quirk
 
-  let blockHour = hour < SLOT_STARTS[0] ? 22 : SLOT_STARTS[0];
+  const FIRST_SLOT_START = 2; // matches SLOT_STARTS[0] — spelled out to avoid
+  // strict TypeScript flagging bracket access as possibly undefined.
+  let blockHour = hour < FIRST_SLOT_START ? 22 : FIRST_SLOT_START;
   for (const s of SLOT_STARTS) if (hour >= s) blockHour = s;
 
   return { dayIndex: DAY_ORDER.indexOf(dayOfWeek), startTime: `${String(blockHour).padStart(2, '0')}:00` };
@@ -79,7 +81,7 @@ export async function GET() {
     const [h] = nextRow.startTime.split(':').map(Number);
     const h12 = (h as number) % 12 || 12;
     const ampm = (h as number) >= 12 ? 'PM' : 'AM';
-    const startsAt = `${DAY_ABBR[nextRow.dayIndex]} ${h12}${ampm}`;
+    const startsAt = `${DAY_ABBR[nextRow.dayIndex] ?? '???'} ${h12}${ampm}`;
 
     return Response.json({
       onAir: onAirProfile,
