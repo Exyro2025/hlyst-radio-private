@@ -122,6 +122,9 @@ export default function HlystAdminPage() {
   const [artistUploading, setArtistUploading] = useState(false);
   const [artistError, setArtistError] = useState('');
   const artistFileInputRef = useRef<HTMLInputElement>(null);
+  const [artistArtworkFile, setArtistArtworkFile] = useState<File | null>(null);
+  const [artistArtworkPreview, setArtistArtworkPreview] = useState('');
+  const artistArtworkInputRef = useRef<HTMLInputElement>(null);
 
   const [health, setHealth] = useState<any>(null);
   const [healthLoading, setHealthLoading] = useState(false);
@@ -271,6 +274,23 @@ export default function HlystAdminPage() {
     setArtistUploading(true);
     setArtistError('');
     try {
+      let artworkUrl: string | null = null;
+      if (artistArtworkFile) {
+        const artworkFormData = new FormData();
+        artworkFormData.append('file', artistArtworkFile);
+        const artworkRes = await fetch('/api/hlyst-admin/artist-music/artwork-upload', {
+          method: 'POST',
+          body: artworkFormData,
+        });
+        const artworkBody = await artworkRes.json();
+        if (!artworkRes.ok) {
+          setArtistError(artworkBody.error || 'Artwork upload failed.');
+          setArtistUploading(false);
+          return;
+        }
+        artworkUrl = artworkBody.url;
+      }
+
       const blob = await upload(artistFile.name, artistFile, {
         access: 'public',
         handleUploadUrl: '/api/hlyst-admin/artist-music/upload-token',
@@ -288,6 +308,7 @@ export default function HlystAdminPage() {
           fileFormat: artistFormat,
           fileSizeBytes: artistFile.size,
           audioUrl: blob.url,
+          artworkUrl,
           releaseStatus: artistReleaseStatus,
           releaseDate: artistReleaseDate || null,
         }),
@@ -305,7 +326,10 @@ export default function HlystAdminPage() {
         setArtistFormat('');
         setArtistReleaseStatus('CURRENT');
         setArtistReleaseDate('');
+        setArtistArtworkFile(null);
+        setArtistArtworkPreview('');
         if (artistFileInputRef.current) artistFileInputRef.current.value = '';
+        if (artistArtworkInputRef.current) artistArtworkInputRef.current.value = '';
         fetchArtistItems();
       }
     } catch (e) {
@@ -1185,6 +1209,28 @@ export default function HlystAdminPage() {
                 <label style={labelStyle}>Artist (detected — edit if needed)</label>
                 <input style={fieldStyle} value={artistArtist} onChange={(e) => setArtistArtist(e.target.value)} placeholder="e.g. Tarvona" />
 
+                <label style={labelStyle}>Artwork (optional)</label>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', marginTop: '0.4rem' }}>
+                  {artistArtworkPreview && (
+                    <img src={artistArtworkPreview} alt="" style={{ width: 56, height: 56, objectFit: 'cover', borderRadius: 4, border: '1px solid #333' }} />
+                  )}
+                  <input
+                    ref={artistArtworkInputRef}
+                    type="file"
+                    accept="image/jpeg,image/png,image/webp"
+                    onChange={(e) => {
+                      const f = e.target.files?.[0];
+                      setArtistArtworkFile(f || null);
+                      setArtistArtworkPreview(f ? URL.createObjectURL(f) : '');
+                    }}
+                    style={{ ...fieldStyle, flex: 1 }}
+                  />
+                </div>
+                <p style={{ color: '#666', fontSize: '0.75rem', marginTop: '0.3rem' }}>
+                  No cover? Leave this blank — the site shows a clean placeholder instead, never a fake or broken image.
+                </p>
+
+
                 <div style={{ display: 'flex', gap: '1rem' }}>
                   <div style={{ flex: 1 }}>
                     <label style={labelStyle}>Composer (detected)</label>
@@ -1244,7 +1290,13 @@ export default function HlystAdminPage() {
               <p style={{ color: '#666', fontSize: '0.85rem' }}>Nothing uploaded yet.</p>
             )}
             {artistItems.map((item) => (
-              <div key={item.id} style={{ border: '1px solid #222', padding: '1rem', marginBottom: '0.75rem', borderRadius: 4 }}>
+              <div key={item.id} style={{ border: '1px solid #222', padding: '1rem', marginBottom: '0.75rem', borderRadius: 4, display: 'flex', gap: '0.9rem' }}>
+                <div style={{
+                  width: 48, height: 48, flexShrink: 0, borderRadius: 4, border: '1px solid #2a2a2a', background: '#161616',
+                  backgroundImage: item.artwork_url ? `url(${encodeURI(item.artwork_url)})` : undefined,
+                  backgroundSize: 'cover', backgroundPosition: 'center',
+                }} />
+                <div style={{ flex: 1, minWidth: 0 }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.8rem', color: '#888', marginBottom: '0.4rem' }}>
                   <span>
                     <b style={{ color: IVORY }}>{item.title}</b>
@@ -1274,6 +1326,7 @@ export default function HlystAdminPage() {
                 >
                   Delete
                 </button>
+                </div>
               </div>
             ))}
           </div>
