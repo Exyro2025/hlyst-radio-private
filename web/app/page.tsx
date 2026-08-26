@@ -10,7 +10,7 @@
 import { useRef, useState, useEffect } from 'react';
 import Image from 'next/image';
 import { djs } from '@/lib/djs';
-import { getOnAirNow, getComingUp } from '@/lib/schedule';
+import { fetchOnAir, type OnAirResult } from '@/lib/schedule';
 
 const STREAM_URL = process.env.NEXT_PUBLIC_LIVE365_STREAM_URL || '';
 const GOLD = '#c9a44c';
@@ -33,8 +33,19 @@ export default function HomePage() {
   const [twAudioBlob, setTwAudioBlob] = useState<Blob | null>(null);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
 
-  const onAirDj = getOnAirNow();
-  const comingUp = getComingUp();
+  // Empty shell, not a fabricated DJ identity — shown only for the brief
+  // moment before fetchOnAir() resolves. Same shape as DjProfile so every
+  // existing render line below (onAirDj.name, .portrait, .about, etc.)
+  // keeps working unchanged; only the data source moved from a synchronous
+  // regex parse of djs.ts to an async fetch against the canonical
+  // Postgres schedule via /api/on-air.
+  const emptyDj = {
+    slug: '', name: '', onAirName: '', title: '', schedule: '',
+    portrait: '', about: '', inHisLane: '', onAirStyle: '', theVibe: '',
+    theAudience: '', whatHeBrings: '', trustedFor: '', signatureQuote: '',
+  };
+  const [onAirDj, setOnAirDj] = useState(emptyDj);
+  const [comingUp, setComingUp] = useState<{ dj: typeof emptyDj; startsAt: string }>({ dj: emptyDj, startsAt: '' });
   const voices = djs.slice(0, 4);
   const [nowPlaying, setNowPlaying] = useState<{ live: boolean; title?: string; artist?: string; album?: string; artwork?: string } | null>(null);
 
@@ -47,6 +58,23 @@ export default function HomePage() {
     };
     fetchNowPlaying();
     const interval = setInterval(fetchNowPlaying, 30000);
+    return () => clearInterval(interval);
+  }, []);
+
+  useEffect(() => {
+    fetchOnAir().then((result: OnAirResult) => {
+      if (result.onAir) setOnAirDj(result.onAir);
+      if (result.comingUp) setComingUp(result.comingUp);
+    });
+    // Schedule slots change on 4-hour boundaries, not worth polling as
+    // often as now-playing — a re-fetch every 5 minutes is plenty to
+    // catch the boundary without hammering the DB.
+    const interval = setInterval(() => {
+      fetchOnAir().then((result: OnAirResult) => {
+        if (result.onAir) setOnAirDj(result.onAir);
+        if (result.comingUp) setComingUp(result.comingUp);
+      });
+    }, 5 * 60 * 1000);
     return () => clearInterval(interval);
   }, []);
 
