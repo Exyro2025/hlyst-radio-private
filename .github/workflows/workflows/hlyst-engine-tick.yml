@@ -1,0 +1,34 @@
+# Wakes the HLYST DJ engine on a real cadence. This does NOT mean "make the
+# DJ speak" — it means "ask the engine to evaluate whether anything needs
+# to happen right now," per the decide-then-generate pipeline in
+# web/app/api/hlyst-admin/engine-tick/route.ts.
+#
+# GitHub Actions cron is a real constraint, not a rounding error: 5-minute
+# minimum interval (anything faster silently never fires), and best-effort
+# timing — delays of several minutes, sometimes more at peak load (worst
+# around :00/:30), are normal and documented by GitHub. The engine's
+# decision logic re-evaluates actual elapsed time each call rather than
+# assuming exact-minute firing, so this jitter doesn't break anything —
+# it just means "every 5 minutes, roughly" rather than a hard guarantee.
+#
+# Two secrets required in this repo's Settings → Secrets and variables →
+# Actions: HLYST_SITE_URL (e.g. https://your-domain.vercel.app) and
+# HLYST_ENGINE_CRON_SECRET (must match the same-named env var in Vercel).
+
+name: HLYST Engine Tick
+
+on:
+  schedule:
+    - cron: '*/5 * * * *'
+  workflow_dispatch: {} # lets you trigger a run manually from the Actions tab, for testing
+
+jobs:
+  tick:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Call the engine-tick endpoint
+        run: |
+          curl -sS -X POST "${{ secrets.HLYST_SITE_URL }}/api/hlyst-admin/engine-tick" \
+            -H "Authorization: Bearer ${{ secrets.HLYST_ENGINE_CRON_SECRET }}" \
+            -H "Content-Type: application/json" \
+            --fail-with-body
