@@ -87,6 +87,20 @@ export class OpenAIProvider implements LLMProvider {
   }
 }
 
+// ── GatewayProvider ──────────────────────────────────────────────────────
+// Vercel AI Gateway, via the official `ai` SDK's createGateway() — not a
+// hand-rolled fetch call. This matters: Vercel's own SDK is what correctly
+// resolves the OIDC credential at runtime (its exact delivery mechanism —
+// env var vs. request header vs. internal caching — is Vercel's to handle
+// and isn't reliably reproducible with a manual fetch). Confirmed present
+// in the same controller/src/llm/internal/provider/registry.ts pattern
+// this codebase already uses for the 'gateway' case. On a Vercel
+// deployment this needs no API key at all once OIDC federation is
+// enabled in Project Settings -> Security.
+//
+// Off Vercel (see DEPLOYMENT.md), set AI_GATEWAY_API_KEY instead, since
+// OIDC is a Vercel-runtime-only mechanism.
+
 export class GatewayProvider implements LLMProvider {
   readonly name = 'gateway';
   private readonly model: string;
@@ -96,36 +110,35 @@ export class GatewayProvider implements LLMProvider {
   }
 
   isConfigured(): boolean {
-    return Boolean(process.env.VERCEL_OIDC_TOKEN || process.env.AI_GATEWAY_API_KEY);
+    // On Vercel with OIDC federation enabled, the SDK resolves credentials
+    // itself with no env var required — so this can't check for a token's
+    // presence the way the other providers check for an API key. Instead,
+    // this provider is offered as a last-resort candidate (see
+    // getLLMProvider() below) and its actual availability is proven by
+    // whether generate() succeeds, not guessed at here.
+    return true;
   }
 
   async generate(systemPrompt: string, userPrompt: string): Promise<LLMResult> {
-    const apiKey = process.env.AI_GATEWAY_API_KEY || process.env.VERCEL_OIDC_TOKEN;
-    const res = await fetch('https://ai-gateway.vercel.sh/v1/chat/completions', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${apiKey}`,
-      },
-      body: JSON.stringify({
-        model: this.model,
-        max_tokens: 200,
-        messages: [
-          { role: 'system', content: systemPrompt },
-          { role: 'user', content: userPrompt },
-        ],
-      }),
+    const { gateway } = await import('ai');
+    const { generateText } = await import('ai');
+    const result = await generateText({
+      model: gateway(this.model),
+      system: systemPrompt,
+      prompt: userPrompt,
     });
-    if (!res.ok) {
-      const body = await res.text().catch(() => '');
-      throw new Error(`AI Gateway error (${res.status}): ${body.slice(0, 300)}`);
-    }
-    const data = await res.json();
-    const text = data.choices?.[0]?.message?.content;
-    if (!text) throw new Error('AI Gateway returned no text content.');
-    return { text, provider: this.name };
+    if (!result.text) throw new Error('AI Gateway returned no text content.');
+    return { text: result.text, provider: this.name };
   }
 }
+
+// ── Provider selection ───────────────────────────────────────────────────
+// Tries each configured provider in order; the first one that's actually
+// configured is used. Order: explicit Anthropic key, explicit OpenAI key,
+// then Gateway last — since GatewayProvider.isConfigured() can't verify
+// OIDC availability in advance, it's the last resort so an explicit key
+// always wins when present, and Gateway is only reached (and its actual
+// success/failure known) when no explicit key exists.
 
 const candidates: LLMProvider[] = [new AnthropicProvider(), new OpenAIProvider(), new GatewayProvider()];
 
