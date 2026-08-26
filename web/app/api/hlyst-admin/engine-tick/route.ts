@@ -1,27 +1,25 @@
-// The real decide-then-generate-then-log pipeline. Two ways in:
-//  - Admin session cookie (the "Run engine tick now" button in the UI)
-//  - Authorization: Bearer <HLYST_ENGINE_CRON_SECRET> (an external scheduler
-//    — GitHub Actions — calling this on a real cadence). This is a secret
-//    we own, not Vercel's auto-provisioned CRON_SECRET, since we're
-//    deliberately not using Vercel Cron (see HLYST_ENGINE_CRON_SECRET in
-//    .env.example for why).
+// Wakes the HLYST DJ engine on a real cadence. This does NOT mean "make the
+// DJ speak" — it means "ask the engine to evaluate whether anything needs
+// to happen right now." Two ways in: an admin session cookie (the "Run
+// engine tick now" button), or Authorization: Bearer <HLYST_ENGINE_CRON_SECRET>
+// (an external scheduler — GitHub Actions — calling this on a real cadence).
 //
 // Idempotent by design: a "claim" row is inserted with a deterministic
 // tick_key BEFORE any LLM call happens. If another tick already claimed
-// that exact key (UNIQUE(persona_id, tick_key)), this run backs off
-// immediately — no duplicate break, no wasted LLM call. This matters
-// because the trigger (GitHub Actions cron) is explicitly best-effort and
-// can occasionally double-fire or overlap.
+// that exact key, this run backs off immediately — no duplicate break, no
+// wasted LLM call.
 //
-// Every invocation — whether it spoke, stayed silent, or hit a duplicate —
-// is logged to engine_tick_log, so scheduler health is visible from the
-// Control Room independent of whether anything was actually generated.
+// Audio rendering is isolated from text generation on purpose — a break
+// with real text but no audio still counts as generated. Nothing here can
+// turn a successful text generation into a logged error.
 
 import { cookies } from 'next/headers';
 import { neon } from '@neondatabase/serverless';
 import { buildDjSystemPrompt, type EnginePersona } from '@/lib/djPrompt.server';
 import { callLLM } from '@/lib/llm.server';
 import { decideBreak, type BreakDecisionInput, type BreakType } from '@/lib/breakDecision';
+import { synthesizeSpeech } from '@/lib/elevenlabs.server';
+import { uploadBreakAudio } from '@/lib/audioStorage.server';
 
 const sql = neon(process.env.TALKWAVE_URL_POSTGRES_URL!);
 
@@ -68,17 +66,13 @@ function resolveSlotAndProgress(now: Date) {
   };
 }
 
-// Deterministic dedup key. Includes the actual calendar date, not just the
-// recurring day name — a show_open key scoped to "Monday:06:00" alone would
-// block that slot forever after its first real Monday, since day-of-week
-// repeats every week. Scoping to dateStr fixes that.
 function computeTickKey(breakType: BreakType, dateStr: string, hour: number, minute: number, startTime: string): string {
   const hh = String(hour).padStart(2, '0');
   const mm = String(minute).padStart(2, '0');
   if (breakType === 'show_open' || breakType === 'show_close') return `${breakType}:${dateStr}:${startTime}`;
   if (breakType === 'hourly') return `hourly:${dateStr}:${hh}`;
   if (breakType === 'station_id') return `station_id:${dateStr}:${hh}:${mm}`;
-  return `${breakType}:${dateStr}:${hh}:${mm}`; // ad_lib, talkwave_response — per-minute granularity
+  return `${breakType}:${dateStr}:${hh}:${mm}`;
 }
 
 const BREAK_PROMPTS: Record<Exclude<BreakType, 'talkwave_response'>, string> = {
@@ -108,7 +102,7 @@ export async function POST(req: Request) {
   const { dayOfWeek, startTime, minutesIntoShow, minutesUntilShowEnd, dateStr, hour, minute } = resolveSlotAndProgress(now);
 
   const personaRows = await sql`
-    SELECT p.id, p.name, p.soul, p.frequency, p.dj_mode, p.humour, p.local_colour, p.warmth, p.language
+    SELECT p.id, p.name, p.soul, p.frequency, p.dj_mode, p.humour, p.local_colour, p.warmth, p.language, p.tts_voice_id, p.tts_engine
     FROM schedule s
     JOIN personas p ON p.id = s.persona_id
     WHERE s.day_of_week = ${dayOfWeek} AND s.start_time = ${startTime}
@@ -146,9 +140,6 @@ export async function POST(req: Request) {
 
   const tickKey = computeTickKey(decision.breakType!, dateStr, hour, minute, startTime);
 
-  // Claim the slot BEFORE doing any LLM work. If another tick already
-  // claimed this exact key, this INSERT returns no row and we back off —
-  // no duplicate break, no wasted API call.
   const claimRows = await sql`
     INSERT INTO dj_breaks (persona_id, break_type, reason, text, status, context, intended_air_time, tick_key)
     VALUES (${personaId}, ${decision.breakType}, ${decision.reason}, '', 'pending',
@@ -189,6 +180,17 @@ export async function POST(req: Request) {
     const { text } = await callLLM(systemPrompt, userPrompt);
 
     await sql`UPDATE dj_breaks SET text = ${text}, status = 'generated' WHERE id = ${claimedId}`;
+
+    if (p.tts_voice_id && process.env.ELEVENLABS_API_KEY) {
+      try {
+        const audioBuffer = await synthesizeSpeech(text, p.tts_voice_id);
+        const audioUrl = await uploadBreakAudio(audioBuffer, claimedId);
+        await sql`UPDATE dj_breaks SET audio_url = ${audioUrl}, audio_status = 'rendered' WHERE id = ${claimedId}`;
+      } catch (audioError) {
+        const audioMessage = audioError instanceof Error ? audioError.message : 'Audio rendering failed.';
+        await sql`UPDATE dj_breaks SET audio_status = 'failed', error_detail = ${audioMessage} WHERE id = ${claimedId}`;
+      }
+    }
 
     if (talkWaveItem) {
       await sql`
