@@ -717,4 +717,327 @@ export default function HlystAdminPage() {
               <HealthRow label="Personas table" ok={health.personasTable.ok}
                 detail={health.personasTable.ok ? `${health.personasTable.count} personas` : 'Not created yet'} />
               <HealthRow label="  — imaging persona (VM)" ok={health.imagingPersonaCount.ok && health.imagingPersonaCount.count === 1}
-                detail={health.imagingPersonaCount.ok ? `${health.imagingPersonaCount.count} found (should be 1)` :
+                detail={health.imagingPersonaCount.ok ? `${health.imagingPersonaCount.count} found (should be 1)` : 'Unavailable'} />
+              <HealthRow label="  — voice IDs assigned" ok={health.voicesAssignedCount.ok && health.voicesAssignedCount.count > 0}
+                detail={health.voicesAssignedCount.ok ? `${health.voicesAssignedCount.count} of 16 set` : 'Unavailable'} />
+              <HealthRow label="Schedule table" ok={health.scheduleTable.ok}
+                detail={health.scheduleTable.ok ? `${health.scheduleTable.count} slots (should be 42)` : 'Not created yet'} />
+              <HealthRow label="Talk Wave approved-item tracking" ok={health.talkWaveApprovedColumnReady.ok}
+                detail={health.talkWaveApprovedColumnReady.ok ? `${health.talkWaveApprovedColumnReady.count} approved so far` : 'approved_at column not added yet'} />
+
+              <button
+                onClick={fetchHealth}
+                style={{
+                  marginTop: '1.5rem', border: `1px solid ${GOLD}`, color: GOLD, background: 'transparent',
+                  padding: '0.5rem 1.2rem', borderRadius: 999, cursor: 'pointer', fontSize: '0.85rem',
+                }}
+              >
+                Re-check
+              </button>
+            </div>
+          )}
+        </div>
+      )}
+
+      {tab === 'breaks' && (
+        <div>
+          <div style={{ marginBottom: '1.5rem' }}>
+            <button
+              onClick={runEngineTick}
+              disabled={tickLoading}
+              style={{
+                border: `1px solid ${GOLD}`, color: GOLD, background: 'transparent',
+                padding: '0.65rem 1.4rem', borderRadius: 8, cursor: 'pointer',
+              }}
+            >
+              {tickLoading ? 'Running…' : 'Run engine tick now'}
+            </button>
+            <p style={{ color: '#888', fontSize: '0.8rem', marginTop: '0.6rem' }}>
+              Manually runs the real decide-then-generate pipeline for whoever's on the current schedule slot right now.
+              A real deployment would call this automatically every few minutes — that scheduling isn't wired up yet.
+            </p>
+          </div>
+
+          {tickResult && (
+            <div style={{
+              background: '#111', border: `1px solid ${tickResult.error ? '#7a3030' : '#222'}`, borderRadius: 8,
+              padding: '1rem 1.2rem', marginBottom: '1.5rem',
+            }}>
+              <p style={{ margin: 0, fontSize: '0.85rem', color: '#999' }}>
+                {tickResult.personaName ? `${tickResult.personaName} — ` : ''}{tickResult.reason}
+              </p>
+              {tickResult.text && (
+                <p style={{ margin: '0.6rem 0 0', fontStyle: 'italic', fontSize: '0.95rem' }}>{tickResult.text}</p>
+              )}
+              {tickResult.error && (
+                <p style={{ margin: '0.6rem 0 0', color: '#e88', fontSize: '0.85rem' }}>{tickResult.error}</p>
+              )}
+            </div>
+          )}
+
+          <div style={{ borderTop: '1px solid #222', paddingTop: '1.5rem' }}>
+            <label style={labelStyle}>Recent breaks (last 50)</label>
+            {breaksLoading && <p style={{ color: '#888' }}>Loading…</p>}
+            {!breaksLoading && breaksLog.length === 0 && (
+              <p style={{ color: '#666', fontSize: '0.85rem' }}>Nothing generated yet — run a tick above, or wait for real activity once this is on a schedule.</p>
+            )}
+            {breaksLog.map((b) => (
+              <div key={b.id} style={{
+                padding: '0.9rem 0', borderBottom: '1px solid #1a1a1a',
+                display: 'flex', justifyContent: 'space-between', gap: '1rem',
+              }}>
+                <div>
+                  <div style={{ fontSize: '0.9rem' }}>
+                    <b>{b.persona_name}</b> · {b.break_type}
+                    {b.status === 'error' && <span style={{ color: '#e88' }}> · error</span>}
+                    {b.status !== 'error' && b.audio_status === 'rendered' && <span style={{ color: '#8c8' }}> · audio</span>}
+                    {b.status !== 'error' && b.audio_status === 'failed' && <span style={{ color: '#c9944c' }}> · audio failed</span>}
+                  </div>
+                  <div style={{ fontSize: '0.85rem', color: '#ccc', marginTop: '0.2rem', fontStyle: 'italic' }}>
+                    {b.text || b.error_detail}
+                  </div>
+                  <div style={{ fontSize: '0.75rem', color: '#666', marginTop: '0.2rem' }}>{b.reason}</div>
+                  {b.audio_url && (
+                    <audio controls src={b.audio_url} style={{ width: '100%', marginTop: '0.5rem', height: 32 }} />
+                  )}
+                </div>
+                <div style={{ fontSize: '0.75rem', color: '#666', whiteSpace: 'nowrap' }}>
+                  {new Date(b.created_at).toLocaleString()}
+                </div>
+              </div>
+            ))}
+          </div>
+
+          <div style={{ borderTop: '1px solid #222', paddingTop: '1.5rem', marginTop: '1.5rem' }}>
+            <label style={labelStyle}>Scheduler executions (last 30 — includes silent ticks)</label>
+            {tickLog.length === 0 && (
+              <p style={{ color: '#666', fontSize: '0.85rem' }}>No tick executions recorded yet.</p>
+            )}
+            {tickLog.map((t) => (
+              <div key={t.id} style={{
+                padding: '0.6rem 0', borderBottom: '1px solid #1a1a1a',
+                display: 'flex', justifyContent: 'space-between', gap: '1rem', fontSize: '0.8rem',
+              }}>
+                <div style={{ color: t.error_detail ? '#e88' : t.skipped_duplicate ? '#c9944c' : t.should_speak ? '#8c8' : '#888' }}>
+                  {t.error_detail ? `Error: ${t.error_detail}` :
+                   t.skipped_duplicate ? `Duplicate skipped (${t.break_type})` :
+                   t.should_speak ? `Spoke — ${t.break_type}` : `Silent — ${t.reason}`}
+                </div>
+                <div style={{ color: '#666', whiteSpace: 'nowrap' }}>{new Date(t.ran_at).toLocaleString()}</div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {tab === 'vm' && (
+        <div>
+          <p style={{ color: '#888', fontSize: '0.85rem', marginBottom: '1.5rem' }}>
+            Vince Morgan — "The Messenger." Evergreen station imaging: generated once, reviewed here, approved,
+            then reused — not regenerated on every play. VM never resolves as a scheduled DJ.
+          </p>
+
+          <div style={{ marginBottom: '1.5rem' }}>
+            <label style={labelStyle}>Generate a new imaging asset</label>
+            <div style={{ display: 'flex', gap: '0.6rem', marginTop: '0.4rem' }}>
+              <select style={{ ...fieldStyle, flex: 1 }} value={vmGenerateType} onChange={(e) => setVmGenerateType(e.target.value)}>
+                <option value="station_id">Station ID</option>
+                <option value="show_transition">Show transition</option>
+                <option value="talkwave_invite">Talk Wave invite</option>
+                <option value="special_announcement">Special announcement</option>
+                <option value="programming_notice">Programming notice</option>
+                <option value="the_lyst_intro">The Lyst intro</option>
+                <option value="interview_intro">Interview intro</option>
+              </select>
+              <button
+                onClick={generateVmImaging}
+                disabled={vmGenerating}
+                style={{
+                  border: `1px solid ${GOLD}`, color: GOLD, background: 'transparent',
+                  padding: '0.6rem 1.2rem', borderRadius: 6, cursor: 'pointer', whiteSpace: 'nowrap',
+                }}
+              >
+                {vmGenerating ? 'Generating…' : 'Generate'}
+              </button>
+            </div>
+            {vmError && <p style={{ color: '#e88', fontSize: '0.85rem', marginTop: '0.75rem' }}>{vmError}</p>}
+          </div>
+
+          <div style={{ borderTop: '1px solid #222', paddingTop: '1.5rem' }}>
+            <label style={labelStyle}>Imaging library ({vmItems.length})</label>
+            {vmLoading && <p style={{ color: '#888' }}>Loading…</p>}
+            {!vmLoading && vmItems.length === 0 && (
+              <p style={{ color: '#666', fontSize: '0.85rem' }}>Nothing generated yet.</p>
+            )}
+            {vmItems.map((item) => (
+              <div key={item.id} style={{ border: '1px solid #222', padding: '1rem', marginBottom: '0.75rem', borderRadius: 4 }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.8rem', color: '#888', marginBottom: '0.5rem' }}>
+                  <span>
+                    <b style={{ color: IVORY }}>{item.imaging_type.replace(/_/g, ' ')}</b>
+                    {' · '}
+                    <span style={{
+                      color: item.status === 'approved' ? '#8c8' : item.status === 'archived' ? '#666' : '#c9944c',
+                    }}>
+                      {item.status}
+                    </span>
+                    {item.times_used > 0 && ` · used ${item.times_used}×`}
+                  </span>
+                  <span>{new Date(item.created_at).toLocaleString()}</span>
+                </div>
+                <p style={{ margin: 0, fontSize: '0.95rem', fontStyle: 'italic' }}>{item.text}</p>
+                {item.audio_url && (
+                  <audio controls src={item.audio_url} style={{ width: '100%', marginTop: '0.5rem' }} />
+                )}
+                {item.audio_status === 'failed' && (
+                  <p style={{ color: '#c9944c', fontSize: '0.8rem', marginTop: '0.4rem' }}>Audio not rendered.</p>
+                )}
+                <div style={{ display: 'flex', gap: '0.5rem', marginTop: '0.75rem' }}>
+                  {['approved', 'archived', 'draft'].map((s) => (
+                    <button
+                      key={s}
+                      onClick={() => updateVmStatus(item.id, s)}
+                      disabled={item.status === s}
+                      style={{
+                        fontSize: '0.75rem', padding: '0.3rem 0.7rem', borderRadius: 999, cursor: 'pointer',
+                        border: `1px solid ${item.status === s ? GOLD : '#333'}`,
+                        color: item.status === s ? GOLD : '#999',
+                        background: 'transparent', opacity: item.status === s ? 1 : 0.8,
+                      }}
+                    >
+                      {s}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {tab === 'production' && (
+        <div>
+          <p style={{ color: '#888', fontSize: '0.85rem', marginBottom: '1.5rem' }}>
+            HLYST's own production library — beds, transitions, bumpers, imaging. These are not artist
+            releases and are never described on-air as "new music." Artwork is optional.
+          </p>
+
+          <div style={{ border: '1px solid #222', borderRadius: 6, padding: '1.2rem', marginBottom: '2rem' }}>
+            <label style={labelStyle}>Upload a production track</label>
+            <input
+              ref={prodFileInputRef}
+              type="file"
+              accept="audio/mpeg,audio/wav,audio/x-wav,audio/wave"
+              onChange={(e) => {
+                const f = e.target.files?.[0];
+                if (f) handleProdFileSelect(f);
+              }}
+              style={{ ...fieldStyle, marginTop: '0.4rem' }}
+            />
+
+            {prodParsing && <p style={{ color: '#888', fontSize: '0.8rem', marginTop: '0.6rem' }}>Reading file…</p>}
+
+            {prodFile && !prodParsing && (
+              <>
+                <label style={labelStyle}>Title (detected — edit if needed)</label>
+                <input style={fieldStyle} value={prodTitle} onChange={(e) => setProdTitle(e.target.value)} />
+
+                <label style={labelStyle}>Artist</label>
+                <input style={fieldStyle} value={prodArtist} onChange={(e) => setProdArtist(e.target.value)} />
+
+                <div style={{ display: 'flex', gap: '1rem' }}>
+                  <div style={{ flex: 1 }}>
+                    <label style={labelStyle}>Composer (detected)</label>
+                    <input style={fieldStyle} value={prodComposer} onChange={(e) => setProdComposer(e.target.value)} />
+                  </div>
+                  <div style={{ flex: 1 }}>
+                    <label style={labelStyle}>Genre (detected)</label>
+                    <input style={fieldStyle} value={prodGenre} onChange={(e) => setProdGenre(e.target.value)} />
+                  </div>
+                </div>
+
+                <p style={{ color: '#666', fontSize: '0.8rem', marginTop: '0.5rem' }}>
+                  Duration: {prodDuration ? `${Math.floor(prodDuration / 60)}:${String(prodDuration % 60).padStart(2, '0')}` : 'unknown'}
+                  {' · '}Format: {prodFormat || 'unknown'}
+                  {' · '}Size: {(prodFile.size / 1024 / 1024).toFixed(1)} MB
+                </p>
+
+                <label style={labelStyle}>Operational use (select all that apply)</label>
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.5rem', marginTop: '0.4rem' }}>
+                  {['bed', 'transition', 'talkwave_bed', 'interview_bed', 'bumper', 'imaging', 'promo'].map((c) => (
+                    <button
+                      key={c}
+                      onClick={() => toggleProdClassification(c)}
+                      style={{
+                        fontSize: '0.75rem', padding: '0.35rem 0.8rem', borderRadius: 999, cursor: 'pointer',
+                        border: `1px solid ${prodClassifications.includes(c) ? GOLD : '#333'}`,
+                        color: prodClassifications.includes(c) ? GOLD : '#999',
+                        background: 'transparent',
+                      }}
+                    >
+                      {c.replace(/_/g, ' ')}
+                    </button>
+                  ))}
+                </div>
+
+                {prodError && <p style={{ color: '#e88', fontSize: '0.85rem', marginTop: '0.75rem' }}>{prodError}</p>}
+
+                <button
+                  onClick={uploadProdTrack}
+                  disabled={prodUploading || !prodTitle}
+                  style={{
+                    marginTop: '1.2rem', border: `1px solid ${GOLD}`, color: GOLD, background: 'transparent',
+                    padding: '0.6rem 1.5rem', borderRadius: 999, cursor: 'pointer',
+                  }}
+                >
+                  {prodUploading ? 'Uploading…' : 'Upload & save'}
+                </button>
+              </>
+            )}
+          </div>
+
+          <div style={{ borderTop: '1px solid #222', paddingTop: '1.5rem' }}>
+            <label style={labelStyle}>Library ({prodItems.length})</label>
+            {prodLoading && <p style={{ color: '#888' }}>Loading…</p>}
+            {!prodLoading && prodItems.length === 0 && (
+              <p style={{ color: '#666', fontSize: '0.85rem' }}>Nothing uploaded yet.</p>
+            )}
+            {prodItems.map((item) => (
+              <div key={item.id} style={{ border: '1px solid #222', padding: '1rem', marginBottom: '0.75rem', borderRadius: 4 }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.8rem', color: '#888', marginBottom: '0.4rem' }}>
+                  <span>
+                    <span style={{ color: GOLD, fontFamily: 'monospace' }}>{item.hly_id}</span>
+                    {' · '}
+                    <b style={{ color: IVORY }}>{item.title}</b>
+                    {' — '}{item.artist}
+                  </span>
+                  <span>{new Date(item.uploaded_at).toLocaleDateString()}</span>
+                </div>
+                <p style={{ margin: 0, fontSize: '0.8rem', color: '#999' }}>
+                  {item.composer && `Composer: ${item.composer} · `}
+                  {item.genre && `${item.genre} · `}
+                  {item.duration_seconds ? `${Math.floor(item.duration_seconds / 60)}:${String(item.duration_seconds % 60).padStart(2, '0')} · ` : ''}
+                  {item.file_format}
+                </p>
+                {item.classifications?.length > 0 && (
+                  <p style={{ margin: '0.3rem 0 0', fontSize: '0.75rem', color: '#c9944c' }}>
+                    {item.classifications.map((c: string) => c.replace(/_/g, ' ')).join(', ')}
+                  </p>
+                )}
+                <audio controls src={item.audio_url} style={{ width: '100%', marginTop: '0.5rem', height: 32 }} />
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function HealthRow({ label, ok, detail }: { label: string; ok: boolean; detail: string }) {
+  return (
+    <div style={{ display: 'flex', justifyContent: 'space-between', padding: '0.6rem 0', borderBottom: '1px solid #1a1a1a', fontSize: '0.9rem' }}>
+      <span style={{ color: label.trim().startsWith('—') ? '#888' : IVORY }}>{label}</span>
+      <span style={{ color: ok ? '#8c8' : '#e88', fontSize: '0.85rem' }}>{ok ? '✓ ' : '○ '}{detail}</span>
+    </div>
+  );
+}
