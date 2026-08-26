@@ -1,6 +1,8 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useRef } from 'react';
+import { parseBlob } from 'music-metadata';
+import { upload } from '@vercel/blob/client';
 
 const GOLD = '#c9a44c';
 const IVORY = '#f5f0e8';
@@ -62,7 +64,7 @@ export default function HlystAdminPage() {
   const [messages, setMessages] = useState<MessageRow[]>([]);
   const [voiceNotes, setVoiceNotes] = useState<VoiceNoteRow[]>([]);
   const [loading, setLoading] = useState(false);
-  const [tab, setTab] = useState<'talkwave' | 'personas' | 'health' | 'breaks' | 'vm'>('talkwave');
+  const [tab, setTab] = useState<'talkwave' | 'personas' | 'health' | 'breaks' | 'vm' | 'production'>('talkwave');
 
   const [personas, setPersonas] = useState<PersonaRow[]>([]);
   const [personasLoading, setPersonasLoading] = useState(false);
@@ -89,6 +91,21 @@ export default function HlystAdminPage() {
   const [vmGenerateType, setVmGenerateType] = useState('station_id');
   const [vmGenerating, setVmGenerating] = useState(false);
   const [vmError, setVmError] = useState('');
+
+  const [prodItems, setProdItems] = useState<any[]>([]);
+  const [prodLoading, setProdLoading] = useState(false);
+  const [prodFile, setProdFile] = useState<File | null>(null);
+  const [prodTitle, setProdTitle] = useState('');
+  const [prodArtist, setProdArtist] = useState('HLYST');
+  const [prodComposer, setProdComposer] = useState('');
+  const [prodGenre, setProdGenre] = useState('');
+  const [prodDuration, setProdDuration] = useState<number | null>(null);
+  const [prodFormat, setProdFormat] = useState('');
+  const [prodClassifications, setProdClassifications] = useState<string[]>([]);
+  const [prodParsing, setProdParsing] = useState(false);
+  const [prodUploading, setProdUploading] = useState(false);
+  const [prodError, setProdError] = useState('');
+  const prodFileInputRef = useRef<HTMLInputElement>(null);
 
   const [health, setHealth] = useState<any>(null);
   const [healthLoading, setHealthLoading] = useState(false);
@@ -185,6 +202,83 @@ export default function HlystAdminPage() {
     fetchVmItems();
   };
 
+  const fetchProdItems = async () => {
+    setProdLoading(true);
+    const res = await fetch('/api/hlyst-admin/production-music');
+    if (res.ok) {
+      const data = await res.json();
+      setProdItems(data.items || []);
+    }
+    setProdLoading(false);
+  };
+
+  const handleProdFileSelect = async (file: File) => {
+    setProdFile(file);
+    setProdError('');
+    setProdParsing(true);
+    try {
+      const metadata = await parseBlob(file);
+      setProdTitle(metadata.common.title || file.name.replace(/\.[^.]+$/, ''));
+      setProdComposer(metadata.common.composer?.join(', ') || '');
+      setProdGenre(metadata.common.genre?.join(', ') || '');
+      setProdDuration(metadata.format.duration ? Math.round(metadata.format.duration) : null);
+      setProdFormat(metadata.format.container || file.type.split('/')[1] || '');
+    } catch {
+      setProdTitle(file.name.replace(/\.[^.]+$/, ''));
+    }
+    setProdParsing(false);
+  };
+
+  const toggleProdClassification = (c: string) => {
+    setProdClassifications((prev) => (prev.includes(c) ? prev.filter((x) => x !== c) : [...prev, c]));
+  };
+
+  const uploadProdTrack = async () => {
+    if (!prodFile || !prodTitle) return;
+    setProdUploading(true);
+    setProdError('');
+    try {
+      const blob = await upload(prodFile.name, prodFile, {
+        access: 'public',
+        handleUploadUrl: '/api/hlyst-admin/production-music/upload-token',
+      });
+
+      const res = await fetch('/api/hlyst-admin/production-music', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          title: prodTitle,
+          artist: prodArtist,
+          composer: prodComposer,
+          genre: prodGenre,
+          durationSeconds: prodDuration,
+          fileFormat: prodFormat,
+          fileSizeBytes: prodFile.size,
+          audioUrl: blob.url,
+          classifications: prodClassifications,
+        }),
+      });
+      const body = await res.json();
+      if (!res.ok) {
+        setProdError(body.error || 'Save failed.');
+      } else {
+        setProdFile(null);
+        setProdTitle('');
+        setProdArtist('HLYST');
+        setProdComposer('');
+        setProdGenre('');
+        setProdDuration(null);
+        setProdFormat('');
+        setProdClassifications([]);
+        if (prodFileInputRef.current) prodFileInputRef.current.value = '';
+        fetchProdItems();
+      }
+    } catch (e) {
+      setProdError(e instanceof Error ? e.message : 'Upload failed.');
+    }
+    setProdUploading(false);
+  };
+
   const runEngineTick = async () => {
     setTickLoading(true);
     setTickResult(null);
@@ -216,6 +310,9 @@ export default function HlystAdminPage() {
     }
     if (tab === 'vm' && authed) {
       fetchVmItems();
+    }
+    if (tab === 'production' && authed) {
+      fetchProdItems();
     }
   }, [tab, authed]);
 
@@ -377,7 +474,7 @@ export default function HlystAdminPage() {
     </div>
   );
 
-  const TabButton = ({ id, label }: { id: 'talkwave' | 'personas' | 'health' | 'breaks' | 'vm'; label: string }) => (
+  const TabButton = ({ id, label }: { id: 'talkwave' | 'personas' | 'health' | 'breaks' | 'vm' | 'production'; label: string }) => (
     <button
       onClick={() => setTab(id)}
       style={{
@@ -406,6 +503,7 @@ export default function HlystAdminPage() {
         <TabButton id="health" label="Engine Health" />
         <TabButton id="breaks" label="DJ Breaks" />
         <TabButton id="vm" label="Station Imaging" />
+        <TabButton id="production" label="Production Music" />
       </div>
 
       {tab === 'talkwave' && (
@@ -619,211 +717,4 @@ export default function HlystAdminPage() {
               <HealthRow label="Personas table" ok={health.personasTable.ok}
                 detail={health.personasTable.ok ? `${health.personasTable.count} personas` : 'Not created yet'} />
               <HealthRow label="  — imaging persona (VM)" ok={health.imagingPersonaCount.ok && health.imagingPersonaCount.count === 1}
-                detail={health.imagingPersonaCount.ok ? `${health.imagingPersonaCount.count} found (should be 1)` : 'Unavailable'} />
-              <HealthRow label="  — voice IDs assigned" ok={health.voicesAssignedCount.ok && health.voicesAssignedCount.count > 0}
-                detail={health.voicesAssignedCount.ok ? `${health.voicesAssignedCount.count} of 16 set` : 'Unavailable'} />
-              <HealthRow label="Schedule table" ok={health.scheduleTable.ok}
-                detail={health.scheduleTable.ok ? `${health.scheduleTable.count} slots (should be 42)` : 'Not created yet'} />
-              <HealthRow label="Talk Wave approved-item tracking" ok={health.talkWaveApprovedColumnReady.ok}
-                detail={health.talkWaveApprovedColumnReady.ok ? `${health.talkWaveApprovedColumnReady.count} approved so far` : 'approved_at column not added yet'} />
-
-              <button
-                onClick={fetchHealth}
-                style={{
-                  marginTop: '1.5rem', border: `1px solid ${GOLD}`, color: GOLD, background: 'transparent',
-                  padding: '0.5rem 1.2rem', borderRadius: 999, cursor: 'pointer', fontSize: '0.85rem',
-                }}
-              >
-                Re-check
-              </button>
-            </div>
-          )}
-        </div>
-      )}
-
-      {tab === 'breaks' && (
-        <div>
-          <div style={{ marginBottom: '1.5rem' }}>
-            <button
-              onClick={runEngineTick}
-              disabled={tickLoading}
-              style={{
-                border: `1px solid ${GOLD}`, color: GOLD, background: 'transparent',
-                padding: '0.65rem 1.4rem', borderRadius: 8, cursor: 'pointer',
-              }}
-            >
-              {tickLoading ? 'Running…' : 'Run engine tick now'}
-            </button>
-            <p style={{ color: '#888', fontSize: '0.8rem', marginTop: '0.6rem' }}>
-              Manually runs the real decide-then-generate pipeline for whoever's on the current schedule slot right now.
-              A real deployment would call this automatically every few minutes — that scheduling isn't wired up yet.
-            </p>
-          </div>
-
-          {tickResult && (
-            <div style={{
-              background: '#111', border: `1px solid ${tickResult.error ? '#7a3030' : '#222'}`, borderRadius: 8,
-              padding: '1rem 1.2rem', marginBottom: '1.5rem',
-            }}>
-              <p style={{ margin: 0, fontSize: '0.85rem', color: '#999' }}>
-                {tickResult.personaName ? `${tickResult.personaName} — ` : ''}{tickResult.reason}
-              </p>
-              {tickResult.text && (
-                <p style={{ margin: '0.6rem 0 0', fontStyle: 'italic', fontSize: '0.95rem' }}>{tickResult.text}</p>
-              )}
-              {tickResult.error && (
-                <p style={{ margin: '0.6rem 0 0', color: '#e88', fontSize: '0.85rem' }}>{tickResult.error}</p>
-              )}
-            </div>
-          )}
-
-          <div style={{ borderTop: '1px solid #222', paddingTop: '1.5rem' }}>
-            <label style={labelStyle}>Recent breaks (last 50)</label>
-            {breaksLoading && <p style={{ color: '#888' }}>Loading…</p>}
-            {!breaksLoading && breaksLog.length === 0 && (
-              <p style={{ color: '#666', fontSize: '0.85rem' }}>Nothing generated yet — run a tick above, or wait for real activity once this is on a schedule.</p>
-            )}
-            {breaksLog.map((b) => (
-              <div key={b.id} style={{
-                padding: '0.9rem 0', borderBottom: '1px solid #1a1a1a',
-                display: 'flex', justifyContent: 'space-between', gap: '1rem',
-              }}>
-                <div>
-                  <div style={{ fontSize: '0.9rem' }}>
-                    <b>{b.persona_name}</b> · {b.break_type}
-                    {b.status === 'error' && <span style={{ color: '#e88' }}> · error</span>}
-                    {b.status !== 'error' && b.audio_status === 'rendered' && <span style={{ color: '#8c8' }}> · audio</span>}
-                    {b.status !== 'error' && b.audio_status === 'failed' && <span style={{ color: '#c9944c' }}> · audio failed</span>}
-                  </div>
-                  <div style={{ fontSize: '0.85rem', color: '#ccc', marginTop: '0.2rem', fontStyle: 'italic' }}>
-                    {b.text || b.error_detail}
-                  </div>
-                  <div style={{ fontSize: '0.75rem', color: '#666', marginTop: '0.2rem' }}>{b.reason}</div>
-                  {b.audio_url && (
-                    <audio controls src={b.audio_url} style={{ width: '100%', marginTop: '0.5rem', height: 32 }} />
-                  )}
-                </div>
-                <div style={{ fontSize: '0.75rem', color: '#666', whiteSpace: 'nowrap' }}>
-                  {new Date(b.created_at).toLocaleString()}
-                </div>
-              </div>
-            ))}
-          </div>
-
-          <div style={{ borderTop: '1px solid #222', paddingTop: '1.5rem', marginTop: '1.5rem' }}>
-            <label style={labelStyle}>Scheduler executions (last 30 — includes silent ticks)</label>
-            {tickLog.length === 0 && (
-              <p style={{ color: '#666', fontSize: '0.85rem' }}>No tick executions recorded yet.</p>
-            )}
-            {tickLog.map((t) => (
-              <div key={t.id} style={{
-                padding: '0.6rem 0', borderBottom: '1px solid #1a1a1a',
-                display: 'flex', justifyContent: 'space-between', gap: '1rem', fontSize: '0.8rem',
-              }}>
-                <div style={{ color: t.error_detail ? '#e88' : t.skipped_duplicate ? '#c9944c' : t.should_speak ? '#8c8' : '#888' }}>
-                  {t.error_detail ? `Error: ${t.error_detail}` :
-                   t.skipped_duplicate ? `Duplicate skipped (${t.break_type})` :
-                   t.should_speak ? `Spoke — ${t.break_type}` : `Silent — ${t.reason}`}
-                </div>
-                <div style={{ color: '#666', whiteSpace: 'nowrap' }}>{new Date(t.ran_at).toLocaleString()}</div>
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
-
-      {tab === 'vm' && (
-        <div>
-          <p style={{ color: '#888', fontSize: '0.85rem', marginBottom: '1.5rem' }}>
-            Vince Morgan — "The Messenger." Evergreen station imaging: generated once, reviewed here, approved,
-            then reused — not regenerated on every play. VM never resolves as a scheduled DJ.
-          </p>
-
-          <div style={{ marginBottom: '1.5rem' }}>
-            <label style={labelStyle}>Generate a new imaging asset</label>
-            <div style={{ display: 'flex', gap: '0.6rem', marginTop: '0.4rem' }}>
-              <select style={{ ...fieldStyle, flex: 1 }} value={vmGenerateType} onChange={(e) => setVmGenerateType(e.target.value)}>
-                <option value="station_id">Station ID</option>
-                <option value="show_transition">Show transition</option>
-                <option value="talkwave_invite">Talk Wave invite</option>
-                <option value="special_announcement">Special announcement</option>
-                <option value="programming_notice">Programming notice</option>
-                <option value="the_lyst_intro">The Lyst intro</option>
-                <option value="interview_intro">Interview intro</option>
-              </select>
-              <button
-                onClick={generateVmImaging}
-                disabled={vmGenerating}
-                style={{
-                  border: `1px solid ${GOLD}`, color: GOLD, background: 'transparent',
-                  padding: '0.6rem 1.2rem', borderRadius: 6, cursor: 'pointer', whiteSpace: 'nowrap',
-                }}
-              >
-                {vmGenerating ? 'Generating…' : 'Generate'}
-              </button>
-            </div>
-            {vmError && <p style={{ color: '#e88', fontSize: '0.85rem', marginTop: '0.75rem' }}>{vmError}</p>}
-          </div>
-
-          <div style={{ borderTop: '1px solid #222', paddingTop: '1.5rem' }}>
-            <label style={labelStyle}>Imaging library ({vmItems.length})</label>
-            {vmLoading && <p style={{ color: '#888' }}>Loading…</p>}
-            {!vmLoading && vmItems.length === 0 && (
-              <p style={{ color: '#666', fontSize: '0.85rem' }}>Nothing generated yet.</p>
-            )}
-            {vmItems.map((item) => (
-              <div key={item.id} style={{ border: '1px solid #222', padding: '1rem', marginBottom: '0.75rem', borderRadius: 4 }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.8rem', color: '#888', marginBottom: '0.5rem' }}>
-                  <span>
-                    <b style={{ color: IVORY }}>{item.imaging_type.replace(/_/g, ' ')}</b>
-                    {' · '}
-                    <span style={{
-                      color: item.status === 'approved' ? '#8c8' : item.status === 'archived' ? '#666' : '#c9944c',
-                    }}>
-                      {item.status}
-                    </span>
-                    {item.times_used > 0 && ` · used ${item.times_used}×`}
-                  </span>
-                  <span>{new Date(item.created_at).toLocaleString()}</span>
-                </div>
-                <p style={{ margin: 0, fontSize: '0.95rem', fontStyle: 'italic' }}>{item.text}</p>
-                {item.audio_url && (
-                  <audio controls src={item.audio_url} style={{ width: '100%', marginTop: '0.5rem' }} />
-                )}
-                {item.audio_status === 'failed' && (
-                  <p style={{ color: '#c9944c', fontSize: '0.8rem', marginTop: '0.4rem' }}>Audio not rendered.</p>
-                )}
-                <div style={{ display: 'flex', gap: '0.5rem', marginTop: '0.75rem' }}>
-                  {['approved', 'archived', 'draft'].map((s) => (
-                    <button
-                      key={s}
-                      onClick={() => updateVmStatus(item.id, s)}
-                      disabled={item.status === s}
-                      style={{
-                        fontSize: '0.75rem', padding: '0.3rem 0.7rem', borderRadius: 999, cursor: 'pointer',
-                        border: `1px solid ${item.status === s ? GOLD : '#333'}`,
-                        color: item.status === s ? GOLD : '#999',
-                        background: 'transparent', opacity: item.status === s ? 1 : 0.8,
-                      }}
-                    >
-                      {s}
-                    </button>
-                  ))}
-                </div>
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
-    </div>
-  );
-}
-
-function HealthRow({ label, ok, detail }: { label: string; ok: boolean; detail: string }) {
-  return (
-    <div style={{ display: 'flex', justifyContent: 'space-between', padding: '0.6rem 0', borderBottom: '1px solid #1a1a1a', fontSize: '0.9rem' }}>
-      <span style={{ color: label.trim().startsWith('—') ? '#888' : IVORY }}>{label}</span>
-      <span style={{ color: ok ? '#8c8' : '#e88', fontSize: '0.85rem' }}>{ok ? '✓ ' : '○ '}{detail}</span>
-    </div>
-  );
-}
+                detail={health.imagingPersonaCount.ok ? `${health.imagingPersonaCount.count} found (should be 1)` :
