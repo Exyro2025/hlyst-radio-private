@@ -33,12 +33,6 @@ export default function HomePage() {
   const [twAudioBlob, setTwAudioBlob] = useState<Blob | null>(null);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
 
-  // Empty shell, not a fabricated DJ identity — shown only for the brief
-  // moment before fetchOnAir() resolves. Same shape as DjProfile so every
-  // existing render line below (onAirDj.name, .portrait, .about, etc.)
-  // keeps working unchanged; only the data source moved from a synchronous
-  // regex parse of djs.ts to an async fetch against the canonical
-  // Postgres schedule via /api/on-air.
   const emptyDj = {
     slug: '', name: '', onAirName: '', title: '', schedule: '',
     portrait: '', about: '', inHisLane: '', onAirStyle: '', theVibe: '',
@@ -47,13 +41,22 @@ export default function HomePage() {
   const [onAirDj, setOnAirDj] = useState(emptyDj);
   const [comingUp, setComingUp] = useState<{ dj: typeof emptyDj; startsAt: string }>({ dj: emptyDj, startsAt: '' });
   const voices = djs.slice(0, 4);
-  const [nowPlaying, setNowPlaying] = useState<{ live: boolean; title?: string; artist?: string; album?: string; artwork?: string } | null>(null);
+  const [nowPlaying, setNowPlaying] = useState<{ live: boolean; title?: string; artist?: string; album?: string; artwork?: string; isNewRelease?: boolean } | null>(null);
 
   useEffect(() => {
     const fetchNowPlaying = () => {
       fetch('/api/now-playing')
         .then(res => res.json())
-        .then(setNowPlaying)
+        .then((data) => {
+          setNowPlaying({
+            live: Boolean(data.streamOnline),
+            title: data.nowPlaying?.title,
+            artist: data.nowPlaying?.artist,
+            album: data.nowPlaying?.album,
+            artwork: data.nowPlaying?.artworkUrl,
+            isNewRelease: data.nowPlaying?.isNewRelease,
+          });
+        })
         .catch(() => setNowPlaying({ live: false }));
     };
     fetchNowPlaying();
@@ -66,9 +69,6 @@ export default function HomePage() {
       if (result.onAir) setOnAirDj(result.onAir);
       if (result.comingUp) setComingUp(result.comingUp);
     });
-    // Schedule slots change on 4-hour boundaries, not worth polling as
-    // often as now-playing — a re-fetch every 5 minutes is plenty to
-    // catch the boundary without hammering the DB.
     const interval = setInterval(() => {
       fetchOnAir().then((result: OnAirResult) => {
         if (result.onAir) setOnAirDj(result.onAir);
@@ -277,7 +277,18 @@ export default function HomePage() {
           <p style={{ color: GOLD, fontSize: '0.7rem', letterSpacing: '0.14em', margin: '0 0 0.25rem' }}>NOW PLAYING</p>
           {nowPlaying?.live && nowPlaying.title ? (
             <>
-              <p style={{ fontSize: '1.7rem', fontWeight: 800, margin: 0 }}>{nowPlaying.title}</p>
+              <p style={{ fontSize: '1.7rem', fontWeight: 800, margin: 0 }}>
+                {nowPlaying.title}
+                {nowPlaying.isNewRelease && (
+                  <span style={{
+                    marginLeft: '0.6rem', fontSize: '0.65rem', fontWeight: 700, letterSpacing: '0.08em',
+                    color: GOLD, border: `1px solid ${GOLD}`, borderRadius: 999, padding: '0.15rem 0.5rem',
+                    verticalAlign: 'middle',
+                  }}>
+                    NEW
+                  </span>
+                )}
+              </p>
               <p style={{ color: '#999', fontSize: '0.85rem', margin: '0.2rem 0 0' }}>
                 {[nowPlaying.artist, nowPlaying.album].filter(Boolean).join(' · ')}
               </p>
