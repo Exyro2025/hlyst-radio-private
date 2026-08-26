@@ -74,6 +74,11 @@ export default function HlystAdminPage() {
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState('');
 
+  const [previewBreakType, setPreviewBreakType] = useState('ad_lib');
+  const [previewText, setPreviewText] = useState('');
+  const [previewLoading, setPreviewLoading] = useState(false);
+  const [previewError, setPreviewError] = useState('');
+
   const [health, setHealth] = useState<any>(null);
   const [healthLoading, setHealthLoading] = useState(false);
 
@@ -157,6 +162,32 @@ export default function HlystAdminPage() {
     setSelectedId(p.id);
     setDraft({ ...p });
     setSaveError('');
+    setPreviewText('');
+    setPreviewError('');
+  };
+
+  const generatePreview = async () => {
+    if (!draft) return;
+    setPreviewLoading(true);
+    setPreviewError('');
+    setPreviewText('');
+    try {
+      const res = await fetch('/api/hlyst-admin/generate-break', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ personaId: draft.id, breakType: previewBreakType }),
+      });
+      const body = await res.json();
+      if (!res.ok) {
+        setPreviewError(body.error || 'Generation failed.');
+      } else {
+        setPreviewText(body.text);
+      }
+    } catch {
+      setPreviewError('Could not reach the generation endpoint.');
+    } finally {
+      setPreviewLoading(false);
+    }
   };
 
   const savePersona = async () => {
@@ -420,6 +451,34 @@ export default function HlystAdminPage() {
                 >
                   {saving ? 'Saving…' : 'Save changes'}
                 </button>
+
+                <div style={{ marginTop: '2rem', paddingTop: '1.5rem', borderTop: '1px solid #222' }}>
+                  <label style={labelStyle}>Preview — generate a test line (not sent to air, not saved anywhere)</label>
+                  <div style={{ display: 'flex', gap: '0.6rem', marginTop: '0.4rem' }}>
+                    <select style={{ ...fieldStyle, flex: 1 }} value={previewBreakType} onChange={(e) => setPreviewBreakType(e.target.value)}>
+                      <option value="show_open">Show open</option>
+                      <option value="back_announce">Back-announce</option>
+                      <option value="station_id">Station ID</option>
+                      <option value="ad_lib">Ad-lib</option>
+                    </select>
+                    <button
+                      onClick={generatePreview}
+                      disabled={previewLoading}
+                      style={{
+                        border: `1px solid ${GOLD}`, color: GOLD, background: 'transparent',
+                        padding: '0.6rem 1.2rem', borderRadius: 6, cursor: 'pointer', whiteSpace: 'nowrap',
+                      }}
+                    >
+                      {previewLoading ? 'Generating…' : 'Generate'}
+                    </button>
+                  </div>
+                  {previewError && <p style={{ color: '#e88', fontSize: '0.85rem', marginTop: '0.75rem' }}>{previewError}</p>}
+                  {previewText && (
+                    <div style={{ marginTop: '0.75rem', padding: '0.9rem 1rem', background: '#111', border: '1px solid #222', borderRadius: 6 }}>
+                      <p style={{ margin: 0, fontSize: '0.95rem', lineHeight: 1.6, fontStyle: 'italic' }}>{previewText}</p>
+                    </div>
+                  )}
+                </div>
               </div>
             )}
           </div>
@@ -439,6 +498,8 @@ export default function HlystAdminPage() {
 
               <HealthRow label="ElevenLabs API key" ok={health.elevenLabsConfigured}
                 detail={health.elevenLabsConfigured ? 'Configured' : 'ELEVENLABS_API_KEY not set'} />
+              <HealthRow label="LLM (text generation)" ok={health.llmConfigured}
+                detail={health.llmConfigured ? 'Configured' : 'ANTHROPIC_API_KEY / OPENAI_API_KEY not set'} />
               <HealthRow label="Live365 connection" ok={health.live365Configured}
                 detail={health.live365Configured ? 'Configured' : 'LIVE365_STATION_ID / LIVE365_STREAM_URL not set'} />
               <HealthRow label="Talk Wave engine secret" ok={health.talkWaveEngineSecretConfigured}
