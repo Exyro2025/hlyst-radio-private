@@ -1,6 +1,6 @@
 // Admin-only preview endpoint — generates ONE test line for a persona,
 // using the real system prompt and a real LLM call, and (when the persona
-// has a voice ID and ElevenLabs is configured) a real rendered audio
+// has a voice ID and a voice provider is configured) a real rendered audio
 // preview. Nothing here writes to the DJ Breaks log or the schedule.
 
 import { cookies } from 'next/headers';
@@ -8,7 +8,8 @@ import { neon } from '@neondatabase/serverless';
 import { buildDjSystemPrompt, type EnginePersona } from '@/lib/djPrompt.server';
 import { callLLM } from '@/lib/llm.server';
 import { synthesizeSpeech } from '@/lib/elevenlabs.server';
-import { put } from '@vercel/blob';
+import { voiceProvider } from '@/lib/providers/VoiceProvider';
+import { storageProvider } from '@/lib/providers/StorageProvider';
 
 const sql = neon(process.env.TALKWAVE_URL_POSTGRES_URL!);
 
@@ -60,15 +61,10 @@ export async function POST(req: Request) {
 
     let audioUrl: string | null = null;
     let audioError: string | null = null;
-    if (r.tts_voice_id && process.env.ELEVENLABS_API_KEY) {
+    if (r.tts_voice_id && voiceProvider.isConfigured()) {
       try {
         const audioBuffer = await synthesizeSpeech(text, r.tts_voice_id);
-        const blob = await put(`preview/${personaId}-${Date.now()}.mp3`, audioBuffer, {
-          access: 'public',
-          contentType: 'audio/mpeg',
-          addRandomSuffix: false,
-        });
-        audioUrl = blob.url;
+        audioUrl = await storageProvider.put(`preview/${personaId}-${Date.now()}.mp3`, audioBuffer, 'audio/mpeg');
       } catch (e) {
         audioError = e instanceof Error ? e.message : 'Audio rendering failed.';
       }
