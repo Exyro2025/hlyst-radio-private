@@ -122,10 +122,18 @@ export async function POST(req: Request) {
   const lastBreakAt = lastBreakRows.length ? new Date((lastBreakRows[0] as any).created_at) : null;
   const lastBreakType = lastBreakRows.length ? ((lastBreakRows[0] as any).break_type as BreakType) : null;
 
-  const talkWaveCountRows = await sql`
-    SELECT COUNT(*) FROM messages WHERE status = 'approved' AND used_at IS NULL
-  `;
-  const approvedTalkWaveCount = Number((talkWaveCountRows[0] as any).count);
+    // Isolated on purpose: if the messages table is unreachable for any
+  // reason, Talk Wave availability just reads as zero for this tick —
+  // station IDs, hourly checks, and ad-libs must not go down with it.
+  let approvedTalkWaveCount = 0;
+  try {
+    const talkWaveCountRows = await sql`
+      SELECT COUNT(*) FROM messages WHERE status = 'approved' AND used_at IS NULL
+    `;
+    approvedTalkWaveCount = Number((talkWaveCountRows[0] as any).count);
+  } catch {
+    approvedTalkWaveCount = 0;
+  }
 
   const decisionInput: BreakDecisionInput = {
     frequency: p.frequency, djMode: p.dj_mode, now, minutesIntoShow, minutesUntilShowEnd,
