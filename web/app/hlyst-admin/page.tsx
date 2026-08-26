@@ -83,6 +83,7 @@ export default function HlystAdminPage() {
   const [breaksLoading, setBreaksLoading] = useState(false);
   const [tickResult, setTickResult] = useState<any>(null);
   const [tickLoading, setTickLoading] = useState(false);
+  const [tickLog, setTickLog] = useState<any[]>([]);
 
   const [health, setHealth] = useState<any>(null);
   const [healthLoading, setHealthLoading] = useState(false);
@@ -131,6 +132,14 @@ export default function HlystAdminPage() {
     setBreaksLoading(false);
   };
 
+  const fetchTickLog = async () => {
+    const res = await fetch('/api/hlyst-admin/engine-tick-log');
+    if (res.ok) {
+      const data = await res.json();
+      setTickLog(data.ticks || []);
+    }
+  };
+
   const runEngineTick = async () => {
     setTickLoading(true);
     setTickResult(null);
@@ -142,6 +151,7 @@ export default function HlystAdminPage() {
     }
     setTickLoading(false);
     fetchBreaksLog();
+    fetchTickLog();
   };
 
   useEffect(() => {
@@ -157,6 +167,7 @@ export default function HlystAdminPage() {
     }
     if (tab === 'breaks' && authed) {
       fetchBreaksLog();
+      fetchTickLog();
     }
   }, [tab, authed]);
 
@@ -536,6 +547,14 @@ export default function HlystAdminPage() {
                 detail={health.live365Configured ? 'Configured' : 'LIVE365_STATION_ID / LIVE365_STREAM_URL not set'} />
               <HealthRow label="Talk Wave engine secret" ok={health.talkWaveEngineSecretConfigured}
                 detail={health.talkWaveEngineSecretConfigured ? 'Configured' : 'TALKWAVE_ENGINE_SECRET not set'} />
+              <HealthRow label="Engine cron secret" ok={health.engineCronSecretConfigured}
+                detail={health.engineCronSecretConfigured ? 'Configured' : 'HLYST_ENGINE_CRON_SECRET not set'} />
+              <HealthRow label="Scheduler (GitHub Actions tick)" ok={!!health.lastTick && health.lastTick.minutesAgo < 15}
+                detail={
+                  health.lastTick
+                    ? `Last ran ${health.lastTick.minutesAgo} min ago${health.lastTick.skippedDuplicate ? ' (duplicate, skipped)' : health.lastTick.shouldSpeak ? ` — ${health.lastTick.breakType}` : ' — no break needed'}`
+                    : 'No tick recorded yet — scheduler may not be running'
+                } />
               <HealthRow label="Personas table" ok={health.personasTable.ok}
                 detail={health.personasTable.ok ? `${health.personasTable.count} personas` : 'Not created yet'} />
               <HealthRow label="  — imaging persona (VM)" ok={health.imagingPersonaCount.ok && health.imagingPersonaCount.count === 1}
@@ -621,6 +640,26 @@ export default function HlystAdminPage() {
                 <div style={{ fontSize: '0.75rem', color: '#666', whiteSpace: 'nowrap' }}>
                   {new Date(b.created_at).toLocaleString()}
                 </div>
+              </div>
+            ))}
+          </div>
+
+          <div style={{ borderTop: '1px solid #222', paddingTop: '1.5rem', marginTop: '1.5rem' }}>
+            <label style={labelStyle}>Scheduler executions (last 30 — includes silent ticks)</label>
+            {tickLog.length === 0 && (
+              <p style={{ color: '#666', fontSize: '0.85rem' }}>No tick executions recorded yet.</p>
+            )}
+            {tickLog.map((t) => (
+              <div key={t.id} style={{
+                padding: '0.6rem 0', borderBottom: '1px solid #1a1a1a',
+                display: 'flex', justifyContent: 'space-between', gap: '1rem', fontSize: '0.8rem',
+              }}>
+                <div style={{ color: t.error_detail ? '#e88' : t.skipped_duplicate ? '#c9944c' : t.should_speak ? '#8c8' : '#888' }}>
+                  {t.error_detail ? `Error: ${t.error_detail}` :
+                   t.skipped_duplicate ? `Duplicate skipped (${t.break_type})` :
+                   t.should_speak ? `Spoke — ${t.break_type}` : `Silent — ${t.reason}`}
+                </div>
+                <div style={{ color: '#666', whiteSpace: 'nowrap' }}>{new Date(t.ran_at).toLocaleString()}</div>
               </div>
             ))}
           </div>
