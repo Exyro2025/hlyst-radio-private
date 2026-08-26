@@ -62,7 +62,7 @@ export default function HlystAdminPage() {
   const [messages, setMessages] = useState<MessageRow[]>([]);
   const [voiceNotes, setVoiceNotes] = useState<VoiceNoteRow[]>([]);
   const [loading, setLoading] = useState(false);
-  const [tab, setTab] = useState<'talkwave' | 'personas' | 'health' | 'breaks'>('talkwave');
+  const [tab, setTab] = useState<'talkwave' | 'personas' | 'health' | 'breaks' | 'vm'>('talkwave');
 
   const [personas, setPersonas] = useState<PersonaRow[]>([]);
   const [personasLoading, setPersonasLoading] = useState(false);
@@ -83,6 +83,12 @@ export default function HlystAdminPage() {
   const [tickResult, setTickResult] = useState<any>(null);
   const [tickLoading, setTickLoading] = useState(false);
   const [tickLog, setTickLog] = useState<any[]>([]);
+
+  const [vmItems, setVmItems] = useState<any[]>([]);
+  const [vmLoading, setVmLoading] = useState(false);
+  const [vmGenerateType, setVmGenerateType] = useState('station_id');
+  const [vmGenerating, setVmGenerating] = useState(false);
+  const [vmError, setVmError] = useState('');
 
   const [health, setHealth] = useState<any>(null);
   const [healthLoading, setHealthLoading] = useState(false);
@@ -139,6 +145,46 @@ export default function HlystAdminPage() {
     }
   };
 
+  const fetchVmItems = async () => {
+    setVmLoading(true);
+    const res = await fetch('/api/hlyst-admin/vm-imaging');
+    if (res.ok) {
+      const data = await res.json();
+      setVmItems(data.items || []);
+    }
+    setVmLoading(false);
+  };
+
+  const generateVmImaging = async () => {
+    setVmGenerating(true);
+    setVmError('');
+    try {
+      const res = await fetch('/api/hlyst-admin/vm-imaging/generate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ imagingType: vmGenerateType }),
+      });
+      const body = await res.json();
+      if (!res.ok) {
+        setVmError(body.error || 'Generation failed.');
+      } else {
+        fetchVmItems();
+      }
+    } catch {
+      setVmError('Could not reach the generation endpoint.');
+    }
+    setVmGenerating(false);
+  };
+
+  const updateVmStatus = async (id: number, status: string) => {
+    await fetch('/api/hlyst-admin/vm-imaging/update', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ id, status }),
+    });
+    fetchVmItems();
+  };
+
   const runEngineTick = async () => {
     setTickLoading(true);
     setTickResult(null);
@@ -167,6 +213,9 @@ export default function HlystAdminPage() {
     if (tab === 'breaks' && authed) {
       fetchBreaksLog();
       fetchTickLog();
+    }
+    if (tab === 'vm' && authed) {
+      fetchVmItems();
     }
   }, [tab, authed]);
 
@@ -328,7 +377,7 @@ export default function HlystAdminPage() {
     </div>
   );
 
-  const TabButton = ({ id, label }: { id: 'talkwave' | 'personas' | 'health' | 'breaks'; label: string }) => (
+  const TabButton = ({ id, label }: { id: 'talkwave' | 'personas' | 'health' | 'breaks' | 'vm'; label: string }) => (
     <button
       onClick={() => setTab(id)}
       style={{
@@ -356,6 +405,7 @@ export default function HlystAdminPage() {
         <TabButton id="personas" label="DJ Personas" />
         <TabButton id="health" label="Engine Health" />
         <TabButton id="breaks" label="DJ Breaks" />
+        <TabButton id="vm" label="Station Imaging" />
       </div>
 
       {tab === 'talkwave' && (
@@ -676,6 +726,90 @@ export default function HlystAdminPage() {
                    t.should_speak ? `Spoke — ${t.break_type}` : `Silent — ${t.reason}`}
                 </div>
                 <div style={{ color: '#666', whiteSpace: 'nowrap' }}>{new Date(t.ran_at).toLocaleString()}</div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {tab === 'vm' && (
+        <div>
+          <p style={{ color: '#888', fontSize: '0.85rem', marginBottom: '1.5rem' }}>
+            Vince Morgan — "The Messenger." Evergreen station imaging: generated once, reviewed here, approved,
+            then reused — not regenerated on every play. VM never resolves as a scheduled DJ.
+          </p>
+
+          <div style={{ marginBottom: '1.5rem' }}>
+            <label style={labelStyle}>Generate a new imaging asset</label>
+            <div style={{ display: 'flex', gap: '0.6rem', marginTop: '0.4rem' }}>
+              <select style={{ ...fieldStyle, flex: 1 }} value={vmGenerateType} onChange={(e) => setVmGenerateType(e.target.value)}>
+                <option value="station_id">Station ID</option>
+                <option value="show_transition">Show transition</option>
+                <option value="talkwave_invite">Talk Wave invite</option>
+                <option value="special_announcement">Special announcement</option>
+                <option value="programming_notice">Programming notice</option>
+                <option value="the_lyst_intro">The Lyst intro</option>
+                <option value="interview_intro">Interview intro</option>
+              </select>
+              <button
+                onClick={generateVmImaging}
+                disabled={vmGenerating}
+                style={{
+                  border: `1px solid ${GOLD}`, color: GOLD, background: 'transparent',
+                  padding: '0.6rem 1.2rem', borderRadius: 6, cursor: 'pointer', whiteSpace: 'nowrap',
+                }}
+              >
+                {vmGenerating ? 'Generating…' : 'Generate'}
+              </button>
+            </div>
+            {vmError && <p style={{ color: '#e88', fontSize: '0.85rem', marginTop: '0.75rem' }}>{vmError}</p>}
+          </div>
+
+          <div style={{ borderTop: '1px solid #222', paddingTop: '1.5rem' }}>
+            <label style={labelStyle}>Imaging library ({vmItems.length})</label>
+            {vmLoading && <p style={{ color: '#888' }}>Loading…</p>}
+            {!vmLoading && vmItems.length === 0 && (
+              <p style={{ color: '#666', fontSize: '0.85rem' }}>Nothing generated yet.</p>
+            )}
+            {vmItems.map((item) => (
+              <div key={item.id} style={{ border: '1px solid #222', padding: '1rem', marginBottom: '0.75rem', borderRadius: 4 }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.8rem', color: '#888', marginBottom: '0.5rem' }}>
+                  <span>
+                    <b style={{ color: IVORY }}>{item.imaging_type.replace(/_/g, ' ')}</b>
+                    {' · '}
+                    <span style={{
+                      color: item.status === 'approved' ? '#8c8' : item.status === 'archived' ? '#666' : '#c9944c',
+                    }}>
+                      {item.status}
+                    </span>
+                    {item.times_used > 0 && ` · used ${item.times_used}×`}
+                  </span>
+                  <span>{new Date(item.created_at).toLocaleString()}</span>
+                </div>
+                <p style={{ margin: 0, fontSize: '0.95rem', fontStyle: 'italic' }}>{item.text}</p>
+                {item.audio_url && (
+                  <audio controls src={item.audio_url} style={{ width: '100%', marginTop: '0.5rem' }} />
+                )}
+                {item.audio_status === 'failed' && (
+                  <p style={{ color: '#c9944c', fontSize: '0.8rem', marginTop: '0.4rem' }}>Audio not rendered.</p>
+                )}
+                <div style={{ display: 'flex', gap: '0.5rem', marginTop: '0.75rem' }}>
+                  {['approved', 'archived', 'draft'].map((s) => (
+                    <button
+                      key={s}
+                      onClick={() => updateVmStatus(item.id, s)}
+                      disabled={item.status === s}
+                      style={{
+                        fontSize: '0.75rem', padding: '0.3rem 0.7rem', borderRadius: 999, cursor: 'pointer',
+                        border: `1px solid ${item.status === s ? GOLD : '#333'}`,
+                        color: item.status === s ? GOLD : '#999',
+                        background: 'transparent', opacity: item.status === s ? 1 : 0.8,
+                      }}
+                    >
+                      {s}
+                    </button>
+                  ))}
+                </div>
               </div>
             ))}
           </div>
