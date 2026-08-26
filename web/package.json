@@ -52,6 +52,7 @@
     "marked": "^15.0.7",
     "media-chrome": "^4.19.2",
     "motion": "^12.40.0",
+    "music-metadata": "^11.15.0",
     "nanoid": "^6.0.0",
     "@neondatabase/serverless": "^0.10.0",
     "@vercel/blob": "^0.27.0",
