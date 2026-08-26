@@ -6,6 +6,7 @@
 
 import { cookies } from 'next/headers';
 import { neon } from '@neondatabase/serverless';
+import { del } from '@vercel/blob';
 
 const sql = neon(process.env.TALKWAVE_URL_POSTGRES_URL!);
 
@@ -63,4 +64,37 @@ export async function POST(req: Request) {
   `;
 
   return Response.json({ id: (insertRows[0] as any).id, hlyId: (insertRows[0] as any).hly_id });
+}
+
+export async function DELETE(req: Request) {
+  if (!(await isAuthed())) {
+    return Response.json({ error: 'Unauthorized' }, { status: 401 });
+  }
+
+  const { id } = await req.json();
+  if (!id || typeof id !== 'number') {
+    return Response.json({ error: 'id (number) is required.' }, { status: 400 });
+  }
+
+  const rows = await sql`SELECT audio_url, artwork_url FROM production_music WHERE id = ${id}`;
+  if (!rows.length) {
+    return Response.json({ error: 'Not found.' }, { status: 404 });
+  }
+  const r = rows[0] as any;
+
+  // Delete the actual file(s) in Blob too, not just the database row —
+  // otherwise every deleted track leaves an orphaned file behind.
+  const urlsToDelete = [r.audio_url, r.artwork_url].filter(Boolean) as string[];
+  if (urlsToDelete.length) {
+    try {
+      await del(urlsToDelete);
+    } catch {
+      // If the blob is already gone or unreachable, still proceed to
+      // remove the database row — an orphaned Blob file is a much
+      // smaller problem than a delete button that silently does nothing.
+    }
+  }
+
+  await sql`DELETE FROM production_music WHERE id = ${id}`;
+  return Response.json({ ok: true });
 }
