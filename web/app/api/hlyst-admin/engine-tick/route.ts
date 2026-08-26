@@ -24,6 +24,7 @@ import { callLLM } from '@/lib/llm.server';
 import { decideBreak, type BreakDecisionInput, type BreakType } from '@/lib/breakDecision';
 import { synthesizeSpeech } from '@/lib/elevenlabs.server';
 import { uploadBreakAudio } from '@/lib/audioStorage.server';
+import { mixSpeechWithBed } from '@/lib/audioMixer.server';
 
 const sql = neon(process.env.TALKWAVE_URL_POSTGRES_URL!);
 
@@ -204,9 +205,37 @@ export async function POST(req: Request) {
 
     await sql`UPDATE dj_breaks SET text = ${text}, status = 'generated' WHERE id = ${claimedId}`;
 
+    // Audio rendering is isolated from text generation on purpose — per
+    // the failure-isolation rule, a break with real text but no audio
+    // still counts as generated. Nothing here can turn a successful text
+    // generation into a logged error.
     if (p.tts_voice_id && process.env.ELEVENLABS_API_KEY) {
       try {
-        const audioBuffer = await synthesizeSpeech(text, p.tts_voice_id);
+        let audioBuffer = await synthesizeSpeech(text, p.tts_voice_id);
+
+        // Production bed under speech — genuinely optional, best-effort.
+        // No bed track, or any failure fetching/decoding/mixing one,
+        // simply leaves the plain speech-only audio in place; it never
+        // turns a successful generation into a failure.
+        try {
+          const bedRows = await sql`
+            SELECT audio_url FROM production_music
+            WHERE 'bed' = ANY(classifications)
+            ORDER BY random() LIMIT 1
+          `;
+          if (bedRows.length) {
+            const bedUrl = (bedRows[0] as any).audio_url as string;
+            const bedRes = await fetch(bedUrl);
+            if (bedRes.ok) {
+              const bedBuffer = Buffer.from(await bedRes.arrayBuffer());
+              audioBuffer = await mixSpeechWithBed(audioBuffer, bedBuffer);
+            }
+          }
+        } catch {
+          // Bed mixing is a real enhancement, not a requirement — the
+          // plain speech audioBuffer from above is still used.
+        }
+
         const audioUrl = await uploadBreakAudio(audioBuffer, claimedId);
         await sql`UPDATE dj_breaks SET audio_url = ${audioUrl}, audio_status = 'rendered' WHERE id = ${claimedId}`;
       } catch (audioError) {
