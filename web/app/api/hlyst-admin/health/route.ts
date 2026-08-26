@@ -47,16 +47,39 @@ export async function GET() {
     ? await tableStatus(() => sql`SELECT COUNT(*) FROM personas WHERE tts_voice_id != ''`)
     : { ok: false, error: 'personas table not available' };
 
+  // Last tick execution — the honest signal for "is the external scheduler
+  // (GitHub Actions) actually alive," since this app has no way to
+  // introspect GitHub's side directly. A stale or missing last-tick time
+  // means the scheduler isn't running, whatever GitHub's UI might say.
+  let lastTick: { ranAt: string; shouldSpeak: boolean; breakType: string | null; skippedDuplicate: boolean; minutesAgo: number } | null = null;
+  try {
+    const rows = await sql`SELECT ran_at, should_speak, break_type, skipped_duplicate FROM engine_tick_log ORDER BY ran_at DESC LIMIT 1`;
+    if (rows.length) {
+      const r = rows[0] as any;
+      lastTick = {
+        ranAt: r.ran_at,
+        shouldSpeak: r.should_speak,
+        breakType: r.break_type,
+        skippedDuplicate: r.skipped_duplicate,
+        minutesAgo: Math.round((Date.now() - new Date(r.ran_at).getTime()) / 60000),
+      };
+    }
+  } catch {
+    // engine_tick_log table not set up yet — lastTick stays null, reported honestly below.
+  }
+
   return Response.json({
     checkedAt: new Date().toISOString(),
     elevenLabsConfigured: Boolean(process.env.ELEVENLABS_API_KEY),
     llmConfigured: Boolean(process.env.ANTHROPIC_API_KEY || process.env.OPENAI_API_KEY),
     live365Configured: Boolean(process.env.LIVE365_STATION_ID && process.env.LIVE365_STREAM_URL),
     talkWaveEngineSecretConfigured: Boolean(process.env.TALKWAVE_ENGINE_SECRET),
+    engineCronSecretConfigured: Boolean(process.env.HLYST_ENGINE_CRON_SECRET),
     personasTable: personas,
     scheduleTable: schedule,
     imagingPersonaCount: imagingPersona,
     voicesAssignedCount: voicesAssigned,
     talkWaveApprovedColumnReady: approvedTalkWave,
+    lastTick,
   });
 }
