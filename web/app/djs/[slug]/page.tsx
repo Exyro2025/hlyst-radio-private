@@ -1,12 +1,18 @@
 // DJ profile page — matches the spec: large portrait left, editorial fields
 // right. Black background, gold accents, ivory type, editorial condensed
-// headlines. One dynamic route serves all 15 DJs from the djs.ts data file.
+// headlines. One dynamic route serves all 15 DJs from the djs.ts data file
+// for bio/portrait/slug; the schedule line now comes from the canonical
+// Postgres schedule/personas tables via scheduleRanges.server.ts, falling
+// back to dj.schedule (djs.ts) only if that lookup comes back empty.
 //
 // Place this file at: web/app/djs/[slug]/page.tsx
 
 import { notFound } from 'next/navigation';
 import Image from 'next/image';
 import { djs, getDjBySlug } from '@/lib/djs';
+import { getScheduleRangesByName } from '@/lib/scheduleRanges.server';
+
+export const revalidate = 300; // 5 min — matches web/app/schedule/page.tsx
 
 export function generateStaticParams() {
   return djs.map(dj => ({ slug: dj.slug }));
@@ -16,6 +22,10 @@ export default async function DjProfilePage({ params }: { params: Promise<{ slug
   const { slug } = await params;
   const dj = getDjBySlug(slug);
   if (!dj) return notFound();
+
+  const ranges = await getScheduleRangesByName();
+  const schedule = ranges.get(dj.name);
+  const scheduleDisplay = schedule && schedule.length > 0 ? schedule.join(', ') : dj.schedule;
 
   const fields: { label: string; value: string }[] = [
     { label: 'About', value: dj.about },
@@ -69,7 +79,7 @@ export default async function DjProfilePage({ params }: { params: Promise<{ slug
             {dj.title}
           </p>
           <p style={{ fontSize: '0.95rem', color: '#999', margin: '0 0 2.5rem' }}>
-            {dj.schedule}
+            {scheduleDisplay}
           </p>
 
           {fields.map(f => (
