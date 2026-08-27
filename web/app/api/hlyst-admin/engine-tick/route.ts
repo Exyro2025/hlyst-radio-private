@@ -24,7 +24,20 @@ import { callLLM } from '@/lib/llm.server';
 import { decideBreak, type BreakDecisionInput, type BreakType } from '@/lib/breakDecision';
 import { synthesizeSpeech } from '@/lib/elevenlabs.server';
 import { uploadBreakAudio } from '@/lib/audioStorage.server';
-import { mixSpeechWithBed } from '@/lib/audioMixer.server';
+import { sendToSubwave } from '@/lib/subwaveBridge.server';
+
+// HLYST's own break types → SUB/WAVE's queue kinds (controller/src/broadcast/
+// queue/kinds.ts). talkwave_response and station_id/hourly air immediately;
+// everything else rides into the next track transition — see DEFERRED_KINDS
+// in controller/src/routes/hlyst-bridge.ts, which this mapping must agree with.
+const BRIDGE_KIND: Record<BreakType, string> = {
+  show_open: 'dj-speak',
+  show_close: 'dj-speak',
+  station_id: 'station-id',
+  hourly: 'hourly-check',
+  ad_lib: 'dj-speak',
+  talkwave_response: 'talkwave',
+};
 
 const sql = neon(process.env.TALKWAVE_URL_POSTGRES_URL!);
 
@@ -213,34 +226,32 @@ export async function POST(req: Request) {
       try {
         let audioBuffer = await synthesizeSpeech(text, p.tts_voice_id);
 
-        // Production bed under speech — genuinely optional, best-effort.
-        // No bed track, or any failure fetching/decoding/mixing one,
-        // simply leaves the plain speech-only audio in place; it never
-        // turns a successful generation into a failure.
-        try {
-          const bedRows = await sql`
-            SELECT audio_url FROM production_music
-            WHERE 'bed' = ANY(classifications)
-            ORDER BY random() LIMIT 1
-          `;
-          if (bedRows.length) {
-            const bedUrl = (bedRows[0] as any).audio_url as string;
-            const bedRes = await fetch(bedUrl);
-            if (bedRes.ok) {
-              const bedBuffer = Buffer.from(await bedRes.arrayBuffer());
-              audioBuffer = await mixSpeechWithBed(audioBuffer, bedBuffer);
-            }
-          }
-        } catch {
-          // Bed mixing is a real enhancement, not a requirement — the
-          // plain speech audioBuffer from above is still used.
-        }
-
+                // No bed mixing here — SUB/WAVE is the single audio authority per the
+        // spec (Section 3). HLYST hands over clean speech only; SUB/WAVE's own
+        // bed-policy decides talk-over vs. bed vs. incoming-song ramp once the
+        // bridge call below reaches it.
         const audioUrl = await uploadBreakAudio(audioBuffer, claimedId);
         await sql`UPDATE dj_breaks SET audio_url = ${audioUrl}, audio_status = 'rendered' WHERE id = ${claimedId}`;
-      } catch (audioError) {
-        const audioMessage = audioError instanceof Error ? audioError.message : 'Audio rendering failed.';
-        await sql`UPDATE dj_breaks SET audio_status = 'failed', error_detail = ${audioMessage} WHERE id = ${claimedId}`;
+
+        // Hand the rendered break to SUB/WAVE's real broadcast queue. Failure
+        // is isolated the same way audio rendering itself is above — a break
+        // that's generated and rendered but never reaches SUB/WAVE (no
+        // deployment yet, a network blip) still counts as a successful tick;
+        // it just never airs. That gap is visible in dj_breaks.bridge_status,
+        // not swallowed silently.
+        try {
+          await sendToSubwave({
+            kind: BRIDGE_KIND[decision.breakType!],
+            text,
+            audioUrl,
+            personaId,
+            personaName: p.name,
+            djMode: !!p.dj_mode,
+          });
+          await sql`UPDATE dj_breaks SET bridge_status = 'sent' WHERE id = ${claimedId}`;
+        } catch (bridgeError) {
+          const bridgeMessage = bridgeError instanceof Error ? bridgeError.message : 'Bridge call failed.';
+          await sql`UPDATE dj_breaks SET bridge_status = 'failed', bridge_error = ${bridgeMessage} WHERE id = ${claimedId}`;
       }
     }
 
