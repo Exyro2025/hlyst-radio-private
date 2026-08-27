@@ -4,7 +4,8 @@
 // the two libraries never mix operationally.
 
 import { cookies } from 'next/headers';
-import { handleUpload, type HandleUploadBody } from '@vercel/blob/client';
+import type { HandleUploadBody } from '@vercel/blob/client';
+import { storageProvider } from '@/lib/providers/StorageProvider';
 
 async function isAuthed() {
   const cookieStore = await cookies();
@@ -20,17 +21,11 @@ export async function POST(request: Request) {
   const body = (await request.json()) as HandleUploadBody;
 
   try {
-    const jsonResponse = await handleUpload({
+    const jsonResponse = await storageProvider.createClientUploadToken({
       body,
       request,
-      onBeforeGenerateToken: async () => {
-        return {
-          allowedContentTypes: ['audio/mpeg', 'audio/wav', 'audio/x-wav', 'audio/wave'],
-          addRandomSuffix: true,
-          pathname: 'artist-music/',
-        };
-      },
-      onUploadCompleted: async () => {},
+      pathname: 'artist-music/',
+      allowedContentTypes: ['audio/mpeg', 'audio/wav', 'audio/x-wav', 'audio/wave'],
     });
     return Response.json(jsonResponse);
   } catch (e) {
