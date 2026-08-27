@@ -37,6 +37,7 @@ import { router as debugRoutes } from './routes/debug.js';
 import { router as statsRoutes } from './routes/stats.js';
 import { router as djRoutes } from './routes/dj.js';
 import { router as hlystBridgeRoutes } from './routes/hlyst-bridge.js';
+import { startHlystSync } from './broadcast/hlyst-sync.js';
 import { router as libraryRoutes } from './routes/library.js';
 import { router as playlistsRoutes } from './routes/playlists.js';
 import { router as onboardingRoutes } from './routes/onboarding.js';
