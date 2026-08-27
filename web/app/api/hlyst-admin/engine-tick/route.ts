@@ -162,7 +162,42 @@ export async function POST(req: Request) {
     frequency: p.frequency, djMode: p.dj_mode, now, minutesIntoShow, minutesUntilShowEnd,
     lastBreakAt, lastBreakType, approvedTalkWaveCount,
   };
-  const decision = decideBreak(decisionInput);
+    const decision = decideBreak(decisionInput);
+
+  // Promotions run on every tick, independent of whether the DJ is speaking
+  // this cycle — they're background rotation, not a DJ break. Eligibility:
+  // active, inside its start/end window (a past end_at is a promo that has
+  // simply expired — no separate cron needed), station-wide or scoped to
+  // this persona, and outside its own minimum separation. Never a parallel
+  // playout path — an eligible promo goes through the exact same bridge call
+  // as every other station-production element.
+  try {
+    const promoRows = await sql`
+      SELECT id, title, audio_url, min_separation_minutes FROM promotions
+      WHERE active = true
+        AND (start_at IS NULL OR start_at <= ${now.toISOString()})
+        AND (end_at IS NULL OR end_at > ${now.toISOString()})
+        AND (eligible_persona_ids = '{}' OR ${personaId} = ANY(eligible_persona_ids))
+        AND (
+          last_used_at IS NULL
+          OR last_used_at <= ${now.toISOString()}::timestamptz - (min_separation_minutes || ' minutes')::interval
+        )
+      ORDER BY random() LIMIT 1
+    `;
+    if (promoRows.length) {
+      const promo = promoRows[0] as any;
+      await sendToSubwave({
+        kind: 'promo',
+        text: promo.title,
+        audioUrl: promo.audio_url,
+        personaId,
+        personaName: p.name,
+      });
+      await sql`UPDATE promotions SET times_used = times_used + 1, last_used_at = now() WHERE id = ${promo.id}`;
+    }
+  } catch {
+    // Promotions are opportunistic, same as VM — never affect the DJ break.
+  }
 
   if (!decision.shouldSpeak) {
     await logTick({ personaId, shouldSpeak: false, breakType: null, reason: decision.reason, skippedDuplicate: false, errorDetail: null });
