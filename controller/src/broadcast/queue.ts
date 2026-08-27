@@ -432,7 +432,7 @@ class Queue {
   // the line if the real seam lands too far from it — the forecast is made from
   // the on-air track's remaining play and goes badly wrong when the pick misses
   // that seam and auto.m3u fills the slot.
-  async push({ track, requestedBy = null, intent = null, introScript = null, introKind = 'dj-speak', introPersona = null, aiPicked = false, allowDuplicate = false, linkPrev = null, linkClockAt = null }: {
+    async push({ track, requestedBy = null, intent = null, introScript = null, introKind = 'dj-speak', introPersona = null, aiPicked = false, allowDuplicate = false, linkPrev = null, linkClockAt = null, introWav = null }: {
     track: Track;
     requestedBy?: string | null;
     intent?: string | null;
@@ -443,6 +443,7 @@ class Queue {
     allowDuplicate?: boolean;
     linkPrev?: { id?: string | null; title?: string | null; artist?: string | null } | null;
     linkClockAt?: Date | number | null;
+    introWav?: string | null;
   }) {
     // The blocklist is absolute — even explicit manual queueing is refused
     // until the entry is unblocked — so it sits above `allowDuplicate`. Every
@@ -487,7 +488,7 @@ class Queue {
       linkClockAt: (introScript && linkClockAt != null)
         ? (linkClockAt instanceof Date ? linkClockAt.getTime() : linkClockAt)
         : null,
-      introWav: null as string | null,
+      introWav,
       introAired: false,
       queuedAt: new Date().toISOString(),
       sent: false,
@@ -1317,15 +1318,15 @@ class Queue {
   // voices the OUTGOING DJ after the hour has flipped (dj-agent.runPersonaHandoff).
   // `opts.meta` is merged into the session turn, e.g. tagging the sign-off with
   // the outgoing persona id.
-  async announce(text, kind = 'announcement', { persona = null, meta = {} }: { persona?: Persona | null; meta?: TurnMeta } = {}) {
+    async announce(text, kind = 'announcement', { persona = null, meta = {}, wavPath = null }: { persona?: Persona | null; meta?: TurnMeta; wavPath?: string | null } = {}) {
     if (!text || !text.trim()) return;
     try {
-      const wavPath = await speak(text, { kind, persona });
+      const resolvedWav = wavPath || await speak(text, { kind, persona });
       const targetFile = kind === 'link'
         ? config.liquidsoap.introFile
         : config.liquidsoap.sayFile;
       const seg: SegmentDesc = { kind, channel: kind === 'link' ? 'intro' : 'say', text, meta, persona };
-      const handoff = await airVoice(targetFile, wavPath, text, voiceGainDb(kind, persona), {
+      const handoff = await airVoice(targetFile, resolvedWav, text, voiceGainDb(kind, persona), {
         onQueued: q => this.onQueued(q, seg),
       });
       // Bookkeeping runs when the words reach the stream, not when the file was
@@ -1472,11 +1473,11 @@ class Queue {
   // (djLog → recap/opener anti-repeat, session turn, webhook) happens at AIR
   // time, so the DJ's memory reflects what reached the stream, not what was
   // merely scheduled.
-  async announceAtNextTrack(text, kind = 'announcement', { persona = null, meta = {} }: { persona?: Persona | null; meta?: TurnMeta } = {}) {
+    async announceAtNextTrack(text, kind = 'announcement', { persona = null, meta = {}, wavPath = null }: { persona?: Persona | null; meta?: TurnMeta; wavPath?: string | null } = {}) {
     if (!text || !text.trim()) return;
     try {
-      const wavPath = await speak(text, { kind, persona });
-      this._pendingVoice = { text, kind, wavPath, persona, meta, t: Date.now() };
+      const resolvedWav = wavPath || await speak(text, { kind, persona });
+      this._pendingVoice = { text, kind, wavPath: resolvedWav, persona, meta, t: Date.now() };
       this.log('scheduler', `Holding ${kind} for the next track boundary`);
     } catch (err) {
       this.log('error', `Deferred announce failed: ${(err as Error).message}`);
