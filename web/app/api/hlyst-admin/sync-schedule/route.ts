@@ -26,10 +26,21 @@ export async function GET(req: Request) {
     WHERE is_imaging = false
   `;
 
-  const schedule = await sql`
+   const schedule = await sql`
     SELECT day_of_week, start_time, persona_id
     FROM schedule
   `;
 
-  return Response.json({ personas, schedule });
-}
+  // Eligible Artist Music — real songs that should enter SUB/WAVE's actual
+  // playable catalog, not just get mentioned in DJ speech. release_status is
+  // the existing eligibility control (per the library's own design); nothing
+  // new is invented here. SUB/WAVE's own blocklist/picker rules stay the
+  // final say on when/whether any given track actually airs — this only
+  // makes the master available to that authoritative system.
+  const artistMusic = await sql`
+    SELECT id, title, artist, composer, genre, duration_seconds, audio_url, release_status
+    FROM artist_music
+    WHERE release_status IN ('NEW_RELEASE', 'CURRENT', 'CATALOG')
+  `;
+
+  return Response.json({ personas, schedule, artistMusic });
