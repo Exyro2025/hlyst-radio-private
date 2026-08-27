@@ -12,7 +12,7 @@
 // registerSkillKinds() — so a new skill is recapped without editing this list.
 // 'handoff' (the two-voice persona mic-pass) counts too, so the incoming DJ's
 // next segments don't echo the greeting's opener.
-export const VOICE_KINDS = new Set(['dj-speak', 'link', 'station-id', 'hourly-check', 'handoff', 'banter']);
+export const VOICE_KINDS = new Set(['dj-speak', 'link', 'station-id', 'hourly-check', 'handoff', 'banter', 'talkwave', 'vm-imaging', 'promo']);
 // The intro channels tied to a track start rather than the wall clock — the
 // standalone-talk-break clock (getLastTalkBreakAt) skips them.
 export const TRACK_TIED_KINDS = new Set(['dj-speak', 'link']);
@@ -23,7 +23,7 @@ export const PENDING_VOICE_MAX_AGE_MS = 20 * 60_000;
 // Kinds whose recap entries are de-duped. Skills are added at load time too.
 // 'handoff' is deliberately NOT deduped — its two lines (sign-off + greeting)
 // are distinct utterances by different voices.
-export const DEDUPE_KINDS = new Set(['station-id', 'hourly-check']);
+export const DEDUPE_KINDS = new Set(['station-id', 'hourly-check', 'vm-imaging']);
 export const KIND_LABEL: Record<string, string> = {
   'dj-speak': 'intro',
   'link': 'link',
@@ -31,6 +31,9 @@ export const KIND_LABEL: Record<string, string> = {
   'hourly-check': 'hourly',
   'handoff': 'handoff',
   'banter': 'banter',
+  'talkwave': 'talkwave',
+  'vm-imaging': 'imaging',
+  'promo': 'promo',
 };
 
 // Register the loaded skill kinds (built-in + custom) as recap voice/dedupe
