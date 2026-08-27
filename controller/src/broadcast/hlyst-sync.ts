@@ -74,7 +74,11 @@ export async function syncFromHlyst(): Promise<void> {
   try {
     const res = await fetch(url, { headers: { 'x-sync-token': token } });
     if (!res.ok) throw new Error(`HLYST sync fetch failed (${res.status})`);
-    const body = await res.json();
+        const body = await res.json() as {
+      personas: HlystPersonaRow[];
+      schedule: HlystScheduleRow[];
+      artistMusic?: HlystArtistMusicRow[];
+    };
     personaRows = body.personas;
     scheduleRows = body.schedule;
     artistMusicRows = body.artistMusic || [];
