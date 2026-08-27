@@ -327,10 +327,14 @@ export async function POST(req: Request) {
                 await sql`UPDATE vm_imaging SET times_used = times_used + 1, last_used_at = now() WHERE id = ${vm.id}`;
               }
             }
-          } catch {
+                    } catch {
             // Opportunistic only — a VM miss never affects the DJ break above.
           }
         }
+      } catch (audioError) {
+        const audioMessage = audioError instanceof Error ? audioError.message : 'Audio rendering failed.';
+        await sql`UPDATE dj_breaks SET audio_status = 'failed', error_detail = ${audioMessage} WHERE id = ${claimedId}`;
+      }
     }
 
     if (talkWaveItem) {
