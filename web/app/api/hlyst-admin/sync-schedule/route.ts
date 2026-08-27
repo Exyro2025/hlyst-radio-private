@@ -43,4 +43,5 @@ export async function GET(req: Request) {
     WHERE release_status IN ('NEW_RELEASE', 'CURRENT', 'CATALOG')
   `;
 
-  return Response.json({ personas, schedule, artistMusic });
+    return Response.json({ personas, schedule, artistMusic });
+}
