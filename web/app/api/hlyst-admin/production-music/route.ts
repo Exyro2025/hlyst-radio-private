@@ -6,7 +6,7 @@
 
 import { cookies } from 'next/headers';
 import { neon } from '@neondatabase/serverless';
-import { del } from '@vercel/blob';
+import { storageProvider } from '@/lib/providers/StorageProvider';
 
 const sql = neon(process.env.TALKWAVE_URL_POSTGRES_URL!);
 
@@ -86,8 +86,8 @@ export async function DELETE(req: Request) {
   // otherwise every deleted track leaves an orphaned file behind.
   const urlsToDelete = [r.audio_url, r.artwork_url].filter(Boolean) as string[];
   if (urlsToDelete.length) {
-    try {
-      await del(urlsToDelete);
+        try {
+      await storageProvider.del(urlsToDelete);
     } catch {
       // If the blob is already gone or unreachable, still proceed to
       // remove the database row — an orphaned Blob file is a much
