@@ -114,7 +114,14 @@ export class GatewayProvider implements LLMProvider {
   readonly name = 'gateway';
   private readonly model: string;
 
-  constructor(model = 'anthropic/claude-haiku-4.5') {
+  // anthropic/claude-haiku-4.5's own catalog description claims free-tier
+  // suitability, but that's descriptive text, not an access grant — this
+  // account's free tier rejected it with a 403 (RestrictedModelsError).
+  // minimax/minimax-m3 carries the catalog's actual "free" tag (confirmed
+  // live against https://ai-gateway.vercel.sh/v1/models), so it's genuinely
+  // usable without paid credits. Same Gateway, same OIDC path — only the
+  // model string changed.
+  constructor(model = 'minimax/minimax-m3') {
     this.model = model;
   }
 
