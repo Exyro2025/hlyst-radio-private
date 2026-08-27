@@ -180,6 +180,7 @@ app.use(mcpRoutes);
 // ---------------------------------------------------------------------------
 app.listen(config.server.port, async () => {
   console.log(`SUB/WAVE controller on :${config.server.port}`);
+  startHlystSync();
 
   // Malformed env vars fell back to their defaults at import time and warned on
   // stdout. Repeat them into the booth log too — that's the surface an operator
