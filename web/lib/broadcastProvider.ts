@@ -107,4 +107,60 @@ export class Live365Provider implements BroadcastOutputAdapter {
   }
 }
 
-export const broadcastProvider: BroadcastOutputAdapter = new Live365Provider();
+// SubwaveProvider — reads real now-playing metadata (artist/title/DJ/show/
+// stream health) straight from SUB/WAVE's own controller, which already
+// serves exactly this shape at GET /now-playing (controller/src/routes/
+// public.ts). This is the "internal metadata" half of the contract: the
+// actual public streamUrl listeners connect to is still Live365's job, kept
+// deliberately out of scope here — see the header note and Section 11 of
+// the completion pass. Falls back honestly to Live365Provider's existing
+// (currently metadata-blank) behavior when SUB/WAVE isn't configured, so
+// this never silently regresses a station that hasn't deployed SUB/WAVE yet.
+export class SubwaveProvider implements BroadcastOutputAdapter {
+  private fallback = new Live365Provider();
+
+  async getStatus(): Promise<BroadcastStatus> {
+    const url = process.env.SUBWAVE_CONTROLLER_URL;
+    if (!url) return this.fallback.getStatus();
+
+    try {
+      const res = await fetch(`${url}/now-playing`, { cache: 'no-store' });
+      if (!res.ok) throw new Error(`SUB/WAVE now-playing returned ${res.status}`);
+      const data = await res.json();
+      return {
+        connected: !!data.streamOnline,
+        configState: 'configured',
+        // The public listen URL is Live365's job once that's connected —
+        // this provider is metadata-only by design.
+        streamUrl: null,
+        artist: data.nowPlaying?.artist ?? null,
+        title: data.nowPlaying?.title ?? null,
+        artwork: null,
+        currentShow: data.activeShow?.name ?? null,
+        currentDj: data.dj?.name ?? null,
+        recentTracks: [],
+      };
+    } catch (err) {
+      return {
+        connected: false,
+        configState: 'configured',
+        streamUrl: null,
+        artist: null,
+        title: null,
+        artwork: null,
+        currentShow: null,
+        currentDj: null,
+        recentTracks: [],
+        reason: err instanceof Error ? err.message : 'SUB/WAVE now-playing fetch failed.',
+      };
+    }
+  }
+
+  async publish(): Promise<{ success: boolean; error?: string }> {
+    return { success: false, error: 'SubwaveProvider is metadata-only — publish() has no meaning here.' };
+  }
+}
+
+export const broadcastProvider: BroadcastOutputAdapter = process.env.SUBWAVE_CONTROLLER_URL
+  ? new SubwaveProvider()
+  : new Live365Provider();
