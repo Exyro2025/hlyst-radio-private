@@ -39,6 +39,14 @@ const BRIDGE_KIND: Record<BreakType, string> = {
   talkwave_response: 'talkwave',
 };
 
+// VM (Vince Morgan) fires opportunistically at real station transitions only
+// — never a scheduled DJ, never every tick. Global cooldown (across every
+// approved element, not per-element) is the "do not over-trigger" gate the
+// spec asks for; 90 min keeps him rare against ~42 weekly show boundaries
+// without pinning him to a fixed schedule of his own.
+const VM_TRANSITION_TYPES: BreakType[] = ['show_open', 'show_close'];
+const VM_MIN_GAP_MINUTES = 90;
+
 const sql = neon(process.env.TALKWAVE_URL_POSTGRES_URL!);
 
 const STATION_TIMEZONE = 'America/New_York';
@@ -240,7 +248,7 @@ export async function POST(req: Request) {
         // it just never airs. That gap is visible in dj_breaks.bridge_status,
         // not swallowed silently.
         try {
-          await sendToSubwave({
+                    await sendToSubwave({
             kind: BRIDGE_KIND[decision.breakType!],
             text,
             audioUrl,
@@ -252,7 +260,42 @@ export async function POST(req: Request) {
         } catch (bridgeError) {
           const bridgeMessage = bridgeError instanceof Error ? bridgeError.message : 'Bridge call failed.';
           await sql`UPDATE dj_breaks SET bridge_status = 'failed', bridge_error = ${bridgeMessage} WHERE id = ${claimedId}`;
-      }
+        }
+
+        // VM auto-trigger — entirely separate from the DJ break above, and
+        // never allowed to affect its success. Only considered on a real
+        // transition tick, and only when the global cooldown has cleared.
+        if (VM_TRANSITION_TYPES.includes(decision.breakType!)) {
+          try {
+            const cooldownRows = await sql`
+              SELECT last_used_at FROM vm_imaging
+              WHERE last_used_at IS NOT NULL
+              ORDER BY last_used_at DESC LIMIT 1
+            `;
+            const lastVmAt = cooldownRows.length ? new Date((cooldownRows[0] as any).last_used_at) : null;
+            const cooledDown = !lastVmAt || (now.getTime() - lastVmAt.getTime()) >= VM_MIN_GAP_MINUTES * 60_000;
+
+            if (cooledDown) {
+              const vmRows = await sql`
+                SELECT id, text, audio_url FROM vm_imaging
+                WHERE status = 'approved' AND audio_status = 'rendered'
+                ORDER BY random() LIMIT 1
+              `;
+              if (vmRows.length) {
+                const vm = vmRows[0] as any;
+                await sendToSubwave({
+                  kind: 'vm-imaging',
+                  text: vm.text,
+                  audioUrl: vm.audio_url,
+                  personaName: 'Vince Morgan',
+                });
+                await sql`UPDATE vm_imaging SET times_used = times_used + 1, last_used_at = now() WHERE id = ${vm.id}`;
+              }
+            }
+          } catch {
+            // Opportunistic only — a VM miss never affects the DJ break above.
+          }
+        }
     }
 
     if (talkWaveItem) {
