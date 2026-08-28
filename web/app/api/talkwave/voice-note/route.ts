@@ -1,6 +1,12 @@
 import { put } from '@vercel/blob';
 import { neon } from '@neondatabase/serverless';
 
+// Forces dynamic rendering — this route hits the DB at module load
+// (const sql = neon(...)) and must never be statically evaluated at
+// Docker build time, when TALKWAVE_URL_POSTGRES_URL isn't set.
+export const dynamic = 'force-dynamic';
+
+
 const sql = neon(process.env.TALKWAVE_URL_POSTGRES_URL!);
 
 export async function POST(req: Request) {

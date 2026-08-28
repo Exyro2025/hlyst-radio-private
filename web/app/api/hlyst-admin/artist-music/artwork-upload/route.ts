@@ -9,7 +9,7 @@
 // limit, unlike full audio files which regularly exceed it.
 
 import { cookies } from 'next/headers';
-import { put } from '@vercel/blob';
+import { storageProvider } from '@/lib/providers/StorageProvider';
 
 async function isAuthed() {
   const cookieStore = await cookies();
@@ -41,11 +41,7 @@ export async function POST(req: Request) {
   const buffer = Buffer.from(await file.arrayBuffer());
   const ext = file.type === 'image/png' ? 'png' : file.type === 'image/webp' ? 'webp' : 'jpg';
 
-  const blob = await put(`artist-music-artwork/${Date.now()}.${ext}`, buffer, {
-    access: 'public',
-    contentType: file.type,
-    addRandomSuffix: true,
-  });
+  const blob = await storageProvider.put(`artist-music-artwork/${Date.now()}.${ext}`, buffer, file.type);
 
-  return Response.json({ url: blob.url });
+  return Response.json({ url: blob });
 }

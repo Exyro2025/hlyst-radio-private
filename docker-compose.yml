@@ -40,6 +40,7 @@ services:
     volumes:
       - caddy-data:/data
       - caddy-config:/config
+      - hlyst-music-storage:/srv/uploads:ro
 
   # -------------------------------------------------------------------------
   # BROADCAST — icecast2 + liquidsoap in one container
@@ -175,6 +176,13 @@ services:
     container_name: sub-wave-web
     restart: unless-stopped
     logging: *default-logging
+    volumes:
+      # Persistent home for uploaded Production/Artist Music (and artwork).
+      # Mounted at public/uploads/, so Next.js serves these as ordinary
+      # static files at SITE_URL + /uploads/*. Survives `docker compose
+      # down` (not -v) and rebuilds, unlike the rest of public/ which is
+      # baked into the image at build time.
+      - hlyst-music-storage:/app/public/uploads
     depends_on:
       # The homepage renders per-request against the controller — starting web
       # before it is healthy serves broken first pages.
@@ -196,6 +204,21 @@ services:
       # Server-side base URL for generateMetadata; internal compose name, not
       # exposed to the browser (which uses /api via Caddy).
       - CONTROLLER_INTERNAL_URL=http://controller:7701
+      # HLYST-specific vars, previously missing from this allowlist.
+      - TALKWAVE_URL_POSTGRES_URL=${TALKWAVE_URL_POSTGRES_URL:-}
+      - ELEVENLABS_API_KEY=${ELEVENLABS_API_KEY:-}
+      - ADMIN_USER=${ADMIN_USER:-}
+      - ADMIN_PASS=${ADMIN_PASS:-}
+      - HLYST_ENGINE_CRON_SECRET=${HLYST_ENGINE_CRON_SECRET:-}
+      - TALKWAVE_ENGINE_SECRET=${TALKWAVE_ENGINE_SECRET:-}
+      - SUBWAVE_SYNC_TOKEN=${SUBWAVE_SYNC_TOKEN:-}
+      - LIVE365_STATION_ID=${LIVE365_STATION_ID:-}
+      - LIVE365_STREAM_URL=${LIVE365_STREAM_URL:-}
+      - LIVE365_API_CREDENTIAL=${LIVE365_API_CREDENTIAL:-}
+      - OLLAMA_URL=${OLLAMA_URL:-}
+      - OLLAMA_MODEL=${OLLAMA_MODEL:-}
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
 
   # -------------------------------------------------------------------------
   # TTS-HEAVY (optional) — sidecar for Chatterbox + PocketTTS
@@ -303,6 +326,7 @@ services:
 volumes:
   caddy-data:
   caddy-config:
+  hlyst-music-storage:
   tts-heavy-chatterbox-cache:
   tts-heavy-pocket-cache:
   analyzer-cache:

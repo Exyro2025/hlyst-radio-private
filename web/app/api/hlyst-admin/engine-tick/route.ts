@@ -26,6 +26,12 @@ import { synthesizeSpeech } from '@/lib/elevenlabs.server';
 import { uploadBreakAudio } from '@/lib/audioStorage.server';
 import { sendToSubwave } from '@/lib/subwaveBridge.server';
 
+// Forces dynamic rendering — this route hits the DB at module load
+// (const sql = neon(...)) and must never be statically evaluated at
+// Docker build time, when TALKWAVE_URL_POSTGRES_URL isn't set.
+export const dynamic = 'force-dynamic';
+
+
 // HLYST's own break types → SUB/WAVE's queue kinds (controller/src/broadcast/
 // queue/kinds.ts). talkwave_response and station_id/hourly air immediately;
 // everything else rides into the next track transition — see DEFERRED_KINDS

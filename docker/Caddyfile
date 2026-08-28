@@ -65,6 +65,17 @@
 		respond 404
 	}
 
+	# HLYST's own Next.js API routes (personas, schedule, on-air state,
+	# now-playing bridge, Talk Wave). These live under web/app/api/* and
+	# must be routed to the web service BEFORE the generic /api/* rule
+	# below, which would otherwise send them to the SUB/WAVE controller
+	# (which has no knowledge of these routes and 404s them). Plain
+	# `handle` (not handle_path) so the full path reaches Next.js intact.
+	@hlyst_api path /api/hlyst-admin/* /api/on-air/* /api/now-playing/* /api/talkwave/*
+	handle @hlyst_api {
+		reverse_proxy web:7700
+	}
+
 	# Controller REST API. handle_path strips the /api prefix, so the
 	# controller keeps its existing routes.
 	handle_path /api/* {
@@ -76,6 +87,13 @@
 	@listen path /listen.pls /listen.m3u
 	handle @listen {
 		reverse_proxy controller:7701
+	}
+
+	# Uploaded Production/Artist Music — served directly from the shared
+	# volume, bypassing Next.js entirely.
+	handle_path /uploads/* {
+		root * /srv/uploads
+		file_server
 	}
 
 	# Everything else → Next.js web UI.

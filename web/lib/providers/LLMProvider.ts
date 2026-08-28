@@ -142,15 +142,55 @@ export class GatewayProvider implements LLMProvider {
   }
 }
 
-// ── Provider selection ───────────────────────────────────────────────────
-// Tries each configured provider in order; the first one that's actually
-// configured is used. Order: explicit Anthropic key, explicit OpenAI key,
-// then Gateway last — since GatewayProvider.isConfigured() can't verify
-// OIDC availability in advance, it's the last resort so an explicit key
-// always wins when present, and Gateway is only reached (and its actual
-// success/failure known) when no explicit key exists.
+// ── Ollama ──────────────────────────────────────────────────────────────
+// Local homelab/production LLM — no API key, no cloud dependency. This is
+// the intended DEFAULT provider for this deployment. Reaches Ollama
+// running directly on the OVH host via host.docker.internal.
+export class OllamaProvider implements LLMProvider {
+  readonly name = 'ollama';
+  private readonly url: string;
+  private readonly model: string;
 
-const candidates: LLMProvider[] = [new AnthropicProvider(), new OpenAIProvider(), new GatewayProvider()];
+  constructor() {
+    this.url = process.env.OLLAMA_URL || 'http://host.docker.internal:11434';
+    this.model = process.env.OLLAMA_MODEL || 'llama3.1';
+  }
+
+  isConfigured(): boolean {
+    return true;
+  }
+
+  async generate(systemPrompt: string, userPrompt: string): Promise<LLMResult> {
+    const res = await fetch(`${this.url}/api/chat`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        model: this.model,
+        messages: [
+          { role: 'system', content: systemPrompt },
+          { role: 'user', content: userPrompt },
+        ],
+        stream: false,
+      }),
+    });
+    if (!res.ok) {
+      const body = await res.text().catch(() => '');
+      throw new Error(`Ollama error (${res.status}): ${body.slice(0, 300)}`);
+    }
+    const data = await res.json();
+    const text = data?.message?.content;
+    if (!text) throw new Error('Ollama returned no text content.');
+    return { text, provider: this.name };
+  }
+}
+
+// ── Provider selection ───────────────────────────────────────────────────
+const candidates: LLMProvider[] = [
+  new AnthropicProvider(),
+  new OpenAIProvider(),
+  new OllamaProvider(),
+  new GatewayProvider(),
+];
 
 export function getLLMProvider(): LLMProvider | null {
   return candidates.find((p) => p.isConfigured()) ?? null;

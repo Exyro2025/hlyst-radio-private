@@ -35,6 +35,7 @@ ENV NEXT_PUBLIC_GA_ID=${NEXT_PUBLIC_GA_ID}
 # falls back to web/package.json (see web/next.config.js).
 ARG SUBWAVE_BUILD_VERSION
 ENV SUBWAVE_BUILD_VERSION=${SUBWAVE_BUILD_VERSION}
+ENV TALKWAVE_URL_POSTGRES_URL=postgresql://build:build@localhost:5432/build
 RUN npm run build
 
 # ---- runner ----

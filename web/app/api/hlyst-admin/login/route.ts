@@ -5,9 +5,10 @@ export async function POST(req: Request) {
 
   if (username === process.env.ADMIN_USER && password === process.env.ADMIN_PASS) {
     const cookieStore = await cookies();
+    const isHttps = (process.env.SITE_URL || '').startsWith('https://');
     cookieStore.set('hlyst_admin_session', process.env.ADMIN_PASS!, {
       httpOnly: true,
-      secure: true,
+      secure: isHttps,
       sameSite: 'lax',
       path: '/',
       maxAge: 60 * 60 * 8,

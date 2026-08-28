@@ -13,6 +13,12 @@
 import { neon } from '@neondatabase/serverless';
 import { djs, type DjProfile } from '@/lib/djs';
 
+// Forces dynamic rendering — this route hits the DB at module load
+// (const sql = neon(...)) and must never be statically evaluated at
+// Docker build time, when TALKWAVE_URL_POSTGRES_URL isn't set.
+export const dynamic = 'force-dynamic';
+
+
 const sql = neon(process.env.TALKWAVE_URL_POSTGRES_URL!);
 
 const SLOT_STARTS = [2, 6, 10, 14, 18, 22];

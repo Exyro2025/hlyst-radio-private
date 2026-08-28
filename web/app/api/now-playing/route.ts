@@ -25,6 +25,12 @@ import { neon } from '@neondatabase/serverless';
 import type { NowPlayingResponse } from '@/lib/types';
 import { broadcastProvider } from '@/lib/broadcastProvider';
 
+// Forces dynamic rendering — this route hits the DB at module load
+// (const sql = neon(...)) and must never be statically evaluated at
+// Docker build time, when TALKWAVE_URL_POSTGRES_URL isn't set.
+export const dynamic = 'force-dynamic';
+
+
 const sql = neon(process.env.TALKWAVE_URL_POSTGRES_URL!);
 
 interface HlystNowPlayingExtras {

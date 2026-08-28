@@ -2,7 +2,6 @@
 
 import { useEffect, useState, useRef } from 'react';
 import { parseBlob } from 'music-metadata';
-import { upload } from '@vercel/blob/client';
 
 const GOLD = '#c9a44c';
 const IVORY = '#f5f0e8';
@@ -291,10 +290,19 @@ export default function HlystAdminPage() {
         artworkUrl = artworkBody.url;
       }
 
-      const blob = await upload(artistFile.name, artistFile, {
-        access: 'public',
-        handleUploadUrl: '/api/hlyst-admin/artist-music/upload-token',
+      const artistUploadForm = new FormData();
+      artistUploadForm.append('file', artistFile);
+      const artistUploadRes = await fetch('/api/hlyst-admin/artist-music/upload', {
+        method: 'POST',
+        body: artistUploadForm,
       });
+      const artistUploadBody = await artistUploadRes.json();
+      if (!artistUploadRes.ok) {
+        setArtistError(artistUploadBody.error || 'Upload failed.');
+        setArtistUploading(false);
+        return;
+      }
+      const blob = { url: artistUploadBody.url };
 
       const res = await fetch('/api/hlyst-admin/artist-music', {
         method: 'POST',
@@ -374,10 +382,19 @@ export default function HlystAdminPage() {
     setProdUploading(true);
     setProdError('');
     try {
-      const blob = await upload(prodFile.name, prodFile, {
-        access: 'public',
-        handleUploadUrl: '/api/hlyst-admin/production-music/upload-token',
+      const prodUploadForm = new FormData();
+      prodUploadForm.append('file', prodFile);
+      const prodUploadRes = await fetch('/api/hlyst-admin/production-music/upload', {
+        method: 'POST',
+        body: prodUploadForm,
       });
+      const prodUploadBody = await prodUploadRes.json();
+      if (!prodUploadRes.ok) {
+        setProdError(prodUploadBody.error || 'Upload failed.');
+        setProdUploading(false);
+        return;
+      }
+      const blob = { url: prodUploadBody.url };
 
       const res = await fetch('/api/hlyst-admin/production-music', {
         method: 'POST',
