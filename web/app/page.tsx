@@ -17,6 +17,27 @@ const GOLD = '#c9a44c';
 const BG = '#0a0a0a';
 const IVORY = '#f5f0e8';
 
+interface QueueTrackEntry {
+  track?: { title?: string | null; artist?: string | null; album?: string | null } | null;
+  introScript?: string | null;
+  introPersona?: { name?: string | null } | null;
+  startedAt?: string | null;
+  endedAt?: string | null;
+  requestedBy?: string | null;
+}
+
+function timeAgo(iso?: string | null): string {
+  if (!iso) return '';
+  const ms = Date.now() - new Date(iso).getTime();
+  if (!Number.isFinite(ms) || ms < 0) return '';
+  const mins = Math.floor(ms / 60000);
+  if (mins < 1) return 'just now';
+  if (mins < 60) return `${mins}m ago`;
+  const hrs = Math.floor(mins / 60);
+  if (hrs < 24) return `${hrs}h ago`;
+  return `${Math.floor(hrs / 24)}d ago`;
+}
+
 export default function HomePage() {
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const [playing, setPlaying] = useState(false);
@@ -75,6 +96,25 @@ export default function HomePage() {
         if (result.comingUp) setComingUp(result.comingUp);
       });
     }, 5 * 60 * 1000);
+       return () => clearInterval(interval);
+  }, []);
+
+  const [recentUpcoming, setRecentUpcoming] = useState<{ recentPlays: QueueTrackEntry[]; upcoming: QueueTrackEntry[] }>({ recentPlays: [], upcoming: [] });
+
+  useEffect(() => {
+    const fetchRecentUpcoming = () => {
+      fetch('/api/recent-upcoming')
+        .then(res => res.json())
+        .then((data) => {
+          setRecentUpcoming({
+            recentPlays: Array.isArray(data.recentPlays) ? data.recentPlays : [],
+            upcoming: Array.isArray(data.upcoming) ? data.upcoming : [],
+          });
+        })
+        .catch(() => {});
+    };
+    fetchRecentUpcoming();
+    const interval = setInterval(fetchRecentUpcoming, 30000);
     return () => clearInterval(interval);
   }, []);
 
@@ -326,30 +366,63 @@ export default function HomePage() {
         
       </div>
 
+            {/* RECENTLY PLAYED / UP NEXT */}
+      {(recentUpcoming.recentPlays.length > 0 || recentUpcoming.upcoming.length > 0) && (
+        <section style={{ padding: '3rem 2rem', borderBottom: '1px solid #222', display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '2.5rem' }}>
+          {recentUpcoming.recentPlays.length > 0 && (
+            <div>
+              <p style={{ color: GOLD, fontSize: '0.75rem', letterSpacing: '0.16em', margin: '0 0 1.25rem' }}>RECENTLY PLAYED</p>
+              {recentUpcoming.recentPlays.map((item, i) => (
+                <div key={`rp-${i}`} style={{ display: 'flex', justifyContent: 'space-between', gap: '1rem', borderBottom: '1px solid #1a1a1a', padding: '0.85rem 0' }}>
+                  <div style={{ minWidth: 0 }}>
+                    <p style={{ margin: 0, fontSize: '0.95rem', fontWeight: 700, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                      {item.track?.title || 'Untitled'}
+                    </p>
+                    <p style={{ margin: '0.15rem 0 0', fontSize: '0.8rem', color: '#999', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                      {item.track?.artist}
+                    </p>
+                    {item.introPersona?.name && (
+                      <p style={{ margin: '0.3rem 0 0', fontSize: '0.75rem', color: GOLD }}>
+                        {item.introPersona.name} on the mic
+                      </p>
+                    )}
+                  </div>
+                  <span style={{ flexShrink: 0, fontSize: '0.7rem', color: '#666', paddingTop: '0.15rem' }}>
+                    {timeAgo(item.endedAt)}
+                  </span>
+                </div>
+              ))}
+            </div>
+          )}
+          {recentUpcoming.upcoming.length > 0 && (
+            <div>
+              <p style={{ color: GOLD, fontSize: '0.75rem', letterSpacing: '0.16em', margin: '0 0 1.25rem' }}>UP NEXT</p>
+              {recentUpcoming.upcoming.map((item, i) => (
+                <div key={`up-${i}`} style={{ display: 'flex', alignItems: 'baseline', gap: '0.85rem', borderBottom: '1px solid #1a1a1a', padding: '0.85rem 0' }}>
+                  <span style={{ fontSize: '1.1rem', fontWeight: 200, color: '#555', width: '1.5rem', flexShrink: 0 }}>
+                    {String(i + 1).padStart(2, '0')}
+                  </span>
+                  <div style={{ minWidth: 0 }}>
+                    <p style={{ margin: 0, fontSize: '0.95rem', fontWeight: 700, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                      {item.track?.title || 'Untitled'}
+                    </p>
+                    <p style={{ margin: '0.15rem 0 0', fontSize: '0.8rem', color: '#999', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                      {item.track?.artist}
+                    </p>
+                    {item.requestedBy && (
+                      <p style={{ margin: '0.3rem 0 0', fontSize: '0.75rem', color: GOLD }}>
+                        requested by {item.requestedBy}
+                      </p>
+                    )}
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </section>
+      )}
+
       {/* FROM THE LYST */}
-      <section id="lyst" style={{ padding: '3rem 2rem', borderBottom: '1px solid #222' }}>
-        <p style={{ color: GOLD, fontSize: '0.75rem', letterSpacing: '0.16em', margin: '0 0 0.5rem' }}>FROM THE LYST</p>
-        <p style={{ color: '#888', fontSize: '0.85rem', margin: '0 0 2rem', maxWidth: 480 }}>
-          No payola. No politics. Just excellence. The Lyst is earned, never for sale.
-        </p>
-        <div style={{ display: 'grid', gridTemplateColumns: '1.4fr 1fr', gap: '1.5rem' }}>
-          <div style={{ background: '#111', border: '1px solid #222', padding: '2rem' }}>
-            <p style={{ color: GOLD, fontSize: '0.7rem', letterSpacing: '0.14em', margin: '0 0 1rem' }}>FRONT OF THE LYST</p>
-            <h3 style={{ fontSize: '1.8rem', fontWeight: 800, margin: '0 0 0.5rem' }}>The record everyone's talking about</h3>
-            <p style={{ color: '#999', fontSize: '0.9rem', margin: 0 }}>This week's definitive pick, earned on merit alone.</p>
-          </div>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
-            <div style={{ background: '#111', border: '1px solid #222', padding: '1.5rem' }}>
-              <p style={{ color: GOLD, fontSize: '0.65rem', letterSpacing: '0.14em', margin: '0 0 0.5rem' }}>ON THE LYST</p>
-              <h4 style={{ fontSize: '1.1rem', fontWeight: 700, margin: 0 }}>Rising this week</h4>
-            </div>
-            <div style={{ background: '#111', border: '1px solid #222', padding: '1.5rem' }}>
-              <p style={{ color: GOLD, fontSize: '0.65rem', letterSpacing: '0.14em', margin: '0 0 0.5rem' }}>CERTIFIED LYST</p>
-              <h4 style={{ fontSize: '1.1rem', fontWeight: 700, margin: 0 }}>The permanent record</h4>
-            </div>
-          </div>
-        </div>
-      </section>
 
       {/* COMING UP */}
       {comingUp && (
@@ -403,18 +476,26 @@ export default function HomePage() {
         </a>
       </section>
 
-            {/* TALK WAVE INVITATION */}
-      <section style={{ padding: '3rem 2rem', borderBottom: '1px solid #222', textAlign: 'center' }}>
-        <p style={{ color: GOLD, fontSize: '0.75rem', letterSpacing: '0.16em', margin: '0 0 0.75rem' }}>TALK WAVE</p>
-        <h3 style={{ fontSize: '1.6rem', fontWeight: 800, margin: '0 0 0.75rem' }}>The booth is listening.</h3>
-        <button onClick={() => setTalkWaveOpen(true)} style={{
-          border: `1px solid ${GOLD}`, color: GOLD, background: 'transparent',
-          padding: '0.65rem 1.5rem', fontSize: '0.8rem', letterSpacing: '0.1em',
-          textTransform: 'uppercase', cursor: 'pointer', borderRadius: 999,
-        }}>
-          Open Talk Wave
-        </button>
+                  {/* WAYS TO CONNECT */}
+      <section style={{ padding: '3rem 2rem', borderBottom: '1px solid #222' }}>
+        <p style={{ color: GOLD, fontSize: '0.75rem', letterSpacing: '0.16em', margin: '0 0 2rem' }}>WAYS TO CONNECT</p>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '1.5rem' }}>
+          <div onClick={() => setTalkWaveOpen(true)} style={{ border: '1px solid #222', padding: '1.5rem', cursor: 'pointer' }}>
+            <p style={{ color: IVORY, fontWeight: 700, margin: '0 0 0.4rem' }}>TALK WAVE</p>
+            <p style={{ color: '#999', fontSize: '0.85rem', margin: 0 }}>Send the booth a message or voice note.</p>
+          </div>
+          <div onClick={handleShare} style={{ border: '1px solid #222', padding: '1.5rem', cursor: 'pointer' }}>
+            <p style={{ color: IVORY, fontWeight: 700, margin: '0 0 0.4rem' }}>SHARE THE STATION</p>
+            <p style={{ color: '#999', fontSize: '0.85rem', margin: 0 }}>{shareCopied ? 'Link copied.' : 'Send HLYST to a friend.'}</p>
+          </div>
+          <a href="/api/listen.pls" style={{ border: '1px solid #222', padding: '1.5rem', textDecoration: 'none', color: IVORY, display: 'block' }}>
+            <p style={{ color: IVORY, fontWeight: 700, margin: '0 0 0.4rem' }}>TUNE IN ELSEWHERE</p>
+            <p style={{ color: '#999', fontSize: '0.85rem', margin: 0 }}>One-tap link for Sonos, VLC, and hardware players.</p>
+          </a>
+        </div>
       </section>
+
+      {/* TALK WAVE INVITATION */}
 
       {/* MANIFESTO */}
       <section style={{ padding: '4rem 2rem', textAlign: 'center', borderBottom: '1px solid #222' }}>
