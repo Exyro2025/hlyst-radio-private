@@ -12,7 +12,7 @@ import Image from 'next/image';
 import { djs } from '@/lib/djs';
 import { fetchOnAir, type OnAirResult } from '@/lib/schedule';
 
-const STREAM_URL = process.env.NEXT_PUBLIC_LIVE365_STREAM_URL || '';
+const STREAM_URL = process.env.NEXT_PUBLIC_LIVE365_STREAM_URL || '/stream.mp3';
 const GOLD = '#c9a44c';
 const BG = '#0a0a0a';
 const IVORY = '#f5f0e8';
