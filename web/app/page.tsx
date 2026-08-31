@@ -422,7 +422,30 @@ export default function HomePage() {
         </section>
       )}
 
-      {/* FROM THE LYST */}
+            {/* FROM THE LYST */}
+      <section id="lyst" style={{ padding: '3rem 2rem', borderBottom: '1px solid #222' }}>
+        <p style={{ color: GOLD, fontSize: '0.75rem', letterSpacing: '0.16em', margin: '0 0 0.5rem' }}>FROM THE LYST</p>
+        <p style={{ color: '#888', fontSize: '0.85rem', margin: '0 0 2rem', maxWidth: 480 }}>
+          No payola. No politics. Just excellence. The Lyst is earned, never for sale.
+        </p>
+        <div style={{ display: 'grid', gridTemplateColumns: '1.4fr 1fr', gap: '1.5rem' }}>
+          <div style={{ background: '#111', border: '1px solid #222', padding: '2rem' }}>
+            <p style={{ color: GOLD, fontSize: '0.7rem', letterSpacing: '0.14em', margin: '0 0 1rem' }}>FRONT OF THE LYST</p>
+            <h3 style={{ fontSize: '1.8rem', fontWeight: 800, margin: '0 0 0.5rem' }}>The record everyone's talking about</h3>
+            <p style={{ color: '#999', fontSize: '0.9rem', margin: 0 }}>This week's definitive pick, earned on merit alone.</p>
+          </div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
+            <div style={{ background: '#111', border: '1px solid #222', padding: '1.5rem' }}>
+              <p style={{ color: GOLD, fontSize: '0.65rem', letterSpacing: '0.14em', margin: '0 0 0.5rem' }}>ON THE LYST</p>
+              <h4 style={{ fontSize: '1.1rem', fontWeight: 700, margin: 0 }}>Rising this week</h4>
+            </div>
+            <div style={{ background: '#111', border: '1px solid #222', padding: '1.5rem' }}>
+              <p style={{ color: GOLD, fontSize: '0.65rem', letterSpacing: '0.14em', margin: '0 0 0.5rem' }}>CERTIFIED LYST</p>
+              <h4 style={{ fontSize: '1.1rem', fontWeight: 700, margin: 0 }}>The permanent record</h4>
+            </div>
+          </div>
+        </div>
+      </section>
 
       {/* COMING UP */}
       {comingUp && (
@@ -495,22 +518,20 @@ export default function HomePage() {
         </div>
       </section>
 
-      {/* TALK WAVE INVITATION */}
+            {/* TALK WAVE INVITATION */}
+      <section style={{ padding: '3rem 2rem', borderBottom: '1px solid #222', textAlign: 'center' }}>
+        <p style={{ color: GOLD, fontSize: '0.75rem', letterSpacing: '0.16em', margin: '0 0 0.75rem' }}>TALK WAVE</p>
+        <h3 style={{ fontSize: '1.6rem', fontWeight: 800, margin: '0 0 0.75rem' }}>The booth is listening.</h3>
+        <button onClick={() => setTalkWaveOpen(true)} style={{
+          border: `1px solid ${GOLD}`, color: GOLD, background: 'transparent',
+          padding: '0.65rem 1.5rem', fontSize: '0.8rem', letterSpacing: '0.1em',
+          textTransform: 'uppercase', cursor: 'pointer', borderRadius: 999,
+        }}>
+          Open Talk Wave
+        </button>
+      </section>
 
       {/* MANIFESTO */}
-      <section style={{ padding: '4rem 2rem', textAlign: 'center', borderBottom: '1px solid #222' }}>
-        <p style={{ color: GOLD, fontSize: '0.75rem', letterSpacing: '0.2em', margin: '0 0 1.5rem' }}>
-          OUR STANDARD. OUR PROMISE.
-        </p>
-        <div style={{ display: 'flex', justifyContent: 'center', gap: '3rem', flexWrap: 'wrap', marginBottom: '2rem', fontSize: '0.85rem', letterSpacing: '0.08em' }}>
-          <span>CURATED BY HUMANS</span>
-          <span>EARNED NOT BOUGHT</span>
-          <span>CULTURE FIRST</span>
-        </div>
-        <h2 style={{ fontSize: '2rem', fontWeight: 800, letterSpacing: '0.02em', margin: 0 }}>
-          REAL DJS.<br />REAL MUSIC.<br />REAL CULTURE.
-        </h2>
-      </section>
 
             {/* FOOTER */}
       <footer style={{ padding: '3rem 2rem', borderTop: '1px solid #222', fontSize: '0.8rem', color: '#999' }}>
