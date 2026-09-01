@@ -563,12 +563,25 @@ export async function agenticTick(ctx) {
       return;
     }
 
-    lastFired.set(seg.kind, Date.now());
+        lastFired.set(seg.kind, Date.now());
     segmentState.lastAnySegment = Date.now();
     if (seg.kind === 'weather' && ctx.weather?.condition) {
-      segmentState.lastWeatherCondition = ctx.weather.condition;
+      // Hard grounding guard — enforced in code, not just prompted for.
+      // The model may only reference precipitation/storm/snow language when
+      // the actual observed condition supports it. A 'cloudy' or 'clear'
+      // reading can never legally produce "drizzle", "rain", "mist", "snow",
+      // etc. — those words are dropped from the segment entirely (never
+      // aired) rather than trusted to prompt wording alone (issue: model
+      // invented "a light drizzle" over an actual 'cloudy' reading).
+      const condition = ctx.weather.condition;
+      const precipSupported = condition === 'rainy' || condition === 'stormy' || condition === 'snowy';
+      const FORBIDDEN_UNLESS_SUPPORTED = /\b(drizzl\w*|rain\w*|shower\w*|mist\w*|sleet\w*|snow\w*|storm\w*|hail\w*|downpour\w*)\b/i;
+      if (!precipSupported && FORBIDDEN_UNLESS_SUPPORTED.test(seg.text)) {
+        queue.log('error', `Weather segment dropped — invented precipitation language not supported by observed condition "${condition}": "${seg.text}"`);
+        return;
+      }
+      segmentState.lastWeatherCondition = condition;
     }
-
     // queue.announce appends the segment turn into the live session. The
     // speaker's id rides in meta so session.windowMessages names a guest's
     // turn as theirs rather than the host's own words.

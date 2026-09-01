@@ -233,14 +233,24 @@ const MONTH_LABELS = ['January', 'February', 'March', 'April', 'May', 'June',
 // latitude, so a southern-hemisphere station (negative lat) reads July as
 // winter, not summer (issue: Buenos Aires DJ talking about "summer" and "heat"
 // in July). The southern seasons are the northern ones shifted six months.
-function seasonFor(month /* 1-12 */, lat = weatherConfig().lat) {
-  const m = lat < 0 ? ((month + 5) % 12) + 1 : month;
-  if (m === 12 || m <= 2) return 'winter';
-  if (m <= 5) return 'spring';
-  if (m <= 8) return 'summer';
-  return 'autumn';
+// Astronomical seasons (fixed calendar boundaries close to the real
+// equinox/solstice dates) — how listeners actually talk day-to-day, not
+// meteorological seasons (which flip on the 1st of the month regardless of
+// the equinox). Sept 1 stays "summer" until ~Sept 22. Hemisphere-aware: a
+// southern-hemisphere station reads these boundaries six months offset.
+function seasonFor(month /* 1-12 */, day = 1, lat = weatherConfig().lat) {
+  const md = month * 100 + day; // e.g. Sept 1 -> 901, Dec 21 -> 1221
+  let season: 'winter' | 'spring' | 'summer' | 'autumn';
+  if (md >= 1221 || md < 320) season = 'winter';
+  else if (md < 621) season = 'spring';
+  else if (md < 922) season = 'summer';
+  else season = 'autumn';
+  if (lat < 0) {
+    const order = ['winter', 'spring', 'summer', 'autumn'] as const;
+    season = order[(order.indexOf(season) + 2) % 4];
+  }
+  return season;
 }
-
 export function getDateContext(date = new Date()) {
   const { dow, month, day } = zonedParts(date);
   return {
@@ -251,8 +261,7 @@ export function getDateContext(date = new Date()) {
     dayLabel: DAY_LABELS[dow],
     monthLabel: MONTH_LABELS[month - 1],
     dayOfMonth: day,
-    season: seasonFor(month),
-  };
+    season: seasonFor(month, day),  };
 }
 
 export function getClockContext(date = new Date()) {
