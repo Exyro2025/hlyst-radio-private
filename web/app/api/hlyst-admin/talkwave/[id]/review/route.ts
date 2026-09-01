@@ -28,7 +28,8 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
   try {
     const rows = await sql`
       UPDATE messages
-      SET status = ${status}, reviewed_at = now(), reviewed_by = 'owner'
+      SET status = ${status}, reviewed_at = now(), reviewed_by = 'owner',
+          approved_at = CASE WHEN ${status} = 'approved' THEN now() ELSE approved_at END
       WHERE id = ${messageId} AND status = 'quarantined'
       RETURNING id
     `;
