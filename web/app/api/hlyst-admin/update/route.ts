@@ -30,9 +30,19 @@ export async function POST(req: Request) {
   }
 
   if (table === 'messages') {
-    await sql`UPDATE messages SET status = ${status} WHERE id = ${id}`;
+    await sql`
+      UPDATE messages
+      SET status = ${status},
+          approved_at = CASE WHEN ${status} = 'approved' THEN now() ELSE approved_at END
+      WHERE id = ${id}
+    `;
   } else {
-    await sql`UPDATE voice_notes SET status = ${status} WHERE id = ${id}`;
+    await sql`
+      UPDATE voice_notes
+      SET status = ${status},
+          approved_at = CASE WHEN ${status} = 'approved' THEN now() ELSE approved_at END
+      WHERE id = ${id}
+    `;
   }
 
   return Response.json({ ok: true });
