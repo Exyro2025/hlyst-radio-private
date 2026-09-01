@@ -1,20 +1,20 @@
-// Extraordinary Event Mode (brief §22) — a manually-activated, durable
+// Extraordinary Event Mode (brief Â§22) â€” a manually-activated, durable
 // station state for situations where normal cheerful programming would be
-// obviously inappropriate (historic public-impact events only — never
+// obviously inappropriate (historic public-impact events only â€” never
 // routine news, politics, or an ordinary severe-weather alert, which is
 // severe-weather.ts's job, not this one's).
 //
-// Deliberately NOT wired to any automatic news/headline feed — the brief is
+// Deliberately NOT wired to any automatic news/headline feed â€” the brief is
 // explicit that a single internet headline must never autonomously trigger
 // this. Activation is an owner/admin action (routes/emergency.ts) only.
 //
 // FEMA/IPAWS integration boundary: ingestIpawsAlert() below is where a real
 // IPAWS feed would plug in once credentials/MOA are in place. It is not
-// currently called by anything — the brief explicitly says pending FEMA
+// currently called by anything â€” the brief explicitly says pending FEMA
 // registration must not block the rest of this feature, so the boundary
 // exists and is ready, but nothing invents a feed that isn't there yet.
 //
-// Same persistence shape as dj-memory.ts/session.ts — debounced atomic
+// Same persistence shape as dj-memory.ts/session.ts â€” debounced atomic
 // write, survives a controller restart.
 
 import { existsSync, readFileSync } from 'node:fs';
@@ -88,11 +88,11 @@ export function deactivate(deactivatedBy: string) {
   schedulePersist();
 }
 
-// FEMA/IPAWS integration boundary — not called by anything yet. Once a real
+// FEMA/IPAWS integration boundary â€” not called by anything yet. Once a real
 // feed is wired in (separate work, pending credentials per the brief), it
-// should call this with the alert's own headline as `reason` — never invent
+// should call this with the alert's own headline as `reason` â€” never invent
 // one. Left unimplemented beyond the signature on purpose: no fetch loop, no
 // polling, nothing that could silently "activate itself" on partial data.
 export function ingestIpawsAlert(_alert: { headline: string; id: string }): void {
-  throw new Error('ingestIpawsAlert is a placeholder — FEMA/IPAWS is not connected yet');
+  throw new Error('ingestIpawsAlert is a placeholder â€” FEMA/IPAWS is not connected yet');
 }

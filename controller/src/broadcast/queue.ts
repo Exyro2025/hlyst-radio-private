@@ -1,6 +1,6 @@
 // Queue manager — keeps the in-memory queue and writes track URIs
 // to the file Liquidsoap watches. A now-playing watcher rotates items
-// between upcoming → current → history based on what Liquidsoap reports.
+// between upcoming â†’ current â†’ history based on what Liquidsoap reports.
 //
 // This module owns the Queue class and the singleton every caller uses. The
 // pieces that aren't the class live in ./queue/ and are re-exported below, so
@@ -239,7 +239,7 @@ class Queue {
           // Drop anything older than 96h on boot — keeps the file from
           // ballooning if the cap was raised between restarts, while holding
           // enough history to supply a maxed count-based no-repeat window
-          // (clampNoRepeatWindow: up to 1000 distinct ≈ 2-3 days of air).
+          // (clampNoRepeatWindow: up to 1000 distinct â‰ˆ 2-3 days of air).
           const cutoff = Date.now() - 96 * 3_600_000;
           this._recentPlays = arr
             .filter((p: RecentPlay) => p && p.endedAt && new Date(p.endedAt).getTime() > cutoff)
@@ -271,7 +271,7 @@ class Queue {
       // Dedup against plays recordPlay already logged — matched on title|artist
       // with the existing end-stamp inside a track-length window of the event's
       // start (playAlreadyRecorded), NOT an exact-timestamp key. The old exact
-      // key never matched (end-stamp ≠ start `t`), so every play was duplicated.
+      // key never matched (end-stamp â‰  start `t`), so every play was duplicated.
       const filled: typeof this._recentPlays = [];
       const today = new Date().toISOString().slice(0, 10);
       const yest = new Date(Date.now() - 86_400_000).toISOString().slice(0, 10);
@@ -339,7 +339,7 @@ class Queue {
     return picked.map((e) => {
       const ago = formatAgo(Date.now() - new Date(e.t).getTime());
       const msg = (e.message || '').replace(/\s+/g, ' ').trim();
-      const truncated = msg.length > maxChars ? msg.slice(0, maxChars - 1) + '…' : msg;
+      const truncated = msg.length > maxChars ? msg.slice(0, maxChars - 1) + 'â€¦' : msg;
       return `- ${ago} ago [${KIND_LABEL[e.kind] || e.kind}]: "${truncated}"`;
     }).join('\n');
   }
@@ -405,7 +405,7 @@ class Queue {
   // Timestamp (ms) of the most recent STANDALONE talk break, or 0 — every
   // voice kind except the track-tied intro channels ('link'/'dj-speak', which
   // air with nearly every pick and would mute a gap check outright on a chatty
-  // station). Skill kinds (weather/news/…) count via VOICE_KINDS, so a gap
+  // station). Skill kinds (weather/news/â€¦) count via VOICE_KINDS, so a gap
   // gated on this can't stack onto a segment the listener just heard.
   getLastTalkBreakAt() {
     for (const entry of this.djLog) {
@@ -421,7 +421,7 @@ class Queue {
   // drainToLiquidsoap renders it to a WAV ahead of time and airIntro() writes
   // that WAV only when the track actually starts, so the voice lands over the
   // right song. `introKind` picks the engine routing and the duck channel —
-  // 'dj-speak' → say.txt (HEAVY duck, request intros), 'link' → intro.txt
+  // 'dj-speak' â†’ say.txt (HEAVY duck, request intros), 'link' â†’ intro.txt
   // (LIGHT duck, between-track links).
   //
   // `linkPrev` is the track the intro BACK-ANNOUNCES. Deferring the line to air
@@ -565,7 +565,7 @@ class Queue {
   }
 
   // How many transitions must pass between DJ-mode transition-FX, keyed off the
-  // chattiness ladder. Infinity for silent/quiet personas → no transition FX.
+  // chattiness ladder. Infinity for silent/quiet personas â†’ no transition FX.
   sfxTransitionGap(): number {
     const f = settings.effectiveFrequency();
     if (f === 'aggressive') return 4;
@@ -669,8 +669,8 @@ class Queue {
       this._lastBed = pick.name;
 
       // The entry-side transition effects applyMixTransition armed on this
-      // track (sweep/dissolve/chop/blend, validated for the predecessor→item
-      // pair) would now be applied to the OUTGOING bed at the bed→item cross —
+      // track (sweep/dissolve/chop/blend, validated for the predecessorâ†’item
+      // pair) would now be applied to the OUTGOING bed at the bedâ†’item cross —
       // radio.liq reads them off the incoming track's metadata. Same for the
       // armed transition stinger, which onTrackStarted fires at this item's
       // start, i.e. mid-ramp under the DJ's closing words. The bed replaced
@@ -690,7 +690,7 @@ class Queue {
       const why = budgetMs == null ? `no vocal onset, over ${cfg.thresholdSec}s`
         : budgetMs === Infinity ? 'instrumental'
           : `vocals at ${Math.round(budgetMs / 1000)}s`;
-      this.log('beds', `bed "${pick.name}" ${bedSec}s (${entryCrossSec}s entry cross) → ${crossSec}s ramp into "${item.track?.title}" (${Math.round(voiceMs / 1000)}s link, ${why})`);
+      this.log('beds', `bed "${pick.name}" ${bedSec}s (${entryCrossSec}s entry cross) â†’ ${crossSec}s ramp into "${item.track?.title}" (${Math.round(voiceMs / 1000)}s link, ${why})`);
     } catch (err) {
       // A bed is a garnish — never let it cost the station a track.
       this.log('error', `Bed push failed: ${(err as Error).message}`);
@@ -736,7 +736,7 @@ class Queue {
     // and its envelope scales to whatever d it gets.
     //
     // Auto-arm a washout when the cap will CUT this pick (duration >
-    // effectiveMaxTrackSec → drain stamps liq_cue_out): the ending is a forced
+    // effectiveMaxTrackSec â†’ drain stamps liq_cue_out): the ending is a forced
     // mid-song exit, and the echo-out is what makes it sound intentional rather
     // than broken. Deterministic rather than an LLM choice — the controller
     // knows which tracks will be capped. Coexists with a sweep on the same pick
@@ -779,7 +779,7 @@ class Queue {
         if (exitSecs != null) {
           item.track.crossSec = exitSecs;
           const sung = next.vocalTail === true ? ', vocal tail' : '';
-          this.log('mix', `exit canvas ${exitSecs}s (${outro.ending} ending${sung}) → ${item.track.title}`);
+          this.log('mix', `exit canvas ${exitSecs}s (${outro.ending} ending${sung}) â†’ ${item.track.title}`);
         }
       }
     }
@@ -839,7 +839,7 @@ class Queue {
       delete item.track.sweep;
       this.log('mix', 'sweep dropped (tracks too compatible — beat-blend beats a sweep)');
     }
-    if (item.track.sweep) this.log('mix', `sweep armed → ${item.track.title}`);
+    if (item.track.sweep) this.log('mix', `sweep armed â†’ ${item.track.title}`);
     // blend is the sweep's mirror (entry-side, flagged on the incoming pick):
     // it only makes sense between COMPATIBLE tracks — the handover exposes a
     // clash rather than hiding it.
@@ -851,7 +851,7 @@ class Queue {
       delete item.track.blend;
       this.log('mix', 'blend dropped (tracks clash — a handover needs a compatible pair)');
     }
-    if (item.track.blend) this.log('mix', `blend armed → ${item.track.title}`);
+    if (item.track.blend) this.log('mix', `blend armed â†’ ${item.track.title}`);
     // dissolve (reverb wash) — blend's mirror: beatless ambience only earns
     // its place across a measurable clash. Also yields to a washout already
     // riding the PREVIOUS track's exit: both gestures shape the same outgoing
@@ -866,7 +866,7 @@ class Queue {
       delete item.track.dissolve;
       this.log('mix', 'dissolve dropped (tracks too compatible — a blend keeps the groove a wash would kill)');
     }
-    if (item.track.dissolve) this.log('mix', `dissolve armed → ${item.track.title}`);
+    if (item.track.dissolve) this.log('mix', `dissolve armed â†’ ${item.track.title}`);
     // chop (crossfader cut) — the percussive clash move: the outgoing track is
     // gated rhythmically on its own beat, stabs thinning out as this pick rises
     // through the gaps. Entry-side like the sweep, so it needs no canvas — but
@@ -885,7 +885,7 @@ class Queue {
     }
     if (item.track.chop) {
       item.track.chopPeriod = mix.chopPeriodFor(cur.bpm);
-      this.log('mix', `chop armed: ${item.track.chopPeriod}s gate → ${item.track.title}`);
+      this.log('mix', `chop armed: ${item.track.chopPeriod}s gate â†’ ${item.track.title}`);
     }
     // loop (exit loop) — exit-side like the washout: THIS pick's last bar is
     // caught in a comb-cascade loop as it ends (see radio.liq's loop block
@@ -903,13 +903,13 @@ class Queue {
     if (item.track.loop) {
       item.track.crossSec = mix.loopCrossSecondsFor(next, maxSec);
       item.track.loopBar = mix.loopBarFor(next.bpm);
-      this.log('mix', `loop armed: ${item.track.crossSec}s canvas, ${item.track.loopBar}s bar → ${item.track.title}`);
+      this.log('mix', `loop armed: ${item.track.crossSec}s canvas, ${item.track.loopBar}s bar â†’ ${item.track.title}`);
     }
     if (item.track.washout) {
       item.track.crossSec = mix.washoutCrossSecondsFor(next, maxSec);
       item.track.washoutDelay = mix.washoutDelayFor(next.bpm);
       const why = item.track.washoutAuto ? ' (length-cap exit)' : '';
-      this.log('mix', `washout armed${why}: ${item.track.crossSec}s canvas, ${item.track.washoutDelay}s tap → ${item.track.title}`);
+      this.log('mix', `washout armed${why}: ${item.track.crossSec}s canvas, ${item.track.washoutDelay}s tap â†’ ${item.track.title}`);
     }
     const effectFired = !!(item.track.sweep || item.track.washout || item.track.blend || item.track.dissolve || item.track.chop || item.track.loop);
 
@@ -917,7 +917,7 @@ class Queue {
     // settings.sfx.enabled; never two transitions in a row, and never a riser
     // over a sweep/washout transition. Only ARMED here: this runs at drain
     // time, right after the PREVIOUS track started — the crossfade this
-    // stinger is sized for (prevTrack → item) is a full track away. Playing it
+    // stinger is sized for (prevTrack â†’ item) is a full track away. Playing it
     // now (the original behaviour) landed a drum-roll a few seconds into a
     // song, apropos of nothing. onTrackStarted fires it when item airs, i.e.
     // while that crossfade is actually happening.
@@ -927,7 +927,7 @@ class Queue {
       if (fx) {
         this._transitionsSinceSfx = 0;
         item.transitionSfx = fx;
-        this.log('mix', `transition stinger armed (${fx}) → ${item.track.title}`);
+        this.log('mix', `transition stinger armed (${fx}) â†’ ${item.track.title}`);
       }
     }
   }
@@ -952,7 +952,7 @@ class Queue {
 
   // Seconds until ITEM airs: the on-air clock extended past every sent-but-
   // unaired item ahead of it in `upcoming`. An unknown length anywhere in the
-  // chain makes the answer unknowable (null → callers take the safe path).
+  // chain makes the answer unknowable (null â†’ callers take the safe path).
   // Live — call it again after any await; the sender's TTS/render waits can
   // stretch tens of seconds and a stale value overstates the real window.
   remainingUntilItemAirs(item: QueueItem): number | null {
@@ -1019,7 +1019,7 @@ class Queue {
     if (secs == null) return;
     const existing = item.track.crossSec;
     item.track.crossSec = existing != null ? Math.min(existing, secs) : secs;
-    this.log('mix', `pair blend ${item.track.crossSec}s: ${item.track.title} → ${successor.track.title}`
+    this.log('mix', `pair blend ${item.track.crossSec}s: ${item.track.title} â†’ ${successor.track.title}`
       + (existing != null && existing < secs ? ' (ending canvas kept)' : ''));
   }
 
@@ -1033,7 +1033,7 @@ class Queue {
   // request arriving IS the successor arriving, so FIFO is never inverted by
   // draining around a held item). The watcher tick re-runs this as the clock
   // advances; past the hard deadline the item drains with track-intrinsic
-  // stamps only. transitions.pairDrain off → eager drain, today's behaviour.
+  // stamps only. transitions.pairDrain off â†’ eager drain, today's behaviour.
   async drainToLiquidsoap(force = false) {
     if (this.senderBusy) {
       // A forced drain (the clip-as-track recovery) must not vanish into a
@@ -1145,7 +1145,7 @@ class Queue {
         // tag first by default — see applyLoudnessGain — else the measured
         // value from the item or a library lookup) and stash a clamped gain
         // offset toward the target; subsonic.getAnnotatedUri folds it into
-        // liq_amplify. No loudness from any source → no liq_amplify → unity.
+        // liq_amplify. No loudness from any source â†’ no liq_amplify â†’ unity.
         await this.applyLoudnessGain(item.track);
 
         // Hard length cap (#447): stamp a cue_out so Liquidsoap cuts an
@@ -1173,7 +1173,7 @@ class Queue {
             this.applyPairStamps(item, successor);
             // Stem-blend seam (feature: stem-blend transitions): with the
             // pair known, try to upgrade this seam to a pre-rendered blend.
-            // Cache-hit-only + deadline-raced inside; null → the plain
+            // Cache-hit-only + deadline-raced inside; null â†’ the plain
             // pair-aware crossfade just stamped above.
             try {
               // The render's window is the ahead-extended clock (time until
@@ -1199,7 +1199,7 @@ class Queue {
                 item.cueOutSec = blend.blendStartSec;
                 successor.stemSeam = true;
                 successor.stemCueInSec = blend.inCueSec;
-                this.log('mix', `stem blend armed: ${item.track.title} ✕ ${successor.track.title} (cut ${blend.blendStartSec}s, cue-in ${blend.inCueSec}s, clip ${blend.clipSec}s)`);
+                this.log('mix', `stem blend armed: ${item.track.title} âœ• ${successor.track.title} (cut ${blend.blendStartSec}s, cue-in ${blend.inCueSec}s, clip ${blend.clipSec}s)`);
               }
             } catch (err) {
               this.log('error', `Stem blend failed (falling back to plain crossfade): ${(err as Error).message}`);
@@ -1313,9 +1313,9 @@ class Queue {
 
   // Speak something without queueing a track — hourly time checks, weather,
   // station IDs, auto-DJ links. Two Liquidsoap voice channels, picked by kind:
-  //   - 'link' → intro.txt → intro_queue → LIGHT duck (talk-over feel: the song
+  //   - 'link' â†’ intro.txt â†’ intro_queue â†’ LIGHT duck (talk-over feel: the song
   //              that just started stays audible under the voice)
-  //   - else   → say.txt   → voice_queue → HEAVY duck (solo voice dominates)
+  //   - else   â†’ say.txt   â†’ voice_queue â†’ HEAVY duck (solo voice dominates)
   //
   // `opts.persona` overrides the on-air persona for THIS clip — the mic-pass
   // voices the OUTGOING DJ after the hour has flipped (dj-agent.runPersonaHandoff).
@@ -1473,7 +1473,7 @@ class Queue {
   //
   // One slot only: a newer pending segment replaces an unaired older one, so a
   // fresh ident supersedes a stale one rather than stacking. All bookkeeping
-  // (djLog → recap/opener anti-repeat, session turn, webhook) happens at AIR
+  // (djLog â†’ recap/opener anti-repeat, session turn, webhook) happens at AIR
   // time, so the DJ's memory reflects what reached the stream, not what was
   // merely scheduled.
     async announceAtNextTrack(text, kind = 'announcement', { persona = null, meta = {}, wavPath = null }: { persona?: Persona | null; meta?: TurnMeta; wavPath?: string | null } = {}) {
@@ -1795,7 +1795,7 @@ class Queue {
       // hand-off before airIntro tries to reuse it.
       this._introRenders.transfer(item, this.current);
       this.log('playing', `${np.title} — ${np.artist}`, { requestedBy: item.requestedBy, source });
-      // A tracked item matched → controller and Liquidsoap are in sync; clear any
+      // A tracked item matched â†’ controller and Liquidsoap are in sync; clear any
       // dj_queue-empty desync streak accumulated from prior untracked plays.
       this._emptyDjQueueStreak = 0;
       // Transition stinger armed at drain (applyMixTransition) — fired HERE
@@ -1815,7 +1815,7 @@ class Queue {
       // is dropped instead of airing a stale name.
       void this.airIntro(this.current, this.history[0]?.track || null);
     } else {
-      // Not a tracked request → auto-playlist or jingle.
+      // Not a tracked request â†’ auto-playlist or jingle.
       // If we see untracked plays while there are sent items in `upcoming`,
       // those items might no longer be in Liquidsoap's dj_queue (e.g. after a restart).
       // Reconcile with the live dj_queue to clean up any stale entries.
@@ -1839,7 +1839,7 @@ class Queue {
     // Record the play into the live session's chat history.
     session.appendTurn({
       role: 'track', kind: 'play',
-      text: `▶ "${this.current.track.title}" by ${this.current.track.artist || 'unknown'}`,
+      text: `â–¶ "${this.current.track.title}" by ${this.current.track.artist || 'unknown'}`,
       meta: { source: this.current.source, requestedBy: this.current.requestedBy || null },
     });
 
@@ -1971,7 +1971,7 @@ class Queue {
         // recovery, part-way through a track, where the elapsed part would push
         // `showAt` over the next boundary early (#1205). With a held predecessor
         // (deadline path) the pick follows the HELD track instead, so the lead
-        // adds that track's length. Unknown clock → no look-ahead.
+        // adds that track's length. Unknown clock â†’ no look-ahead.
         //
         // This ONE date then drives the whole boundary sequence below — roll,
         // episode plan, mic-pass, episode hook — not just the pick. Leaving the
@@ -2075,7 +2075,7 @@ class Queue {
     }
   }
 
-  // Greater Cleveland / NE Ohio traffic (#20) � scheduled rush-hour reports
+  // Greater Cleveland / NE Ohio traffic (#20) — scheduled rush-hour reports
   // plus exceptional major-incident coverage, sourced from OHGO. Own busy
   // guard so a slow OHGO fetch can't stack across watcher ticks; gating and
   // suppression (programme episodes, djCallsAllowed, etc.) live in traffic.ts
@@ -2105,7 +2105,7 @@ class Queue {
     }
   }
 
-  // Severe/consequential weather alerts (#21) � NWS-sourced, dormant except
+  // Severe/consequential weather alerts (#21) — NWS-sourced, dormant except
   // for genuinely severe conditions. Same busy-guard + suppression split as
   // maybeTraffic.
   _severeWeatherBusy = false;
@@ -2260,7 +2260,7 @@ class Queue {
         return;
       }
 
-      // Non-empty read → the queue is live; reset the desync streak.
+      // Non-empty read â†’ the queue is live; reset the desync streak.
       this._emptyDjQueueStreak = 0;
 
       // Pass 1: confirm items that ARE currently in dj_queue.
@@ -2333,7 +2333,7 @@ class Queue {
       } catch { /* best-effort */ }
     }
 
-    // …and the OUTGOING half (item.stemBlend): the clip queued right behind
+    // â€¦and the OUTGOING half (item.stemBlend): the clip queued right behind
     // this track was mixed from ITS tail and carries the successor's identity
     // — with the track cancelled it's an orphan that would air after whatever
     // actually plays (flipping now-playing to a track no seam justifies), and
@@ -2358,7 +2358,7 @@ class Queue {
             this.log('scheduler', `removed the rendered transition clip into ${next.track.title} along with it`);
           } else {
             // The clip stays queued, so the successor keeps its head-skip —
-            // clip → track is still a coherent seam, only its entry is abrupt.
+            // clip â†’ track is still a coherent seam, only its entry is abrupt.
             this.log('scheduler', `transition clip into ${next.track.title} could not be removed — it will front the track after an abrupt seam`);
           }
         } else {
@@ -2551,7 +2551,7 @@ class Queue {
   onBedStarted() {
     // The bed is pushed immediately ahead of its item, so the item a marker
     // belongs to is the first bedded one still waiting to speak. No such item
-    // (the overwhelmingly common tick) → nothing to do, skip the disk read.
+    // (the overwhelmingly common tick) â†’ nothing to do, skip the disk read.
     const item = this.upcoming.find(i => i.bedded && i.sent && !i.introAired);
     if (!item) return;
 
@@ -2578,7 +2578,7 @@ class Queue {
     // carry it (item.bedEntrySec). Hold the link for what remains, so the
     // DJ's first words land on the solo bed, not the outgoing song's fade.
     const waitMs = Math.max(0, startedMs + (item.bedEntrySec || 0) * 1000 - Date.now());
-    this.log('beds', `bed on air → airing the link for "${item.track?.title}"${
+    this.log('beds', `bed on air â†’ airing the link for "${item.track?.title}"${
       waitMs > 0 ? ` in ${(waitMs / 1000).toFixed(1)}s (entry cross)` : ''}`);
     const fire = () => void this.airIntro(item, this.current?.track || null);
     if (waitMs > 0) setTimeout(fire, waitMs);

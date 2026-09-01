@@ -92,15 +92,15 @@ const VERNACULAR_COOLDOWN_MS = 45 * 60_000;
 export function vernacularClause(): string {
   const lystCoastRecent = recentlyDid('VERNACULAR_LYST_COAST', VERNACULAR_COOLDOWN_MS);
   const the16Recent = recentlyDid('VERNACULAR_1_6', VERNACULAR_COOLDOWN_MS);
-  const base = 'Optional local vernacular, use ORGANICALLY only when it genuinely fits — never forced, never a substitute for the word Cleveland, never both in the same break, never explained on air: "The Lyst Coast" (HLYST\'s own branded identity for the Cleveland/home area) and "The 1-6" (casual local shorthand from the 216 area code).';
+  const base = 'Optional local vernacular, use ORGANICALLY only when it genuinely fits â€” never forced, never a substitute for the word Cleveland, never both in the same break, never explained on air: "The Lyst Coast" (HLYST\'s own branded identity for the Cleveland/home area) and "The 1-6" (casual local shorthand). Never say "the 216" â€” it is not HLYST\'s vernacular; if local shorthand does not fit, just say Cleveland.';
   if (lystCoastRecent && the16Recent) {
-    return `${base} You used BOTH recently — skip local vernacular entirely this break; just say Cleveland if you need to.`;
+    return `${base} You used BOTH recently â€” skip local vernacular entirely this break; just say Cleveland if you need to.`;
   }
   if (lystCoastRecent) {
-    return `${base} You used "The Lyst Coast" recently — if vernacular fits, reach for "The 1-6" instead, or just say Cleveland.`;
+    return `${base} You used "The Lyst Coast" recently â€” if vernacular fits, reach for "The 1-6" instead, or just say Cleveland.`;
   }
   if (the16Recent) {
-    return `${base} You used "The 1-6" recently — if vernacular fits, reach for "The Lyst Coast" instead, or just say Cleveland.`;
+    return `${base} You used "The 1-6" recently â€” if vernacular fits, reach for "The Lyst Coast" instead, or just say Cleveland.`;
   }
   return base;
 }
@@ -115,11 +115,11 @@ export function recordVernacularUsage(text: string) {
 
 // --- Cross-process transition claims (DJ HANDOFF vs Vince imaging) --------
 // "This DJ's upcoming/just-happened changeover has already been promoted by
-// ONE of the two systems that can cover it" — the outgoing DJ's own HANDOFF
+// ONE of the two systems that can cover it" â€” the outgoing DJ's own HANDOFF
 // break (talk-decision.ts), or Vince Morgan imaging fired opportunistically
 // by HLYST's engine-tick. Both sides reach this through the same 'HANDOFF'
 // event kind already used above, scoped by a subject (the incoming DJ's
-// name) rather than a second store — SUB/WAVE checks/claims in-process,
+// name) rather than a second store â€” SUB/WAVE checks/claims in-process,
 // HLYST checks/claims over HTTP via controller/src/routes/hlyst-bridge.ts's
 // /hlyst/transition-claim endpoint, which just calls these two functions.
 //
@@ -143,7 +143,7 @@ export function claimTransition(key: string) {
 }
 
 
-// List of active/recent transition claims, newest first — feeds the debug
+// List of active/recent transition claims, newest first â€” feeds the debug
 // panel's shared-airtime view. Same 'HANDOFF' event kind and window as
 // transitionClaimed() above; this just enumerates instead of testing one key.
 export function recentTransitionClaims(withinMs: number = TRANSITION_CLAIM_WINDOW_MS): Array<{ subject: string; t: number; ageMs: number }> {

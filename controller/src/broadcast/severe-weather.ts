@@ -1,21 +1,21 @@
-// Severe/consequential weather alerts — sourced from the National Weather
-// Service (api.weather.gov, keyless). Dormant by design (brief §21): NO
+// Severe/consequential weather alerts â€” sourced from the National Weather
+// Service (api.weather.gov, keyless). Dormant by design (brief Â§21): NO
 // hourly forecast, NO ordinary temperature/condition chatter (that's the
-// separate, already-existing ambient weather SKILL — skills/builtins/weather —
+// separate, already-existing ambient weather SKILL â€” skills/builtins/weather â€”
 // which this module does not touch or replace). This module exists ONLY for
 // alerts NWS itself classifies Severe or Extreme: tornado/severe thunderstorm/
 // flash flood/winter storm/excessive heat-cold warnings and the like.
 //
 // Never fabricates: a failed/empty/stale NWS fetch means silence. Each
-// DISTINCT alert (by NWS's own alert id) earns exactly one report — updates
+// DISTINCT alert (by NWS's own alert id) earns exactly one report â€” updates
 // or re-checks of an alert already reported don't repeat it, which is what
 // lets a genuinely new severe alert "override ordinary spacing" (brief) without
 // a station-wide cooldown gate standing in its way, the way traffic.ts's does.
 //
 // Suspended during a programme-mode episode (Lystenne) UNLESS Extraordinary
-// Event Mode (#22) is active — routine severe weather sits below scheduled
+// Event Mode (#22) is active â€” routine severe weather sits below scheduled
 // programming in the airtime hierarchy; only a genuine emergency supersedes
-// Lystenne (brief §23).
+// Lystenne (brief Â§23).
 
 import * as settings from '../settings.js';
 import { djObject } from '../llm/sdk.js';
@@ -28,12 +28,12 @@ import * as budget from './dj-budget.js';
 import * as emergencyMode from './emergency-mode.js';
 
 const NWS_BASE = 'https://api.weather.gov/alerts/active';
-// NWS requires a descriptive User-Agent, not an API key — no invented
+// NWS requires a descriptive User-Agent, not an API key â€” no invented
 // contact info, just a plain identifier for the station's integration.
 const NWS_USER_AGENT = 'HLYST-Radio-Weather-Integration';
 
 // Only these NWS severity classes count as "consequential" per the brief;
-// Moderate/Minor/Unknown stay silent — this is the dormancy boundary.
+// Moderate/Minor/Unknown stay silent â€” this is the dormancy boundary.
 const QUALIFYING_SEVERITIES = new Set(['Severe', 'Extreme']);
 
 interface NwsAlert {
@@ -79,10 +79,10 @@ function isQualifying(a: NwsAlert): boolean {
   return QUALIFYING_SEVERITIES.has(a.severity);
 }
 
-// See traffic.ts's identical rationale — the `programme` flag on the
+// See traffic.ts's identical rationale â€” the `programme` flag on the
 // resolved active show is the only "an episode is airing" signal this
 // codebase already surfaces. Bypassed entirely once Extraordinary Event Mode
-// is active, per brief §23's "only genuine emergency override" rule.
+// is active, per brief Â§23's "only genuine emergency override" rule.
 function suspendedByProgramme(): boolean {
   if (emergencyMode.isActive()) return false;
   try {
@@ -99,9 +99,9 @@ const copySchema = z.object({
 async function generateSevereWeatherCopy(alert: NwsAlert): Promise<string | null> {
   const persona = session.onAirPersona();
   const system = `You are ${persona?.name || 'the station DJ'}, delivering a brief on-air severe weather
-alert for your listening area. Use ONLY the facts given below — never invent a location,
+alert for your listening area. Use ONLY the facts given below â€” never invent a location,
 timing, or condition. This is a genuine public-safety alert: keep it clear, direct, and
-brief. No stage directions, no radio-cliché tells, no downplaying it as small talk.`;
+brief. No stage directions, no radio-clichÃ© tells, no downplaying it as small talk.`;
   const facts = `Event: ${alert.event}\nHeadline: ${alert.headline}\n${alert.description ? `Details: ${alert.description.slice(0, 500)}` : ''}`;
   try {
     const out = await djObject({
@@ -133,7 +133,7 @@ export async function maybeSevereWeather(queue: any): Promise<void> {
     const text = await generateSevereWeatherCopy(alert);
     memory.recordEvent('SEVERE_WEATHER', { subject: claimKey });
     if (!text) {
-      queue.log('weather', `Severe alert "${alert.event}" — copy generation failed, skipping`);
+      queue.log('weather', `Severe alert "${alert.event}" â€” copy generation failed, skipping`);
       continue;
     }
     await queue.announceAtNextTrack(text, 'severe-weather', { persona: session.onAirPersona() });

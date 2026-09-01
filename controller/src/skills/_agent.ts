@@ -46,7 +46,7 @@ import * as sfx from '../broadcast/sfx.js';
 // every skill — shipped and operator-added — from a directory (SKILL.md +
 // optional tool.mjs). Each cap carries: kind/skill (the queue.announce kind +
 // enable-toggle slug), label, cooldownMs, desc (the agent brief), contextFields
-// (the "right now" fields it may mention; unset → default profile, no weather),
+// (the "right now" fields it may mention; unset â†’ default profile, no weather),
 // window, requiresKey, ready() (from the tool module or the env key), seeded
 // (shipped built-in vs operator skill), and the wrapped data tool
 // (toolFn/toolName/toolDesc/config). Every skill lives under state/skills/<slug>/.
@@ -69,7 +69,7 @@ const DEFAULT_SEGMENT_CONTEXT = (CONTEXT_FIELDS as readonly string[]).filter(f =
 // The context fields a single capability's situation block should carry.
 // cap.contextFields may be an array (built-ins) or a comma-string (custom
 // skills / built-in overrides, straight from SKILL.md frontmatter). Absent or
-// empty → the default profile (no weather).
+// empty â†’ the default profile (no weather).
 export function effectiveContextFields(cap: { contextFields?: unknown } | null | undefined): string[] {
   const raw = cap?.contextFields;
   if (raw == null) return DEFAULT_SEGMENT_CONTEXT;
@@ -184,8 +184,8 @@ ${list}`;
 }
 
 let tickBusy = false;
-const lastFired = new Map<string, number>(); // kind → ms timestamp of last aired segment
-const lastUnavailable = new Map<string, number>(); // kind → ms timestamp of last unusable pool-mode fetch
+const lastFired = new Map<string, number>(); // kind â†’ ms timestamp of last aired segment
+const lastUnavailable = new Map<string, number>(); // kind â†’ ms timestamp of last unusable pool-mode fetch
 
 // An unavailable source should not consume another retrieval + scheduler slot
 // on the very next 5-minute tick, but it also should not inherit a multi-hour
@@ -316,7 +316,7 @@ export const directorAgent = defineAgent({
   // Wall-clock ceiling, mirroring the picker (dj-agent.ts). Without it a
   // gemma-class model that ignores toolChoice can drive the done-tool recovery
   // into a multi-step stall (86s observed in issue #555) and hang the tick;
-  // the deadline turns that into a clean throw → handled as silence below.
+  // the deadline turns that into a clean throw â†’ handled as silence below.
   timeoutMs: segmentDeadline,
   buildSystem: ({ persona, caps, freq, sfxCatalog }) =>
     directorSystem(persona, caps, freq, sfxCatalog),
@@ -405,7 +405,7 @@ export function dataBlock(data: unknown) {
   if (data == null) return '';
   let body: string;
   try { body = JSON.stringify(data, null, 1); } catch { body = String(data); }
-  if (body.length > 6000) body = body.slice(0, 6000) + '\n…(truncated)';
+  if (body.length > 6000) body = body.slice(0, 6000) + '\nâ€¦(truncated)';
   return `\n\nSource data for this segment (write only from this and the current moment — do not invent facts):\n${body}`;
 }
 
@@ -551,7 +551,7 @@ export async function agenticTick(ctx) {
 
     if (!seg || !seg.text || !seg.text.trim()) {
       if (skippedBeforeLlm) {
-        queue.log('scheduler', `[segment] ${skippedBeforeLlm} → unavailable → skipped before LLM — ${silentReason}`);
+        queue.log('scheduler', `[segment] ${skippedBeforeLlm} â†’ unavailable â†’ skipped before LLM — ${silentReason}`);
       } else {
         queue.log('scheduler', `Segment agent stayed silent — ${silentReason || 'nothing to add'}`);
       }
@@ -568,18 +568,18 @@ export async function agenticTick(ctx) {
         lastFired.set(seg.kind, Date.now());
     segmentState.lastAnySegment = Date.now();
     if (seg.kind === 'weather' && ctx.weather?.condition) {
-      // Hard grounding guard � enforced in code, not just prompted for.
+      // Hard grounding guard — enforced in code, not just prompted for.
       // The model may only reference precipitation/storm/snow language when
       // the actual observed condition supports it. A 'cloudy' or 'clear'
       // reading can never legally produce "drizzle", "rain", "mist", "snow",
-      // etc. � those words are dropped from the segment entirely (never
+      // etc. — those words are dropped from the segment entirely (never
       // aired) rather than trusted to prompt wording alone (issue: model
       // invented "a light drizzle" over an actual 'cloudy' reading).
       const condition = ctx.weather.condition;
       const precipSupported = condition === 'rainy' || condition === 'stormy' || condition === 'snowy';
       const FORBIDDEN_UNLESS_SUPPORTED = /\b(drizzl\w*|rain\w*|shower\w*|mist\w*|sleet\w*|snow\w*|storm\w*|hail\w*|downpour\w*)\b/i;
       if (!precipSupported && FORBIDDEN_UNLESS_SUPPORTED.test(seg.text)) {
-        queue.log('error', `Weather segment dropped � invented precipitation language not supported by observed condition "${condition}": "${seg.text}"`);
+        queue.log('error', `Weather segment dropped — invented precipitation language not supported by observed condition "${condition}": "${seg.text}"`);
         return;
       }
        segmentState.lastWeatherCondition = condition;
@@ -887,7 +887,7 @@ export function skillCatalog() {
       } else if (searchProvider === 'searxng') {
         requiresKey = null;
         keyUrl = null;
-        hint = 'SearXNG self-hosted meta-search. Configure base URL in admin → Settings → Search.';
+        hint = 'SearXNG self-hosted meta-search. Configure base URL in admin â†’ Settings â†’ Search.';
       } else {
         requiresKey = null;
         keyUrl = null;

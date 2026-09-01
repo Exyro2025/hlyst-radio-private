@@ -8,7 +8,7 @@ import * as session from './broadcast/session.js';
 import { getListenerCount } from './broadcast/listeners.js';
 import { zonedParts, zonedISODate, clockDisplay, spokenHourPhrase, spokenTimePhrase } from './time.js';
 
-// The day-period → {vibe, show} table stays in code (these feed spoken-segment
+// The day-period â†’ {vibe, show} table stays in code (these feed spoken-segment
 // prompts and show resolution). Each period's MOOD is operator-editable
 // (settings.moodSchedule via moodScheduleFor). Note the 'drive-time' vibe reads
 // 'end of the workday', not 'drive home': the vibe string lands in every
@@ -148,7 +148,7 @@ function mapWeatherCode(code: number) {
   return 'cloudy';
 }
 
-// Operator-editable weather → mood map (settings.weatherMoods). '' (no steer)
+// Operator-editable weather â†’ mood map (settings.weatherMoods). '' (no steer)
 // normalises to null so the dominantMood chain (festival > weather > time)
 // falls through to the time mood, exactly as the old hardcoded default did.
 function weatherToMood(condition) {
@@ -234,7 +234,7 @@ const MONTH_LABELS = ['January', 'February', 'March', 'April', 'May', 'June',
 // winter, not summer (issue: Buenos Aires DJ talking about "summer" and "heat"
 // in July). The southern seasons are the northern ones shifted six months.
 // Astronomical seasons (fixed calendar boundaries close to the real
-// equinox/solstice dates) � how listeners actually talk day-to-day, not
+// equinox/solstice dates) — how listeners actually talk day-to-day, not
 // meteorological seasons (which flip on the 1st of the month regardless of
 // the equinox). Sept 1 stays "summer" until ~Sept 22. Hemisphere-aware: a
 // southern-hemisphere station reads these boundaries six months offset.
@@ -270,9 +270,9 @@ export function getClockContext(date = new Date()) {
   return {
     hhmm: `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`,
     // What the prompts show the model — the model speaks whatever clock shape
-    // it sees, so this follows the operator's locale (en-US → "1:05 pm")
+    // it sees, so this follows the operator's locale (en-US â†’ "1:05 pm")
     // instead of always feeding 24-hour digits (issue: "thirteen oh five" on
-    // air with AM/PM selected in admin → Settings → Station).
+    // air with AM/PM selected in admin â†’ Settings â†’ Station).
     display: clockDisplay(h, m, getSettings().locale === 'en-US'),
     // Deterministic spoken hour for the hourly time check ("midnight", "one
     // in the morning") — computed here so the model never converts 24-hour
@@ -389,7 +389,7 @@ export async function getFullContext(at?: Date) {
 
   // The moment this context DESCRIBES, stamped so consumers can tell a
   // look-ahead context from a live one. Without it a consumer that needs a date
-  // (session.start → getEffectivePersona) silently falls back to the wall clock
+  // (session.start â†’ getEffectivePersona) silently falls back to the wall clock
   // and disagrees with the activeShow resolved above — which, on a look-ahead
   // roll, stamps the OUTGOING persona onto the INCOMING show's session and
   // makes stampRolledFrom see no persona change at all (mic-pass suppressed).

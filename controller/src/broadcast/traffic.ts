@@ -1,22 +1,22 @@
-// Greater Cleveland / Northeast Ohio traffic reports — sourced from ODOT's
+// Greater Cleveland / Northeast Ohio traffic reports â€” sourced from ODOT's
 // OHGO public API. Two firing paths, both boundary-deferred through the
-// existing queue.announceAtNextTrack() (no parallel scheduler, brief §20):
+// existing queue.announceAtNextTrack() (no parallel scheduler, brief Â§20):
 //
 //  - SCHEDULED: weekday rush windows (6-9 AM, 3-6 PM), one report per
 //    qualifying hour, claimed via dj-memory so a restart or a slow tick can't
 //    double-fire the same hour's slot.
 //  - EXCEPTIONAL: outside those windows, only a genuinely major incident
-//    (closure, multi-vehicle, fatality, hazmat, etc. — judged from OHGO's own
+//    (closure, multi-vehicle, fatality, hazmat, etc. â€” judged from OHGO's own
 //    description text, never invented) can trigger a report, gated by its own
 //    minimum gap so one big incident doesn't spam updates.
 //
 // Never fabricates: a failed/empty/stale OHGO fetch means silence, not a
 // guess. Suspended entirely during a programme-mode episode (Lystenne) and
 // behind the same djCallsAllowed/autoVoiceAllowed/budget gates every other
-// autonomous segment already respects — traffic sits BELOW scheduled
+// autonomous segment already respects â€” traffic sits BELOW scheduled
 // programming and emergency override in the airtime hierarchy, never above.
 //
-// No verified OHGO region-filter param for this deployment — incidents are
+// No verified OHGO region-filter param for this deployment â€” incidents are
 // filtered CLIENT-SIDE against NE Ohio interstates/counties rather than
 // trusting an unconfirmed server-side filter to actually narrow anything.
 
@@ -41,11 +41,11 @@ const NE_OHIO_KEYWORDS = [
   'Portage', 'Cleveland', 'Akron', 'Parma', 'Lakewood', 'Euclid',
 ];
 
-// Keyword heuristic for "genuinely major" — judged from OHGO's own
+// Keyword heuristic for "genuinely major" â€” judged from OHGO's own
 // Description/RoadwayName text, never invented. Two-tier: MUST match a real
 // severity signal, and MUST NOT be explained solely by a routine minor cause
 // (a disabled/stalled vehicle blocking a lane is common and not "major" even
-// when OHGO's own text says a lane is "closed" for it — bare 'closed' was
+// when OHGO's own text says a lane is "closed" for it â€” bare 'closed' was
 // firing on exactly this the first time this ran live, which is precisely
 // what the brief's "genuinely major" bar exists to exclude). Calibrate
 // further against real payloads as more incidents are observed.
@@ -57,7 +57,7 @@ const MAJOR_KEYWORDS = [
 ];
 
 // Routine causes that, even when OHGO's text says a lane is "closed" for
-// them, are NOT what "genuinely major" means — a stalled/disabled vehicle
+// them, are NOT what "genuinely major" means â€” a stalled/disabled vehicle
 // blocking one lane is common and clears quickly.
 const ROUTINE_CAUSE_KEYWORDS = [
   'disabled vehicle', 'stalled vehicle', 'stalled car', 'debris',
@@ -69,7 +69,7 @@ interface OhgoIncident {
   direction?: string;
 }
 
-// Raw fetch — returns null on ANY failure (network, non-200, malformed body,
+// Raw fetch â€” returns null on ANY failure (network, non-200, malformed body,
 // missing key). Never throws into the caller; a null result IS the "stay
 // silent" signal per the brief's no-fabrication rule.
 async function fetchIncidents(): Promise<OhgoIncident[] | null> {
@@ -106,7 +106,7 @@ function isMajor(i: OhgoIncident): boolean {
   if (!MAJOR_KEYWORDS.some(k => haystack.includes(k))) return false;
   // A severity keyword matched, but if the incident's own text attributes it
   // to a routine cause with no OTHER severity signal (no injury/fatality/
-  // hazmat/etc. alongside it), treat it as not major — a partial lane
+  // hazmat/etc. alongside it), treat it as not major â€” a partial lane
   // closure for a stalled car is not "genuinely major" even though the word
   // "closed" can appear in its description.
   const routineCauseOnly = ROUTINE_CAUSE_KEYWORDS.some(k => haystack.includes(k))
@@ -124,10 +124,10 @@ function scheduledSlot(now: Date): number | null {
   return null;
 }
 
-// Suspended during a programme-mode episode (Lystenne) — resolveActiveShow's
+// Suspended during a programme-mode episode (Lystenne) â€” resolveActiveShow's
 // `programme` flag (settings/persona.ts resolveShowShape) is the only signal
 // this codebase already surfaces for "an episode is airing". If Lystenne ends
-// up using a different flag, point this at that instead — flagging this as
+// up using a different flag, point this at that instead â€” flagging this as
 // the one part of this module built on an inference rather than a confirmed
 // field, since I haven't seen programme.ts directly.
 function programmeEpisodeActive(): boolean {
@@ -142,7 +142,7 @@ const copySchema = z.object({
   text: z.string().describe('the exact words the DJ says on air, stating only the given facts'),
 });
 
-// Write the on-air line from the ALREADY-VERIFIED incident list only — the
+// Write the on-air line from the ALREADY-VERIFIED incident list only â€” the
 // model is not asked to decide whether to report, only how to say what it
 // was given. Empty `incidents` never reaches this function.
 async function generateTrafficCopy(incidents: OhgoIncident[]): Promise<string | null> {
@@ -152,9 +152,9 @@ async function generateTrafficCopy(incidents: OhgoIncident[]): Promise<string | 
     return `- ${i.description}${where ? ` (${where}${i.direction ? `, ${i.direction}` : ''})` : ''}`;
   }).join('\n');
   const system = `You are ${persona?.name || 'the station DJ'}, giving a brief live traffic report for
-Greater Cleveland / Northeast Ohio. Use ONLY the facts listed below — never invent a
+Greater Cleveland / Northeast Ohio. Use ONLY the facts listed below â€” never invent a
 location, cause, delay, or condition not given to you. Keep it brief, natural, in your
-own on-air voice. No stage directions, no radio-cliché tells.`;
+own on-air voice. No stage directions, no radio-clichÃ© tells.`;
   try {
     const out = await djObject({
       system,
@@ -172,7 +172,7 @@ own on-air voice. No stage directions, no radio-cliché tells.`;
 // Called once per watcher tick from queue.ts, mirroring maybeAutonomousBreak.
 export async function maybeTraffic(queue: any): Promise<void> {
   if (!djCallsAllowed() || !autoVoiceAllowed() || !budget.optionalSegmentsAllowed()) return;
-  // Below scheduled programming in the airtime hierarchy — Lystenne (and any
+  // Below scheduled programming in the airtime hierarchy â€” Lystenne (and any
   // other programme-mode episode) is never interrupted for routine traffic.
   if (programmeEpisodeActive()) return;
 
@@ -184,28 +184,28 @@ export async function maybeTraffic(queue: any): Promise<void> {
     if (memory.recentlyDid('TRAFFIC_REPORT', 55 * 60_000, claimKey)) return;
     const incidents = await fetchIncidents();
     if (!incidents) {
-      queue.log('traffic', `OHGO unavailable — skipping the ${slot}:00 scheduled report`);
+      queue.log('traffic', `OHGO unavailable â€” skipping the ${slot}:00 scheduled report`);
       return;
     }
     const local = incidents.filter(inNortheastOhio);
-    // Claim the slot regardless of whether there's anything to report — the
+    // Claim the slot regardless of whether there's anything to report â€” the
     // brief asks for the OPPORTUNITY at top of hour, not a forced report
     // when conditions are genuinely clear.
     memory.recordEvent('TRAFFIC_REPORT', { subject: claimKey });
     if (!local.length) {
-      queue.log('traffic', `${slot}:00 scheduled report — no NE Ohio incidents to report`);
+      queue.log('traffic', `${slot}:00 scheduled report â€” no NE Ohio incidents to report`);
       return;
     }
     const text = await generateTrafficCopy(local);
     if (!text) {
-      queue.log('traffic', `${slot}:00 scheduled report — copy generation failed, skipping`);
+      queue.log('traffic', `${slot}:00 scheduled report â€” copy generation failed, skipping`);
       return;
     }
     await queue.announceAtNextTrack(text, 'traffic', { persona: session.onAirPersona() });
     return;
   }
 
-  // Exceptional path — outside rush windows entirely, only a genuinely major
+  // Exceptional path â€” outside rush windows entirely, only a genuinely major
   // local incident can trigger a report, gapped so one incident doesn't spam.
   if (memory.recentlyDid('TRAFFIC_REPORT', 60 * 60_000, 'exceptional')) return;
   const incidents = await fetchIncidents();

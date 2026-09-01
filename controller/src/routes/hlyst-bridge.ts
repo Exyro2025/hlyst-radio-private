@@ -1,10 +1,10 @@
 // The ONE external contract between the Vercel-hosted HLYST engine and
 // SUB/WAVE's real broadcast queue. HLYST renders its own audio (ElevenLabs,
-// on its own infrastructure) and hands the finished file to this route —
+// on its own infrastructure) and hands the finished file to this route â€”
 // SUB/WAVE never re-renders it, per the single-audio-authority rule.
 //
 // Auth reuses the same ADMIN_USER/ADMIN_PASS Basic Auth every other admin
-// route uses — HLYST's Vercel functions call this server-to-server with an
+// route uses â€” HLYST's Vercel functions call this server-to-server with an
 // Authorization header, not a browser, so there's no CORS involved at all.
 import express from 'express';
 import { mkdir, writeFile } from 'node:fs/promises';
@@ -16,7 +16,7 @@ import { queue } from '../broadcast/queue.js';
 import * as djMemory from '../broadcast/dj-agent/dj-memory.js';
 export const router = express.Router();
 // Kinds that ride into the NEXT track transition rather than airing the
-// instant they arrive — the same reasoning announceAtNextTrack() already
+// instant they arrive â€” the same reasoning announceAtNextTrack() already
 // encodes: HLYST doesn't know SUB/WAVE's exact upcoming track, so instead of
 // guessing, these wait for whatever boundary SUB/WAVE reaches next. Every
 // other kind (station-id, handoff, banter, talkwave, promo) airs immediately.
@@ -25,12 +25,12 @@ const ALLOWED_KINDS = new Set([
   'dj-speak', 'link', 'station-id', 'hourly-check', 'handoff', 'banter',
   'talkwave', 'vm-imaging', 'promo',
 ]);
-// Vince Morgan imaging cooldown — station imaging shouldn't stack on top of
+// Vince Morgan imaging cooldown â€” station imaging shouldn't stack on top of
 // itself every few minutes. In-memory is fine: one controller process, and a
 // restart resetting the clock to "cooldown clear" is the safe failure mode.
 const VM_IMAGING_COOLDOWN_MS = 20 * 60_000;
 let lastVmImagingAt = 0;
-// Read-only cooldown snapshot for the debug panel — never mutates state.
+// Read-only cooldown snapshot for the debug panel â€” never mutates state.
 export function vmImagingCooldownStatus() {
   const sinceLast = Date.now() - lastVmImagingAt;
   const remainingMs = Math.max(0, VM_IMAGING_COOLDOWN_MS - sinceLast);
@@ -63,7 +63,7 @@ router.post('/hlyst/broadcast', requireAdmin, async (req, res) => {
     return res.status(400).json({ error: 'text is required' });
   }
   if (!audioUrl || typeof audioUrl !== 'string') {
-    return res.status(400).json({ error: 'audioUrl is required — this route never renders audio itself' });
+    return res.status(400).json({ error: 'audioUrl is required â€” this route never renders audio itself' });
   }
   if (kind === 'vm-imaging') {
     const sinceLast = Date.now() - lastVmImagingAt;

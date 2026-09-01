@@ -1,5 +1,5 @@
-// Admin-gated Extraordinary Event Mode controls (brief §22). Manual
-// activation/deactivation only — see broadcast/emergency-mode.ts for why
+// Admin-gated Extraordinary Event Mode controls (brief Â§22). Manual
+// activation/deactivation only â€” see broadcast/emergency-mode.ts for why
 // there is no automatic trigger here.
 import express from 'express';
 import { requireAdmin } from '../middleware/auth.js';
@@ -7,7 +7,7 @@ import * as emergencyMode from '../broadcast/emergency-mode.js';
 
 export const router = express.Router();
 
-// GET /emergency/status — current state + recent activation history, for the
+// GET /emergency/status â€” current state + recent activation history, for the
 // admin dashboard to show plainly whether the station is in this mode.
 router.get('/emergency/status', requireAdmin, (req, res) => {
   res.json(emergencyMode.status());
