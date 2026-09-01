@@ -682,16 +682,35 @@ export default function HlystAdminPage() {
             ))}
           </section>
 
-          <section>
+                    <section>
             <h2 style={{ color: GOLD, fontSize: '1.1rem', marginBottom: '1rem' }}>Voice Notes ({voiceNotes.length})</h2>
             {voiceNotes.length === 0 && <p style={{ color: '#666' }}>No voice notes yet.</p>}
             {voiceNotes.map((v) => (
               <div key={v.id} style={{ border: '1px solid #222', padding: '1rem', marginBottom: '0.75rem', borderRadius: 4 }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.8rem', color: '#888', marginBottom: '0.5rem' }}>
-                  <span>{v.listener_name || 'Anonymous'}</span>
+                  <span>{v.listener_name || 'Anonymous'}{v.category ? ` · ${v.category}` : ''}</span>
                   <span>{new Date(v.created_at).toLocaleString()} · {v.status}</span>
                 </div>
                 <audio controls src={v.audio_url} style={{ width: '100%' }} />
+                {v.transcript ? (
+                  <p style={{ margin: '0.5rem 0 0', fontSize: '0.9rem', fontStyle: 'italic', color: '#ccc' }}>
+                    "{v.transcript}"
+                  </p>
+                ) : (
+                  <p style={{ margin: '0.5rem 0 0', fontSize: '0.8rem', color: '#c9944c' }}>
+                    No transcript ({v.transcript_status || 'unknown'}) — listen to the audio directly to review.
+                  </p>
+                )}
+                {v.transcript_status && v.transcript_status !== 'ok' && (
+                  <p style={{ margin: '0.35rem 0 0', fontSize: '0.75rem', color: '#c9944c' }}>
+                    Transcript status: {v.transcript_status}
+                  </p>
+                )}
+                {v.safety_reason && (
+                  <p style={{ margin: '0.35rem 0 0', fontSize: '0.75rem', color: '#666' }}>
+                    {v.safety_reason}
+                  </p>
+                )}
                 <StatusButtons table="voice_notes" id={v.id} status={v.status} />
               </div>
             ))}
