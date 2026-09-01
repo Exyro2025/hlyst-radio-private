@@ -21,7 +21,7 @@ const META = `${STATE_DIR}/jingles.json`;
 
 const DEFAULT_IDENT = {
   filename: 'station_ident_default.wav',
-  text: "You're tuned to SUB/WAVE. The signal continues.",
+  text: "You're tuned to HLYST. The signal continues.",
   builtin: true,
 };
 
