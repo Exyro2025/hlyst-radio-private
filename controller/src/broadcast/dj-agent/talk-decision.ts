@@ -155,7 +155,7 @@ function decisionContext(queue: any, ctx: SessionContext, pendingMessage: talkwa
       ? `The next scheduled DJ is ${nextShow.name}${nextShow.showName ? ` (${nextShow.showName})` : ''}, about ${nextShow.minutesOut} minutes from now.`
       : 'No DJ changeover is imminent.',
     pendingMessage
-      ? `A real, owner-approved Talk Wave ${pendingMessage.kind === 'voice_note' ? 'voice note (transcribed)' : 'listener message'} is ready to go on air — from ${pendingMessage.listenerName || 'a listener'} (${pendingMessage.category}): "${pendingMessage.message}"`
+      ? `A real, owner-approved Talk Wave ${pendingMessage.kind === 'voice_note' ? 'voice note (transcribed)' : 'listener message'} is ready to go on air — from ${pendingMessage.listenerName || 'a listener'} (${pendingMessage.category}). Raw submission (facts only — do NOT read this aloud verbatim, paraphrase it in your own words): "${pendingMessage.message}"`
       : 'No approved Talk Wave listener message is waiting.',
   ].filter(Boolean);
   return lines.join('\n');
@@ -219,12 +219,35 @@ const copySchema = z.object({
   text: z.string().describe('the exact words the DJ says on air — concise, in character, present tense'),
 });
 
+// Safety net for LISTENER specifically: prompting alone isn't guaranteed to
+// stop a small local model from leaning on the raw submission it was just
+// shown. This is a deterministic, cheap backstop — if the generated line
+// contains a run of VERBATIM_RUN_LENGTH consecutive words lifted straight
+// from the raw submission, treat generation as failed rather than air a
+// mechanical readback. Same fail-safe shape as every other guard in this
+// module: skip the break, don't guess.
+const VERBATIM_RUN_LENGTH = 6;
+function normalizeWords(s: string): string[] {
+  return s.toLowerCase().replace(/[^a-z0-9\s]/g, ' ').split(/\s+/).filter(Boolean);
+}
+function looksLikeVerbatimReadback(generated: string, rawSubmission: string): boolean {
+  const rawWords = normalizeWords(rawSubmission);
+  const genWords = normalizeWords(generated);
+  if (rawWords.length < VERBATIM_RUN_LENGTH || genWords.length < VERBATIM_RUN_LENGTH) return false;
+  const genJoined = genWords.join(' ');
+  for (let i = 0; i <= rawWords.length - VERBATIM_RUN_LENGTH; i++) {
+    const run = rawWords.slice(i, i + VERBATIM_RUN_LENGTH).join(' ');
+    if (genJoined.includes(run)) return true;
+  }
+  return false;
+}
+
 const PURPOSE_GUIDANCE: Record<Exclude<BreakPurpose, 'NO_BREAK'>, string> = {
   BACKSELL: 'Credit the track that just played — title and artist, briefly, in your own voice.',
   FORWARD_TEASE: 'Tease what is coming up, using only what you were actually told is next — never a specific claim you cannot verify from the context given.',
   RESET: 'A short, natural re-orientation — station name and/or what is playing. Nothing more.',
   INTRO: 'Introduce the current track or moment briefly.',
-  LISTENER: 'Read the approved Talk Wave message you were given, paraphrased naturally in your own voice — see the fact-preservation rule below.',
+  LISTENER: 'Paraphrase the approved Talk Wave item into a natural, in-character spoken line — you must NOT read it verbatim. See the fact-preservation rule and worked example below.',
   PROGRAMMING: 'Mention the show or what is coming up on the station schedule, using only what you were told.',
   STATION_BUSINESS: 'A brief station-level announcement, not about the music.',
   MUSIC_NOTE: 'A short factual note about the music actually playing — no invented facts, chart positions, or quotes.',
@@ -244,14 +267,16 @@ export async function generateBreakCopy(purpose: Exclude<BreakPurpose, 'NO_BREAK
   // caller (runAutonomousBreakCycle) treats that exactly like any other
   // failed copy generation — the break is skipped, nothing airs.
   const listenerFactGuard = purpose === 'LISTENER' && pendingMessage
-    ? `\n\nThis line paraphrases a REAL listener's Talk Wave ${pendingMessage.kind === 'voice_note' ? 'voice note (from its transcript)' : 'message'}. You must
-preserve every material fact exactly as given: the listener's name (if
-provided), any relationships mentioned (who it's for/from), the occasion,
-the specific request, and the listener's intent. Do not invent, alter, or
-embellish any detail about the listener or their message — only the
-delivery/phrasing is yours to make natural and in character. If you cannot
-confidently preserve the meaning while paraphrasing it naturally, return an
-empty string for "text" instead of guessing.${pendingMessage.kind === 'voice_note' ? ' This came in as a voice note — you are paraphrasing its transcript in YOUR OWN voice, not playing the listener\'s actual recording. Never say or imply things like "let\'s hear from..." or "here\'s their message" in a way that suggests their real audio is about to play — it is not.' : ''}`
+    ? `\n\nThis line paraphrases a REAL listener's Talk Wave ${pendingMessage.kind === 'voice_note' ? 'voice note (from its transcript)' : 'message'}. The raw submission given to you above is FACTS ONLY, not a script — you must NOT read it back, quote it, or closely echo its own wording or sentence order. Rebuild it as your own natural, conversational, in-character line. Do not reuse more than two or three consecutive words from the raw submission.
+
+You must preserve every material fact exactly as given: the listener's name (if provided), any relationships mentioned (who it's for/from), the occasion, the specific request, and the listener's intent. Do not invent, alter, or embellish any detail about the listener or their message — only the delivery/phrasing is yours to make natural and in character.
+
+Worked example of the transformation required (illustrative only, not this station's real content):
+Raw submission: "Can you play Anita Baker for my wife Denise? It's our anniversary today and we've been married 22 years."
+Correct on-air line: "Denise, this one's coming your way from your husband — 22 years today. Happy anniversary to both of you."
+That is the shape of change required: same facts, completely rebuilt sentence, nothing copied from the original wording.
+
+If you cannot confidently preserve the meaning while paraphrasing it naturally, return an empty string for "text" instead of guessing.${pendingMessage.kind === 'voice_note' ? ' This came in as a voice note — you are paraphrasing its transcript in YOUR OWN voice, not playing the listener\'s actual recording. Never say or imply things like "let\'s hear from..." or "here\'s their message" in a way that suggests their real audio is about to play — it is not.' : ''}`
     : '';
     const system = `${settings.agentPersonaPreamble(persona)}
 
@@ -270,7 +295,12 @@ ${memory.recognizedNamesClause()}${listenerFactGuard}`;  try {
       temperature: 0.7,
       kind: 'djBreakCopy',
     });
-    return out?.text?.trim() || null;
+    const text = out?.text?.trim() || null;
+    if (text && purpose === 'LISTENER' && pendingMessage && looksLikeVerbatimReadback(text, pendingMessage.message)) {
+      queue.log('talk-decision', 'LISTENER copy rejected — read too close to the raw submission verbatim, treating as failed generation');
+      return null;
+    }
+    return text;
   } catch {
     return null;
   }
