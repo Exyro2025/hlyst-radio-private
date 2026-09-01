@@ -30,6 +30,7 @@
 
 import { z } from 'zod';
 import { queue } from '../broadcast/queue.js';
+import * as memory from '../broadcast/dj-agent/dj-memory.js';
 import * as settings from '../settings.js';
 import { defineAgent } from '../llm/agent.js';
 import { djObject, modelTolerant } from '../llm/sdk.js';
@@ -350,6 +351,7 @@ export function buildSituation(ctx, { forced = false, contextFields, recentCurio
     const list = recentCuriosity.map(t => `- ${t}`).join('\n');
     lines.push(`\nCuriosity topics already aired in the last few days (openings shown; if you air a curiosity segment, pick a genuinely different subject â€” do NOT revisit any of these, even reworded):\n${list}`);
   }
+    lines.push(`\n${memory.vernacularClause()}`);
   lines.push(forced
     ? '\nWrite the segment the operator has asked for now.'
     : '\nDecide now: air one segment, or stay silent.');
@@ -580,9 +582,9 @@ export async function agenticTick(ctx) {
         queue.log('error', `Weather segment dropped — invented precipitation language not supported by observed condition "${condition}": "${seg.text}"`);
         return;
       }
-      segmentState.lastWeatherCondition = condition;
+       segmentState.lastWeatherCondition = condition;
     }
-    // queue.announce appends the segment turn into the live session. The
+    memory.recordVernacularUsage(seg.text);    // queue.announce appends the segment turn into the live session. The
     // speaker's id rides in meta so session.windowMessages names a guest's
     // turn as theirs rather than the host's own words.
     await queue.announce(seg.text.trim(), seg.kind, {

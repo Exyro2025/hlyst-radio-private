@@ -83,6 +83,35 @@ export function memoryClauseForPrompt(): string {
   return bits.length ? bits.join(' ') : 'No relevant recent talk breaks recorded.';
 }
 
+// --- Local vernacular usage tracking (The Lyst Coast / The 1-6) ----------
+// Optional station vocabulary, never mandatory, never a Cleveland
+// replacement. Tracked so the same expression doesn't repeat too closely
+// and the two never land in the same break together.
+const VERNACULAR_COOLDOWN_MS = 45 * 60_000;
+
+export function vernacularClause(): string {
+  const lystCoastRecent = recentlyDid('VERNACULAR_LYST_COAST', VERNACULAR_COOLDOWN_MS);
+  const the16Recent = recentlyDid('VERNACULAR_1_6', VERNACULAR_COOLDOWN_MS);
+  const base = 'Optional local vernacular, use ORGANICALLY only when it genuinely fits — never forced, never a substitute for the word Cleveland, never both in the same break, never explained on air: "The Lyst Coast" (HLYST\'s own branded identity for the Cleveland/home area) and "The 1-6" (casual local shorthand from the 216 area code).';
+  if (lystCoastRecent && the16Recent) {
+    return `${base} You used BOTH recently — skip local vernacular entirely this break; just say Cleveland if you need to.`;
+  }
+  if (lystCoastRecent) {
+    return `${base} You used "The Lyst Coast" recently — if vernacular fits, reach for "The 1-6" instead, or just say Cleveland.`;
+  }
+  if (the16Recent) {
+    return `${base} You used "The 1-6" recently — if vernacular fits, reach for "The Lyst Coast" instead, or just say Cleveland.`;
+  }
+  return base;
+}
+
+// Scans actually-aired text so tracking reflects what was really said, not
+// merely what was permitted.
+export function recordVernacularUsage(text: string) {
+  if (/\blyst coast\b/i.test(text)) recordEvent('VERNACULAR_LYST_COAST');
+  if (/\bthe 1-6\b|\bthe one[\s-]six\b/i.test(text)) recordEvent('VERNACULAR_1_6');
+}
+
 
 // --- Cross-process transition claims (DJ HANDOFF vs Vince imaging) --------
 // "This DJ's upcoming/just-happened changeover has already been promoted by

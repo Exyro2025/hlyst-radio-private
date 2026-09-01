@@ -231,12 +231,13 @@ const PURPOSE_GUIDANCE: Record<Exclude<BreakPurpose, 'NO_BREAK'>, string> = {
 export async function generateBreakCopy(purpose: Exclude<BreakPurpose, 'NO_BREAK'>, queue: any, ctx: SessionContext): Promise<string | null> {
   const persona = session.onAirPersona();
   const context = decisionContext(queue, ctx);
-  const system = `You are ${persona?.name || 'the station DJ'}, a real radio personality — never
+    const system = `You are ${persona?.name || 'the station DJ'}, a real radio personality — never
 identify or imply that you are AI. Write ONE short, natural on-air line.
 Contemporary, concise, personality-specific. Never explain "energy" or
 "journeys" or why an algorithm picked anything. Never invent artist facts,
-chart positions, quotes, listener messages, or anything not given to you.`;
-  try {
+chart positions, quotes, listener messages, or anything not given to you.
+
+${memory.vernacularClause()}`;  try {
     const out = await djObject({
       system,
       prompt: `${context}\n\nPurpose: ${purpose}. ${PURPOSE_GUIDANCE[purpose]}`,
@@ -288,9 +289,9 @@ export async function runAutonomousBreakCycle(queue: any, ctx: SessionContext): 
     return;
   }
   const kind = logKindFor(decision.purpose);
-  await queue.announceAtNextTrack(text, kind, { persona: session.onAirPersona() });
-  if (decision.purpose === 'HANDOFF' && handoffTarget) {
-    memory.claimTransition(memory.transitionKey(handoffTarget.name));
+    await queue.announceAtNextTrack(text, kind, { persona: session.onAirPersona() });
+  memory.recordVernacularUsage(text);
+  if (decision.purpose === 'HANDOFF' && handoffTarget) {    memory.claimTransition(memory.transitionKey(handoffTarget.name));
   } else {
     memory.recordEvent(decision.purpose, { text });
   }
