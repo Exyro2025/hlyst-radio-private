@@ -352,6 +352,7 @@ export function buildSituation(ctx, { forced = false, contextFields, recentCurio
     lines.push(`\nCuriosity topics already aired in the last few days (openings shown; if you air a curiosity segment, pick a genuinely different subject — do NOT revisit any of these, even reworded):\n${list}`);
   }
     lines.push(`\n${memory.vernacularClause()}`);
+    lines.push(`\n${memory.recognizedNamesClause()}`);
   lines.push(forced
     ? '\nWrite the segment the operator has asked for now.'
     : '\nDecide now: air one segment, or stay silent.');
