@@ -155,7 +155,7 @@ function decisionContext(queue: any, ctx: SessionContext, pendingMessage: talkwa
       ? `The next scheduled DJ is ${nextShow.name}${nextShow.showName ? ` (${nextShow.showName})` : ''}, about ${nextShow.minutesOut} minutes from now.`
       : 'No DJ changeover is imminent.',
     pendingMessage
-      ? `A real, owner-approved Talk Wave listener message is ready to go on air — from ${pendingMessage.listenerName || 'a listener'} (${pendingMessage.category}): "${pendingMessage.message}"`
+      ? `A real, owner-approved Talk Wave ${pendingMessage.kind === 'voice_note' ? 'voice note (transcribed)' : 'listener message'} is ready to go on air — from ${pendingMessage.listenerName || 'a listener'} (${pendingMessage.category}): "${pendingMessage.message}"`
       : 'No approved Talk Wave listener message is waiting.',
   ].filter(Boolean);
   return lines.join('\n');
@@ -175,7 +175,8 @@ Purposes and what each means:
   longer stretch of silence.
 - INTRO: introduce the current track or block.
 - LISTENER: read/acknowledge a real, owner-approved Talk Wave listener
-  message, only if one was actually given to you above — never invent one.
+  message or voice note transcript, only if one was actually given to you
+  above — never invent one.
 - PROGRAMMING: mention the show/schedule/what's coming on the station.
 - STATION_BUSINESS: station-level announcements (not music-related).
 - MUSIC_NOTE: a short, factual note about the music actually playing — never
@@ -243,14 +244,14 @@ export async function generateBreakCopy(purpose: Exclude<BreakPurpose, 'NO_BREAK
   // caller (runAutonomousBreakCycle) treats that exactly like any other
   // failed copy generation — the break is skipped, nothing airs.
   const listenerFactGuard = purpose === 'LISTENER' && pendingMessage
-    ? `\n\nThis line paraphrases a REAL listener's Talk Wave message. You must
+    ? `\n\nThis line paraphrases a REAL listener's Talk Wave ${pendingMessage.kind === 'voice_note' ? 'voice note (from its transcript)' : 'message'}. You must
 preserve every material fact exactly as given: the listener's name (if
 provided), any relationships mentioned (who it's for/from), the occasion,
 the specific request, and the listener's intent. Do not invent, alter, or
 embellish any detail about the listener or their message — only the
 delivery/phrasing is yours to make natural and in character. If you cannot
 confidently preserve the meaning while paraphrasing it naturally, return an
-empty string for "text" instead of guessing.`
+empty string for "text" instead of guessing.${pendingMessage.kind === 'voice_note' ? ' This came in as a voice note — you are paraphrasing its transcript in YOUR OWN voice, not playing the listener\'s actual recording. Never say or imply things like "let\'s hear from..." or "here\'s their message" in a way that suggests their real audio is about to play — it is not.' : ''}`
     : '';
     const system = `${settings.agentPersonaPreamble(persona)}
 
@@ -322,8 +323,8 @@ export async function runAutonomousBreakCycle(queue: any, ctx: SessionContext): 
   memory.recordVernacularUsage(text);
   if (decision.purpose === 'LISTENER' && pendingMessage) {
     talkwave
-      .markMessageUsed(pendingMessage.id, session.onAirPersona()?.name ?? null, settings.resolveActiveShow()?.name ?? null)
-      .catch((err) => queue.log('talk-decision', `failed to mark Talk Wave message ${pendingMessage.id} used: ${(err as Error).message}`));
+      .markMessageUsed(pendingMessage.kind, pendingMessage.id, session.onAirPersona()?.name ?? null, settings.resolveActiveShow()?.name ?? null)
+      .catch((err) => queue.log('talk-decision', `failed to mark Talk Wave ${pendingMessage.kind} ${pendingMessage.id} used: ${(err as Error).message}`));
   }
   if (decision.purpose === 'HANDOFF' && handoffTarget) {    memory.claimTransition(memory.transitionKey(handoffTarget.name));
   } else {
