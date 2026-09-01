@@ -21,6 +21,10 @@ interface VoiceNoteRow {
   audio_url: string;
   status: string;
   created_at: string;
+  category?: string | null;
+  transcript?: string | null;
+  transcript_status?: string | null;
+  safety_reason?: string | null;
 }
 
 interface PersonaRow {
