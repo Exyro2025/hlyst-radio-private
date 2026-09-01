@@ -55,10 +55,11 @@ export async function POST(req: Request) {
     // prohibited -> rejected (auto-rejected, never reaches DJ context)
     // ambiguous -> quarantined (owner exception queue)
     const status = verdict === 'safe' ? 'approved' : verdict === 'prohibited' ? 'rejected' : 'quarantined';
+    const approvedAt = status === 'approved' ? new Date() : null;
 
     await sql`
-      INSERT INTO messages (listener_name, message, category, status, safety_reason)
-      VALUES (${listenerName || null}, ${trimmed}, ${category}, ${status}, ${reason})
+      INSERT INTO messages (listener_name, message, category, status, safety_reason, approved_at)
+      VALUES (${listenerName || null}, ${trimmed}, ${category}, ${status}, ${reason}, ${approvedAt})
     `;
     return Response.json({ ok: true });
   } catch (err) {
