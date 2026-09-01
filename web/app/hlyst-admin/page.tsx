@@ -1071,7 +1071,7 @@ export default function HlystAdminPage() {
                 {item.audio_status === 'failed' && (
                   <p style={{ color: '#c9944c', fontSize: '0.8rem', marginTop: '0.4rem' }}>Audio not rendered.</p>
                 )}
-                <div style={{ display: 'flex', gap: '0.5rem', marginTop: '0.75rem' }}>
+                                <div style={{ display: 'flex', gap: '0.5rem', marginTop: '0.75rem' }}>
                   {['approved', 'archived', 'draft'].map((s) => (
                     <button
                       key={s}
@@ -1087,6 +1087,15 @@ export default function HlystAdminPage() {
                       {s}
                     </button>
                   ))}
+                  <button
+                    onClick={() => deleteVmItem(item.id)}
+                    style={{
+                      fontSize: '0.75rem', padding: '0.3rem 0.7rem', borderRadius: 999, cursor: 'pointer',
+                      border: '1px solid #622', color: '#e88', background: 'transparent', marginLeft: 'auto',
+                    }}
+                  >
+                    delete
+                  </button>
                 </div>
               </div>
             ))}
