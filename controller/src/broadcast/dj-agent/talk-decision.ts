@@ -45,6 +45,7 @@ import { z } from 'zod';
 import * as settings from '../../settings.js';
 import { djObject } from '../../llm/sdk.js';
 import * as memory from './dj-memory.js';
+import * as talkwave from './talkwave-store.js';
 import type { SessionContext } from '../session.js';
 import * as session from '../session.js';
 import * as emergencyMode from '../emergency-mode.js';
@@ -136,7 +137,7 @@ const decisionSchema = z.object({
   reason: z.string().describe('one short sentence, for the operator log only — never aired'),
 });
 
-function decisionContext(queue: any, ctx: SessionContext): string {
+function decisionContext(queue: any, ctx: SessionContext, pendingMessage: talkwave.PendingMessage | null): string {
   const persona = session.onAirPersona();
   const recap = queue.getDjRecap({ limit: 6, withinMinutes: 90 });
   const current = queue.current?.track;
@@ -153,6 +154,9 @@ function decisionContext(queue: any, ctx: SessionContext): string {
     nextShow
       ? `The next scheduled DJ is ${nextShow.name}${nextShow.showName ? ` (${nextShow.showName})` : ''}, about ${nextShow.minutesOut} minutes from now.`
       : 'No DJ changeover is imminent.',
+    pendingMessage
+      ? `A real, owner-approved Talk Wave listener message is ready to go on air — from ${pendingMessage.listenerName || 'a listener'} (${pendingMessage.category}): "${pendingMessage.message}"`
+      : 'No approved Talk Wave listener message is waiting.',
   ].filter(Boolean);
   return lines.join('\n');
 }
@@ -170,8 +174,8 @@ Purposes and what each means:
 - RESET: a simple re-orientation (station name, what's playing) after a
   longer stretch of silence.
 - INTRO: introduce the current track or block.
-- LISTENER: acknowledge a real listener message/interaction, only if one was
-  actually given to you above — never invent one.
+- LISTENER: read/acknowledge a real, owner-approved Talk Wave listener
+  message, only if one was actually given to you above — never invent one.
 - PROGRAMMING: mention the show/schedule/what's coming on the station.
 - STATION_BUSINESS: station-level announcements (not music-related).
 - MUSIC_NOTE: a short, factual note about the music actually playing — never
@@ -192,8 +196,8 @@ single time you're asked.
 
 Never choose a purpose whose supporting fact wasn't actually given to you.`;
 
-export async function decideBreak(queue: any, ctx: SessionContext): Promise<BreakDecision> {
-  const context = decisionContext(queue, ctx);
+export async function decideBreak(queue: any, ctx: SessionContext, pendingMessage: talkwave.PendingMessage | null): Promise<BreakDecision> {
+  const context = decisionContext(queue, ctx, pendingMessage);
   try {
     const out = await djObject({
       system: DECISION_SYSTEM,
@@ -219,7 +223,7 @@ const PURPOSE_GUIDANCE: Record<Exclude<BreakPurpose, 'NO_BREAK'>, string> = {
   FORWARD_TEASE: 'Tease what is coming up, using only what you were actually told is next — never a specific claim you cannot verify from the context given.',
   RESET: 'A short, natural re-orientation — station name and/or what is playing. Nothing more.',
   INTRO: 'Introduce the current track or moment briefly.',
-  LISTENER: 'Acknowledge the listener interaction you were given, in character, briefly.',
+  LISTENER: 'Read the approved Talk Wave message you were given, paraphrased naturally in your own voice — see the fact-preservation rule below.',
   PROGRAMMING: 'Mention the show or what is coming up on the station schedule, using only what you were told.',
   STATION_BUSINESS: 'A brief station-level announcement, not about the music.',
   MUSIC_NOTE: 'A short factual note about the music actually playing — no invented facts, chart positions, or quotes.',
@@ -228,16 +232,33 @@ const PURPOSE_GUIDANCE: Record<Exclude<BreakPurpose, 'NO_BREAK'>, string> = {
   LIVE_INFO: 'State only the real information you were given — nothing invented.',
 };
 
-export async function generateBreakCopy(purpose: Exclude<BreakPurpose, 'NO_BREAK'>, queue: any, ctx: SessionContext): Promise<string | null> {
+export async function generateBreakCopy(purpose: Exclude<BreakPurpose, 'NO_BREAK'>, queue: any, ctx: SessionContext, pendingMessage: talkwave.PendingMessage | null): Promise<string | null> {
   const persona = session.onAirPersona();
-  const context = decisionContext(queue, ctx);
+  const context = decisionContext(queue, ctx, pendingMessage);
+  // LISTENER only: a real person's message is being paraphrased, not
+  // invented station content — the ordinary "don't fabricate" rule above
+  // isn't strict enough here. Every material fact (name, relationships,
+  // occasion, request, intent) must survive the paraphrase unchanged; if the
+  // model can't confidently do that, it returns an empty string and the
+  // caller (runAutonomousBreakCycle) treats that exactly like any other
+  // failed copy generation — the break is skipped, nothing airs.
+  const listenerFactGuard = purpose === 'LISTENER' && pendingMessage
+    ? `\n\nThis line paraphrases a REAL listener's Talk Wave message. You must
+preserve every material fact exactly as given: the listener's name (if
+provided), any relationships mentioned (who it's for/from), the occasion,
+the specific request, and the listener's intent. Do not invent, alter, or
+embellish any detail about the listener or their message — only the
+delivery/phrasing is yours to make natural and in character. If you cannot
+confidently preserve the meaning while paraphrasing it naturally, return an
+empty string for "text" instead of guessing.`
+    : '';
     const system = `You are ${persona?.name || 'the station DJ'}, a real radio personality — never
 identify or imply that you are AI. Write ONE short, natural on-air line.
 Contemporary, concise, personality-specific. Never explain "energy" or
 "journeys" or why an algorithm picked anything. Never invent artist facts,
 chart positions, quotes, listener messages, or anything not given to you.
 
-${memory.vernacularClause()}`;  try {
+${memory.vernacularClause()}${listenerFactGuard}`;  try {
     const out = await djObject({
       system,
       prompt: `${context}\n\nPurpose: ${purpose}. ${PURPOSE_GUIDANCE[purpose]}`,
@@ -258,7 +279,12 @@ export function logKindFor(purpose: BreakPurpose): string {
 // --- Orchestrator ------------------------------------------------------------
 export async function runAutonomousBreakCycle(queue: any, ctx: SessionContext): Promise<void> {
   if (!frequencyAllows(() => queue.getLastTalkBreakAt())) return;
-  const decision = await decideBreak(queue, ctx);
+  // Fetched once and reused for both stages of this cycle (decision + copy)
+  // so the fact injected into the prompt and the row marked "used" after
+  // airing are guaranteed to be the same message — no race between two
+  // separate fetches picking different rows.
+  const pendingMessage = await talkwave.fetchNextApprovedMessage().catch(() => null);
+  const decision = await decideBreak(queue, ctx, pendingMessage);
   scheduleNextDecisionCheck();
 
     if (decision.purpose === 'NO_BREAK') {
@@ -283,7 +309,7 @@ export async function runAutonomousBreakCycle(queue: any, ctx: SessionContext): 
     }
   }
 
-  const text = await generateBreakCopy(decision.purpose, queue, ctx);
+  const text = await generateBreakCopy(decision.purpose, queue, ctx, pendingMessage);
   if (!text) {
     queue.log('talk-decision', `${decision.purpose} chosen but copy generation failed — skipping`);
     return;
@@ -291,6 +317,11 @@ export async function runAutonomousBreakCycle(queue: any, ctx: SessionContext): 
   const kind = logKindFor(decision.purpose);
     await queue.announceAtNextTrack(text, kind, { persona: session.onAirPersona() });
   memory.recordVernacularUsage(text);
+  if (decision.purpose === 'LISTENER' && pendingMessage) {
+    talkwave
+      .markMessageUsed(pendingMessage.id, session.onAirPersona()?.name ?? null, settings.resolveActiveShow()?.name ?? null)
+      .catch((err) => queue.log('talk-decision', `failed to mark Talk Wave message ${pendingMessage.id} used: ${(err as Error).message}`));
+  }
   if (decision.purpose === 'HANDOFF' && handoffTarget) {    memory.claimTransition(memory.transitionKey(handoffTarget.name));
   } else {
     memory.recordEvent(decision.purpose, { text });
