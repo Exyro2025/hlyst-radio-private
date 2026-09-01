@@ -1464,7 +1464,7 @@ class Queue {
     return true;
   }
 
-  // Defer a spoken segment to the NEXT track boundary. Used for station idents:
+    // Defer a spoken segment to the NEXT track boundary. Used for station idents:
   // unlike the hourly time check they have no real-time constraint, so ducking
   // the current song mid-vocal at an arbitrary minute is pure loss, where at a
   // transition the same ident lands like real radio. The WAV renders NOW (TTS
@@ -1473,11 +1473,25 @@ class Queue {
   //
   // One slot only: a newer pending segment replaces an unaired older one, so a
   // fresh ident supersedes a stale one rather than stacking. All bookkeeping
-  // (djLog â†’ recap/opener anti-repeat, session turn, webhook) happens at AIR
+  // (djLog → recap/opener anti-repeat, session turn, webhook) happens at AIR
   // time, so the DJ's memory reflects what reached the stream, not what was
   // merely scheduled.
+  //
+  // Narrow priority exception: a still-pending Talk Wave listener break
+  // (kind 'break-listener' — a real, owner-approved listener request) is not
+  // superseded by a routine, regenerable low-priority kind (station-id,
+  // hourly-check). Those simply fire again on their own next cron cycle at no
+  // cost, whereas overwriting an unaired listener break silently loses a real
+  // request that's already been marked used in the Talk Wave database — this
+  // is the one case where "newer replaces older" is the wrong call. Every
+  // other kind-vs-kind collision keeps the original one-slot behavior above.
+  _LOW_PRIORITY_KINDS = new Set(['station-id', 'hourly-check']);
     async announceAtNextTrack(text, kind = 'announcement', { persona = null, meta = {}, wavPath = null }: { persona?: Persona | null; meta?: TurnMeta; wavPath?: string | null } = {}) {
     if (!text || !text.trim()) return;
+    if (this._pendingVoice?.kind === 'break-listener' && this._LOW_PRIORITY_KINDS.has(kind)) {
+      this.log('scheduler', `Skipping ${kind} — a pending Talk Wave listener break is still waiting to air`);
+      return;
+    }
     try {
       const resolvedWav = wavPath || await speak(text, { kind, persona });
       this._pendingVoice = { text, kind, wavPath: resolvedWav, persona, meta, t: Date.now() };
