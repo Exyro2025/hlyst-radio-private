@@ -36,7 +36,7 @@ const NWS_USER_AGENT = 'HLYST-Radio-Weather-Integration';
 // Moderate/Minor/Unknown stay silent — this is the dormancy boundary.
 const QUALIFYING_SEVERITIES = new Set(['Severe', 'Extreme']);
 
-interface NwsAlert {
+export interface NwsAlert {
   id: string;
   event: string;
   headline: string;
@@ -118,25 +118,71 @@ brief. No stage directions, no radio-cliché tells, no downplaying it as small t
 }
 
 // Called once per watcher tick from queue.ts, mirroring maybeTraffic.
-export async function maybeSevereWeather(queue: any): Promise<void> {
-  if (!djCallsAllowed() || !autoVoiceAllowed() || !budget.optionalSegmentsAllowed()) return;
-  if (suspendedByProgramme()) return;
+export interface SevereWeatherTestResult {
+  ranAt: string;
+  alertUsed: { id: string; event: string; severity: string; headline: string } | null;
+  qualifies: boolean;
+  activeDj: string | null;
+  copy: string | null;
+  wouldAir: boolean;
+  reason: string;
+}
 
-  const alerts = await fetchSevereAlerts();
-  if (!alerts) return;
+// Called once per watcher tick from queue.ts, mirroring maybeTraffic.
+// dryRun mode (options.dryRun) exercises the full real pipeline — qualification filter,
+// copy generation via the real LLM call, active-DJ lookup — against either a supplied
+// fakeAlert or a real fetch, but returns a result object instead of calling
+// queue.announceAtNextTrack, so nothing is scheduled to actually air.
+export async function maybeSevereWeather(
+  queue: any,
+  options?: { dryRun?: boolean; fakeAlert?: NwsAlert }
+): Promise<SevereWeatherTestResult | void> {
+  const dryRun = options?.dryRun === true;
+
+  if (!dryRun) {
+    if (!djCallsAllowed() || !autoVoiceAllowed() || !budget.optionalSegmentsAllowed()) return;
+    if (suspendedByProgramme()) return;
+  }
+
+  const alerts = dryRun && options?.fakeAlert ? [options.fakeAlert] : await fetchSevereAlerts();
+  if (!alerts) {
+    if (dryRun) {
+      return { ranAt: new Date().toISOString(), alertUsed: null, qualifies: false, activeDj: null, copy: null, wouldAir: false, reason: 'no alerts available (fetch failed or none active)' };
+    }
+    return;
+  }
   const qualifying = alerts.filter(isQualifying);
-  if (!qualifying.length) return;
+  if (!qualifying.length) {
+    if (dryRun) {
+      const a = alerts[0];
+      return { ranAt: new Date().toISOString(), alertUsed: { id: a.id, event: a.event, severity: a.severity, headline: a.headline }, qualifies: false, activeDj: null, copy: null, wouldAir: false, reason: 'alert did not qualify under QUALIFYING_SEVERITIES' };
+    }
+    return;
+  }
 
   for (const alert of qualifying) {
-    const claimKey = `alert:${alert.id}`;
-    if (memory.recentlyDid('SEVERE_WEATHER', 24 * 3_600_000, claimKey)) continue;
+    const claimKey = dryRun ? `test:${alert.id}` : `alert:${alert.id}`;
+    if (!dryRun && memory.recentlyDid('SEVERE_WEATHER', 24 * 3_600_000, claimKey)) continue;
     const text = await generateSevereWeatherCopy(alert);
-    memory.recordEvent('SEVERE_WEATHER', { subject: claimKey });
+    const activeDj = session.onAirPersona()?.name ?? null;
     if (!text) {
+      if (dryRun) {
+        return { ranAt: new Date().toISOString(), alertUsed: { id: alert.id, event: alert.event, severity: alert.severity, headline: alert.headline }, qualifies: true, activeDj, copy: null, wouldAir: false, reason: 'copy generation failed' };
+      }
+      memory.recordEvent('SEVERE_WEATHER', { subject: claimKey });
       queue.log('weather', `Severe alert "${alert.event}" — copy generation failed, skipping`);
       continue;
     }
+    if (dryRun) {
+      queue.log('weather-test', `DRY RUN: would air severe-weather break for "${alert.event}" via ${activeDj ?? 'no persona currently on air'}: "${text}"`);
+      memory.recordEvent('SEVERE_WEATHER_TEST', { subject: claimKey });
+      return { ranAt: new Date().toISOString(), alertUsed: { id: alert.id, event: alert.event, severity: alert.severity, headline: alert.headline }, qualifies: true, activeDj, copy: text, wouldAir: true, reason: 'dry run only — real broadcast NOT performed, normal programming unaffected' };
+    }
+    memory.recordEvent('SEVERE_WEATHER', { subject: claimKey });
     await queue.announceAtNextTrack(text, 'severe-weather', { persona: session.onAirPersona() });
     return;
+  }
+  if (dryRun) {
+    return { ranAt: new Date().toISOString(), alertUsed: null, qualifies: false, activeDj: null, copy: null, wouldAir: false, reason: 'all qualifying alerts already claimed in the last 24h (cooldown)' };
   }
 }

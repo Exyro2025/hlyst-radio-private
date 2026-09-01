@@ -24,6 +24,7 @@ import { voiceStatus } from '../broadcast/voice-policy.js';
 import { clockStatus } from '../broadcast/clock-policy.js';
 import * as requestLog from '../broadcast/request-log.js';
 import * as hlystBridge from './hlyst-bridge.js';
+import * as severeWeather from '../broadcast/severe-weather.js';
 import * as djMemory from '../broadcast/dj-agent/dj-memory.js';
 import { getStationTimezone } from '../time.js';
 import { publicOrigin } from './public.js';
@@ -379,4 +380,28 @@ router.get('/debug/state-tree', requireAdmin, async (req, res) => {
 router.post('/debug/subsonic/reset', requireAdmin, (req, res) => {
   subsonicLog.reset();
   res.json({ ok: true });
+});
+
+// POST /debug/test-severe-weather — dry-run test of the severe-weather pipeline.
+// Runs the real qualification filter, real LLM copy generation, and real active-DJ
+// lookup against a real captured NWS Severe alert (or one supplied in the body),
+// but never calls announceAtNextTrack — nothing is scheduled to actually air.
+// Default fixture captured live from api.weather.gov on 2026-09-01 (Red Flag Warning,
+// NWS Missoula MT — a genuinely real, currently-active Severe alert at capture time).
+router.post('/debug/test-severe-weather', requireAdmin, async (req, res) => {
+  try {
+    const defaultFixture: severeWeather.NwsAlert = {
+      id: 'urn:oid:2.49.0.1.840.0.6aa2d90f00e5d478fcc6fa61918041effddc4d0f.001.2',
+      event: 'Red Flag Warning',
+      headline: 'Red Flag Warning issued September 1 at 10:22AM MDT until September 3 at 8:00PM MDT by NWS Missoula MT',
+      description: 'RED FLAG WARNING IN EFFECT FROM NOON WEDNESDAY TO 8 PM MDT THURSDAY DUE TO WIND AND LOW RELATIVE HUMIDITY FOR EAST BEAVERHEAD... Strong southwest winds will develop Wednesday as a cold front tracks eastward and stalls along the Continental Divide. Winds will peak each afternoon and early evening.',
+      severity: 'Severe',
+      expires: '2026-09-03T20:00:00-06:00',
+    };
+    const fakeAlert: severeWeather.NwsAlert = req.body?.alert ?? defaultFixture;
+    const result = await severeWeather.maybeSevereWeather(queue, { dryRun: true, fakeAlert });
+    res.json({ ok: true, result });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
 });
