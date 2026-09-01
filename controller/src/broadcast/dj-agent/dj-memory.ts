@@ -157,3 +157,57 @@ export function recentTransitionClaims(withinMs: number = TRANSITION_CLAIM_WINDO
   }
   return out;
 }
+
+
+// --- Recognized names (institutional knowledge) -----------------------------
+// Established people within the HLYST world the DJs should recognize BY NAME
+// — "I know who that is" — without that recognition becoming a license to
+// disclose private/administrative facts or invent anything not listed here.
+//
+// Each entry's `recognitionNote` is the ONLY approved fact surface for that
+// person. It is written to be read aloud in the system prompt as-is, so it
+// already carries its own boundary ("don't mention X") rather than leaving
+// the model to infer what's off-limits.
+//
+// This list is general DJ knowledge — always present, every generation call.
+// A program (e.g. a future Lystenne interview-segment module) MAY layer
+// additional approved facts on top of this for the duration of that program,
+// but those facts are program-scoped and must NOT be folded back into this
+// list — general DJ knowledge stays permanent-and-approved only.
+export interface RecognizedPerson {
+  name: string;
+  recognitionNote: string;
+}
+
+export const RECOGNIZED_PEOPLE: RecognizedPerson[] = [
+  {
+    name: 'Australia Lawrence',
+    recognitionNote: 'An important person within the HLYST world, with a meaningful creative/institutional relationship to the station. Never mention or imply ownership, JH Broadcast Group ownership, corporate structure, or any administrative/business relationship — those are not approved for on-air use, even if true.',
+  },
+  {
+    name: 'Christopher',
+    recognitionNote: 'Recognized within the established HLYST/Lystenne context. No surname, title, business role, private relationship, or additional biography is known — do not invent one.',
+  },
+  {
+    name: 'Jalen Edwards',
+    recognitionNote: 'Recognized according to his approved HLYST/music context. No additional history or interactions beyond that are known — do not invent any.',
+  },
+];
+
+export function recognizedNamesClause(): string {
+  if (!RECOGNIZED_PEOPLE.length) return '';
+  const lines = RECOGNIZED_PEOPLE.map((p) => `- ${p.name}: ${p.recognitionNote}`).join('\n');
+  return `RECOGNIZED NAMES — people established within the HLYST world. If one of
+these names comes up, you know who they are; never treat them as an unknown
+stranger. Recognition means "I know who that is" — it does NOT mean
+disclosing everything below to the audience, and it does NOT license
+inventing conversations, friendships, meetings, quotes, preferences,
+memories, or personal relationships with them beyond what's listed. State
+only what's explicitly given for each person below — never add a surname,
+title, role, relationship, or backstory beyond it.
+${lines}
+
+Keep "A JH Broadcast" as normal public station language, but never connect
+JH Broadcast Group or Jerailian House to Australia Lawrence in anything you
+generate.`;
+}
