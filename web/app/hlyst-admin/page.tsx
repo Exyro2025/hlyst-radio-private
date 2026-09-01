@@ -215,11 +215,21 @@ export default function HlystAdminPage() {
     setVmGenerating(false);
   };
 
-  const updateVmStatus = async (id: number, status: string) => {
+    const updateVmStatus = async (id: number, status: string) => {
     await fetch('/api/hlyst-admin/vm-imaging/update', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ id, status }),
+    });
+    fetchVmItems();
+  };
+
+  const deleteVmItem = async (id: number) => {
+    if (!confirm('Delete this imaging asset? This removes the audio file permanently, not just from the list.')) return;
+    await fetch('/api/hlyst-admin/vm-imaging', {
+      method: 'DELETE',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ id }),
     });
     fetchVmItems();
   };
