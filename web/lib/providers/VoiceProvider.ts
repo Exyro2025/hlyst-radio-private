@@ -2,6 +2,17 @@
 // text into spoken audio. Call sites should import `voiceProvider` from
 // here, never call ElevenLabs (or any TTS vendor) directly.
 
+// "HLYST" isn't a real word, so ElevenLabs guesses its pronunciation fresh
+// every time — spelling it out one way, dropping the H another, never
+// consistent. This swaps in a phonetic respelling ONLY for what's sent to
+// the voice engine; the text stored in the database and shown in the admin
+// UI stays the real spelling "HLYST" untouched. Matches the pronunciation
+// already established for this station: "H" + "lyst" (rhymes with "list").
+// Word-boundary, case-insensitive — won't touch "HLYST" inside another word.
+function forSpeech(text: string): string {
+  return text.replace(/\bHLYST\b/gi, 'Aitch Lyst');
+}
+
 export interface VoiceProvider {
   readonly name: string;
   isConfigured(): boolean;
@@ -28,7 +39,7 @@ export class ElevenLabsProvider implements VoiceProvider {
         Accept: 'audio/mpeg',
       },
       body: JSON.stringify({
-        text,
+        text: forSpeech(text),
         model_id: 'eleven_multilingual_v2',
         // speed 1.0 = ElevenLabs default, which read too fast/rapid-fire for
         // Vince's imaging lines in practice. Range is 0.7-1.2; 0.92 is a
