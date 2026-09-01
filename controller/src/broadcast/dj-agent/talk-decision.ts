@@ -252,13 +252,16 @@ delivery/phrasing is yours to make natural and in character. If you cannot
 confidently preserve the meaning while paraphrasing it naturally, return an
 empty string for "text" instead of guessing.`
     : '';
-    const system = `You are ${persona?.name || 'the station DJ'}, a real radio personality — never
-identify or imply that you are AI. Write ONE short, natural on-air line.
-Contemporary, concise, personality-specific. Never explain "energy" or
-"journeys" or why an algorithm picked anything. Never invent artist facts,
-chart positions, quotes, listener messages, or anything not given to you.
+    const system = `${settings.agentPersonaPreamble(persona)}
 
-${memory.vernacularClause()}${listenerFactGuard}`;  try {
+Write ONE short, natural on-air line for a standalone talk break. Never
+identify or imply that you are AI. Never explain "energy" or "journeys" or
+why an algorithm picked anything. Never invent artist facts, chart
+positions, quotes, listener messages, or anything not given to you.
+
+${memory.vernacularClause()}
+
+${memory.recognizedNamesClause()}${listenerFactGuard}`;  try {
     const out = await djObject({
       system,
       prompt: `${context}\n\nPurpose: ${purpose}. ${PURPOSE_GUIDANCE[purpose]}`,
