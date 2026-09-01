@@ -343,7 +343,7 @@ export const DEFAULTS = {
     // withDeadline. The main and recovery runs each get the full budget, so worst
     // case per pick is ~2x this before the stateless fallback. Reasoning-heavy
     // cloud models routinely need 20-40s.
-    agentTimeoutMs: 45000,
+    agentTimeoutMs: 90000,
     // Pause autonomous DJ LLM work and listener requests whenever Icecast reports
     // zero listeners — the stream coasts on the auto playlist.
     pauseWhenEmpty: false,

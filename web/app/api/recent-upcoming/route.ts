@@ -1,17 +1,9 @@
-// Same-origin /api/recent-upcoming — proxies straight to the SUB/WAVE
-// controller's GET /recent-upcoming (controller/src/routes/public.ts),
-// same bridge SubwaveProvider uses for now-playing (see lib/broadcastProvider.ts).
-// Returns empty arrays (never an error) when SUBWAVE_CONTROLLER_URL isn't set
-// or the controller is unreachable — the homepage section is designed to
-// simply not render rather than show a broken state.
-//
-// Place this file at: web/app/api/recent-upcoming/route.ts
 import { NextResponse } from 'next/server';
 
 export const dynamic = 'force-dynamic';
 
 export async function GET() {
-  const url = process.env.SUBWAVE_CONTROLLER_URL;
+  const url = process.env.CONTROLLER_INTERNAL_URL;
   if (!url) {
     return NextResponse.json({ recentPlays: [], upcoming: [] });
   }

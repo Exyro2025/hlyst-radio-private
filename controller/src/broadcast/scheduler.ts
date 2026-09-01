@@ -550,7 +550,7 @@ export async function rollSessionNow({ airHandoff = true }: { airHandoff?: boole
   try {
     await programme.ensurePlan(ctx);
   } catch (err) {
-    queue.log('error', `Programme plan failed: ${err.message}`);
+    queue.log('error', `Programme plan failed: ${err.stack}`);
   }
   if (airHandoff) {
     try {
@@ -567,7 +567,7 @@ export async function rollSessionNow({ airHandoff = true }: { airHandoff?: boole
   try {
     introAired = await programme.onSessionSettled(queue, ctx);
   } catch (err) {
-    queue.log('error', `Programme episode hook failed: ${err.message}`);
+    queue.log('error', `Programme episode hook failed: ${err.stack}`);
   }
   return { ctx, introAired };
 }

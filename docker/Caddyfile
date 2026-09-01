@@ -71,7 +71,7 @@
 	# below, which would otherwise send them to the SUB/WAVE controller
 	# (which has no knowledge of these routes and 404s them). Plain
 	# `handle` (not handle_path) so the full path reaches Next.js intact.
-	@hlyst_api path /api/hlyst-admin/* /api/on-air/* /api/now-playing/* /api/talkwave/*
+	@hlyst_api path /api/hlyst-admin/* /api/on-air /api/on-air/* /api/now-playing/* /api/talkwave/* /api/recent-upcoming
 	handle @hlyst_api {
 		reverse_proxy web:7700
 	}

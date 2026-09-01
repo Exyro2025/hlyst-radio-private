@@ -43,6 +43,26 @@ services:
       - hlyst-music-storage:/srv/uploads:ro
 
   # -------------------------------------------------------------------------
+  # NAVIDROME — on-air rotation music library (Subsonic API)
+  # -------------------------------------------------------------------------
+  navidrome:
+    image: deluan/navidrome:latest
+    container_name: hlyst-navidrome
+    restart: unless-stopped
+    logging: *default-logging
+    ports:
+      - "4533:4533"
+    environment:
+      - ND_MUSICFOLDER=/music
+      - ND_SCANSCHEDULE=1h
+      - ND_LOGLEVEL=info
+      - ND_SESSIONTIMEOUT=24h
+      - ND_BASEURL=
+    volumes:
+      - navidrome-data:/data
+      - /home/ubuntu/hlyst-music:/music
+
+  # -------------------------------------------------------------------------
   # BROADCAST — icecast2 + liquidsoap in one container
   # -------------------------------------------------------------------------
   # The entrypoint resolves ICECAST_* passwords, renders icecast.xml, and
@@ -327,6 +347,8 @@ volumes:
   caddy-data:
   caddy-config:
   hlyst-music-storage:
+  navidrome-data:
+  hlyst-music-library:
   tts-heavy-chatterbox-cache:
   tts-heavy-pocket-cache:
   analyzer-cache:

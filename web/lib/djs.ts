@@ -220,7 +220,7 @@ export const djs: DjProfile[] = [
     title: 'The Balance Keeper',
     schedule: 'Saturday · 6AM–10AM',
     portrait: '/Monica Hayes Portrait.png',
-    about: "Monica Hayes creates space for every mood and every moment. She blends feel-good favorites, timeless classics, and today's hits into the perfect vibe. Smooth transitions. Positive energy. Great music. Good company. She keeps it balanced, keeps it moving, and keeps it HLYST. Saturday mornings. Monica has you.
+    about: "Monica Hayes creates space for every mood and every moment. She blends feel-good favorites, timeless classics, and today's hits into the perfect vibe. Smooth transitions. Positive energy. Great music. Good company. She keeps it balanced, keeps it moving, and keeps it HLYST. Saturday mornings. Monica has you.",
     inHisLane: "R&B / Neo-Soul / Classic Hits / Feel-Good Favorites / Today's Hits",
     onAirStyle: 'Warm. Welcoming. Engaging. Relatable. Effortless flow.',
     theVibe: 'Feel-Good. Uplifting. Relaxed & Fun. Good Energy.',
@@ -252,7 +252,7 @@ export const djs: DjProfile[] = [
     title: 'The Moment Maker',
     schedule: 'Saturday 2AM–6AM · Sunday 2AM–6AM (Overnight R&B/Soul)',
     portrait: '/Terri Mitchell Portrait.png',
-    about: "Terri Mitchell lives for the moments that matter. She turns up the good times and brings people together through music. From timeless classics to today's favorites, she creates a feel-good experience that sticks with you. Smooth blends. Big energy. Positive vibes. Real connection. Terri doesn't just play the soundtrack—she makes the moment. Every Saturday overnight. Every Sunday overnight. Terri Mitchell makes it HLYST.
+    about: "Terri Mitchell lives for the moments that matter. She turns up the good times and brings people together through music. From timeless classics to today's favorites, she creates a feel-good experience that sticks with you. Smooth blends. Big energy. Positive vibes. Real connection. Terri doesn't just play the soundtrack—she makes the moment. Every Saturday overnight. Every Sunday overnight. Terri Mitchell makes it HLYST.",
     inHisLane: 'R&B / Neo-Soul / Classic Hits / Feel-Good Favorites / Sunday Brunch Vibes',
     onAirStyle: 'Warm. Genuine. Engaging. Uplifting. Flows with ease.',
     theVibe: 'Feel-Good. Upbeat. Positive. Connected.',

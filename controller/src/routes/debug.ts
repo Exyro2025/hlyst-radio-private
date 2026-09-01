@@ -1,4 +1,4 @@
-// Admin-gated GET /debug â€” everything-at-a-glance for the debug UI.
+// Admin-gated GET /debug — everything-at-a-glance for the debug UI.
 import express from 'express';
 import { readFile, readdir } from 'node:fs/promises';
 import { config } from '../config.js';
@@ -23,6 +23,8 @@ import { budgetStatus } from '../broadcast/dj-budget.js';
 import { voiceStatus } from '../broadcast/voice-policy.js';
 import { clockStatus } from '../broadcast/clock-policy.js';
 import * as requestLog from '../broadcast/request-log.js';
+import * as hlystBridge from './hlyst-bridge.js';
+import * as djMemory from '../broadcast/dj-agent/dj-memory.js';
 import { getStationTimezone } from '../time.js';
 import { publicOrigin } from './public.js';
 import { requireAdmin } from '../middleware/auth.js';
@@ -30,7 +32,7 @@ import { BadStatePathError, listStateDir } from '../util/state-tree.js';
 
 export const router = express.Router();
 
-// GET /requests â€” recent listener requests and exactly how the AI DJ resolved
+// GET /requests — recent listener requests and exactly how the AI DJ resolved
 // each (intent breakdown, which path handled it, the picked track, the spoken
 // ack + full intro script, timing). Durable across restarts via request-log's
 // on-disk JSONL. Feeds the dashboard's Requests card.
@@ -42,11 +44,11 @@ router.get('/requests', requireAdmin, (req, res) => {
   }
 });
 
-// A debug snapshot is expensive to assemble â€” it loads the mood library, fetches
+// A debug snapshot is expensive to assemble — it loads the mood library, fetches
 // Icecast + weather, sweeps the state dir with stat(), and serialises the whole
 // DJ session (~170KB). The admin panel polls it every ~2s. Coalesce concurrent
-// and rapid hits behind a tiny single-flight cache so a burst of polls â€” or
-// several open admin tabs â€” triggers the build at most once per TTL, instead of
+// and rapid hits behind a tiny single-flight cache so a burst of polls — or
+// several open admin tabs — triggers the build at most once per TTL, instead of
 // stacking that work on the single-threaded event loop and starving other
 // /api/* routes (the cause of the edge 524s).
 const DEBUG_CACHE_TTL_MS = 1000;
@@ -111,7 +113,24 @@ async function buildDebugSnapshot(req: express.Request): Promise<any> {
     pickerBusy: queue.pickerBusy,
   };
 
-  // 3. Icecast status â€” capture the full source array so the per-mount block
+  // 2b. Shared-airtime coordination (DJ HANDOFF vs Vince Morgan imaging) —
+  // the Vince-side cooldown gate in hlyst-bridge.ts, any active transition
+  // claims from dj-memory.ts, and the talk-decision engine's recent outcomes
+  // (already in djLog under 'talk-decision' and the break-<purpose> kinds
+  // logKindFor() produces).
+  try {
+    out.handoff = {
+      vmImagingCooldown: hlystBridge.vmImagingCooldownStatus(),
+      activeClaims: djMemory.recentTransitionClaims(),
+      recentDecisions: queue.djLog
+        .filter((e: any) => e.kind === 'talk-decision' || e.kind.startsWith('break-'))
+        .slice(0, 20),
+    };
+  } catch (err: any) {
+    out.handoff = { error: err.message };
+  }
+
+  // 3. Icecast status — capture the full source array so the per-mount block
   // below can reuse it (one status-json fetch, not two).
   let icecastSources: any[] = [];
   try {
@@ -132,11 +151,11 @@ async function buildDebugSnapshot(req: express.Request): Promise<any> {
     out.icecast = { error: err.message };
   }
 
-  // 3b. Listen mounts â€” per-mount config vs. live Icecast status, plus the
+  // 3b. Listen mounts — per-mount config vs. live Icecast status, plus the
   // tune-in files. `configured` is the operator's intent (mp3 is the mandatory
   // floor; opus/flac/aac are opt-in); `live` is whether Icecast actually has a
   // source on that mount. configured-but-not-live = encoder didn't connect /
-  // needs a mixer restart â€” the diagnostic this surfaces.
+  // needs a mixer restart — the diagnostic this surfaces.
   {
     const st = settingsSnapshot?.stream || {};
     const origin = publicOrigin(req);
@@ -186,13 +205,13 @@ async function buildDebugSnapshot(req: express.Request): Promise<any> {
     };
   }
 
-  // 4. Liquidsoap log tail â€” Liquidsoap writes radio.log into the shared
+  // 4. Liquidsoap log tail — Liquidsoap writes radio.log into the shared
   // state dir's logs/ subfolder (see radio.liq + the liquidsoap volume
   // mount), which the controller sees via the shared state mount.
   // Reading it here means no extra controller-side log mount is needed.
   // Read from the state ROOT, not the active station dir: the compose bind
   // mount pins /var/log/liquidsoap to the root logs/ (compose can't follow
-  // the active-station pointer), so radio.log is install-level â€” like
+  // the active-station pointer), so radio.log is install-level — like
   // icecast-secrets.env. In single-station mode stateRoot === stateDir.
   // Station-dir fallback: right after a multi-station conversion the bind
   // mount still follows the moved logs/ inode into stations/<id>/, so the
@@ -206,35 +225,35 @@ async function buildDebugSnapshot(req: express.Request): Promise<any> {
     out.liquidsoapLog = `error: ${err.message}`;
   }
 
-  // 5. State dir listing â€” deliberately NOT here. It used to run a readdir plus
+  // 5. State dir listing — deliberately NOT here. It used to run a readdir plus
   // a stat fan-out over the state dir AND state/voice on every 2s poll of this
   // handler. The debug panel now browses the tree lazily via GET /debug/state-tree
   // below, one directory per expand, on mount rather than on a timer.
 
-  // 6. Recent LLM calls â€” `llm` reflects the active provider/model resolved
+  // 6. Recent LLM calls — `llm` reflects the active provider/model resolved
   // by the registry; `ollamaUrl` is the effective endpoint (settings or default).
   out.llm = {
     provider: llmProvider.providerName(),
     activeModel: llmProvider.activeModelLabel(),
     ollamaUrl: llmProvider.activeOllamaUrl(),
-    // Daily token budget â€” today's usage vs the cap and the resulting tier
+    // Daily token budget — today's usage vs the cap and the resulting tier
     // (normal / soft / hard). `enabled:false` when no cap is set.
     budget: (() => { try { return budgetStatus(); } catch (err: any) { return { error: err.message }; } })(),
     // Station-wide voice switch (settings.tts.enabled). `enabled:false` means
-    // every autonomous talk moment is standing down â€” worth seeing here before
+    // every autonomous talk moment is standing down — worth seeing here before
     // anyone debugs "why is the DJ quiet".
     voice: (() => { try { return voiceStatus(); } catch (err: any) { return { error: err.message }; } })(),
     // Station clock switch (settings.djSpeakClock). `enabled:false` means the
     // wall clock is off air and the automatic top-of-the-hour time check is
-    // standing down â€” the same "why has the DJ gone quiet about X" question
+    // standing down — the same "why has the DJ gone quiet about X" question
     // `voice` above answers, one surface further in.
     clock: (() => { try { return clockStatus(); } catch (err: any) { return { error: err.message }; } })(),
-    // Done-tool retry churn (D2) â€” since-boot count of the strategy layer's
+    // Done-tool retry churn (D2) — since-boot count of the strategy layer's
     // two "stopped without calling done" retry sites (agent.ts), the same
     // symptom the corrective re-pick in dj-agent.ts exists to salvage.
     agentDoneRetries: agentDoneRetryCount(),
     recentCalls: dj.recentCalls,
-    // Raw-request capture status â€” the admin UI shows the toggle + the file path
+    // Raw-request capture status — the admin UI shows the toggle + the file path
     // so operators know where to look. `viaEnv` means LLM_DEBUG_RAW forces it on
     // (the UI toggle can't turn it off in that case).
     debug: {
@@ -245,7 +264,7 @@ async function buildDebugSnapshot(req: express.Request): Promise<any> {
     },
   };
 
-  // 6c. TTS routing â€” which engine/voice the effective persona resolves to,
+  // 6c. TTS routing — which engine/voice the effective persona resolves to,
   // and whether it's silently falling back from the engine the persona asked
   // for (e.g. a cloud voice with the Cloud engine switched off). Plus the raw
   // TTS call ring (stats.ts, same since-boot window as the LLM ring) so the
@@ -264,7 +283,7 @@ async function buildDebugSnapshot(req: express.Request): Promise<any> {
     out.library = { error: err.message };
   }
 
-  // 6d. Subsonic API call tracking â€” every request to Navidrome, plus
+  // 6d. Subsonic API call tracking — every request to Navidrome, plus
   // library-coverage stats (distinct songs returned vs. tagged total).
   try {
     out.subsonic = subsonicLog.snapshot(out.library?.total ?? null);
@@ -279,22 +298,22 @@ async function buildDebugSnapshot(req: express.Request): Promise<any> {
     out.context = { error: err.message };
   }
 
-  // 7b. Live DJ session â€” the current run's chat history.
+  // 7b. Live DJ session — the current run's chat history.
   try {
     out.session = session.getSession();
   } catch (err) {
     out.session = { error: err.message };
   }
 
-  // 8. Config (redacted) â€” show *effective* values: the admin UI's location
+  // 8. Config (redacted) — show *effective* values: the admin UI's location
   // setting overrides the env-derived config, so read that from settings
   // (falling back to config) rather than the stale env default. The LLM
   // provider/model/endpoint is provider-agnostic (any AI SDK provider or
-  // router) and already reported in `out.llm` â€” not duplicated here.
+  // router) and already reported in `out.llm` — not duplicated here.
   out.config = {
     navidromeUrl: config.navidrome.url,
     navidromeUser: config.navidrome.user,
-    // Admin-only, so both are safe to show â€” and showing both is the operator's
+    // Admin-only, so both are safe to show — and showing both is the operator's
     // proof the split is live: `location` drives the forecast, `onAirLocation`
     // is what the DJ says and what the public endpoints publish.
     location: settingsSnapshot?.weather?.locationName || config.weather.locationName,
@@ -305,7 +324,7 @@ async function buildDebugSnapshot(req: express.Request): Promise<any> {
   return out;
 }
 
-// GET /sessions â€” archived session list, newest first. The live session is
+// GET /sessions — archived session list, newest first. The live session is
 // served inline by /debug; this lists the rolled-off runs in state/sessions/.
 router.get('/sessions', requireAdmin, async (req, res) => {
   try {
@@ -333,9 +352,9 @@ router.get('/sessions', requireAdmin, async (req, res) => {
   }
 });
 
-// GET /debug/state-tree â€” ONE directory of the state dir, for the debug panel's
+// GET /debug/state-tree — ONE directory of the state dir, for the debug panel's
 // read-only tree. Metadata only: names, sizes, mtimes, dir/file/symlink. There is
-// deliberately no content endpoint beside it â€” settings.json, secrets.env and
+// deliberately no content endpoint beside it — settings.json, secrets.env and
 // icecast-secrets.env all live in this tree and hold live credentials.
 //
 // Rooted at config.stateDir (the ACTIVE station dir), which is what the old flat
@@ -355,7 +374,7 @@ router.get('/debug/state-tree', requireAdmin, async (req, res) => {
   }
 });
 
-// POST /debug/subsonic/reset â€” zero the Subsonic call tracker so coverage can
+// POST /debug/subsonic/reset — zero the Subsonic call tracker so coverage can
 // be watched building from scratch during a targeted test run.
 router.post('/debug/subsonic/reset', requireAdmin, (req, res) => {
   subsonicLog.reset();

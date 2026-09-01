@@ -1,48 +1,25 @@
-import Link from 'next/link';
-import Masthead from '@/components/landing/Masthead';
-import StationFooter from '@/components/landing/StationFooter';
-import { AnimatedLink } from '@/components/ui/animated-link';
-
-// The site-wide 404, catching unmatched URLs and any `notFound()` without a
-// closer not-found.tsx. Without this file Next serves its own bare 404 inside
-// the root layout, which carries no masthead of its own — so this page supplies
-// the Masthead + bs-paper + StationFooter trio the other shells use.
+const GOLD = '#c9a44c';
+const BG = '#0a0a0a';
+const IVORY = '#f5f0e8';
 
 export default function NotFound() {
   return (
-    <div className="min-h-screen bg-bg text-ink">
-      <Masthead />
-      <main className="bs-paper">
-        <article>
-          <header className="bs-news-hero">
-            <p className="bs-eyebrow">OFF THE DIAL</p>
-            <h1>Dead air.</h1>
-            <p>
-              There&rsquo;s nothing broadcasting on this frequency. The page you asked for
-              either moved, never existed, or was pulled from the schedule.
-            </p>
-          </header>
-
-          <p className="bs-news-empty">
-            The stream itself is unaffected — the music keeps playing whatever this page
-            does.
-          </p>
-
-          {/* Primary recovery only — the StationFooter below already renders
-              the full "Back Pages" index (dispatches, stations, skills,
-              personas, shows), so repeating those links here is noise. */}
-          <div className="bs-station-cta">
-            <p className="bs-station-cta-copy">Try one of these instead.</p>
-            <AnimatedLink href="/listen" variant="arrow" className="bs-station-cta-link">
-              Back to the player
-            </AnimatedLink>
-            <Link href="/manual" className="bs-station-cta-help">
-              Read the manual
-            </Link>
-          </div>
-        </article>
-        <StationFooter />
-      </main>
+    <div style={{ background: BG, color: IVORY, minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '2rem' }}>
+      <div style={{ maxWidth: '480px', textAlign: 'center' }}>
+        <p style={{ color: GOLD, fontSize: '0.75rem', letterSpacing: '0.16em', margin: '0 0 1rem' }}>OFF THE DIAL</p>
+        <h1 style={{ fontSize: '2.5rem', fontWeight: 900, margin: '0 0 1rem', textTransform: 'uppercase' }}>Dead Air.</h1>
+        <p style={{ color: '#ccc', fontSize: '1rem', lineHeight: 1.6, margin: '0 0 2rem' }}>
+          There's nothing broadcasting on this frequency. The page you asked for either moved, never existed, or was pulled from the schedule. The stream itself is unaffected — the music keeps playing whatever this page does.
+        </p>
+        <a href="/" style={{
+          display: 'inline-flex', alignItems: 'center', gap: '0.5rem',
+          border: `1px solid ${GOLD}`, color: GOLD, padding: '0.65rem 1.4rem',
+          fontSize: '0.8rem', letterSpacing: '0.1em', textTransform: 'uppercase',
+          textDecoration: 'none', borderRadius: 999,
+        }}>
+          Back to HLYST →
+        </a>
+      </div>
     </div>
   );
 }

@@ -26,7 +26,10 @@ import { artistRootKey, trackKey } from '../music/recency.js';
 import { speak, voiceGainDb } from '../audio/tts.js';
 import * as djAgent from './dj-agent.js';
 import * as programme from './programme.js';
-import * as sfx from './sfx.js';
+import * as talkDecision from './dj-agent/talk-decision.js';
+import * as traffic from './traffic.js';
+import * as severeWeather from './severe-weather.js';
+import * as budget from './dj-budget.js';import * as sfx from './sfx.js';
 import * as beds from './beds.js';
 import * as bedPolicy from './bed-policy.js';
 import * as session from './session.js';
@@ -1992,7 +1995,7 @@ class Queue {
         try {
           await programme.ensurePlan(ctx);
         } catch (err) {
-          this.log('error', `Programme plan failed: ${(err as Error).message}`);
+          this.log('error', `Programme plan failed: ${(err as Error).stack}`);
         }
         // If that roll crossed a persona boundary, air the mic-pass first
         // (sign-off + greeting) so it plays before the incoming DJ's first
@@ -2027,7 +2030,7 @@ class Queue {
         try {
           await programme.onSessionSettled(this, ctx);
         } catch (err) {
-          this.log('error', `Programme episode hook failed: ${(err as Error).message}`);
+          this.log('error', `Programme episode hook failed: ${(err as Error).stack}`);
         }
         await djAgent.runTrackEvent(this, ctx, {
           wantLink,
@@ -2054,6 +2057,71 @@ class Queue {
   // the fresh pick becomes the new held tail whose own deadline is a full track
   // away. Past the hard deadline the window closes and drainToLiquidsoap's
   // intrinsic path owns the endgame.
+  // Autonomous standalone talk breaks (#5/#6/#9) â€” the two-stage decision
+  // engine in dj-agent/talk-decision.ts. Same gating tier as idents/links
+  // (optionalSegmentsAllowed), and its own frequency gate on top so this
+  // doesn't stack with the pick-tied link cadence.
+    _breakBusy = false;
+  async maybeAutonomousBreak() {
+    if (this._breakBusy || !djCallsAllowed() || !autoVoiceAllowed() || !budget.optionalSegmentsAllowed()) return;
+    this._breakBusy = true;
+    try {
+      const ctx = await getFullContext();
+      await talkDecision.runAutonomousBreakCycle(this, ctx);
+    } catch (err) {
+      this.log('error', `Autonomous break cycle failed: ${(err as Error).message}`);
+    } finally {
+      this._breakBusy = false;
+    }
+  }
+
+  // Greater Cleveland / NE Ohio traffic (#20) — scheduled rush-hour reports
+  // plus exceptional major-incident coverage, sourced from OHGO. Own busy
+  // guard so a slow OHGO fetch can't stack across watcher ticks; gating and
+  // suppression (programme episodes, djCallsAllowed, etc.) live in traffic.ts
+  // itself, mirroring maybeAutonomousBreak's split.
+  _trafficBusy = false;
+  async maybeTraffic() {
+    if (this._trafficBusy) return;
+    this._trafficBusy = true;
+    try {
+      await traffic.maybeTraffic(this);
+    } catch (err) {
+      this.log('error', `Traffic check failed: ${(err as Error).message}`);
+    } finally {
+      this._trafficBusy = false;
+    }
+  }
+
+  async maybeTraffic() {
+    if (this._trafficBusy) return;
+    this._trafficBusy = true;
+    try {
+      await traffic.maybeTraffic(this);
+    } catch (err) {
+      this.log('error', `Traffic check failed: ${(err as Error).message}`);
+    } finally {
+      this._trafficBusy = false;
+    }
+  }
+
+  // Severe/consequential weather alerts (#21) — NWS-sourced, dormant except
+  // for genuinely severe conditions. Same busy-guard + suppression split as
+  // maybeTraffic.
+  _severeWeatherBusy = false;
+  async maybeSevereWeather() {
+    if (this._severeWeatherBusy) return;
+    this._severeWeatherBusy = true;
+    try {
+      await severeWeather.maybeSevereWeather(this);
+    } catch (err) {
+      this.log('error', `Severe weather check failed: ${(err as Error).message}`);
+    } finally {
+      this._severeWeatherBusy = false;
+    }
+  }
+
+ 
   maybeDeadlinePick() {
     if (!this.autoPick || this.pickerBusy || !djCallsAllowed()) return;
     if (!this.pairDrainActive()) return;
@@ -2534,11 +2602,13 @@ class Queue {
       // mutation â€” the clock advancing past a deadline has to re-trigger it
       // from here (cheap: senderBusy + an immediate hold-break otherwise).
       this.maybeDeadlinePick();
+      void this.maybeAutonomousBreak();
+      void this.maybeTraffic();
+      void this.maybeSevereWeather();
       void this.drainToLiquidsoap();
     };
     void tick();
-    setInterval(tick, 1500);
-    this.log('scheduler', 'Now-playing watcher started');
+    setInterval(tick, 1500);    this.log('scheduler', 'Now-playing watcher started');
   }
 
   snapshot() {

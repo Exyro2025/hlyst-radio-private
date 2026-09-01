@@ -383,6 +383,13 @@ function tuneInFilesBlocked(res: express.Response): boolean {
   return true;
 }
 
+router.get('/recent-upcoming', async (req, res) => {
+  res.json({
+    recentPlays: queue.history.slice(0, 5),
+    upcoming: queue.upcoming.slice(0, 5),
+  });
+});
+
 router.get('/listen.pls', (req, res) => {
   if (tuneInFilesBlocked(res)) return;
   const { entries } = listenMounts(req);
