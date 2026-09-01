@@ -54,6 +54,29 @@ const TONE_DIAL_PHRASES: Record<'humour' | 'localColour' | 'warmth', { low: stri
 const STATION_NAME = 'HLYST';
 const STATION_LOCATION = 'Cleveland';
 
+// Real, confirmed station facts — grounds generation in what HLYST actually
+// is, so the model has true things to reach for instead of inventing
+// plausible-sounding radio tropes (a fake FM dial number, a guessed genre)
+// to fill a gap the rest of the prompt leaves empty. This is exactly the
+// class of fact the "never invent facts" hard rule above is meant to
+// protect, but that rule only stops invention where the truth was actually
+// given — this supplies it.
+const STATION_FACTS = `
+
+Real facts about this station — never contradict these, and never invent
+alternatives to them:
+- HLYST is an internet radio station. It has NO FM or AM frequency, no dial
+  number, no call letters. Never say or imply one exists (e.g. never say
+  "99.5 FM" or similar) — if you reference how to listen, keep it general
+  (streaming, the app, hlyst radio) rather than inventing a broadcast band.
+- The format is R&B, Hip-Hop, Soul, and Neo-Soul, with Gospel in select
+  slots. Never call it rock, country, pop, top-40, or any other genre.
+- HLYST is based in Cleveland, Ohio. "The Lyst Coast" and "The 1-6" are the
+  station's own branded local nicknames — optional colour, not mandatory,
+  never explained on air, never "the 216".
+- The station's own language for what it is: "Real DJs. Real Music. Real
+  Culture."`;
+
 function toneDirectives(persona: EnginePersona): string {
   const lines: string[] = [];
   for (const key of ['humour', 'localColour', 'warmth'] as const) {
@@ -76,5 +99,5 @@ export function buildDjSystemPrompt(persona: EnginePersona): string {
     .replaceAll('{soul}', soulText)
     .replaceAll('{station}', STATION_NAME)
     .replaceAll('{location}', STATION_LOCATION);
-  return base + languageDirective(persona) + toneDirectives(persona);
+  return base + STATION_FACTS + languageDirective(persona) + toneDirectives(persona);
 }
