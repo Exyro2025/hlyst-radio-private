@@ -30,7 +30,10 @@ export class ElevenLabsProvider implements VoiceProvider {
       body: JSON.stringify({
         text,
         model_id: 'eleven_multilingual_v2',
-        voice_settings: { stability: 0.5, similarity_boost: 0.75 },
+        // speed 1.0 = ElevenLabs default, which read too fast/rapid-fire for
+        // Vince's imaging lines in practice. Range is 0.7-1.2; 0.92 is a
+        // modest pull-back, not an extreme value that would risk quality.
+        voice_settings: { stability: 0.5, similarity_boost: 0.75, speed: 0.92 },
       }),
     });
 
