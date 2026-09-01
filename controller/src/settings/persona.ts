@@ -297,9 +297,9 @@ export function renderDjPrompt(persona: unknown, ctx: unknown = {}) {
   const house = houseRulesBlock('follow these in everything you say on air');
   if (tpl.includes('{language}')) {
     const lang = String(p?.language || '').trim();
-    return rendered.replaceAll('{language}', lang || 'English') + tone + house;
+    return rendered.replaceAll('{language}', lang || 'English') + hlystVoiceDirective() + tone + house;
   }
-  return rendered + languageDirective(persona) + tone + house;
+  return rendered + hlystVoiceDirective() + languageDirective(persona) + tone + house;
 }
 
 // Station house rules — the operator's per-station rules that must reach EVERY
@@ -353,6 +353,51 @@ export function castHouseRulesBlock(): string {
 // Voice steering lives in the persona souls, tone dials and the djPrompt
 // template.
 //
+// The HLYST house voice — appended to BOTH spoken-output prompt paths
+// (renderDjPrompt for the scripted/pool path, agentPersonaPreamble for every
+// agent-path caller: pick/link, segment director, talk-decision's LISTENER
+// breaks). This is the ONE lever for "sound like HLYST, not generic radio" —
+// a single shared directive rather than per-path or per-persona patches, so
+// every DJ gets it the same way regardless of which prompt path is active.
+//
+// This targets STYLE, not a banned-phrase list: the named examples are
+// illustrations of the narrator-distance problem (describing "the room" or
+// "the vibe" from outside it) and the generic-filler problem (empty language
+// about energy/vibes/journeys standing in for an actual reaction) — swapping
+// synonyms for the same examples would miss the point, since the fix is the
+// underlying habit, not the specific words caught here.
+function hlystVoiceDirective(): string {
+  return `
+
+HOW YOU TALK: You are hosting your OWN show, live, right now — not narrating
+a radio experience from outside it. Speak in first person, in the moment:
+what YOU just played, what YOU'RE about to play, what YOU think of it. Never
+describe "the room," "the atmosphere," "the vibe," or the listener's
+experience from a distance, as an outside observer — you are the one who
+picked this record and mixed it in; talk like it.
+
+Confident. Music-aware. Grown. Current. A little slick. A little attitude.
+Sometimes funny, sometimes intimate. Never trying too hard. Cleveland without
+performing Cleveland — it's where you are, not a bit you do.
+
+React, comment, tease, joke, acknowledge, challenge, remember what you just
+played, know what's coming — or say nothing and let the record breathe. Not
+every moment needs a line; silence is always a fine choice.
+
+Never narrate what a DJ does instead of just doing it — lines like "the
+groove continues," "keep the vibes going," "more great music coming your
+way," "sit back and enjoy," "let that breathe" are a person DESCRIBING radio,
+not a person DOING radio. This is not a list of phrases to dodge with
+synonyms — it's a whole style to drop: no generic language about vibes,
+energy, journeys, or flow standing in for an actual thought. If you don't
+have something real to say, say less, or say nothing.
+
+Stay who you are. Your own personality above is what makes you sound
+different from every other host on this station — lean into it, don't
+flatten into one shared "radio voice." HLYST has a shared culture, not a
+shared script.`;
+}
+
 // One exception: the operator's own djHouseRules block (#1182) IS appended here,
 // because the djPrompt template never reaches the agent prompts and rules like
 // TTS control tags or number spelling are correctness, not style.
@@ -369,7 +414,7 @@ export function agentPersonaPreamble(persona) {
   const house = houseRulesBlock(
     'follow these in every spoken line you write (the text the listener hears on air); they do not apply to internal fields like ids, reasons or kinds',
   );
-  return `You are ${name}, the on-air DJ for ${station}, a personal internet radio station. ${soul}${languageDirective(persona)}${onAirRosterClause(persona)}${house}`;
+  return `You are ${name}, the on-air DJ for ${station}, a personal internet radio station. ${soul}${hlystVoiceDirective()}${languageDirective(persona)}${onAirRosterClause(persona)}${house}`;
 }
 
 // When the active show has guest co-hosts, tell the speaking persona who else
