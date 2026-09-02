@@ -1,13 +1,11 @@
 // seed-vince-imaging.mjs — ONE-TIME seed script for the Vince Morgan
 // Station Imaging inventory (Signature + Hype Drops + two DJ-interaction
-// pieces). Run once, then delete. Uses the SAME ElevenLabs voice provider
-// path, storage location, and vm_imaging table the existing Station
-// Imaging "Generate" button uses — this just skips the LLM text-generation
-// step, since the copy here is fixed, owner-approved text, not something to
-// rewrite.
+// pieces). Safe to re-run — it replaces any prior row with the exact same
+// text instead of duplicating it, so running it again after a fix (e.g. the
+// HLYST pronunciation correction) regenerates all 24 with the new audio.
 //
 // Run:
-//   docker exec sub-wave-web node /tmp/seed-vince-imaging.mjs
+//   docker exec sub-wave-web node /app/seed-vince-imaging.mjs
 import { neon } from '@neondatabase/serverless';
 
 const sql = neon(process.env.TALKWAVE_URL_POSTGRES_URL);
@@ -100,6 +98,18 @@ const uploadDir = '/app/public/uploads/vm-imaging';
 await fs.mkdir(uploadDir, { recursive: true });
 
 async function insertRow(imagingType, text, buffer, ext) {
+  // Idempotent re-run: delete any prior row with this exact text (and its
+  // audio file) first, so running this script again — e.g. after a
+  // pronunciation fix — REPLACES the old version instead of duplicating it.
+  const prior = await sql`SELECT id, audio_url FROM vm_imaging WHERE text = ${text}`;
+  for (const row of prior) {
+    if (row.audio_url) {
+      const priorFilename = String(row.audio_url).split('/').pop();
+      if (priorFilename) await fs.unlink(`${uploadDir}/${priorFilename}`).catch(() => {});
+    }
+    await sql`DELETE FROM vm_imaging WHERE id = ${row.id}`;
+  }
+
   const filename = `${imagingType}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}.${ext}`;
   await fs.writeFile(`${uploadDir}/${filename}`, buffer);
   const audioUrl = `${SITE_URL}/uploads/vm-imaging/${filename}`;
