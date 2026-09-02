@@ -12,7 +12,7 @@
 const PORT = 7701;
 const USER = process.env.ADMIN_USER;
 const PASS = process.env.ADMIN_PASS;
-const REPLACEMENT = 'Aitch-Lyst'; // hyphenated — a plain space read as two
+const REPLACEMENT = "H'lyst"; // apostrophe, no space — hyphen still read as two words
 
 if (!USER || !PASS) throw new Error('ADMIN_USER/ADMIN_PASS not set in this container');
 
