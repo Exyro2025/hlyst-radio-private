@@ -14,6 +14,14 @@ const SITE_URL = (process.env.SITE_URL || '').replace(/\/$/, '');
 const MODEL_ID = 'eleven_multilingual_v2';
 const VOICE_SETTINGS = { stability: 0.5, similarity_boost: 0.75, speed: 0.92 };
 
+// Same fix as web/lib/providers/VoiceProvider.ts's forSpeech() — this script
+// calls ElevenLabs directly and doesn't go through that file, so it needs
+// its own copy of the same substitution or every regenerated line would
+// have the old inconsistent "HLYST" pronunciation again.
+function forSpeech(text) {
+  return text.replace(/\bHLYST\b/gi, "H'lyst");
+}
+
 if (!ELEVEN_KEY) throw new Error('ELEVENLABS_API_KEY not set');
 if (!process.env.TALKWAVE_URL_POSTGRES_URL) throw new Error('TALKWAVE_URL_POSTGRES_URL not set');
 
@@ -68,7 +76,7 @@ async function synthMp3(text, voiceId) {
   const res = await fetch(`https://api.elevenlabs.io/v1/text-to-speech/${voiceId}`, {
     method: 'POST',
     headers: { 'xi-api-key': ELEVEN_KEY, 'Content-Type': 'application/json', Accept: 'audio/mpeg' },
-    body: JSON.stringify({ text, model_id: MODEL_ID, voice_settings: VOICE_SETTINGS }),
+    body: JSON.stringify({ text: forSpeech(text), model_id: MODEL_ID, voice_settings: VOICE_SETTINGS }),
   });
   if (!res.ok) throw new Error(`ElevenLabs ${res.status}: ${(await res.text()).slice(0, 200)}`);
   return Buffer.from(await res.arrayBuffer());
@@ -78,7 +86,7 @@ async function synthPcm(text, voiceId) {
   const res = await fetch(`https://api.elevenlabs.io/v1/text-to-speech/${voiceId}?output_format=pcm_${PCM_RATE}`, {
     method: 'POST',
     headers: { 'xi-api-key': ELEVEN_KEY, 'Content-Type': 'application/json' },
-    body: JSON.stringify({ text, model_id: MODEL_ID, voice_settings: VOICE_SETTINGS }),
+    body: JSON.stringify({ text: forSpeech(text), model_id: MODEL_ID, voice_settings: VOICE_SETTINGS }),
   });
   if (!res.ok) throw new Error(`ElevenLabs ${res.status}: ${(await res.text()).slice(0, 200)}`);
   return Buffer.from(await res.arrayBuffer());
