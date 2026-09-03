@@ -518,16 +518,16 @@ export default function HomePage() {
         </div>
       </section>
 
-            {/* TALK WAVE INVITATION */}
+                        {/* IN MY EAR INVITATION */}
       <section style={{ padding: '3rem 2rem', borderBottom: '1px solid #222', textAlign: 'center' }}>
-        <p style={{ color: GOLD, fontSize: '0.75rem', letterSpacing: '0.16em', margin: '0 0 0.75rem' }}>TALK WAVE</p>
+        <p style={{ color: GOLD, fontSize: '0.75rem', letterSpacing: '0.16em', margin: '0 0 0.75rem' }}>IN MY EAR</p>
         <h3 style={{ fontSize: '1.6rem', fontWeight: 800, margin: '0 0 0.75rem' }}>The booth is listening.</h3>
         <button onClick={() => setTalkWaveOpen(true)} style={{
           border: `1px solid ${GOLD}`, color: GOLD, background: 'transparent',
           padding: '0.65rem 1.5rem', fontSize: '0.8rem', letterSpacing: '0.1em',
           textTransform: 'uppercase', cursor: 'pointer', borderRadius: 999,
         }}>
-          Open Talk Wave
+          Open In My Ear
         </button>
       </section>
 
@@ -549,7 +549,7 @@ export default function HomePage() {
           <a href="/djs" style={{ color: '#999', textDecoration: 'none' }}>DJs</a>
           <a href="/interviews" style={{ color: '#999', textDecoration: 'none' }}>Interviews</a>
           <a href="/about" style={{ color: '#999', textDecoration: 'none' }}>About</a>
-          <a href="#talkwave" style={{ color: '#999', textDecoration: 'none' }}>Talk Wave</a>
+          <a href="#talkwave" style={{ color: '#999', textDecoration: 'none' }}>In My Ear</a>
         </div>
         <div style={{ marginBottom: '1.5rem' }}>
           <p style={{ color: '#c9a44c', fontSize: '0.7rem', letterSpacing: '0.14em', margin: '0 0 0.4rem' }}>OUR STANDARD</p>
@@ -576,10 +576,10 @@ export default function HomePage() {
         padding: '0.85rem 1.5rem', fontSize: '0.75rem', letterSpacing: '0.08em',
         textTransform: 'uppercase', cursor: 'pointer', fontWeight: 700,
       }}>
-        Talk Wave
+               In My Ear
       </button>
 
-      {/* TALK WAVE PANEL */}
+      {/* IN MY EAR PANEL */}
       <div style={{
         position: 'fixed', top: 0, right: 0, bottom: 0, width: '380px', maxWidth: '90vw',
         background: '#0a0a0a', borderLeft: '1px solid #222', zIndex: 100,
@@ -592,7 +592,7 @@ export default function HomePage() {
         }}>
           ✕
         </button>
-        <p style={{ color: GOLD, fontSize: '0.75rem', letterSpacing: '0.16em', margin: '0 0 0.5rem' }}>TALK WAVE</p>
+        <p style={{ color: GOLD, fontSize: '0.75rem', letterSpacing: '0.16em', margin: '0 0 0.5rem' }}>IN MY EAR</p>
         <h3 style={{ fontSize: '1.4rem', fontWeight: 800, margin: '0 0 0.5rem' }}>The booth is listening.</h3>
         <p style={{ color: GOLD, fontSize: '0.85rem', margin: '0 0 2rem' }}>
           {onAirDj.onAirName}'s Line — Open
@@ -600,17 +600,13 @@ export default function HomePage() {
 
                 {twMode === null && (
           <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
-            <div style={{ border: '1px solid #222', padding: '1.25rem', opacity: 0.5 }}>
-              <p style={{ color: IVORY, fontWeight: 700, margin: '0 0 0.3rem' }}>CALL</p>
-              <p style={{ color: '#999', fontSize: '0.85rem', margin: 0 }}>Coming soon — telephone integration not yet active.</p>
-            </div>
             <div onClick={() => setTwMode('message')} style={{ border: '1px solid #222', padding: '1.25rem', cursor: 'pointer' }}>
-              <p style={{ color: IVORY, fontWeight: 700, margin: '0 0 0.3rem' }}>MESSAGE</p>
-              <p style={{ color: '#999', fontSize: '0.85rem', margin: 0 }}>Send something directly to the booth.</p>
+              <p style={{ color: IVORY, fontWeight: 700, margin: '0 0 0.3rem' }}>Drop a Line</p>
+              <p style={{ color: '#999', fontSize: '0.85rem', margin: 0 }}>Put it right here.</p>
             </div>
             <div onClick={() => setTwMode('voice')} style={{ border: '1px solid #222', padding: '1.25rem', cursor: 'pointer' }}>
-              <p style={{ color: IVORY, fontWeight: 700, margin: '0 0 0.3rem' }}>VOICE NOTE</p>
-              <p style={{ color: '#999', fontSize: '0.85rem', margin: 0 }}>Leave the DJ a message.</p>
+              <p style={{ color: IVORY, fontWeight: 700, margin: '0 0 0.3rem' }}>Say It</p>
+              <p style={{ color: '#999', fontSize: '0.85rem', margin: 0 }}>Let me hear it.</p>
             </div>
           </div>
         )}
