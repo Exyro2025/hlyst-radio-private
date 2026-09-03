@@ -438,6 +438,27 @@ shared script.`;
 // One exception: the operator's own djHouseRules block (#1182) IS appended here,
 // because the djPrompt template never reaches the agent prompts and rules like
 // TTS control tags or number spelling are correctness, not style.
+// Few-shot style examples clause (persona.styleExamples) — concrete
+// demonstration lines in THIS DJ's voice, shown alongside the soul so a
+// small/local model has something to imitate the shape of, not just a prose
+// description it can fail to operationalize under load (observed: distinct
+// souls collapsing to an identical bare "Title by Artist" line under the
+// SAME context, across multiple personas). Explicitly framed as style-only —
+// the model must not read these as canned lines to replay verbatim, and must
+// still react to the REAL situation in front of it, never one of these.
+// Absent/empty → '' (persona runs on soul alone, unchanged from before this
+// field existed).
+function styleExamplesClause(persona: unknown): string {
+  const examples = (persona as { styleExamples?: unknown } | null | undefined)?.styleExamples;
+  if (!Array.isArray(examples) || !examples.length) return '';
+  const lines = examples
+    .filter((e): e is string => typeof e === 'string' && e.trim().length > 0)
+    .map((e) => `- "${e.trim()}"`)
+    .join('\n');
+  if (!lines) return '';
+  return `\n\nExample lines in YOUR voice, showing your cadence, brevity, humor, and attitude — these demonstrate STYLE only, never repeat one verbatim and never treat one as what to say now. React to the actual, real situation in front of you; only borrow the shape, length, and tone:\n${lines}`;
+}
+
 export function agentPersonaPreamble(persona) {
   const name = persona?.name || 'the DJ';
   // Close the soul as a sentence: this preamble runs straight into the next
@@ -451,7 +472,7 @@ export function agentPersonaPreamble(persona) {
   const house = houseRulesBlock(
     'follow these in every spoken line you write (the text the listener hears on air); they do not apply to internal fields like ids, reasons or kinds',
   );
-  return `You are ${name}, the on-air DJ for ${station}, a personal internet radio station. ${soul}${hlystVoiceDirective()}${languageDirective(persona)}${onAirRosterClause(persona)}${house}`;
+  return `You are ${name}, the on-air DJ for ${station}, a personal internet radio station. ${soul}${styleExamplesClause(persona)}${hlystVoiceDirective()}${languageDirective(persona)}${onAirRosterClause(persona)}${house}`;
 }
 
 // When the active show has guest co-hosts, tell the speaking persona who else
