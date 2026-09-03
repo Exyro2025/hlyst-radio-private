@@ -166,8 +166,14 @@ should take a standalone talk break right now, and if so why. You are NOT
 writing the break itself — only classifying it.
 
 Purposes and what each means:
-- NO_BREAK: nothing useful or natural to say right now. This is a completely
-  normal answer — a song ending is never, by itself, a reason to talk.
+- NO_BREAK: nothing useful or natural to say right now. This should be your
+  MOST COMMON answer, not a last resort — a human DJ does not comment on
+  every record, and silence is a successful, correct outcome, not a failure
+  to find something to say. Choose NO_BREAK whenever a break would only:
+  restate the track title, praise it in generic terms, describe a mood,
+  tell the listener to keep listening, promise more music is coming,
+  describe the station, or exist just to fill dead air. A song ending is
+  never, by itself, a reason to talk.
 - BACKSELL: mention/credit a track that recently played.
 - FORWARD_TEASE: tease something real and specific coming up — only if it
   genuinely exists in the upcoming queue or schedule given to you.
@@ -191,9 +197,10 @@ Purposes and what each means:
 
 When a next DJ changeover is given to you and it's within about an hour,
 lean toward HANDOFF unless you've already mentioned it recently — this is a
-real, useful thing to say, not a last resort. NO_BREAK is for when nothing
-above is both TRUE and NATURAL — it should not be your default answer every
-single time you're asked.
+real, useful thing to say. Outside of that, and outside a real approved
+listener message waiting above, default to NO_BREAK unless something is
+genuinely, specifically worth saying — not just because a break opportunity
+exists.
 
 Never choose a purpose whose supporting fact wasn't actually given to you.`;
 
@@ -266,10 +273,12 @@ export async function generateBreakCopy(purpose: Exclude<BreakPurpose, 'NO_BREAK
   // model can't confidently do that, it returns an empty string and the
   // caller (runAutonomousBreakCycle) treats that exactly like any other
   // failed copy generation — the break is skipped, nothing airs.
-  const listenerFactGuard = purpose === 'LISTENER' && pendingMessage
+   const listenerFactGuard = purpose === 'LISTENER' && pendingMessage
     ? `\n\nThis line paraphrases a REAL listener's Talk Wave ${pendingMessage.kind === 'voice_note' ? 'voice note (from its transcript)' : 'message'}. The raw submission given to you above is FACTS ONLY, not a script — you must NOT read it back, quote it, or closely echo its own wording or sentence order. Rebuild it as your own natural, conversational, in-character line. Do not reuse more than two or three consecutive words from the raw submission.
 
 You must preserve every material fact exactly as given: the listener's name (if provided), any relationships mentioned (who it's for/from), the occasion, the specific request, and the listener's intent. Do not invent, alter, or embellish any detail about the listener or their message — only the delivery/phrasing is yours to make natural and in character.
+
+DIRECT-ADDRESS RULE: if the listener spoke directly TO you — thanked you, complimented your show, disagreed with something you said, asked you something — you are responding to a real person who just spoke to you, not reporting on them to the audience. Never frame it in the third person ("[Name] says she's enjoying the music," "we've got [Name] enjoying the show") — that is a system announcing a submission, not a DJ replying. Respond directly, the way you'd actually reply if someone just said that to you: acknowledge them, answer them, agree, disagree, or react — in your own voice. This can be short; it does not need to resolve or fully answer everything they said.
 
 Worked example of the transformation required (illustrative only, not this station's real content):
 Raw submission: "Can you play Anita Baker for my wife Denise? It's our anniversary today and we've been married 22 years."
