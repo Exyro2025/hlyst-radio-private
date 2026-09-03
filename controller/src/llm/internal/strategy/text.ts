@@ -10,6 +10,7 @@ import { withTransientRetry } from '../core/retry.js';
 import { stripThinking, truncationError, usageOf, perfOf, warningsOf, failureDiagnostics } from '../core/pure.js';
 import { reasoningFor, repeatPenaltyApplies, samplingWithLocalKnobs } from '../provider/capabilities.js';
 import { resolveMaxOutputTokens } from '../../../settings.js';
+import { atmosphericProseReason, AtmosphericProseError } from '../core/quality-guard.js';
 
 // Hard output-token cap. A reasoning model with no cap can generate until it
 // fills the whole context window — one runaway <think> ramble then ties up the
@@ -39,7 +40,7 @@ export async function djText({
     kind,
     (err) => ({ user: prompt, ...failureDiagnostics(err) }),
     async (leg) => {
-      const result = await withTransientRetry(kind, () => generateText({
+      let result = await withTransientRetry(kind, () => generateText({
         model: leg.model,
         instructions: system,
         prompt,
@@ -56,9 +57,35 @@ export async function djText({
       // it tied up the TTS GPU for minutes). Fail the call instead —
       // announce-path callers catch and skip the segment, so the station
       // stays on air, just without this talk break.
-      const truncated = truncationError(result);
+      let truncated = truncationError(result);
       if (truncated) throw truncated;
-      const out = stripThinking(result.text);
+      let out = stripThinking(result.text);
+      // Quality backstop (deterministic, no model call): catch the model
+      // drifting into written/literary/atmospheric prose ("summer's gentle
+      // squeeze still whispering through the air") that prompting alone did
+      // not prevent. One on-the-spot regenerate with a sharper instruction;
+      // if it drifts again, throw — same "caller skips this segment, station
+      // stays on air" contract as the truncation guard above. Never air a
+      // line that fails this check.
+      let atmospheric = atmosphericProseReason(out);
+      if (atmospheric) {
+        result = await withTransientRetry(kind, () => generateText({
+          model: leg.model,
+          instructions: `${system}\n\nSTRICT CORRECTION: your previous attempt used literary, written, or atmospheric language, which is forbidden here. Say it the way a real person would actually say it out loud on air — plain, short, spoken. No scene-setting, no personification of the season/city/lake/air, no poetic imagery.`,
+          prompt,
+          temperature: Math.max(0.3, temperature - 0.2),
+          topP,
+          ...(seed != null ? { seed: seed + 1 } : {}),
+          maxOutputTokens,
+          reasoning: reasoningFor(leg.cfg),
+          ...(signal ? { abortSignal: signal } : {}),
+        }), signal);
+        truncated = truncationError(result);
+        if (truncated) throw truncated;
+        out = stripThinking(result.text);
+        atmospheric = atmosphericProseReason(out);
+        if (atmospheric) throw new AtmosphericProseError(atmospheric);
+      }
       // Only record sampling knobs that actually reached the model — see
       // repeatPenaltyApplies() (currently false everywhere: ai-sdk-ollama v4
       // lost the per-call channel) and samplingWithLocalKnobs() for the
