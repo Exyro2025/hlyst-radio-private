@@ -137,8 +137,8 @@ const decisionSchema = z.object({
   reason: z.string().describe('one short sentence, for the operator log only — never aired'),
 });
 
-function decisionContext(queue: any, ctx: SessionContext, pendingMessage: talkwave.PendingMessage | null): string {
-  const persona = session.onAirPersona();
+function decisionContext(queue: any, ctx: SessionContext, pendingMessage: talkwave.PendingMessage | null, personaOverride: unknown = null): string {
+  const persona: any = personaOverride ?? session.onAirPersona();
   const recap = queue.getDjRecap({ limit: 6, withinMinutes: 90 });
   const current = queue.current?.track;
   const upcoming = queue.upcoming?.[0]?.track;
@@ -269,9 +269,9 @@ const PURPOSE_GUIDANCE: Record<Exclude<BreakPurpose, 'NO_BREAK'>, string> = {
   LIVE_INFO: 'State only the real information you were given — nothing invented.',
 };
 
-export async function generateBreakCopy(purpose: Exclude<BreakPurpose, 'NO_BREAK'>, queue: any, ctx: SessionContext, pendingMessage: talkwave.PendingMessage | null): Promise<string | null> {
-  const persona = session.onAirPersona();
-  const context = decisionContext(queue, ctx, pendingMessage);
+export async function generateBreakCopy(purpose: Exclude<BreakPurpose, 'NO_BREAK'>, queue: any, ctx: SessionContext, pendingMessage: talkwave.PendingMessage | null, personaOverride: unknown = null): Promise<string | null> {
+  const persona = personaOverride ?? session.onAirPersona();
+  const context = decisionContext(queue, ctx, pendingMessage, personaOverride);
   // LISTENER only: a real person's message is being paraphrased, not
   // invented station content — the ordinary "don't fabricate" rule above
   // isn't strict enough here. Every material fact (name, relationships,
