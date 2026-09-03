@@ -1,46 +1,56 @@
-// dj-personality-bench.ts — controlled TEXT-ONLY benchmark: same fixed
-// context, 6 real named DJs, current local model. Does NOT touch ElevenLabs,
-// does NOT touch the live station, does NOT change any persisted settings —
-// settings.llm is overridden only in this process's memory for the duration
-// of the run (same technique llm-bench/cli.ts uses).
+// dj-personality-bench.ts — PRODUCTION-PATH benchmark: calls the REAL
+// generateBreakCopy/decideBreak from broadcast/dj-agent/talk-decision.ts —
+// the same functions the live autonomous break cycle uses — instead of
+// reconstructing the prompt by hand. This means the verbatim-copy guard,
+// the atmospheric-prose backstop (djObject), and JSON repair are all
+// genuinely exercised, not approximated.
 //
-// Uses the REAL shared prompt-building functions (agentPersonaPreamble,
-// vernacularClause, recognizedNamesClause) with each DJ's REAL soul/tone
-// data from live settings — not hand-reconstructed guesses. This does not
-// run through session.ts's full session/schedule machinery (that's deeply
-// coupled to live schedule state, too risky to hack into for a diagnostic
-// script) — so it is a faithful reconstruction of the real prompt shape,
-// not byte-identical to the full production call site.
+// Still does NOT touch ElevenLabs, the live station, or any persisted
+// settings/session state:
+//   - settings.llm is overridden only in this process's memory (unchanged
+//     technique from before).
+//   - the persona is passed as an explicit override param (generateBreakCopy/
+//     decisionContext's new personaOverride argument) rather than by mutating
+//     broadcast/session.ts's live on-air session — so this never calls
+//     session.start() and never writes a session file to disk.
+//   - `queue` is a minimal in-memory stand-in (fixed current/upcoming track,
+//     no-op log/getDjRecap) — never the real queue singleton, so nothing here
+//     can touch the real broadcast/library state.
 //
 // Run, INSIDE THE CONTROLLER CONTAINER:
 //   docker exec sub-wave-controller npx tsx dj-personality-bench.ts
 //
 // To test a second (stronger) model after pulling it via `ollama pull`, set:
 //   docker exec sub-wave-controller env BENCH_MODEL=qwen2.5:7b npx tsx dj-personality-bench.ts
+
 import * as settings from './src/settings.js';
-import * as memory from './src/broadcast/dj-agent/dj-memory.js';
-import { djObject } from './src/llm/sdk.js';
-import { z } from 'zod';
+import { generateBreakCopy, decideBreak } from './src/broadcast/dj-agent/talk-decision.js';
 
 const MODEL = process.env.BENCH_MODEL || 'llama3.2:3b';
 const DJ_NAMES = ['Marcus Reed', 'Eric Jordan', 'Miss Renee Cole', 'Nicole James', 'Julian Cross', 'Winslow the Cypher'];
 
-const copySchema = z.object({
-  text: z.string().describe('the exact words the DJ says on air — concise, in character, present tense'),
-});
+// Minimal queue stand-in — only the members decisionContext() actually reads.
+// No disk I/O, no live queue/library access.
+function mockQueue() {
+  const logs: string[] = [];
+  return {
+    current: { track: { title: 'Got It Bad', artist: 'HLYST' } },
+    upcoming: [{ track: { title: 'Rhodes After Dark', artist: 'HLYST' } }],
+    getDjRecap: () => '',
+    getRecentArtists: () => ['HLYST', 'HLYST', 'Tarvona'],
+    getLastTalkBreakAt: () => 0,
+    log: (kind: string, msg: string) => logs.push(`[${kind}] ${msg}`),
+    _logs: logs,
+  };
+}
 
-// Identical shared context for every DJ — same track just played, same track
-// up next, same purpose. Any difference in output is attributable to the
-// persona, not the situation.
-const SHARED_CONTEXT = `On air: {NAME}.
-Currently playing: "Got It Bad" by HLYST.
-Up next: "Rhodes After Dark" by HLYST.
-Recent artists played: HLYST, HLYST, Tarvona.
-No recent on-air talk this session.
-No DJ changeover is imminent.
-No approved Talk Wave listener message is waiting.
-
-Purpose: BACKSELL. Credit the track that just played — title and artist, briefly, in your own voice.`;
+// A context engineered to plausibly justify NO_BREAK: no recent talk, no
+// pending listener message, no imminent handoff — nothing but ordinary music
+// continuing. Same shared shape as the BACKSELL queue above so this is a
+// fair, faithful call into the real decideBreak(), not a rigged one.
+function mockQueueForNoBreakCheck() {
+  return mockQueue();
+}
 
 async function main() {
   await settings.load();
@@ -48,36 +58,45 @@ async function main() {
   s.llm.provider = 'ollama';
   s.llm.model = MODEL;
 
-  console.log(`\nBenchmarking model: ollama:${MODEL}\n`);
+  console.log(`\nBenchmarking model (PRODUCTION PATH): ollama:${MODEL}\n`);
 
+  // --- Per-DJ BACKSELL test — the real generateBreakCopy(), persona-overridden ---
   for (const name of DJ_NAMES) {
     const persona = (s.personas || []).find((p: any) => p.name === name);
     if (!persona) {
       console.log(`— ${name}: NOT FOUND in live personas list, skipping`);
       continue;
     }
-
-    const system = `${settings.agentPersonaPreamble(persona)}
-
-Write ONE short, natural on-air line for a standalone talk break. Never
-identify or imply that you are AI. Never explain "energy" or "journeys" or
-why an algorithm picked anything. Never invent artist facts, chart
-positions, quotes, listener messages, or anything not given to you.
-
-${memory.vernacularClause()}
-
-${memory.recognizedNamesClause()}`;
-
-    const prompt = SHARED_CONTEXT.replace('{NAME}', name);
+    const queue = mockQueue();
     const t0 = Date.now();
     try {
-      const out = await djObject({ system, prompt, schema: copySchema, temperature: 0.7, kind: 'benchDjPersonality' });
+      const text = await generateBreakCopy('BACKSELL', queue, {} as any, null, persona);
       const ms = Date.now() - t0;
-      console.log(`— ${name}  (${ms}ms)`);
-      console.log(`   "${out?.text || '(empty)'}"\n`);
+      if (text === null) {
+        console.log(`— ${name}  (${ms}ms)  REJECTED by production guard (verbatim/atmospheric backstop) — this is a SAFE outcome, nothing would air`);
+        if (queue._logs.length) console.log(`   reason: ${queue._logs.join(' | ')}`);
+      } else {
+        console.log(`— ${name}  (${ms}ms)`);
+        console.log(`   "${text}"`);
+      }
     } catch (err: any) {
       const ms = Date.now() - t0;
-      console.log(`— ${name}  (${ms}ms)  FAILED: ${err?.message || err}\n`);
+      console.log(`— ${name}  (${ms}ms)  FAILED: ${err?.message || err}`);
+    }
+    console.log('');
+  }
+
+  // --- NO_BREAK path test — the real decideBreak(), ordinary/quiet context ---
+  console.log('--- NO_BREAK production-path check ---');
+  {
+    const queue = mockQueueForNoBreakCheck();
+    const t0 = Date.now();
+    try {
+      const decision = await decideBreak(queue, {} as any, null);
+      const ms = Date.now() - t0;
+      console.log(`decideBreak (${ms}ms) → purpose: ${decision.purpose}  reason: ${decision.reason}`);
+    } catch (err: any) {
+      console.log(`decideBreak FAILED: ${err?.message || err}`);
     }
   }
 }
