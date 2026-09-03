@@ -19,6 +19,7 @@ import { stripThinking, extractJson, usageOf, perfOf, warningsOf, failureDiagnos
 import { needsToolCallObject, reasoningFor, samplingWithLocalKnobs } from '../provider/capabilities.js';
 import { objectViaToolCall } from './object-via-tool.js';
 import { resolveMaxOutputTokens } from '../../../settings.js';
+import { atmosphericProseReasonInObject, AtmosphericProseError } from '../core/quality-guard.js';
 
 // Operator-overridable via settings.llm.maxOutputTokens (issue #712); 0 keeps
 // this default.
@@ -113,6 +114,18 @@ export async function djObject({
             perf = perfOf(result);
             warnings = warningsOf(result);
           }
+          // Quality backstop (deterministic, no model call) — same guard as
+          // djText, applied here to every schema-shaped field (say/text/ack/
+          // intro/...; the speakable key varies by schema). A hit is treated
+          // exactly like a parse/shape failure: it falls through to `catch`
+          // below and consumes this attempt, so attempt 2 (the different
+          // recovery strategy) gets a fresh try. If BOTH attempts still read
+          // as literary/atmospheric prose, the loop's existing "throws only
+          // if both attempts fail" contract applies — the caller already
+          // treats a djObject throw as "skip this segment", so the station
+          // never airs a poetic line, it just goes quiet for that break.
+          const atmospheric = atmosphericProseReasonInObject(object);
+          if (atmospheric) throw new AtmosphericProseError(atmospheric);
           return {
             value: object,
             via: lastVia,
