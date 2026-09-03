@@ -315,6 +315,26 @@ ${memory.recognizedNamesClause()}${listenerFactGuard}`;  try {
       queue.log('talk-decision', 'LISTENER copy rejected — read too close to the raw submission verbatim, treating as failed generation');
       return null;
     }
+    // The few-shot style examples on the persona (settings.agentPersonaPreamble)
+    // are explicitly framed as style demonstrations, never a script — but a
+    // small/local model can still lean on one as an answer key rather than a
+    // style guide (observed: near-verbatim reuse of a style example under
+    // real load). Same guard as the LISTENER check above, run against every
+    // one of this persona's own examples for every purpose — reject and treat
+    // as a failed generation rather than air a line that is substantially a
+    // copy of an example instead of an actual reaction to what's really
+    // happening right now.
+    if (text) {
+      const examples = (persona as { styleExamples?: unknown } | null | undefined)?.styleExamples;
+      if (Array.isArray(examples)) {
+        for (const ex of examples) {
+          if (typeof ex === 'string' && looksLikeVerbatimReadback(text, ex)) {
+            queue.log('talk-decision', `${purpose} copy rejected — too close to one of ${persona?.name ?? 'the persona'}'s own style examples verbatim, treating as failed generation`);
+            return null;
+          }
+        }
+      }
+    }
     return text;
   } catch {
     return null;
