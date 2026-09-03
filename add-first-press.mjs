@@ -45,15 +45,24 @@ async function main() {
 
   const newShows = [...s.shows, newShow];
 
-  // Only touch Saturday hours 12 and 13 — everything else in the schedule,
-  // every other day, stays exactly as it was.
-  const newSchedule = { ...s.schedule };
-  newSchedule[SATURDAY] = { ...(newSchedule[SATURDAY] || {}), 12: newShow.id, 13: newShow.id };
+  // schedule[day] must be a real 24-element Array, not a plain object with
+  // numeric keys — cloning it via array spread (not object spread) keeps it
+  // an actual Array so the server's validator accepts it.
+  const currentSat = Array.isArray(s.schedule?.[SATURDAY])
+    ? [...s.schedule[SATURDAY]]
+    : new Array(24).fill(null);
+  currentSat[12] = newShow.id;
+  currentSat[13] = newShow.id;
+  const newSchedule = { ...s.schedule, [SATURDAY]: currentSat };
 
   const postRes = await fetch(`http://localhost:${PORT}/settings`, {
     method: 'POST',
     headers: { Authorization: auth, 'Content-Type': 'application/json' },
-    body: JSON.stringify({ shows: newShows, schedule: newSchedule }),
+    // personas must ride along even though it's unchanged — shows.personaId
+    // is validated against whatever personas are IN THIS SAME PATCH, and
+    // omitting it made every existing show fail "must reference an existing
+    // persona" even though nothing about personas actually changed.
+    body: JSON.stringify({ personas: s.personas, shows: newShows, schedule: newSchedule }),
   });
   if (!postRes.ok) throw new Error(`POST /settings failed: ${postRes.status} ${await postRes.text()}`);
 
