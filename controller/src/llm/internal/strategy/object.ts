@@ -15,7 +15,7 @@
 import { generateText, Output } from 'ai';
 import { withFailover } from '../core/failover.js';
 import { withTransientRetry } from '../core/retry.js';
-import { stripThinking, extractJson, usageOf, perfOf, warningsOf, failureDiagnostics, schemaHint } from '../core/pure.js';
+import { stripThinking, extractJson, repairUnescapedQuotes, usageOf, perfOf, warningsOf, failureDiagnostics, schemaHint } from '../core/pure.js';
 import { needsToolCallObject, reasoningFor, samplingWithLocalKnobs } from '../provider/capabilities.js';
 import { objectViaToolCall } from './object-via-tool.js';
 import { resolveMaxOutputTokens } from '../../../settings.js';
@@ -99,7 +99,18 @@ export async function djObject({
               ...(signal ? { abortSignal: signal } : {}),
             }), signal);
             try {
-              object = schema.parse(JSON.parse(extractJson(stripThinking(result.text))));
+              const extracted = extractJson(stripThinking(result.text));
+              try {
+                object = schema.parse(JSON.parse(extracted));
+              } catch {
+                // Fail-open ONCE: a small/local model's most common recovery-
+                // path break is a literal unescaped quote inside a string
+                // value (see repairUnescapedQuotes). Try the repaired text;
+                // if it STILL doesn't parse/validate, fall through to the
+                // original error below — fail-closed is preserved, this only
+                // rescues the specific, common, safe-to-fix case.
+                object = schema.parse(JSON.parse(repairUnescapedQuotes(extracted)));
+              }
             } catch (parseErr: any) {
               // Surface the raw output on a shape/parse miss, mirroring the
               // done-tool agent's diagnostics — without this a recovery-path
