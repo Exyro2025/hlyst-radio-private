@@ -15,8 +15,7 @@ const auth = 'Basic ' + Buffer.from(`${USER}:${PASS}`).toString('base64');
 async function main() {
   const res = await fetch(`http://localhost:${PORT}/settings`, { headers: { Authorization: auth } });
   if (!res.ok) throw new Error(`GET /settings failed: ${res.status} ${await res.text()}`);
-  const s = await res.json();
-
+  const s = (await res.json()).values;
   const winslow = (s.personas || []).find((p) => /winslow/i.test(p.name || ''));
   if (!winslow) {
     console.log('Could not find a persona matching "Winslow". Personas found:');
