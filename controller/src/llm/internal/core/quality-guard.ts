@@ -1,154 +1,139 @@
-// djObject — schema-validated structured output. `schema` is a Zod object
-// schema; the returned value is parsed and validated.
+// Deterministic quality backstop — the LAST safety layer described in the DJ
+// speech behavior spec. Prompting alone is not reliable on a small local
+// model: it can hold the frame for stretches, then drift into written,
+// literary, atmospheric prose ("summer's gentle squeeze still whispering
+// through the air", "the lake's still calling"). This module is a cheap,
+// deterministic check run AFTER generation, on every DJ speech call, that
+// catches that drift and forces a regenerate — never an air.
 //
-// Two attempts, because small/cloud models occasionally botch structured output
-// (the AI SDK throws NoObjectGeneratedError — "could not parse the response"):
-//   1. native    — Output.object, which forwards the schema to the provider's
-//                   structured-output mode (constrained decoding where it's
-//                   supported). Ollama instead takes the forced-tool path
-//                   (objectViaToolCall) — it ignores JSON mode.
-//   2. recovery  — plain free-text, then strip <think> blocks / ``` fences and
-//                   Zod-validate ourselves. Catches models that wrap the JSON
-//                   in reasoning the native parser chokes on.
-// Throws only if BOTH attempts fail.
+// This is NOT the primary personality/behavior system (the prompts in
+// prompts/scripts.ts, dj-agent/schemas.ts, dj-agent/talk-decision.ts, and
+// settings/persona.ts remain that). It is a backstop for when those fail.
+//
+// Two layers, deliberately:
+//  1. BANNED_PHRASES / BANNED_WORDS — near-verbatim matches on the specific
+//     constructions the spec calls out by name.
+//  2. PERSONIFICATION_PATTERN — a structural check, not a word list. This is
+//     what catches paraphrases of the same failure the exact strings above
+//     would miss (a season/place noun given a possessive or "is/has", then an
+//     atmosphere verb) — "prevent the underlying writing style", not just the
+//     exact strings already seen.
 
-import { generateText, Output } from 'ai';
-import { withFailover } from '../core/failover.js';
-import { withTransientRetry } from '../core/retry.js';
-import { stripThinking, extractJson, usageOf, perfOf, warningsOf, failureDiagnostics, schemaHint } from '../core/pure.js';
-import { needsToolCallObject, reasoningFor, samplingWithLocalKnobs } from '../provider/capabilities.js';
-import { objectViaToolCall } from './object-via-tool.js';
-import { resolveMaxOutputTokens } from '../../../settings.js';
-import { atmosphericProseReasonInObject, AtmosphericProseError } from '../core/quality-guard.js';
+const BANNED_PHRASES: string[] = [
+  "there's something about",
+  'the kind of record that',
+  'music has a way',
+  'as we continue',
+  'let that breathe',
+  'setting the tone',
+  'soundtrack to',
+  'stay right here',
+  'more great music',
+  'the vibe is',
+  'the vibe here',
+  'the vibes are',
+  'the energy is',
+  'the energy in',
+  'the energy of',
+  'still feeling like',
+  'still feels like',
+  'letting up, but',
+];
 
-// Operator-overridable via settings.llm.maxOutputTokens (issue #712); 0 keeps
-// this default.
-const MAX_TOKENS_OBJECT = 8000;
+// Standalone literary-register words. These essentially never belong in
+// plain spoken DJ patter, so a single occurrence anywhere is enough — this
+// backstop is meant to over-reject in favor of NO_BREAK/regenerate, never to
+// air a line that hedges close to the line.
+const BANNED_WORDS: string[] = [
+  'languid',
+  'whisper',
+  'whispers',
+  'whispering',
+  'linger',
+  'lingers',
+  'lingering',
+  'resonate',
+  'resonates',
+  'resonating',
+  'unfurl',
+  'unfurls',
+  'unfurling',
+  'cradle',
+  'cradles',
+  'cradling',
+  'embrace',
+  'embraces',
+  'embracing',
+];
 
-export async function djObject({
-  system,
-  prompt,
-  schema,
-  temperature = 0.4,
-  maxOutputTokens = resolveMaxOutputTokens(MAX_TOKENS_OBJECT),
-  kind = 'sdk.djObject',
-  leg = undefined,
-  // Optional caller-supplied abort signal. No live caller wraps djObject in
-  // withDeadline today, so this is inert unless one starts to — kept in the
-  // shape as a precaution so a future deadline-wrapped call can cut the
-  // Retry-After sleep short and prevent a ghost retry after the abort (mirrors
-  // djAgent's threading, PR #751 review).
-  signal = undefined,
-}: any): Promise<any> {
-  return withFailover(
-    kind,
-    (err) => ({ user: prompt, ...failureDiagnostics(err) }),
-    async (l) => {
-      let lastErr;
-      // Track the strategy actually attempted so a failure record attributes to
-      // the right sub-path — bucketing every failure as 'ai-sdk' hides which
-      // structured-output branch is breaking in /stats.
-      let lastVia;
-      for (let attempt = 1; attempt <= 2; attempt++) {
-        try {
-          let object;
-          let usage;
-          let perf;
-          let warnings;
-          if (attempt === 1 && needsToolCallObject(l.cfg)) {
-            lastVia = 'ai-sdk:tool';
-            ({ object, usage, perf, warnings } = await withTransientRetry(kind,
-              () => objectViaToolCall(l, { system, prompt, schema, temperature, maxOutputTokens, signal }), signal));
-          } else if (attempt === 1) {
-            lastVia = 'ai-sdk';
-            const result = await withTransientRetry(kind, () => generateText({
-              model: l.model,
-              instructions: system,
-              prompt,
-              temperature,
-              maxOutputTokens,
-              output: Output.object({ schema }),
-              reasoning: reasoningFor(l.cfg),
-              ...(signal ? { abortSignal: signal } : {}),
-            }), signal);
-            object = result.output;
-            usage = usageOf(result);
-            perf = perfOf(result);
-            warnings = warningsOf(result);
-          } else {
-            lastVia = 'ai-sdk:recovery';
-            // Self-describing retry: the native/tool attempt above conveys the
-            // schema to the model via a real provider channel (response_format
-            // or a forced tool's inputSchema) — this plain generateText call has
-            // neither, so without restating the shape here the model is guessing
-            // required keys from whatever the caller's own prose happens to
-            // mention (observed: GLM dropping `reason`/`say` entirely — see
-            // schemaHint's comment). Also route through the no-think model +
-            // forced suppression, same as every other structured-output leg
-            // (objectViaToolCall, djAgent's done-tool path) — this was the one
-            // branch still using the operator's raw reasoning-on model instance.
-            const hint = schemaHint(schema);
-            const result = await withTransientRetry(kind, () => generateText({
-              model: l.noThinkModel ?? l.model,
-              instructions: system,
-              prompt: `${prompt}\n\nRespond with a single JSON object only — no prose, no markdown fences.`
-                + (hint ? ` It MUST validate against this JSON Schema — every required key must be present:\n${hint}` : ''),
-              temperature,
-              maxOutputTokens,
-              reasoning: reasoningFor(l.cfg, { forceNoThink: true }),
-              ...(signal ? { abortSignal: signal } : {}),
-            }), signal);
-            try {
-              object = schema.parse(JSON.parse(extractJson(stripThinking(result.text))));
-            } catch (parseErr: any) {
-              // Surface the raw output on a shape/parse miss, mirroring the
-              // done-tool agent's diagnostics — without this a recovery-path
-              // failure carried no evidence of what the model actually
-              // produced, only the Zod/JSON error.
-              parseErr.text = result.text || '';
-              parseErr.finishReason = result.finishReason;
-              parseErr.usage = result.usage;
-              throw parseErr;
-            }
-            usage = usageOf(result);
-            perf = perfOf(result);
-            warnings = warningsOf(result);
-          }
-          // Quality backstop (deterministic, no model call) — same guard as
-          // djText, applied here to every schema-shaped field (say/text/ack/
-          // intro/...; the speakable key varies by schema). A hit is treated
-          // exactly like a parse/shape failure: it falls through to `catch`
-          // below and consumes this attempt, so attempt 2 (the different
-          // recovery strategy) gets a fresh try. If BOTH attempts still read
-          // as literary/atmospheric prose, the loop's existing "throws only
-          // if both attempts fail" contract applies — the caller already
-          // treats a djObject throw as "skip this segment", so the station
-          // never airs a poetic line, it just goes quiet for that break.
-          const atmospheric = atmosphericProseReasonInObject(object);
-          if (atmospheric) throw new AtmosphericProseError(atmospheric);
-          return {
-            value: object,
-            via: lastVia,
-            sampling: samplingWithLocalKnobs(l.cfg, { temperature }),
-            usage,
-            perf,
-            warnings,
-            // Full, untruncated — the /debug surface shows the whole call, and
-            // the ring buffer holds only 120 entries so size isn't a concern.
-            // (A .slice(0, 500) here used to cut pick reasons mid-sentence in
-            // /admin/debug; the durable events.jsonl still caps via cap().)
-            extra: { system, user: prompt, response: JSON.stringify(object) },
-          };
-        } catch (err) {
-          lastErr = err;
-        }
-      }
-      // Attribute the failure to the last sub-path tried, then let withFailover
-      // decide whether the error is host-unreachable (→ try the backup leg) or
-      // a model/parse failure (→ surface it).
-      (lastErr as any).__via = lastVia;
-      throw lastErr;
-    },
-    leg,
-  );
+// Season/place noun, given a possessive or "is/has", followed (within a short
+// window) by an atmosphere verb or phrase. Catches "summer's gentle squeeze
+// still whispering through the air" and "the lake's still calling" even
+// though neither matches a banned phrase/word list above verbatim.
+const PERSONIFICATION_PATTERN =
+  /\b(summer|winter|spring|autumn|fall|the lake|the city|the night|the air|the heat|the afternoon|the evening|the morning|the vibes?)('s|\s+is\b|\s+are\b|\s+has\b)[^.!?]{0,40}\b(whisper\w*|linger\w*|resonat\w*|breath\w*|unfurl\w*|embrac\w*|cradl\w*|hum(?:ming)? of|still alive|still calling|calling us|settl\w*\s+(?:into|over))\b/i;
+
+// A season/place/atmosphere noun immediately followed by "'s still" / "is
+// still" / "are still" — this specific shape ("the heat's still bearable",
+// "summer's still got a hold on us") is the single most common tell of
+// lingering-mood prose in this failure mode, independent of which adjective
+// or verb follows it.
+const STILL_LINGERING_PATTERN =
+  /\b(summer|winter|spring|autumn|fall|the lake|the city|the night|the air|the heat|the afternoon|the evening|the morning|the vibes?)('s|\s+is\b|\s+are\b)\s+still\b/i;
+
+/**
+ * Returns a short human-readable reason if `text` reads as literary/
+ * atmospheric written prose rather than plain spoken DJ patter, or null if
+ * it passes. Intentionally cheap (no model call) — this runs on every DJ
+ * speech generation.
+ */
+export function atmosphericProseReason(text: string | null | undefined): string | null {
+  if (!text) return null;
+  const lower = text.toLowerCase();
+  for (const phrase of BANNED_PHRASES) {
+    if (lower.includes(phrase)) return `banned phrase: "${phrase}"`;
+  }
+  for (const word of BANNED_WORDS) {
+    if (new RegExp(`\\b${word}\\b`, 'i').test(text)) return `literary word: "${word}"`;
+  }
+  const personification = PERSONIFICATION_PATTERN.exec(text);
+  if (personification) return `personification: "${personification[0]}"`;
+  const stillLingering = STILL_LINGERING_PATTERN.exec(text);
+  if (stillLingering) return `lingering-mood construction: "${stillLingering[0]}"`;
+  return null;
+}
+
+/**
+ * Scans every string value in a plain object (one level of arrays included)
+ * for atmospheric prose — for djObject callers, where the speakable field's
+ * key name varies by schema (say/text/ack/intro/...). Returns the first
+ * reason found, or null. Non-string / non-speakable fields (ids, internal
+ * "reason" scratchpads) are unlikely to trip this; the cost of scanning them
+ * anyway is at most an unnecessary regenerate, never a missed atmospheric
+ * line — the safer direction to err for a last-layer backstop.
+ */
+export function atmosphericProseReasonInObject(obj: unknown): string | null {
+  if (obj == null) return null;
+  if (typeof obj === 'string') return atmosphericProseReason(obj);
+  if (Array.isArray(obj)) {
+    for (const v of obj) {
+      const r = atmosphericProseReasonInObject(v);
+      if (r) return r;
+    }
+    return null;
+  }
+  if (typeof obj === 'object') {
+    for (const v of Object.values(obj as Record<string, unknown>)) {
+      const r = atmosphericProseReasonInObject(v);
+      if (r) return r;
+    }
+  }
+  return null;
+}
+
+export class AtmosphericProseError extends Error {
+  constructor(reason: string) {
+    super(`Generated line rejected by the quality backstop — ${reason}`);
+    this.name = 'AtmosphericProseError';
+  }
 }
