@@ -27,7 +27,8 @@ export async function GET(req: Request) {
 
   const personas = await sql`
     SELECT id, name, soul, humour, local_colour, warmth, language,
-           frequency, script_length, dj_mode, tts_voice_id, tts_engine
+           frequency, script_length, dj_mode, tts_voice_id, tts_engine,
+           style_examples
     FROM personas
     WHERE is_imaging = false
   `;
