@@ -44,6 +44,7 @@ interface HlystPersonaRow {
   dj_mode: boolean;
   tts_voice_id: string | null;
   tts_engine: string | null;
+  style_examples: string[] | null;
 }
 
 interface HlystScheduleRow {
@@ -101,6 +102,7 @@ export async function syncFromHlyst(): Promise<void> {
     localColour: p.local_colour ?? undefined,
     warmth: p.warmth ?? undefined,
     language: p.language ?? '',
+    styleExamples: Array.isArray(p.style_examples) ? p.style_examples : [],
     tts: {
       engine: 'cloud',
       cloudProvider: 'elevenlabs',
