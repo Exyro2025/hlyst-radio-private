@@ -157,6 +157,12 @@ function decisionContext(queue: any, ctx: SessionContext, pendingMessage: talkwa
     pendingMessage
       ? `A real, owner-approved Talk Wave ${pendingMessage.kind === 'voice_note' ? 'voice note (transcribed)' : 'listener message'} is ready to go on air — from ${pendingMessage.listenerName || 'a listener'} (${pendingMessage.category}). Raw submission (facts only — do NOT read this aloud verbatim, paraphrase it in your own words): "${pendingMessage.message}"`
       : 'No approved Talk Wave listener message is waiting.',
+    (() => {
+      const recognized = pendingMessage ? memory.matchRecognizedPerson(pendingMessage.listenerName) : null;
+      return recognized
+        ? `RECOGNITION NOTE: the Talk Wave submitter's name above matches ${recognized.name} on your RECOGNIZED NAMES list — ${recognized.recognitionNote} Treat this submission as coming from someone you recognize, not an unknown stranger's form-field name — but stay strictly within the recognition rules already given: no invented biography, relationship, memory, or disclosure beyond what's listed there. This must change how you respond, not just whether the name appears: never say "Listener ${recognized.name} says..." or "we've got ${recognized.name} enjoying the show" — that's mechanical, not recognition. A natural opener like "${recognized.name}..." or "Okay, ${recognized.name}..." shows familiarity; write your own, don't reuse these verbatim.`
+        : '';
+    })(),
   ].filter(Boolean);
   return lines.join('\n');
 }
@@ -273,7 +279,7 @@ export async function generateBreakCopy(purpose: Exclude<BreakPurpose, 'NO_BREAK
   // model can't confidently do that, it returns an empty string and the
   // caller (runAutonomousBreakCycle) treats that exactly like any other
   // failed copy generation — the break is skipped, nothing airs.
-   const listenerFactGuard = purpose === 'LISTENER' && pendingMessage
+  const listenerFactGuard = purpose === 'LISTENER' && pendingMessage
     ? `\n\nThis line paraphrases a REAL listener's Talk Wave ${pendingMessage.kind === 'voice_note' ? 'voice note (from its transcript)' : 'message'}. The raw submission given to you above is FACTS ONLY, not a script — you must NOT read it back, quote it, or closely echo its own wording or sentence order. Rebuild it as your own natural, conversational, in-character line. Do not reuse more than two or three consecutive words from the raw submission.
 
 You must preserve every material fact exactly as given: the listener's name (if provided), any relationships mentioned (who it's for/from), the occasion, the specific request, and the listener's intent. Do not invent, alter, or embellish any detail about the listener or their message — only the delivery/phrasing is yours to make natural and in character.
