@@ -189,6 +189,63 @@ export function extractJson(s: string): string {
   return t.slice(start, end + 1);
 }
 
+// Repairs the single most common way a small/local model breaks otherwise-
+// well-formed JSON on the manual-parse recovery path: writing a literal,
+// unescaped `"` INSIDE a string value instead of escaping it — e.g.
+// {"text": "Next up, "Rhodes After Dark" by HLYST"} — which is invalid JSON
+// (the parser reads the string as ending after "Next up, "). A single walk
+// over the text, tracking whether we're inside a string: a `"` encountered
+// mid-string is a real terminator only when the next non-whitespace
+// character is one JSON allows there (`,` `}` `]` `:`) or end-of-input;
+// otherwise it's a literal quote the model meant as content, and gets
+// escaped in place. Best-effort — if the repaired text still doesn't parse,
+// the caller's existing JSON.parse throws exactly as before (fail-closed,
+// unchanged).
+export function repairUnescapedQuotes(s: string): string {
+  let out = '';
+  let inString = false;
+  let escaped = false;
+  for (let i = 0; i < s.length; i++) {
+    const ch = s[i];
+    if (inString) {
+      if (escaped) {
+        out += ch;
+        escaped = false;
+        continue;
+      }
+      if (ch === '\\') {
+        out += ch;
+        escaped = true;
+        continue;
+      }
+      if (ch === '"') {
+        let j = i + 1;
+        while (j < s.length && /\s/.test(s[j])) j++;
+        const next = s[j];
+        const terminates = next === undefined || next === ',' || next === '}' || next === ']' || next === ':';
+        if (terminates) {
+          out += ch;
+          inString = false;
+        } else {
+          // Literal quote inside the string content — escape it.
+          out += '\\"';
+        }
+        continue;
+      }
+      out += ch;
+      continue;
+    }
+    // Not currently inside a string.
+    if (ch === '"') {
+      inString = true;
+      out += ch;
+      continue;
+    }
+    out += ch;
+  }
+  return out;
+}
+
 // Normalise the AI SDK usage block into { input, output, total }. Providers
 // vary in which fields they populate (and a local Ollama box often omits them
 // entirely — token stats then read as 0 for that call). In AI SDK 7 `usage`
