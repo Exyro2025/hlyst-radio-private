@@ -601,10 +601,12 @@ export default function HomePage() {
                 {twMode === null && (
           <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
             <div onClick={() => setTwMode('message')} style={{ border: '1px solid #222', padding: '1.25rem', cursor: 'pointer' }}>
+              <p style={{ color: GOLD, fontSize: '0.7rem', letterSpacing: '0.12em', margin: '0 0 0.35rem' }}>MESSAGE</p>
               <p style={{ color: IVORY, fontWeight: 700, margin: '0 0 0.3rem' }}>Drop a Line</p>
               <p style={{ color: '#999', fontSize: '0.85rem', margin: 0 }}>Put it right here.</p>
             </div>
             <div onClick={() => setTwMode('voice')} style={{ border: '1px solid #222', padding: '1.25rem', cursor: 'pointer' }}>
+              <p style={{ color: GOLD, fontSize: '0.7rem', letterSpacing: '0.12em', margin: '0 0 0.35rem' }}>VOICE NOTE</p>
               <p style={{ color: IVORY, fontWeight: 700, margin: '0 0 0.3rem' }}>Say It</p>
               <p style={{ color: '#999', fontSize: '0.85rem', margin: 0 }}>Let me hear it.</p>
             </div>
