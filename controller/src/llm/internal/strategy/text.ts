@@ -71,7 +71,7 @@ export async function djText({
       if (atmospheric) {
         result = await withTransientRetry(kind, () => generateText({
           model: leg.model,
-          instructions: `${system}\n\nSTRICT CORRECTION: your previous attempt used literary, written, or atmospheric language, which is forbidden here. Say it the way a real person would actually say it out loud on air — plain, short, spoken. No scene-setting, no personification of the season/city/lake/air, no poetic imagery.`,
+          instructions: `${system}\n\nSTRICT CORRECTION: your previous attempt used literary, written, or atmospheric language, which is forbidden here. Rewrite it — stay fully in THIS DJ's own voice, personality, and vocabulary from the persona above, just strip out the poetic/scene-setting language. Say it the way this specific DJ would actually say it out loud on air. Do not default to a generic, flat, or bare-minimum phrase just to avoid poetry — the personality must still come through.`,
           prompt,
           temperature: Math.max(0.3, temperature - 0.2),
           topP,
