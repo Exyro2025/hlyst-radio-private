@@ -25,6 +25,7 @@ import { decideBreak, type BreakDecisionInput, type BreakType } from '@/lib/brea
 import { synthesizeSpeech } from '@/lib/elevenlabs.server';
 import { uploadBreakAudio } from '@/lib/audioStorage.server';
 import { sendToSubwave } from '@/lib/subwaveBridge.server';
+import { VM_MIN_GAP_MINUTES } from '@/lib/vmImagingConfig';
 
 // Forces dynamic rendering — this route hits the DB at module load
 // (const sql = neon(...)) and must never be statically evaluated at
@@ -51,7 +52,6 @@ const BRIDGE_KIND: Record<BreakType, string> = {
 // spec asks for; 90 min keeps him rare against ~42 weekly show boundaries
 // without pinning him to a fixed schedule of his own.
 const VM_TRANSITION_TYPES: BreakType[] = ['show_open', 'show_close'];
-const VM_MIN_GAP_MINUTES = 90;
 
 const sql = neon(process.env.TALKWAVE_URL_POSTGRES_URL!);
 
