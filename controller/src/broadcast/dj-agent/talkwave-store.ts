@@ -23,6 +23,12 @@ export interface PendingMessage {
   listenerName: string | null;
   category: string;
   message: string; // typed text, or the voice note's transcript
+  // When this item was approved (or created, if never explicitly approved) —
+  // COALESCE(approved_at, created_at) from the query. Used by talk-decision.ts
+  // to force priority once a real listener has waited too long for a reply,
+  // rather than leaving an indefinite wait to the model's own discretion each
+  // decision cycle.
+  waitingSince: Date;
 }
 
 // Fails silently (returns null) on any error or missing config — a Talk Wave
@@ -63,6 +69,7 @@ export async function fetchNextApprovedMessage(): Promise<PendingMessage | null>
       listenerName: row.listener_name ?? null,
       category: String(row.category ?? 'other'),
       message: String(row.text ?? ''),
+      waitingSince: row.sort_at ? new Date(row.sort_at) : new Date(),
     };
   } catch {
     return null;
