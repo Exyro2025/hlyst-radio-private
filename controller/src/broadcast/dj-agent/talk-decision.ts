@@ -210,7 +210,21 @@ exists.
 
 Never choose a purpose whose supporting fact wasn't actually given to you.`;
 
+// A real listener's approved message left waiting on the model's own
+// discretion, cycle after cycle, could in principle wait indefinitely — the
+// station has observed genuine replies land ~2 hours after submission. Not
+// an interruption (it still only fires on the normal frequency-gated
+// decision cycle, per targetGapMs above), but a bound: once a message has
+// waited this long, the NEXT decision cycle forces LISTENER rather than
+// leaving it to the model's judgment again. "Owner sent a real message and
+// it eventually got a reply" should not depend on the model happening to
+// pick it.
+const LISTENER_MAX_WAIT_MS = 20 * 60_000;
+
 export async function decideBreak(queue: any, ctx: SessionContext, pendingMessage: talkwave.PendingMessage | null): Promise<BreakDecision> {
+  if (pendingMessage && Date.now() - pendingMessage.waitingSince.getTime() >= LISTENER_MAX_WAIT_MS) {
+    return { purpose: 'LISTENER', reason: `forced — real listener message has waited over ${Math.round(LISTENER_MAX_WAIT_MS / 60_000)} minutes` };
+  }
   const context = decisionContext(queue, ctx, pendingMessage);
   try {
     const out = await djObject({
@@ -243,14 +257,32 @@ const VERBATIM_RUN_LENGTH = 6;
 function normalizeWords(s: string): string[] {
   return s.toLowerCase().replace(/[^a-z0-9\s]/g, ' ').split(/\s+/).filter(Boolean);
 }
-function looksLikeVerbatimReadback(generated: string, rawSubmission: string): boolean {
+// minRun caller-overridable: the LISTENER-message check (6-word default) and
+// the style-example check (below) share this function, but a style example
+// is often SHORTER than 6 words — "That's HLYST. Solid record." is 4. With a
+// fixed 6-word floor, rawWords.length < VERBATIM_RUN_LENGTH short-circuited
+// to false for every short example, so an exact, full-word, verbatim copy of
+// a short example was NEVER detected (observed live: Marcus Reed and Miss
+// Renee Cole both aired an exact copy of one of their own examples). Scaling
+// the required run down to min(VERBATIM_RUN_LENGTH, rawWords.length) means a
+// short example must match IN FULL to trigger — no shorter runs falsely
+// flagged — while a long example still only needs any 6-word run, same as
+// before.
+function looksLikeVerbatimReadback(generated: string, rawSubmission: string, minRun: number = VERBATIM_RUN_LENGTH): boolean {
   const rawWords = normalizeWords(rawSubmission);
   const genWords = normalizeWords(generated);
-  if (rawWords.length < VERBATIM_RUN_LENGTH || genWords.length < VERBATIM_RUN_LENGTH) return false;
+  // Below this, a "match" is meaningless — a 1-2 word example like "HLYST."
+  // will coincidentally appear in almost any legitimate line (the station
+  // name is expected to come up naturally) and scaling minRun down to 1-2
+  // would falsely flag that as copying. Too short to be evidence either way.
+  const MIN_MEANINGFUL_WORDS = 3;
+  if (rawWords.length < MIN_MEANINGFUL_WORDS) return false;
+  const run = Math.min(minRun, rawWords.length);
+  if (genWords.length < run) return false;
   const genJoined = genWords.join(' ');
-  for (let i = 0; i <= rawWords.length - VERBATIM_RUN_LENGTH; i++) {
-    const run = rawWords.slice(i, i + VERBATIM_RUN_LENGTH).join(' ');
-    if (genJoined.includes(run)) return true;
+  for (let i = 0; i <= rawWords.length - run; i++) {
+    const chunk = rawWords.slice(i, i + run).join(' ');
+    if (genJoined.includes(chunk)) return true;
   }
   return false;
 }
@@ -286,10 +318,10 @@ You must preserve every material fact exactly as given: the listener's name (if 
 
 DIRECT-ADDRESS RULE: if the listener spoke directly TO you — thanked you, complimented your show, disagreed with something you said, asked you something — you are responding to a real person who just spoke to you, not reporting on them to the audience. Never frame it in the third person ("[Name] says she's enjoying the music," "we've got [Name] enjoying the show") — that is a system announcing a submission, not a DJ replying. Respond directly, the way you'd actually reply if someone just said that to you: acknowledge them, answer them, agree, disagree, or react — in your own voice. This can be short; it does not need to resolve or fully answer everything they said.
 
-Worked example of the transformation required (illustrative only, not this station's real content):
+Worked example of the transformation required (illustrative only — a made-up training example, NOT this station's real content, NOT a real listener, NOT a real relationship, NOT a real occasion. It exists ONLY to show the SHAPE of the rewrite. If you use ANY specific detail from it — "Denise", "wife", "husband", "married", "22 years", "anniversary" — in your actual answer, that is a fabrication and a serious error, even if it sounds natural. Those details belong to this fictional example only and must never appear in your real output unless the REAL raw submission above genuinely contains them):
 Raw submission: "Can you play Anita Baker for my wife Denise? It's our anniversary today and we've been married 22 years."
 Correct on-air line: "Denise, this one's coming your way from your husband — 22 years today. Happy anniversary to both of you."
-That is the shape of change required: same facts, completely rebuilt sentence, nothing copied from the original wording.
+That is the shape of change required: same facts, completely rebuilt sentence, nothing copied from the original wording. Your REAL raw submission above almost certainly has completely different facts — a different name, a different relationship (or none at all), a different occasion (or none at all). Use ONLY what that real submission actually says.
 
 If you cannot confidently preserve the meaning while paraphrasing it naturally, return an empty string for "text" instead of guessing.${pendingMessage.kind === 'voice_note' ? ' This came in as a voice note — you are paraphrasing its transcript in YOUR OWN voice, not playing the listener\'s actual recording. Never say or imply things like "let\'s hear from..." or "here\'s their message" in a way that suggests their real audio is about to play — it is not.' : ''}`
     : '';
@@ -314,6 +346,26 @@ ${memory.recognizedNamesClause()}${listenerFactGuard}`;  try {
     if (text && purpose === 'LISTENER' && pendingMessage && looksLikeVerbatimReadback(text, pendingMessage.message)) {
       queue.log('talk-decision', 'LISTENER copy rejected — read too close to the raw submission verbatim, treating as failed generation');
       return null;
+    }
+    // Deterministic guard against the specific, observed failure of the
+    // LISTENER worked example above: the model treated the illustrative
+    // "Denise / wife / husband / 22 years / anniversary" example as real
+    // content and fabricated a spouse and anniversary for a real listener
+    // who never mentioned either — a real fabrication attributed to a real
+    // person, not just an atmospheric-prose problem. If any of the example's
+    // specific tokens appear in the output but do NOT appear anywhere in the
+    // real raw submission, the model borrowed the example — reject rather
+    // than air fabricated personal facts.
+    if (text && purpose === 'LISTENER' && pendingMessage) {
+      const EXAMPLE_TOKENS = ['denise', 'wife', 'husband', 'married', '22 years', 'anniversary'];
+      const lowerText = text.toLowerCase();
+      const lowerRaw = pendingMessage.message.toLowerCase();
+      for (const token of EXAMPLE_TOKENS) {
+        if (lowerText.includes(token) && !lowerRaw.includes(token)) {
+          queue.log('talk-decision', `LISTENER copy rejected — used the worked example's "${token}" which is not in the real submission, treating as fabrication`);
+          return null;
+        }
+      }
     }
     // The few-shot style examples on the persona (settings.agentPersonaPreamble)
     // are explicitly framed as style demonstrations, never a script — but a
