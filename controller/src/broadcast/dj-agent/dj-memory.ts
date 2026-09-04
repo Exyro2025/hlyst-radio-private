@@ -211,3 +211,34 @@ Keep "A JH Broadcast" as normal public station language, but never connect
 JH Broadcast Group or Jerailian House to Australia Lawrence in anything you
 generate.`;
 }
+
+// Matches a Talk Wave submitter's typed name against RECOGNIZED_PEOPLE, for
+// the dynamic per-message "RECOGNITION NOTE" injected into that submission's
+// context (broadcast/dj-agent/talk-decision.ts's decisionContext). This was
+// called but never implemented — the runtime crash ("memory.
+// matchRecognizedPerson is not a function") every autonomous break cycle hit
+// is that missing function, not a wiring/build/import problem; the caller,
+// the data, and the export path were always correct.
+//
+// Deliberately conservative — an unknown listener must never falsely match:
+//   - exact (trimmed, case-insensitive) full-name match, or
+//   - exact match against just the first word of a recognized person's name
+//     (so "Jalen" matches "Jalen Edwards" — a listener naturally typing only
+//     their first name is the common case), never a substring/partial-word
+//     match (so "Chris" does NOT match "Christopher" — that's a guess, not a
+//     match).
+// Returns null (never throws) on no match or empty/missing input — the
+// caller already treats null as "no recognition note for this message",
+// which is the correct, safe default.
+export function matchRecognizedPerson(name: string | null | undefined): RecognizedPerson | null {
+  if (!name) return null;
+  const norm = name.trim().toLowerCase();
+  if (!norm) return null;
+  for (const p of RECOGNIZED_PEOPLE) {
+    const pNorm = p.name.trim().toLowerCase();
+    if (pNorm === norm) return p;
+    const firstName = pNorm.split(/\s+/)[0];
+    if (firstName === norm) return p;
+  }
+  return null;
+}
