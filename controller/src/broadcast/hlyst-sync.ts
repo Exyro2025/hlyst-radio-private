@@ -45,6 +45,7 @@ interface HlystPersonaRow {
   tts_voice_id: string | null;
   tts_engine: string | null;
   style_examples: string[] | null;
+  genres: string[] | null;
 }
 
 interface HlystScheduleRow {
@@ -114,11 +115,23 @@ export async function syncFromHlyst(): Promise<void> {
 
   // One show per persona — their general on-air identity. The hourly grid
   // below is what actually places them on the clock; the show itself carries
-  // no HLYST-specific schedule shape.
-  const shows = personas.map(p => ({
+  // no HLYST-specific schedule shape beyond genre preference.
+  //
+  // genres wires into SUB/WAVE's existing show-filter feature (schemas/
+  // show.ts, music/picker.ts, music/show-filter.ts) — a real, already-built
+  // mechanism that was simply never fed any data until now. filtersStrict is
+  // deliberately false for every HLYST show: genre here is a soft preference
+  // (picker.ts's dominant-but-not-exclusive source), never a hard exclusion —
+  // a DJ favors their territory but a crossover track can still be picked.
+  // Personas with no genres set (weekend/Sunday specialty shows not covered
+  // by an approved profile yet) get an empty list, same as before this
+  // change — never invented.
+  const shows = personaRows.map(p => ({
     id: `hlyst_${p.id}`,
     name: `HLYST — ${p.name}`,
     personaId: p.id,
+    genres: Array.isArray(p.genres) ? p.genres : [],
+    filtersStrict: false,
   }));
 
   const grid: (string | null)[][] = Array.from({ length: 7 }, () => Array(24).fill(null));
