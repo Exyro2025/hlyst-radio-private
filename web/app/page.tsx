@@ -504,7 +504,7 @@ export default function HomePage() {
         <p style={{ color: GOLD, fontSize: '0.75rem', letterSpacing: '0.16em', margin: '0 0 2rem' }}>WAYS TO CONNECT</p>
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '1.5rem' }}>
           <div onClick={() => setTalkWaveOpen(true)} style={{ border: '1px solid #222', padding: '1.5rem', cursor: 'pointer' }}>
-            <p style={{ color: IVORY, fontWeight: 700, margin: '0 0 0.4rem' }}>TALK WAVE</p>
+            <p style={{ color: IVORY, fontWeight: 700, margin: '0 0 0.4rem' }}>IN MY EAR</p>
             <p style={{ color: '#999', fontSize: '0.85rem', margin: 0 }}>Send the booth a message or voice note.</p>
           </div>
           <div onClick={handleShare} style={{ border: '1px solid #222', padding: '1.5rem', cursor: 'pointer' }}>
@@ -569,7 +569,7 @@ export default function HomePage() {
       </footer>
           
 
-      {/* TALK WAVE FLOATING TRIGGER */}
+      {/* IN MY EAR FLOATING TRIGGER */}
       <button onClick={() => setTalkWaveOpen(true)} style={{
         position: 'fixed', bottom: '2rem', right: '2rem', zIndex: 50,
         background: GOLD, color: BG, border: 'none', borderRadius: 999,
