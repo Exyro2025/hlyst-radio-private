@@ -28,6 +28,7 @@ import * as djAgent from './dj-agent.js';
 import * as programme from './programme.js';
 import * as talkDecision from './dj-agent/talk-decision.js';
 import * as traffic from './traffic.js';
+import * as emergencyMode from './emergency-mode.js';
 import * as severeWeather from './severe-weather.js';
 import * as budget from './dj-budget.js';import * as sfx from './sfx.js';
 import * as beds from './beds.js';
@@ -1757,6 +1758,7 @@ class Queue {
     // this call's first await. Fire-and-forget for the same reason as airIntro:
     // must not stall the watcher tick.
     void this.airPendingVoice(np);
+    void this.maybeVinceImaging();
 
     // Snapshot the outgoing track BEFORE the history roll mutates `this.current`
     // — scrobble.onTrackEvent below needs the previous play + its start time
@@ -2120,6 +2122,52 @@ class Queue {
       this.log('error', `Severe weather check failed: ${(err as Error).message}`);
     } finally {
       this._severeWeatherBusy = false;
+    }
+  }
+
+  // Vince Morgan (station imaging) at ORDINARY track transitions — not the
+  // boundary-only show_open/show_close path (that stays in the web engine-
+  // tick route, unchanged). Called once per real track change (onTrackStarted
+  // dedupes via lastSeenKey, so this is naturally paced to real track length —
+  // no extra local throttle needed beyond that).
+  //
+  // Priority-yielding is deliberately structural, not a hardcoded list of
+  // "don't fire during X/Y/Z": if ANY other segment (a DJ break generating or
+  // already queued, traffic, severe weather, an already-claimed boundary) has
+  // already claimed this moment, one of these flags is already true/set, and
+  // we simply don't call out. This can't go stale as new priority types are
+  // added later, the way an enumerated list would.
+  //
+  // The actual eligibility decision (cooldown, content selection, category
+  // rotation, recent-use suppression) lives web-side, next to the vm_imaging
+  // table it reads — this call is only "is now a locally reasonable moment to
+  // ask", never a guarantee Vince actually fires.
+  _vinceImagingBusy = false;
+  async maybeVinceImaging() {
+    if (this._vinceImagingBusy) return;
+    if (this._pendingVoice || this._breakBusy || this._trafficBusy || this._severeWeatherBusy) return;
+    if (emergencyMode.isActive()) return;
+    const secret = process.env.HLYST_ENGINE_CRON_SECRET;
+    const syncUrl = process.env.HLYST_SYNC_URL;
+    if (!secret || !syncUrl) return; // not configured — silently skip, never throw
+    this._vinceImagingBusy = true;
+    try {
+      const origin = new URL(syncUrl).origin;
+      const res = await fetch(`${origin}/api/hlyst-admin/vm-imaging/maybe-fire`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${secret}` },
+        signal: AbortSignal.timeout(10_000),
+      });
+      if (res.ok) {
+        const body: any = await res.json().catch(() => null);
+        if (body?.fired) this.log('vm-imaging', `Vince aired at an ordinary transition — ${body.reason || 'ok'}`);
+      }
+    } catch (err) {
+      // Fail silent, same posture as every other optional segment in this
+      // file — a network blip here must never affect playback.
+      this.log('error', `Vince imaging check failed: ${(err as Error).message}`);
+    } finally {
+      this._vinceImagingBusy = false;
     }
   }
 
