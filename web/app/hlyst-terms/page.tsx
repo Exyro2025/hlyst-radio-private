@@ -74,8 +74,8 @@ export default function TermsPage() {
         </p>
       </Section>
 
-      <Section title="Talk Wave">
-        <p>Talk Wave is a moderated listener-participation platform.</p>
+      <Section title="In My Ear">
+        <p>In My Ear is a moderated listener-participation platform.</p>
         <p>
           Submission of a message, voice note, or call does not guarantee that it will be read,
           played, answered, or placed on air.
