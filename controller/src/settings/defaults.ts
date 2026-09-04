@@ -95,9 +95,12 @@ export const DEFAULTS = {
     onAirLocation: '',
     units: 'metric' as 'metric' | 'imperial',
   },
-  // The operator's station name (the product is still SUB/WAVE). Substituted into
-  // the prompt's {station} and returned by GET /dj.
-  station: 'SUB/WAVE',
+  // The operator's station name. Substituted into every DJ's spoken prompt
+  // ("the on-air DJ for {station}") and returned by GET /dj. Set to this
+  // deployment's real station name, not the generic underlying product name —
+  // if HLYST's own config ever failed to load for any reason, this is what a
+  // DJ would say instead. It must never be able to say the wrong station.
+  station: 'HLYST Radio',
   // Blurb for link previews (og:description et al). Deliberately NOT the on-air
   // persona's tagline — that changes with the hour, so a shared link would
   // describe itself differently depending on when it was opened (#1086). Empty =
