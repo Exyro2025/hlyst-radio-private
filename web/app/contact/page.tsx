@@ -82,11 +82,11 @@ export default function ContactPage() {
 
       <div style={{ borderTop: '1px solid #222', marginTop: '3rem', paddingTop: '2rem' }}>
         <p style={{ color: GOLD, fontSize: '0.9rem', fontWeight: 700, margin: '0 0 0.5rem' }}>
-          Listener interaction belongs in Talk Wave.
+          Listener interaction belongs in In My Ear.
         </p>
         <p style={{ color: '#999', fontSize: '0.9rem', lineHeight: 1.6, margin: 0 }}>
           Want to join the conversation, send the booth a message, leave a voice note, or
-          participate in the show? Use Talk Wave rather than this business contact form.
+          participate in the show? Use In My Ear rather than this business contact form.
         </p>
       </div>
 
