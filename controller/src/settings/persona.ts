@@ -459,6 +459,22 @@ function styleExamplesClause(persona: unknown): string {
   return `\n\nExample lines in YOUR voice, showing your cadence, brevity, humor, and attitude — these demonstrate STYLE only, never repeat one verbatim and never treat one as what to say now. React to the actual, real situation in front of you; only borrow the shape, length, and tone:\n${lines}`;
 }
 
+// Verified artist facts the model would otherwise have to guess at — a small
+// model given just a bare artist name will sometimes default to a guessed
+// gender/pronoun for an unfamiliar act, which is a real, avoidable error the
+// same way a wrong date or a fabricated bio would be. Station-wide (not
+// per-persona) because it's a fact about the music library, not about any
+// one DJ's voice — every DJ needs it the same way. Kept as a short, flat list
+// so it stays cheap on every call; add future corrections here rather than
+// inventing a second mechanism.
+function verifiedArtistFactsClause(): string {
+  const facts = [
+    'Tarvona is a group/band, not a solo artist — always refer to them as "they"/"their", never "he"/"his" or "she"/"her".',
+  ];
+  if (!facts.length) return '';
+  return `\n\nVerified artist facts — state these correctly whenever relevant, never guess otherwise:\n${facts.map((f) => `- ${f}`).join('\n')}`;
+}
+
 export function agentPersonaPreamble(persona) {
   const name = persona?.name || 'the DJ';
   // Close the soul as a sentence: this preamble runs straight into the next
@@ -472,7 +488,7 @@ export function agentPersonaPreamble(persona) {
   const house = houseRulesBlock(
     'follow these in every spoken line you write (the text the listener hears on air); they do not apply to internal fields like ids, reasons or kinds',
   );
-  return `You are ${name}, the on-air DJ for ${station}, a personal internet radio station. ${soul}${styleExamplesClause(persona)}${hlystVoiceDirective()}${languageDirective(persona)}${onAirRosterClause(persona)}${house}`;
+  return `You are ${name}, the on-air DJ for ${station}, a personal internet radio station. ${soul}${styleExamplesClause(persona)}${verifiedArtistFactsClause()}${hlystVoiceDirective()}${languageDirective(persona)}${onAirRosterClause(persona)}${house}`;
 }
 
 // When the active show has guest co-hosts, tell the speaking persona who else
