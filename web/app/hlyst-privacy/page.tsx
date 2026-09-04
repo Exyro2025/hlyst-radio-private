@@ -35,20 +35,20 @@ export default function PrivacyPage() {
           or device information, general usage information, and interactions with site features.
         </p>
         <p>
-          If you voluntarily use interactive features such as Talk Wave, contact forms, requests,
+          If you voluntarily use interactive features such as In My Ear, contact forms, requests,
           contests, surveys, or other listener participation tools, we may also receive
           information you choose to provide, including your name or alias, email address,
           written message, voice recording, or other submitted content.
         </p>
       </Section>
 
-      <Section title="Talk Wave">
+      <Section title="In My Ear">
         <p>
-          Talk Wave allows listeners to interact with HLYST through features that may include
+          In My Ear allows listeners to interact with HLYST through features that may include
           written messages, voice notes, and, when available, telephone calls.
         </p>
         <p>
-          By voluntarily submitting a message or voice note through Talk Wave, you understand
+          By voluntarily submitting a message or voice note through In My Ear, you understand
           that your submission may be reviewed by HLYST personnel for moderation and potential
           use in connection with HLYST programming.
         </p>
