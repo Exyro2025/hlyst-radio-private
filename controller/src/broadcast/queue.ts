@@ -2107,18 +2107,6 @@ class Queue {
     }
   }
 
-  async maybeTraffic() {
-    if (this._trafficBusy) return;
-    this._trafficBusy = true;
-    try {
-      await traffic.maybeTraffic(this);
-    } catch (err) {
-      this.log('error', `Traffic check failed: ${(err as Error).message}`);
-    } finally {
-      this._trafficBusy = false;
-    }
-  }
-
   // Severe/consequential weather alerts (#21) — NWS-sourced, dormant except
   // for genuinely severe conditions. Same busy-guard + suppression split as
   // maybeTraffic.
