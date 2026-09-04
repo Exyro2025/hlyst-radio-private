@@ -604,6 +604,18 @@ export const PERSONA_LANGUAGE_MAX = 60;
 // Every persona's soul rides in the system prompt on every call, so this is a
 // recurring per-call token cost rather than a structural limit.
 export const PERSONA_SOUL_MAX = 2000;
+// Few-shot style examples (#DJ-speech-behavior-spec): short demonstration
+// lines in this persona's own voice — cadence, brevity, humor, warmth,
+// attitude, musical/listener reaction style, willingness to stay silent,
+// direct-address behavior, characteristic fragments. NOT canned lines to
+// replay verbatim — style demonstrations only, shown to the model alongside
+// `soul` so a small/local model has concrete shape to imitate, not just a
+// prose description it may fail to operationalize under load. Each example
+// capped short (one on-air line) and the list capped small: this rides on
+// EVERY spoken-generation prompt via agentPersonaPreamble, so it must stay
+// cheap, not become a persona-specific novel.
+export const PERSONA_STYLE_EXAMPLE_MAX = 220;
+export const PERSONA_STYLE_EXAMPLES_LIMIT = 8;
 export const PERSONA_SKILLS_LIMIT = 64;
 
 export const PERSONA_FREQUENCIES = [
@@ -933,6 +945,7 @@ export interface PersonaParsed {
   localColour: number;
   warmth: number;
   soul: string;
+  styleExamples: string[];
   language: string;
   avatar: string;
   tts: TtsVoiceSlot;
@@ -1042,6 +1055,27 @@ export const personaSchema = z
         .nullable()
         .default(null),
     ),
+    // See PERSONA_STYLE_EXAMPLE_MAX/LIMIT above. Absent → [] (no examples —
+    // the persona runs on `soul` alone, exactly as before this field existed).
+    // A malformed entry (non-string, or blank after trim) is DROPPED, not
+    // refused — same leniency as `skills`, for the same reason: an operator
+    // adding examples through the admin UI should never have the whole
+    // persona save rejected over one bad row.
+    styleExamples: z.preprocess(
+      personaNullToUndefined,
+      z
+        .array(z.unknown(), { error: 'styleExamples must be an array of strings' })
+        .max(PERSONA_STYLE_EXAMPLES_LIMIT, `styleExamples must be at most ${PERSONA_STYLE_EXAMPLES_LIMIT} entries`)
+        .transform((items) => {
+          const out: string[] = [];
+          for (const v of items) {
+            const s = typeof v === 'string' ? v.trim().slice(0, PERSONA_STYLE_EXAMPLE_MAX) : '';
+            if (s) out.push(s);
+          }
+          return out;
+        })
+        .default([]),
+    ),
     id: z.preprocess(
       // A malformed id reads as absent so resolvePersonaIds mints one.
       (v) => (typeof v === 'string' && PERSONA_ID_RE.test(v) ? v : undefined),
@@ -1061,6 +1095,7 @@ export const personaSchema = z
       localColour: p.localColour,
       warmth: p.warmth,
       soul: p.soul,
+      styleExamples: p.styleExamples,
       language: p.language,
       avatar: p.avatar,
       tts: p.tts,
@@ -3975,3 +4010,4 @@ export const webhooksPatchSchema = z.object({
   webhooks: webhooksSchema.optional(),
   trackPlayListenerGated: z.boolean().optional(),
 });
+
