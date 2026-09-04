@@ -54,6 +54,59 @@ const TONE_DIAL_PHRASES: Record<'humour' | 'localColour' | 'warmth', { low: stri
 const STATION_NAME = 'HLYST';
 const STATION_LOCATION = 'Cleveland';
 
+// People established within the HLYST world — mirrors controller/src/
+// broadcast/dj-agent/dj-memory.ts's RECOGNIZED_PEOPLE exactly. Duplicated
+// here for the same reason the rest of this file is a port, not a shared
+// import: this is a separate Next.js runtime with no access to the
+// controller's own modules. If that list changes, this needs updating too.
+interface RecognizedPerson { name: string; recognitionNote: string; }
+const RECOGNIZED_PEOPLE: RecognizedPerson[] = [
+  {
+    name: 'Australia Lawrence',
+    recognitionNote: 'An important person within the HLYST world, with a meaningful creative/institutional relationship to the station. Never mention or imply ownership, JH Broadcast Group ownership, corporate structure, or any administrative/business relationship — those are not approved for on-air use, even if true.',
+  },
+  {
+    name: 'Christopher',
+    recognitionNote: 'Recognized within the established HLYST/Lystenne context. No surname, title, business role, private relationship, or additional biography is known — do not invent one.',
+  },
+  {
+    name: 'Jalen Edwards',
+    recognitionNote: 'Recognized according to his approved HLYST/music context. No additional history or interactions beyond that are known — do not invent any.',
+  },
+];
+
+function recognizedNamesClause(): string {
+  const lines = RECOGNIZED_PEOPLE.map((p) => `- ${p.name}: ${p.recognitionNote}`).join('\n');
+  return `\n\nRECOGNIZED NAMES — people established within the HLYST world. If one of
+these names comes up, you know who they are; never treat them as an unknown
+stranger. Recognition means "I know who that is" — it does NOT mean
+disclosing everything below to the audience, and it does NOT license
+inventing conversations, friendships, meetings, quotes, preferences,
+memories, or personal relationships with them beyond what's listed. State
+only what's explicitly given for each person below — never add a surname,
+title, role, relationship, or backstory beyond it.
+${lines}
+
+Keep "A JH Broadcast" as normal public station language, but never connect
+JH Broadcast Group or Jerailian House to Australia Lawrence in anything you
+generate.`;
+}
+
+// Same conservative matching as the controller side — exact full name, or
+// exact first-word match (so "Jalen" alone matches "Jalen Edwards"), never a
+// substring/partial guess (so "Chris" does NOT match "Christopher").
+export function matchRecognizedPerson(name: string | null | undefined): RecognizedPerson | null {
+  if (!name) return null;
+  const norm = name.trim().toLowerCase();
+  if (!norm) return null;
+  for (const p of RECOGNIZED_PEOPLE) {
+    const pNorm = p.name.trim().toLowerCase();
+    if (pNorm === norm) return p;
+    if (pNorm.split(/\s+/)[0] === norm) return p;
+  }
+  return null;
+}
+
 // Real, confirmed station facts — grounds generation in what HLYST actually
 // is, so the model has true things to reach for instead of inventing
 // plausible-sounding radio tropes (a fake FM dial number, a guessed genre)
@@ -99,5 +152,5 @@ export function buildDjSystemPrompt(persona: EnginePersona): string {
     .replaceAll('{soul}', soulText)
     .replaceAll('{station}', STATION_NAME)
     .replaceAll('{location}', STATION_LOCATION);
-  return base + STATION_FACTS + languageDirective(persona) + toneDirectives(persona);
+  return base + STATION_FACTS + languageDirective(persona) + toneDirectives(persona) + recognizedNamesClause();
 }
