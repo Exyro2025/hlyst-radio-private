@@ -28,7 +28,7 @@ jobs:
     steps:
       - name: Call the engine-tick endpoint
         run: |
-          curl -sS -X POST "${{ secrets.HLYST_SITE_URL }}/api/hlyst-admin/engine-tick" \
+          curl -sS -L -X POST "${{ secrets.HLYST_SITE_URL }}/api/hlyst-admin/engine-tick" \
             -H "Authorization: Bearer ${{ secrets.HLYST_ENGINE_CRON_SECRET }}" \
             -H "Content-Type: application/json" \
             --fail-with-body
