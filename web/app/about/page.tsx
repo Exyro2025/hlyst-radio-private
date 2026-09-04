@@ -24,7 +24,7 @@ export default function AboutPage() {
       </p>
 
       <p style={{ color: '#e0dbd0', fontSize: '1.05rem', lineHeight: 1.7, margin: '0 0 2rem' }}>
-        Through its DJs, specialty programming, The Lyst, interviews, and Talk Wave, HLYST
+        Through its DJs, specialty programming, The Lyst, interviews, and In My Ear, HLYST
         is designed to feel less like a streaming platform and more like what great radio
         has always been: a place with taste, personality, discovery, conversation, and a
         point of view.
