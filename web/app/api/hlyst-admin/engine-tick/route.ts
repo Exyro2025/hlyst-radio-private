@@ -19,7 +19,7 @@
 
 import { cookies } from 'next/headers';
 import { neon } from '@neondatabase/serverless';
-import { buildDjSystemPrompt, type EnginePersona } from '@/lib/djPrompt.server';
+import { buildDjSystemPrompt, matchRecognizedPerson, type EnginePersona } from '@/lib/djPrompt.server';
 import { callLLM } from '@/lib/llm.server';
 import { decideBreak, type BreakDecisionInput, type BreakType } from '@/lib/breakDecision';
 import { synthesizeSpeech } from '@/lib/elevenlabs.server';
@@ -49,8 +49,7 @@ const BRIDGE_KIND: Record<BreakType, string> = {
 // VM (Vince Morgan) fires opportunistically at real station transitions only
 // — never a scheduled DJ, never every tick. Global cooldown (across every
 // approved element, not per-element) is the "do not over-trigger" gate the
-// spec asks for; 90 min keeps him rare against ~42 weekly show boundaries
-// without pinning him to a fixed schedule of his own.
+// spec asks for.
 const VM_TRANSITION_TYPES: BreakType[] = ['show_open', 'show_close'];
 
 const sql = neon(process.env.TALKWAVE_URL_POSTGRES_URL!);
@@ -230,18 +229,23 @@ export async function POST(req: Request) {
   };
   const systemPrompt = buildDjSystemPrompt(enginePersona);
 
-  let talkWaveItem: { id: number; message: string } | null = null;
+  let talkWaveItem: { id: number; message: string; listenerName: string | null } | null = null;
   let spotlightTrack: { id: number; title: string; artist: string } | null = null;
   let userPrompt: string;
   if (decision.breakType === 'talkwave_response') {
     const itemRows = await sql`
-      SELECT id, message FROM messages
+      SELECT id, message, listener_name FROM messages
       WHERE status = 'approved' AND used_at IS NULL
       ORDER BY approved_at ASC NULLS LAST LIMIT 1
     `;
     if (itemRows.length) {
-      talkWaveItem = itemRows[0] as any;
-      userPrompt = `A listener sent in this message: "${talkWaveItem!.message}". Acknowledge it naturally, briefly.`;
+      const row = itemRows[0] as any;
+      talkWaveItem = { id: row.id, message: row.message, listenerName: row.listener_name ?? null };
+      const recognized = matchRecognizedPerson(talkWaveItem.listenerName);
+      const recognitionLine = recognized
+        ? `\n\nRECOGNITION NOTE: the submitter's name above matches ${recognized.name} on your RECOGNIZED NAMES list — ${recognized.recognitionNote} Treat this as coming from someone you recognize, not an unknown stranger's form-field name — but stay strictly within the recognition rules already given: no invented biography, relationship, memory, or disclosure beyond what's listed there. This must change how you respond, not just whether the name appears: never say "Listener ${recognized.name} says..." — that's mechanical, not recognition. Write your own natural, familiar-sounding opener.`
+        : '';
+      userPrompt = `A listener${talkWaveItem.listenerName ? ` named ${talkWaveItem.listenerName}` : ''} sent in this message: "${talkWaveItem.message}". This message is FACTS ONLY, not a script — do not read it back verbatim; paraphrase it naturally in your own voice. If it addresses you directly (thanks you, compliments you, asks you something), respond to them directly — never in the third person ("[Name] says..."). Acknowledge it naturally, briefly.${recognitionLine}`;
     } else {
       userPrompt = BREAK_PROMPTS.ad_lib;
     }
