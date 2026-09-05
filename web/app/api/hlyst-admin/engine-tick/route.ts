@@ -1,7 +1,7 @@
 // The real decide-then-generate-then-log pipeline. Two ways in:
 //  - Admin session cookie (the "Run engine tick now" button in the UI)
 //  - Authorization: Bearer <HLYST_ENGINE_CRON_SECRET> (an external scheduler
-//    — GitHub Actions — calling this on a real cadence). This is a secret
+//    -- GitHub Actions -- calling this on a real cadence). This is a secret
 //    we own, not Vercel's auto-provisioned CRON_SECRET, since we're
 //    deliberately not using Vercel Cron (see HLYST_ENGINE_CRON_SECRET in
 //    .env.example for why).
@@ -9,17 +9,31 @@
 // Idempotent by design: a "claim" row is inserted with a deterministic
 // tick_key BEFORE any LLM call happens. If another tick already claimed
 // that exact key (UNIQUE(persona_id, tick_key)), this run backs off
-// immediately — no duplicate break, no wasted LLM call. This matters
+// immediately -- no duplicate break, no wasted LLM call. This matters
 // because the trigger (GitHub Actions cron) is explicitly best-effort and
 // can occasionally double-fire or overlap.
 //
-// Every invocation — whether it spoke, stayed silent, or hit a duplicate —
+// Every invocation -- whether it spoke, stayed silent, or hit a duplicate --
 // is logged to engine_tick_log, so scheduler health is visible from the
 // Control Room independent of whether anything was actually generated.
+//
+// OWNERSHIP (HLYST human-presence pass, canonical-ownership correction):
+// this route generates show_open/show_close/station_id/hourly/ad_lib
+// content and runs promotions/Vince's transition auto-trigger -- all of
+// that is unchanged and stays here. Talk Wave/In My Ear listener-response
+// generation and message-claiming is NOT owned here anymore -- that moved
+// entirely to SUB/WAVE controller (controller/src/broadcast/dj-agent/
+// talk-decision.ts + talkwave-store.ts), which is now the single canonical
+// claimant of approved messages, and the only place recognition,
+// conversational continuity, and reaction-state selection happen for Talk
+// Wave. Before this correction, BOTH this route and the controller polled
+// the same `messages` table (status = 'approved' AND used_at IS NULL) and
+// could independently claim and respond to the same submission -- an
+// unmanaged race. See the guard right after `decideBreak` below.
 
 import { cookies } from 'next/headers';
 import { neon } from '@neondatabase/serverless';
-import { buildDjSystemPrompt, matchRecognizedPerson, type EnginePersona } from '@/lib/djPrompt.server';
+import { buildDjSystemPrompt, type EnginePersona } from '@/lib/djPrompt.server';
 import { callLLM } from '@/lib/llm.server';
 import { decideBreak, type BreakDecisionInput, type BreakType } from '@/lib/breakDecision';
 import { synthesizeSpeech } from '@/lib/elevenlabs.server';
@@ -27,27 +41,28 @@ import { uploadBreakAudio } from '@/lib/audioStorage.server';
 import { sendToSubwave } from '@/lib/subwaveBridge.server';
 import { VM_MIN_GAP_MINUTES } from '@/lib/vmImagingConfig';
 
-// Forces dynamic rendering — this route hits the DB at module load
+// Forces dynamic rendering -- this route hits the DB at module load
 // (const sql = neon(...)) and must never be statically evaluated at
 // Docker build time, when TALKWAVE_URL_POSTGRES_URL isn't set.
 export const dynamic = 'force-dynamic';
 
 
-// HLYST's own break types → SUB/WAVE's queue kinds (controller/src/broadcast/
-// queue/kinds.ts). talkwave_response and station_id/hourly air immediately;
-// everything else rides into the next track transition — see DEFERRED_KINDS
-// in controller/src/routes/hlyst-bridge.ts, which this mapping must agree with.
-const BRIDGE_KIND: Record<BreakType, string> = {
+// HLYST's own break types -> SUB/WAVE's queue kinds (controller/src/broadcast/
+// queue/kinds.ts). station_id/hourly air immediately; everything else rides
+// into the next track transition -- see DEFERRED_KINDS in
+// controller/src/routes/hlyst-bridge.ts, which this mapping must agree with.
+// talkwave_response is intentionally absent -- this route never generates
+// or bridges that kind anymore; see the OWNERSHIP note above.
+const BRIDGE_KIND: Record<Exclude<BreakType, 'talkwave_response'>, string> = {
   show_open: 'dj-speak',
   show_close: 'dj-speak',
   station_id: 'station-id',
   hourly: 'hourly-check',
   ad_lib: 'dj-speak',
-  talkwave_response: 'talkwave',
 };
 
 // VM (Vince Morgan) fires opportunistically at real station transitions only
-// — never a scheduled DJ, never every tick. Global cooldown (across every
+// -- never a scheduled DJ, never every tick. Global cooldown (across every
 // approved element, not per-element) is the "do not over-trigger" gate the
 // spec asks for.
 const VM_TRANSITION_TYPES: BreakType[] = ['show_open', 'show_close'];
@@ -108,10 +123,10 @@ function computeTickKey(breakType: BreakType, dateStr: string, hour: number, min
 
 const BREAK_PROMPTS: Record<Exclude<BreakType, 'talkwave_response'>, string> = {
   show_open: 'Open your show. This is the first thing listeners hear from you today.',
-  show_close: 'Wrap your show — you\'re handing off to the next DJ shortly.',
+  show_close: 'Wrap your show -- you\'re handing off to the next DJ shortly.',
   station_id: 'Give a brief station identification for HLYST.',
   hourly: 'Give a brief time check for listeners.',
-  ad_lib: 'Give a short, natural aside — nothing tied to a specific song or event, just a moment of your personality.',
+  ad_lib: 'Give a short, natural aside -- nothing tied to a specific song or event, just a moment of your personality.',
 };
 
 async function logTick(entry: {
@@ -169,12 +184,26 @@ export async function POST(req: Request) {
   };
     const decision = decideBreak(decisionInput);
 
+  // OWNERSHIP GUARD -- SUB/WAVE controller is the sole canonical claimant of
+  // approved Talk Wave/In My Ear messages (recognition, conversational
+  // continuity, reaction-state, and response generation all live there --
+  // see the file header). If this route's own decision engine ever selects
+  // talkwave_response, back off exactly like a normal "nothing to say"
+  // tick: never claim a dj_breaks row, never call the LLM, never touch
+  // messages.used_at. This is what makes ownership atomic and singular --
+  // the message stays untouched and available for the controller to claim
+  // on its own decision cycle.
+  if (decision.breakType === 'talkwave_response') {
+    await logTick({ personaId, shouldSpeak: false, breakType: null, reason: 'Talk Wave/In My Ear ownership belongs to SUB/WAVE controller -- this route no longer claims or generates these responses.', skippedDuplicate: false, errorDetail: null });
+    return Response.json({ shouldSpeak: false, reason: 'Talk Wave/In My Ear ownership belongs to SUB/WAVE controller.' });
+  }
+
   // Promotions run on every tick, independent of whether the DJ is speaking
-  // this cycle — they're background rotation, not a DJ break. Eligibility:
+  // this cycle -- they're background rotation, not a DJ break. Eligibility:
   // active, inside its start/end window (a past end_at is a promo that has
-  // simply expired — no separate cron needed), station-wide or scoped to
+  // simply expired -- no separate cron needed), station-wide or scoped to
   // this persona, and outside its own minimum separation. Never a parallel
-  // playout path — an eligible promo goes through the exact same bridge call
+  // playout path -- an eligible promo goes through the exact same bridge call
   // as every other station-production element.
   try {
     const promoRows = await sql`
@@ -201,7 +230,7 @@ export async function POST(req: Request) {
       await sql`UPDATE promotions SET times_used = times_used + 1, last_used_at = now() WHERE id = ${promo.id}`;
     }
   } catch {
-    // Promotions are opportunistic, same as VM — never affect the DJ break.
+    // Promotions are opportunistic, same as VM -- never affect the DJ break.
   }
 
   if (!decision.shouldSpeak) {
@@ -220,7 +249,7 @@ export async function POST(req: Request) {
   `;
   if (!claimRows.length) {
     await logTick({ personaId, shouldSpeak: true, breakType: decision.breakType!, reason: decision.reason, skippedDuplicate: true, errorDetail: null });
-    return Response.json({ ...decision, personaId, personaName: p.name, skipped: 'duplicate tick — another run already claimed this slot' });
+    return Response.json({ ...decision, personaId, personaName: p.name, skipped: 'duplicate tick -- another run already claimed this slot' });
   }
   const claimedId = (claimRows[0] as any).id;
 
@@ -229,27 +258,9 @@ export async function POST(req: Request) {
   };
   const systemPrompt = buildDjSystemPrompt(enginePersona);
 
-  let talkWaveItem: { id: number; message: string; listenerName: string | null } | null = null;
   let spotlightTrack: { id: number; title: string; artist: string } | null = null;
   let userPrompt: string;
-  if (decision.breakType === 'talkwave_response') {
-    const itemRows = await sql`
-      SELECT id, message, listener_name FROM messages
-      WHERE status = 'approved' AND used_at IS NULL
-      ORDER BY approved_at ASC NULLS LAST LIMIT 1
-    `;
-    if (itemRows.length) {
-      const row = itemRows[0] as any;
-      talkWaveItem = { id: row.id, message: row.message, listenerName: row.listener_name ?? null };
-      const recognized = matchRecognizedPerson(talkWaveItem.listenerName);
-      const recognitionLine = recognized
-        ? `\n\nRECOGNITION NOTE: the submitter's name above matches ${recognized.name} on your RECOGNIZED NAMES list — ${recognized.recognitionNote} Treat this as coming from someone you recognize, not an unknown stranger's form-field name — but stay strictly within the recognition rules already given: no invented biography, relationship, memory, or disclosure beyond what's listed there. This must change how you respond, not just whether the name appears: never say "Listener ${recognized.name} says..." — that's mechanical, not recognition. Write your own natural, familiar-sounding opener.`
-        : '';
-      userPrompt = `A listener${talkWaveItem.listenerName ? ` named ${talkWaveItem.listenerName}` : ''} sent in this message: "${talkWaveItem.message}". This message is FACTS ONLY, not a script — do not read it back verbatim; paraphrase it naturally in your own voice. If it addresses you directly (thanks you, compliments you, asks you something), respond to them directly — never in the third person ("[Name] says..."). Acknowledge it naturally, briefly.${recognitionLine}`;
-    } else {
-      userPrompt = BREAK_PROMPTS.ad_lib;
-    }
-  } else if (decision.breakType === 'ad_lib') {
+  if (decision.breakType === 'ad_lib') {
     const spotlightRows = await sql`
       SELECT id, title, artist FROM artist_music
       WHERE release_status = 'NEW_RELEASE'
@@ -258,7 +269,7 @@ export async function POST(req: Request) {
     `;
     if (spotlightRows.length) {
       spotlightTrack = spotlightRows[0] as any;
-      userPrompt = `Give a short, natural aside spotlighting "${spotlightTrack!.title}" by ${spotlightTrack!.artist} — a real new release. You may call it new, since it genuinely is. Don't invent details about it beyond the title and artist.`;
+      userPrompt = `Give a short, natural aside spotlighting "${spotlightTrack!.title}" by ${spotlightTrack!.artist} -- a real new release. You may call it new, since it genuinely is. Don't invent details about it beyond the title and artist.`;
     } else {
       userPrompt = BREAK_PROMPTS.ad_lib;
     }
@@ -271,7 +282,7 @@ export async function POST(req: Request) {
 
     await sql`UPDATE dj_breaks SET text = ${text}, status = 'generated' WHERE id = ${claimedId}`;
 
-    // Audio rendering is isolated from text generation on purpose — per
+    // Audio rendering is isolated from text generation on purpose -- per
     // the failure-isolation rule, a break with real text but no audio
     // still counts as generated. Nothing here can turn a successful text
     // generation into a logged error.
@@ -279,7 +290,7 @@ export async function POST(req: Request) {
       try {
         let audioBuffer = await synthesizeSpeech(text, p.tts_voice_id);
 
-                // No bed mixing here — SUB/WAVE is the single audio authority per the
+                // No bed mixing here -- SUB/WAVE is the single audio authority per the
         // spec (Section 3). HLYST hands over clean speech only; SUB/WAVE's own
         // bed-policy decides talk-over vs. bed vs. incoming-song ramp once the
         // bridge call below reaches it.
@@ -287,14 +298,14 @@ export async function POST(req: Request) {
         await sql`UPDATE dj_breaks SET audio_url = ${audioUrl}, audio_status = 'rendered' WHERE id = ${claimedId}`;
 
         // Hand the rendered break to SUB/WAVE's real broadcast queue. Failure
-        // is isolated the same way audio rendering itself is above — a break
+        // is isolated the same way audio rendering itself is above -- a break
         // that's generated and rendered but never reaches SUB/WAVE (no
         // deployment yet, a network blip) still counts as a successful tick;
         // it just never airs. That gap is visible in dj_breaks.bridge_status,
         // not swallowed silently.
         try {
                     await sendToSubwave({
-            kind: BRIDGE_KIND[decision.breakType!],
+            kind: BRIDGE_KIND[decision.breakType as Exclude<BreakType, 'talkwave_response'>],
             text,
             audioUrl,
             personaId,
@@ -307,7 +318,7 @@ export async function POST(req: Request) {
           await sql`UPDATE dj_breaks SET bridge_status = 'failed', bridge_error = ${bridgeMessage} WHERE id = ${claimedId}`;
         }
 
-        // VM auto-trigger — entirely separate from the DJ break above, and
+        // VM auto-trigger -- entirely separate from the DJ break above, and
         // never allowed to affect its success. Only considered on a real
         // transition tick, and only when the global cooldown has cleared.
         if (VM_TRANSITION_TYPES.includes(decision.breakType!)) {
@@ -338,20 +349,13 @@ export async function POST(req: Request) {
               }
             }
                     } catch {
-            // Opportunistic only — a VM miss never affects the DJ break above.
+            // Opportunistic only -- a VM miss never affects the DJ break above.
           }
         }
       } catch (audioError) {
         const audioMessage = audioError instanceof Error ? audioError.message : 'Audio rendering failed.';
         await sql`UPDATE dj_breaks SET audio_status = 'failed', error_detail = ${audioMessage} WHERE id = ${claimedId}`;
       }
-    }
-
-    if (talkWaveItem) {
-      await sql`
-        UPDATE messages SET used_at = now(), used_by_dj = ${personaId}, used_by_show = ${startTime}
-        WHERE id = ${talkWaveItem.id}
-      `;
     }
 
     if (spotlightTrack) {
