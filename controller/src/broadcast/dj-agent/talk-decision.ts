@@ -45,6 +45,7 @@ import { z } from 'zod';
 import * as settings from '../../settings.js';
 import { djObject } from '../../llm/sdk.js';
 import * as memory from './dj-memory.js';
+import { deriveReaction, reactionClauseForWording, type ReactionResult } from './reaction.js';
 import * as talkwave from './talkwave-store.js';
 import type { SessionContext } from '../session.js';
 import * as session from '../session.js';
@@ -68,6 +69,7 @@ export type BreakPurpose = typeof BREAK_PURPOSES[number];
 export interface BreakDecision {
   purpose: BreakPurpose;
   reason: string;
+  reaction: ReactionResult;
 }
 
 // --- Frequency gate (#9) ----------------------------------------------------
@@ -163,6 +165,12 @@ function decisionContext(queue: any, ctx: SessionContext, pendingMessage: talkwa
         ? `RECOGNITION NOTE: the Talk Wave submitter's name above matches ${recognized.name} on your RECOGNIZED NAMES list — ${recognized.recognitionNote} Treat this submission as coming from someone you recognize, not an unknown stranger's form-field name — but stay strictly within the recognition rules already given: no invented biography, relationship, memory, or disclosure beyond what's listed there. This must change how you respond, not just whether the name appears: never say "Listener ${recognized.name} says..." or "we've got ${recognized.name} enjoying the show" — that's mechanical, not recognition. A natural opener like "${recognized.name}..." or "Okay, ${recognized.name}..." shows familiarity; write your own, don't reuse these verbatim.`
         : '';
     })(),
+    pendingMessage?.recentExchange
+      ? `CONTINUATION NOTE: this same listener wrote in again recently. Their earlier message was: "${pendingMessage.recentExchange.priorMessage}" — and you responded on air with: "${pendingMessage.recentExchange.djResponse}". This is FACTS ONLY — if it's natural, you may acknowledge the continuation, but never invent anything beyond these two exact quoted facts.`
+      : '',
+    pendingMessage?.recurringCount && pendingMessage.recurringCount > 1
+      ? `FAMILIARITY NOTE: this listener has written in ${pendingMessage.recurringCount} times recently — a regular, not a stranger. This may warrant slightly more warmth/familiarity if natural for your personality, but invent nothing about who they are beyond that count.`
+      : '',
   ].filter(Boolean);
   return lines.join('\n');
 }
@@ -222,21 +230,32 @@ Never choose a purpose whose supporting fact wasn't actually given to you.`;
 const LISTENER_MAX_WAIT_MS = 20 * 60_000;
 
 export async function decideBreak(queue: any, ctx: SessionContext, pendingMessage: talkwave.PendingMessage | null): Promise<BreakDecision> {
-  if (pendingMessage && Date.now() - pendingMessage.waitingSince.getTime() >= LISTENER_MAX_WAIT_MS) {
-    return { purpose: 'LISTENER', reason: `forced — real listener message has waited over ${Math.round(LISTENER_MAX_WAIT_MS / 60_000)} minutes` };
-  }
   const context = decisionContext(queue, ctx, pendingMessage);
+  const persona = session.onAirPersona();
+  const reaction = await deriveReaction(persona, context);
+
+  if (pendingMessage && Date.now() - pendingMessage.waitingSince.getTime() >= LISTENER_MAX_WAIT_MS) {
+    return { purpose: 'LISTENER', reason: `forced — real listener message has waited over ${Math.round(LISTENER_MAX_WAIT_MS / 60_000)} minutes`, reaction };
+  }
+  // Reaction informs, but never overrides, the existing purpose taxonomy or
+  // its safety-relevant branches (HANDOFF claim, frequency gate, fabrication
+  // guards) — none of that changes here. NOTHING_TO_ADD is a strong (not
+  // absolute) steer toward NO_BREAK: silence is a legitimate, common,
+  // positive outcome, not a fallback.
+  const reactionNote = reaction.state === 'NOTHING_TO_ADD'
+    ? `\n\nYour internal reaction to this moment is NOTHING_TO_ADD (${reaction.reason}) — this is a strong signal toward NO_BREAK unless something else genuinely independent is worth a break.`
+    : `\n\nYour internal reaction to this moment is ${reaction.state} (${reaction.reason}). This may support certain purposes (e.g. a real reaction can justify PERSONALITY_MOMENT or MUSIC_NOTE) — but never invent a purpose it doesn't actually support.`;
   try {
     const out = await djObject({
       system: DECISION_SYSTEM,
-      prompt: context + '\n\nDecide: should the DJ speak right now, and why?',
+      prompt: context + reactionNote + '\n\nDecide: should the DJ speak right now, and why?',
       schema: decisionSchema,
       temperature: 0.6,
       kind: 'djTalkDecision',
     });
-    return out ?? { purpose: 'NO_BREAK', reason: 'decision call returned nothing' };
+    return { ...(out ?? { purpose: 'NO_BREAK', reason: 'decision call returned nothing' }), reaction };
   } catch (err) {
-    return { purpose: 'NO_BREAK', reason: `decision failed: ${(err as Error).message}` };
+    return { purpose: 'NO_BREAK', reason: `decision failed: ${(err as Error).message}`, reaction };
   }
 }
 
@@ -301,7 +320,7 @@ const PURPOSE_GUIDANCE: Record<Exclude<BreakPurpose, 'NO_BREAK'>, string> = {
   LIVE_INFO: 'State only the real information you were given — nothing invented.',
 };
 
-export async function generateBreakCopy(purpose: Exclude<BreakPurpose, 'NO_BREAK'>, queue: any, ctx: SessionContext, pendingMessage: talkwave.PendingMessage | null, personaOverride: unknown = null): Promise<string | null> {
+export async function generateBreakCopy(purpose: Exclude<BreakPurpose, 'NO_BREAK'>, queue: any, ctx: SessionContext, pendingMessage: talkwave.PendingMessage | null, personaOverride: unknown = null, reaction?: ReactionResult): Promise<string | null> {
   const persona = personaOverride ?? session.onAirPersona();
   const context = decisionContext(queue, ctx, pendingMessage, personaOverride);
   // LISTENER only: a real person's message is being paraphrased, not
@@ -334,7 +353,7 @@ positions, quotes, listener messages, or anything not given to you.
 
 ${memory.vernacularClause()}
 
-${memory.recognizedNamesClause()}${listenerFactGuard}`;  try {
+${memory.recognizedNamesClause()}${listenerFactGuard}${reaction ? '\n\n' + reactionClauseForWording(reaction) : ''}`;  try {
     const out = await djObject({
       system,
       prompt: `${context}\n\nPurpose: ${purpose}. ${PURPOSE_GUIDANCE[purpose]}`,
@@ -430,7 +449,7 @@ export async function runAutonomousBreakCycle(queue: any, ctx: SessionContext): 
     }
   }
 
-  const text = await generateBreakCopy(decision.purpose, queue, ctx, pendingMessage);
+  const text = await generateBreakCopy(decision.purpose, queue, ctx, pendingMessage, null, decision.reaction);
   if (!text) {
     queue.log('talk-decision', `${decision.purpose} chosen but copy generation failed — skipping`);
     return;
@@ -440,7 +459,7 @@ export async function runAutonomousBreakCycle(queue: any, ctx: SessionContext): 
   memory.recordVernacularUsage(text);
   if (decision.purpose === 'LISTENER' && pendingMessage) {
     talkwave
-      .markMessageUsed(pendingMessage.kind, pendingMessage.id, session.onAirPersona()?.name ?? null, settings.resolveActiveShow()?.name ?? null)
+      .markMessageUsed(pendingMessage.kind, pendingMessage.id, session.onAirPersona()?.name ?? null, settings.resolveActiveShow()?.name ?? null, text)
       .catch((err) => queue.log('talk-decision', `failed to mark Talk Wave ${pendingMessage.kind} ${pendingMessage.id} used: ${(err as Error).message}`));
   }
   if (decision.purpose === 'HANDOFF' && handoffTarget) {    memory.claimTransition(memory.transitionKey(handoffTarget.name));
