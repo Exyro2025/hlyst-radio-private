@@ -1,8 +1,8 @@
-// djText — free-text DJ generation (intros, links, idents, skill segments).
+// djText -- free-text DJ generation (intros, links, idents, skill segments).
 //
-// Runs inside withFailover (primary→fallback on host-unreachable) with a
+// Runs inside withFailover (primary->fallback on host-unreachable) with a
 // transient-retry on the active leg. Resolves its model + sampling per leg, so a
-// primary→fallback switch across different providers picks the right path.
+// primary->fallback switch across different providers picks the right path.
 
 import { generateText } from 'ai';
 import { withFailover } from '../core/failover.js';
@@ -13,12 +13,22 @@ import { resolveMaxOutputTokens } from '../../../settings.js';
 import { atmosphericProseReason, AtmosphericProseError } from '../core/quality-guard.js';
 
 // Hard output-token cap. A reasoning model with no cap can generate until it
-// fills the whole context window — one runaway <think> ramble then ties up the
+// fills the whole context window -- one runaway <think> ramble then ties up the
 // inference slot for minutes. Generous backstop for normal output (idents are
 // ~150 tokens); raise it if you turn `llm.reasoning` on and need room for the
 // chain-of-thought. The operator can override via settings.llm.maxOutputTokens
 // (issue #712); 0 there keeps this default.
 const MAX_TOKENS_TEXT = 4000;
+
+// How many STRICT-CORRECTION regenerate attempts to allow after the first
+// atmospheric-prose hit, before giving up and letting the caller skip this
+// segment (silence). Was 1; raised to 2 (observed live: a single retry can
+// itself still read as atmospheric prose -- Winslow's retry attempt swapped
+// one atmospheric construction for another, "I'm tuning in to HLYST" --
+// giving one more chance meaningfully reduces how often a real DJ moment
+// falls back to silence purely because the first correction attempt also
+// missed, without weakening the guard itself in any way).
+const MAX_ATMOSPHERIC_RETRIES = 2;
 
 export async function djText({
   system,
@@ -30,7 +40,7 @@ export async function djText({
   maxOutputTokens = resolveMaxOutputTokens(MAX_TOKENS_TEXT),
   kind = 'sdk.djText',
   // Optional caller-supplied abort signal. No live caller wraps djText in
-  // withDeadline today, so this is inert unless one starts to — kept in the
+  // withDeadline today, so this is inert unless one starts to -- kept in the
   // shape as a precaution so a future deadline-wrapped call can cut the
   // Retry-After sleep short and prevent a ghost retry after the abort (mirrors
   // djAgent's threading, PR #751 review).
@@ -52,9 +62,9 @@ export async function djText({
         ...(signal ? { abortSignal: signal } : {}),
       }), signal);
       // A free-text DJ script that hit the output-token cap is never a usable
-      // reply — real scripts run ~150 tokens against the 4000-token backstop,
+      // reply -- real scripts run ~150 tokens against the 4000-token backstop,
       // so 'length' means a reasoning model ran away mid-thought (issue #947:
-      // it tied up the TTS GPU for minutes). Fail the call instead —
+      // it tied up the TTS GPU for minutes). Fail the call instead --
       // announce-path callers catch and skip the segment, so the station
       // stays on air, just without this talk break.
       let truncated = truncationError(result);
@@ -63,19 +73,22 @@ export async function djText({
       // Quality backstop (deterministic, no model call): catch the model
       // drifting into written/literary/atmospheric prose ("summer's gentle
       // squeeze still whispering through the air") that prompting alone did
-      // not prevent. One on-the-spot regenerate with a sharper instruction;
-      // if it drifts again, throw — same "caller skips this segment, station
-      // stays on air" contract as the truncation guard above. Never air a
-      // line that fails this check.
+      // not prevent. Up to MAX_ATMOSPHERIC_RETRIES on-the-spot regenerates
+      // with a sharper instruction, re-checking after each; if it still
+      // drifts after all attempts, throw -- same "caller skips this segment,
+      // station stays on air" contract as the truncation guard above. Never
+      // air a line that fails this check.
       let atmospheric = atmosphericProseReason(out);
-      if (atmospheric) {
+      let attempt = 0;
+      while (atmospheric && attempt < MAX_ATMOSPHERIC_RETRIES) {
+        attempt++;
         result = await withTransientRetry(kind, () => generateText({
           model: leg.model,
-          instructions: `${system}\n\nSTRICT CORRECTION: your previous attempt used literary, written, or atmospheric language, which is forbidden here. Rewrite it — stay fully in THIS DJ's own voice, personality, and vocabulary from the persona above, just strip out the poetic/scene-setting language. Say it the way this specific DJ would actually say it out loud on air. Do not default to a generic, flat, or bare-minimum phrase just to avoid poetry — the personality must still come through.`,
+          instructions: `${system}\n\nSTRICT CORRECTION: your previous attempt used literary, written, or atmospheric language, which is forbidden here. Rewrite it -- stay fully in THIS DJ's own voice, personality, and vocabulary from the persona above, just strip out the poetic/scene-setting language. Say it the way this specific DJ would actually say it out loud on air. Do not default to a generic, flat, or bare-minimum phrase just to avoid poetry -- the personality must still come through. Do not describe yourself as a listener tuning in to your own show -- you are the host, on air, right now.`,
           prompt,
           temperature: Math.max(0.3, temperature - 0.2),
           topP,
-          ...(seed != null ? { seed: seed + 1 } : {}),
+          ...(seed != null ? { seed: seed + attempt } : {}),
           maxOutputTokens,
           reasoning: reasoningFor(leg.cfg),
           ...(signal ? { abortSignal: signal } : {}),
@@ -84,9 +97,9 @@ export async function djText({
         if (truncated) throw truncated;
         out = stripThinking(result.text);
         atmospheric = atmosphericProseReason(out);
-        if (atmospheric) throw new AtmosphericProseError(atmospheric);
       }
-      // Only record sampling knobs that actually reached the model — see
+      if (atmospheric) throw new AtmosphericProseError(atmospheric);
+      // Only record sampling knobs that actually reached the model -- see
       // repeatPenaltyApplies() (currently false everywhere: ai-sdk-ollama v4
       // lost the per-call channel) and samplingWithLocalKnobs() for the
       // body-injection providers.
@@ -100,7 +113,7 @@ export async function djText({
         usage: usageOf(result),
         perf: perfOf(result),
         warnings: warningsOf(result),
-        // Full, untruncated — the /debug surface shows the whole system prompt.
+        // Full, untruncated -- the /debug surface shows the whole system prompt.
         extra: { system, user: prompt, response: out },
       };
     },
